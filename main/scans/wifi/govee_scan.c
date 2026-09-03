@@ -20,7 +20,7 @@
 #define GOVEE_SCAN_DURATION_US (3000000LL)
 #define GOVEE_SCAN_TASK_STACK 4096
 
-static govee_device_t g_devices[GOVEE_SCAN_MAX_RESULTS];
+static govee_device_t *g_devices;
 static volatile int g_device_count;
 static volatile bool g_scan_running;
 static volatile bool g_scan_done;
@@ -123,7 +123,8 @@ static void govee_scan_task(void *arg) {
 }
 
 void govee_scan_clear_results(void) {
-    memset(g_devices, 0, sizeof(g_devices));
+    free(g_devices);
+    g_devices = NULL;
     g_device_count = 0;
 }
 
@@ -135,10 +136,18 @@ esp_err_t govee_scan_start_async(void) {
     }
 
     govee_scan_clear_results();
+    g_devices = calloc(GOVEE_SCAN_MAX_RESULTS, sizeof(*g_devices));
+    if (!g_devices) {
+        glog("Govee scan result allocation failed\n");
+        g_scan_done = true;
+        return ESP_ERR_NO_MEM;
+    }
     g_scan_cancelled = false;
     g_scan_done = false;
     g_scan_running = true;
     if (xTaskCreate(govee_scan_task, "govee_scan", GOVEE_SCAN_TASK_STACK, NULL, 4, NULL) != pdPASS) {
+        free(g_devices);
+        g_devices = NULL;
         g_scan_running = false;
         g_scan_done = true;
         return ESP_ERR_NO_MEM;
@@ -163,7 +172,7 @@ int govee_scan_get_count(void) {
 }
 
 const govee_device_t *govee_scan_get_device(int index) {
-    return index >= 0 && index < g_device_count ? &g_devices[index] : NULL;
+    return g_devices && index >= 0 && index < g_device_count ? &g_devices[index] : NULL;
 }
 
 static esp_err_t send_control_message(const char *ip, const char *message) {

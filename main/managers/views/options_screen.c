@@ -43,6 +43,7 @@
 #include "gui/nav_history.h"
 #include "gui/gui_router.h"
 #include "gui/select_overlay.h"
+#include "managers/views/menu_editor_screen.h"
 #include "scans/wifi/ap_scan.h"
 #include "scans/wifi/wpa3_compliance.h"
 #include "managers/ble_manager.h"
@@ -180,7 +181,7 @@ static int ble_adv_last_count = -1;
 static int selected_ble_adv_index = -1;
 static int ble_gatt_last_count = -1;
 static int selected_ble_gatt_index = -1;
-EXT_RAM_BSS_ATTR static char ble_oui_vendor_names[BLE_OUI_VENDOR_MAX_RESULTS][64];
+static char (*ble_oui_vendor_names)[64];
 static const char *ble_oui_vendor_options[BLE_OUI_VENDOR_MAX_RESULTS + 2];
 static int ble_oui_vendor_count = 0;
 static int selected_station_index = -1;
@@ -1167,7 +1168,7 @@ static int settings_submenu_depth = 0;
 
 // Cached chip-info cards for the read-only custom Info page.
 #define OPTIONS_INFO_CARDS_MAX 3
-EXT_RAM_BSS_ATTR static chip_info_card_t s_info_cards[OPTIONS_INFO_CARDS_MAX];
+static chip_info_card_t *s_info_cards;
 static bool             s_info_detail_active = false;
 static lv_obj_t        *s_info_scroll = NULL;
 static lv_obj_t        *s_info_saved_menu_container = NULL;
@@ -1338,7 +1339,9 @@ static void options_show_info_detail(void) {
 
     options_info_add_label(s_info_scroll, GHOSTESP_VERSION, heading_font, LV_TEXT_ALIGN_CENTER, 0);
 
-    int count = chip_info_collect_cards(s_info_cards, OPTIONS_INFO_CARDS_MAX);
+    free(s_info_cards);
+    s_info_cards = calloc(OPTIONS_INFO_CARDS_MAX, sizeof(*s_info_cards));
+    int count = s_info_cards ? chip_info_collect_cards(s_info_cards, OPTIONS_INFO_CARDS_MAX) : 0;
     for (int i = 0; i < count; i++) {
         options_info_add_section(s_info_scroll, s_info_cards[i].title, s_info_cards[i].body,
                                  heading_font, body_font, GUI_GRID * 2);
@@ -1821,6 +1824,8 @@ static SettingsItem settings_items[] = {
     {"Asset Pack", SETTING_RELOAD_ASSET_PACK, (const char * const *)asset_pack_options, 1, 0, SETTINGS_CAT_THEME_ASSETS, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"Terminal Color", SETTING_TERMINAL_COLOR, textcolor_options, 8, 0, SETTINGS_CAT_THEME_ASSETS, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"Menu Layout", SETTING_MENU_LAYOUT, menu_layout_options, 5, 1, SETTINGS_CAT_MENU_STYLE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"Main Menu Items", SETTING_MAIN_MENU_ITEMS, action_options, 1, 0, SETTINGS_CAT_MENU_STYLE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"Apps Gallery Items", SETTING_APPS_MENU_ITEMS, action_options, 1, 0, SETTINGS_CAT_MENU_STYLE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"Zebra Menus", SETTING_ZEBRA_MENUS, bool_options, 2, 0, SETTINGS_CAT_MENU_STYLE, false, NULL, SETTING_WIDGET_TOGGLE},
     {"Surface Tone", SETTING_MENU_BG_SHADE, bg_shade_options, 4, 1, SETTINGS_CAT_MENU_STYLE, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"Rounded Menus", SETTING_MENU_ROUNDED, bool_options, 2, 0, SETTINGS_CAT_MENU_STYLE, false, NULL, SETTING_WIDGET_TOGGLE},
@@ -1984,7 +1989,7 @@ typedef struct {
 
 static const io_btn_preset_t io_btn_presets[] = {
     {"WiFi", "view:wifi", &options_menu_view},
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     {"BLE", "view:ble", &options_menu_view},
 #endif
 #ifdef CONFIG_HAS_NFC
@@ -3897,7 +3902,8 @@ void options_menu_create() {
                           s_resume_menu_state.dualcomm_state == current_dualcomm_menu_state &&
                           s_resume_menu_state.settings_root == current_settings_root &&
                           s_resume_menu_state.settings_category == current_settings_category &&
-                          gui_router_previous_view() != &main_menu_view;
+                          gui_router_previous_view() != &main_menu_view &&
+                          gui_router_previous_view() != &apps_menu_view;
     if (!restoring_view) {
         s_resume_menu_state.valid = false;
         s_pending_restore_state.valid = false;
@@ -4044,7 +4050,7 @@ void options_menu_create() {
         switch (current_bluetooth_menu_state) {
             case BLUETOOTH_MENU_MAIN: options = bluetooth_main_options; break;
             case BLUETOOTH_MENU_DETECT_LIST:
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
                 if (ble_device_detect_is_tracking()) {
                     ble_device_detect_stop_tracking();
                 }
@@ -4059,7 +4065,7 @@ void options_menu_create() {
                 break;
             case BLUETOOTH_MENU_DETECT_DETAILS: options = NULL; break;
             case BLUETOOTH_MENU_ADV_LIST:
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
                 if (advertiser_scan_get_count() <= 0 && !advertiser_scan_is_active()) {
                     start_ble_adv_flow();
                 }
@@ -4215,12 +4221,17 @@ void options_menu_create() {
 
     /* Status bar already handled by options_view_create */
 #ifdef CONFIG_USE_TOUCHSCREEN
+#if GUI_LEGACY_TOUCH_BAR
     const int TOUCH_BAR_HEIGHT = SCROLL_BTN_SIZE + SCROLL_BTN_PADDING * 2;
+#else
+    const int TOUCH_BAR_HEIGHT = 0;
+#endif
     const int BUTTON_AREA_HEIGHT = TOUCH_BAR_HEIGHT;
     int container_height = screen_height - STATUS_BAR_HEIGHT - BUTTON_AREA_HEIGHT;
     lv_obj_set_size(menu_container, screen_width, container_height);
     lv_obj_align(menu_container, LV_ALIGN_TOP_MID, 0, STATUS_BAR_HEIGHT);
 
+#if GUI_LEGACY_TOUCH_BAR
     touch_bar = lv_obj_create(lv_scr_act());
     lv_obj_remove_style_all(touch_bar);
     lv_obj_set_size(touch_bar, screen_width, TOUCH_BAR_HEIGHT);
@@ -4273,6 +4284,7 @@ void options_menu_create() {
     lv_obj_set_style_text_color(down_label, control_text_color, 0);
     lv_obj_center(down_label);
     lv_obj_add_flag(scroll_down_btn, LV_OBJ_FLAG_HIDDEN);
+#endif /* GUI_LEGACY_TOUCH_BAR */
 #endif
     if (g_freeze_hook_id < 0) {
         g_freeze_hook_id = display_manager_register_freeze_pre_lock(options_menu_freeze_pre_lock);
@@ -4341,6 +4353,8 @@ static void load_current_settings_values(void) {
                 settings_items[i].current_value = settings_get_favorites_bypass(&G_Settings) ? 1 : 0;
                 break;
             case SETTING_MANAGE_FAVORITES:
+            case SETTING_MAIN_MENU_ITEMS:
+            case SETTING_APPS_MENU_ITEMS:
                 settings_items[i].current_value = 0;
                 break;
             case SETTING_WEB_AUTH:
@@ -4686,6 +4700,12 @@ static void apply_setting_change(int setting_index, int new_value) {
             break;
         case SETTING_MANAGE_FAVORITES:
             display_manager_switch_view(&favorites_manager_view);
+            return;
+        case SETTING_MAIN_MENU_ITEMS:
+            menu_editor_open(MENU_PLACE_MAIN);
+            return;
+        case SETTING_APPS_MENU_ITEMS:
+            menu_editor_open(MENU_PLACE_APPS);
             return;
         case SETTING_WEB_AUTH:
             settings_set_web_auth_enabled(&G_Settings, new_value == 1);
@@ -5343,6 +5363,9 @@ static void settings_select_open(int setting_index) {
 
     int row_h = (button_height_global > 0) ? button_height_global - 8 : 40;
     if (row_h < 30) row_h = 30;
+#if GUI_LARGE_SCREEN
+    row_h = 64;
+#endif
 
     lv_obj_t *row = NULL;
     if (menu_container && lv_obj_is_valid(menu_container)) {
@@ -5362,6 +5385,9 @@ static void settings_select_open(int setting_index) {
 #ifdef CONFIG_USE_TOUCHSCREEN
     bottom_reserved += SCROLL_BTN_SIZE + SCROLL_BTN_PADDING * 2;
 #endif
+#if GUI_LARGE_TOUCH_UI
+    bottom_reserved = GUI_HOME_SAFE_H + 16;
+#endif
     gui_select_overlay_config_t cfg = {
         .parent = lv_layer_top(),
         .anchor = row,
@@ -5372,8 +5398,13 @@ static void settings_select_open(int setting_index) {
         .max_visible_rows = (LV_VER_RES <= 200) ? 4 : 5,
         .top_reserved = GUI_STATUS_BAR_H + 4,
         .bottom_reserved = bottom_reserved,
+#if GUI_LARGE_SCREEN
+        .min_width = LV_MIN(360, LV_HOR_RES - 64),
+        .max_width = LV_MIN(520, LV_HOR_RES - 64),
+#else
         .min_width = 90,
         .max_width = 230,
+#endif
         .surface_color = lv_color_hex(theme_palette_get_surface_alt(theme)),
         .text_color = lv_color_hex(theme_palette_get_text(theme)),
         .muted_text_color = lv_color_hex(theme_palette_get_text_muted(theme)),
@@ -6623,6 +6654,13 @@ void handle_hardware_button_press_options(InputEvent *event) {
             }
         } else if (button == 0) { // left button
             if (is_settings_mode && current_settings_category >= 0) {
+#if GUI_LARGE_TOUCH_UI
+                /* The large-screen left-edge swipe is translated into joystick-left.
+                 * It is a navigation gesture, so it must leave a settings
+                 * submenu instead of changing the highlighted row's value. */
+                ESP_LOGI(TAG, "System back swipe pressed, going back");
+                back_event_cb(NULL);
+#else
                 // in settings submenu, check if we're on the back option
                 lv_obj_t *sel = lv_obj_get_child(menu_container, selected_item_index);
                 if (sel) {
@@ -6636,6 +6674,7 @@ void handle_hardware_button_press_options(InputEvent *event) {
                         change_current_row(false);
                     }
                 }
+#endif
             } else {
                 // otherwise left goes back
                 ESP_LOGI(TAG, "joystick left pressed, going back");
@@ -9817,6 +9856,8 @@ void options_menu_destroy() {
     }
     s_discard_resume_on_destroy = false;
     s_rendered_menu_state.valid = false;
+    free(s_info_cards);
+    s_info_cards = NULL;
     opt_touch_started = false;
     popup_confirm_close(&settings_confirm_popup);
 #if GHOSTESP_OTA_SUPPORTED
@@ -10082,6 +10123,8 @@ static void back_event_cb(lv_event_t *e) {
 
     if (s_info_detail_active) {
         s_info_detail_active = false;
+        free(s_info_cards);
+        s_info_cards = NULL;
         if (s_info_scroll && lv_obj_is_valid(s_info_scroll)) {
             lv_obj_del(s_info_scroll);
         }
@@ -11124,6 +11167,7 @@ static void ble_detect_list_cleanup(void) {
     if (ble_device_detect_is_active()) {
         ble_device_detect_stop();
     }
+    ble_device_detect_clear_results();
 }
 
 static const char **ble_detect_list_get_options(void) {
@@ -11448,14 +11492,16 @@ static void stop_ble_adv_flow(void) {
 }
 
 static void ble_oui_vendor_clear(void) {
-    memset(ble_oui_vendor_names, 0, sizeof(ble_oui_vendor_names));
+    free(ble_oui_vendor_names);
+    ble_oui_vendor_names = NULL;
     memset(ble_oui_vendor_options, 0, sizeof(ble_oui_vendor_options));
     ble_oui_vendor_count = 0;
 }
 
 static bool ble_oui_vendor_collect_cb(const char *vendor, void *user_data) {
     (void)user_data;
-    if (vendor == NULL || ble_oui_vendor_count >= BLE_OUI_VENDOR_MAX_RESULTS) {
+    if (vendor == NULL || ble_oui_vendor_names == NULL ||
+        ble_oui_vendor_count >= BLE_OUI_VENDOR_MAX_RESULTS) {
         return false;
     }
 
@@ -11504,6 +11550,11 @@ static void ble_oui_vendor_search_kb_cb(const char *text) {
     }
 
     ble_oui_vendor_clear();
+    ble_oui_vendor_names = calloc(BLE_OUI_VENDOR_MAX_RESULTS, sizeof(*ble_oui_vendor_names));
+    if (!ble_oui_vendor_names) {
+        error_popup_create("Not enough memory");
+        return;
+    }
     ouis_foreach_unique_vendor(text, ble_oui_vendor_collect_cb, NULL, BLE_OUI_VENDOR_MAX_RESULTS);
     if (ble_oui_vendor_count <= 0) {
         error_popup_create("No vendors found");
@@ -11747,7 +11798,7 @@ static void ble_gatt_list_cleanup(void) {
     if (gatt_scan_is_active()) {
         gatt_scan_stop();
     }
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     if (ble_is_initialized()) {
         ble_stop();
     }
@@ -11780,7 +11831,7 @@ static void stop_ble_gatt_flow(void) {
     if (gatt_scan_is_active()) {
         gatt_scan_stop();
     }
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     if (ble_is_initialized()) {
         ble_stop();
     }
@@ -13541,7 +13592,7 @@ static void rebuild_current_menu(void) {
             switch (current_bluetooth_menu_state) {
                 case BLUETOOTH_MENU_MAIN: options = bluetooth_main_options; break;
                 case BLUETOOTH_MENU_DETECT_LIST:
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
                     if (ble_device_detect_is_tracking()) {
                         ble_device_detect_stop_tracking();
                     }
@@ -13567,7 +13618,7 @@ static void rebuild_current_menu(void) {
                     break;
                 case BLUETOOTH_MENU_ADV_DETAILS: options = NULL; break;
                 case BLUETOOTH_MENU_GATT_LIST:
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
                     if (gatt_scan_get_device_count() <= 0 && !gatt_scan_is_active()) {
                         start_ble_gatt_flow();
                     }

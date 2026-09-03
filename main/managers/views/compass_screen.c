@@ -2,6 +2,7 @@
 #include "managers/views/main_menu_screen.h"
 #include "managers/display_manager.h"
 #include "gui/screen_layout.h"
+#include "gui/design_tokens.h"
 #include "gui/lvgl_safe.h"
 #include "gui/theme_palette_api.h"
 #include "managers/settings_manager.h"
@@ -38,7 +39,11 @@ static lv_obj_t *heading_label = NULL;
 #define CARDINAL_RADIUS 85  // Distance from center to N/S/E/W labels
 #define NEEDLE_LEN 70
 #endif
-#define RING_CENTER (RING_SIZE / 2)
+
+static int compass_ring_size = RING_SIZE;
+static int compass_cardinal_radius = CARDINAL_RADIUS;
+static int compass_needle_len = NEEDLE_LEN;
+static int compass_ring_center = RING_SIZE / 2;
 
 static lv_obj_t *lbl_n = NULL;
 static lv_obj_t *lbl_s = NULL;
@@ -56,32 +61,32 @@ static void update_cardinal_positions(float heading_deg) {
     float cos_n = cosf(ring_rotation);
     
     // Use lv_obj_set_pos instead of lv_obj_align (faster, no layout recalc)
-    int cx = RING_CENTER;
-    int cy = RING_CENTER;
+    int cx = compass_ring_center;
+    int cy = compass_ring_center;
     int w = cardinal_half_w;
     int h = cardinal_half_h;
     
-    if (lbl_n) lv_obj_set_pos(lbl_n, cx + (int)(sin_n * CARDINAL_RADIUS) - w, 
-                                      cy - (int)(cos_n * CARDINAL_RADIUS) - h);
-    if (lbl_s) lv_obj_set_pos(lbl_s, cx - (int)(sin_n * CARDINAL_RADIUS) - w, 
-                                      cy + (int)(cos_n * CARDINAL_RADIUS) - h);
-    if (lbl_e) lv_obj_set_pos(lbl_e, cx + (int)(cos_n * CARDINAL_RADIUS) - w, 
-                                      cy + (int)(sin_n * CARDINAL_RADIUS) - h);
-    if (lbl_w) lv_obj_set_pos(lbl_w, cx - (int)(cos_n * CARDINAL_RADIUS) - w, 
-                                      cy - (int)(sin_n * CARDINAL_RADIUS) - h);
+    if (lbl_n) lv_obj_set_pos(lbl_n, cx + (int)(sin_n * compass_cardinal_radius) - w,
+                                      cy - (int)(cos_n * compass_cardinal_radius) - h);
+    if (lbl_s) lv_obj_set_pos(lbl_s, cx - (int)(sin_n * compass_cardinal_radius) - w,
+                                      cy + (int)(cos_n * compass_cardinal_radius) - h);
+    if (lbl_e) lv_obj_set_pos(lbl_e, cx + (int)(cos_n * compass_cardinal_radius) - w,
+                                      cy + (int)(sin_n * compass_cardinal_radius) - h);
+    if (lbl_w) lv_obj_set_pos(lbl_w, cx - (int)(cos_n * compass_cardinal_radius) - w,
+                                      cy - (int)(sin_n * compass_cardinal_radius) - h);
 }
 
 static void init_fixed_needle(void) {
     // Needle always points straight up (north half) and down (south half)
-    pts_n[0].x = RING_CENTER;
-    pts_n[0].y = RING_CENTER;
-    pts_n[1].x = RING_CENTER;
-    pts_n[1].y = RING_CENTER - NEEDLE_LEN;  // Up
+    pts_n[0].x = compass_ring_center;
+    pts_n[0].y = compass_ring_center;
+    pts_n[1].x = compass_ring_center;
+    pts_n[1].y = compass_ring_center - compass_needle_len;  // Up
     
-    pts_s[0].x = RING_CENTER;
-    pts_s[0].y = RING_CENTER;
-    pts_s[1].x = RING_CENTER;
-    pts_s[1].y = RING_CENTER + NEEDLE_LEN;  // Down
+    pts_s[0].x = compass_ring_center;
+    pts_s[0].y = compass_ring_center;
+    pts_s[1].x = compass_ring_center;
+    pts_s[1].y = compass_ring_center + compass_needle_len;  // Down
     
     if (needle_line_n) lv_line_set_points(needle_line_n, pts_n, 2);
     if (needle_line_s) lv_line_set_points(needle_line_s, pts_s, 2);
@@ -580,10 +585,25 @@ void compass_create(void) {
     
     lv_obj_t *content = gui_screen_create_content(compass_container, GUI_STATUS_BAR_HEIGHT);
     lv_obj_set_style_text_color(content, text, 0);
+
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    int available = LV_MIN(LV_HOR_RES, LV_VER_RES - GUI_STATUS_BAR_H);
+    compass_ring_size = (available * 55) / 100;
+    if (compass_ring_size < 120) compass_ring_size = 120;
+    if (compass_ring_size > 400) compass_ring_size = 400;
+    compass_cardinal_radius = (compass_ring_size * 42) / 100;
+    compass_needle_len = (compass_ring_size * 35) / 100;
+    compass_ring_center = compass_ring_size / 2;
+#else
+    compass_ring_size = RING_SIZE;
+    compass_cardinal_radius = CARDINAL_RADIUS;
+    compass_needle_len = NEEDLE_LEN;
+    compass_ring_center = RING_SIZE / 2;
+#endif
     
     // Ring container (for the rotating cardinal labels)
     ring = lv_obj_create(content);
-    lv_obj_set_size(ring, RING_SIZE, RING_SIZE);
+    lv_obj_set_size(ring, compass_ring_size, compass_ring_size);
     lv_obj_align(ring, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_radius(ring, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_opa(ring, LV_OPA_TRANSP, 0);
@@ -665,7 +685,7 @@ void compass_create(void) {
 #ifdef CONFIG_IS_ATOMS3R
                  -1
 #else
-                 -10
+                 -(GUI_HOME_SAFE_H + 10)
 #endif
     );
     

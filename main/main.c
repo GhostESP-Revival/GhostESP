@@ -26,12 +26,17 @@
 #include "esp_wifi.h"
 #include "core/esp_comm_manager.h"
 #include "managers/status_display_manager.h"
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+#include "esp_hosted.h"
+#include "managers/p4_slave_ota_manager.h"
+#include "managers/ghost_raw_radio.h"
+#endif
 #include "vendor/drivers/aw9523.h"
 #include "vendor/drivers/pcf8563.h"
 #include <sys/time.h>
 #include <time.h>
 #include <stdlib.h>
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 #include "managers/ble_manager.h"
 #include "managers/ble_bridge_manager.h"
 #endif
@@ -71,7 +76,7 @@
 #include "managers/motion_detector_manager.h"
 #include "managers/camera_stream_manager.h"
 #endif
-#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER)
+#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER) || defined(CONFIG_HAS_CROWPANEL_NS4168)
 #include "managers/audio_receiver_manager.h"
 #endif
 
@@ -665,7 +670,27 @@ void app_main(void) {
     MEASURE_INIT_RAM("Ghostchi Mood init", ghostchi_mood_init());
     ghostchi_mood_record_event(GHOSTCHI_MOOD_EVENT_BOOT, 3);
 
-#if defined(CONFIG_USING_SPI) && defined(CONFIG_SD_SPI_CS_PIN)
+#ifdef CONFIG_CROWPANEL_EPAPER_42
+    /* Factory firmware enables both board rails before touching the panel or
+     * SD socket. GPIO7 is the display rail and GPIO42 is the SD rail; GPIO7
+     * must not later be reused as the generic comm-manager RX pin. */
+    gpio_config_t crowpanel_power_config = {
+        .pin_bit_mask = (1ULL << 7) | (1ULL << 42),
+        /* Keep input enabled so board-driver diagnostics can verify the
+         * physical rail-enable levels, not just the output latch. */
+        .mode = GPIO_MODE_INPUT_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&crowpanel_power_config);
+    gpio_set_level(7, 1);
+    gpio_set_level(42, 1);
+    ESP_LOGI(TAG, "CrowPanel power rails enabled: display GPIO7, SD GPIO42");
+#endif
+
+#if defined(CONFIG_USING_SPI) && defined(CONFIG_SD_SPI_CS_PIN) && \
+    !defined(CONFIG_CROWPANEL_EPAPER_42)
     /* Keep the card deselected before any shared-bus display/touch traffic. */
     gpio_reset_pin(CONFIG_SD_SPI_CS_PIN);
     gpio_set_direction(CONFIG_SD_SPI_CS_PIN, GPIO_MODE_OUTPUT);
@@ -711,7 +736,57 @@ void app_main(void) {
 
 
     MEASURE_INIT_RAM("Serial Manager", serial_manager_init());
-    MEASURE_INIT_RAM("Wifi Manager", wifi_manager_init());
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+    /* Start ESP-Hosted from app_main instead of a C constructor.  IDF 6.1
+     * performs P4 sleep-retention startup after C constructors; initializing
+     * Hosted from the constructor races that initialization and can trip the
+     * sleep-retention module assertion before app_main starts. */
+    ESP_LOGI(TAG, "Starting ESP-Hosted C6 transport...");
+    esp_err_t hosted_init_err = esp_hosted_init();
+    bool hosted_ready = hosted_init_err == ESP_OK;
+    if (!hosted_ready) {
+        ESP_LOGE(TAG, "ESP-Hosted initialization failed: %s", esp_err_to_name(hosted_init_err));
+    }
+
+    /* The C6 handshake must be completed before esp_wifi_remote is used. */
+    esp_err_t hosted_err = hosted_ready ? esp_hosted_connect_to_slave() : hosted_init_err;
+    hosted_ready = hosted_err == ESP_OK;
+    if (!hosted_ready) {
+        ESP_LOGE(TAG, "ESP-Hosted C6 connection failed: %s", esp_err_to_name(hosted_err));
+    } else {
+        /* ESP32-P4 has no local Bluetooth controller. The onboard C6
+         * supplies it through ESP-Hosted's NimBLE VHCI bridge. */
+        esp_err_t hosted_bt_err = esp_hosted_bt_controller_init();
+        if (hosted_bt_err == ESP_OK) {
+            hosted_bt_err = esp_hosted_bt_controller_enable();
+        }
+        if (hosted_bt_err != ESP_OK) {
+            ESP_LOGW(TAG, "ESP-Hosted C6 Bluetooth unavailable: %s",
+                     esp_err_to_name(hosted_bt_err));
+        } else {
+            ESP_LOGI(TAG, "ESP-Hosted C6 Bluetooth controller enabled");
+        }
+        p4_slave_ota_result_t ota_result = p4_slave_ota_update(false);
+        if (ota_result == P4_SLAVE_OTA_UPDATED) {
+            ESP_LOGI(TAG, "C6 update complete; rebooting P4");
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            esp_restart();
+        }
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+        esp_err_t raw_init = ghost_raw_radio_init();
+        if (raw_init != ESP_OK) {
+            ESP_LOGW(TAG, "Ghost raw radio init deferred: %s", esp_err_to_name(raw_init));
+        }
+#endif
+    }
+#else
+    bool hosted_ready = true;
+#endif
+    if (hosted_ready) {
+        MEASURE_INIT_RAM("Wifi Manager", wifi_manager_init());
+    } else {
+        ESP_LOGW(TAG, "Skipping Wi-Fi initialization because ESP-Hosted is offline");
+    }
 #ifdef CONFIG_WITH_ETHERNET
     {
         esp_err_t eth_ret;
@@ -721,7 +796,7 @@ void app_main(void) {
         }
     }
 #endif
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2)
     // MEASURE_INIT_RAM("BLE Manager", ble_init());
 #endif
 #ifdef CONFIG_HAS_BADUSB
@@ -846,17 +921,7 @@ void app_main(void) {
     uint8_t country_index = settings_get_wifi_country(&G_Settings);
     const char *country_codes[] = {"US", "GB", "JP", "AU", "CN", "01"};
     if (country_index < sizeof(country_codes) / sizeof(country_codes[0])) {
-#if defined(CONFIG_IDF_TARGET_ESP32C5)
         esp_err_t err = esp_wifi_set_country_code(country_codes[country_index], true);
-#else
-        wifi_country_t wifi_country = {
-            .cc = {country_codes[country_index][0], country_codes[country_index][1], 0},
-            .schan = 1,
-            .nchan = (country_index == 2) ? 14 : (country_index == 0) ? 11 : 13,
-            .policy = WIFI_COUNTRY_POLICY_MANUAL
-        };
-        esp_err_t err = esp_wifi_set_country(&wifi_country);
-#endif
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "Failed to set WiFi country: %s", esp_err_to_name(err));
         } else {
@@ -882,13 +947,20 @@ void app_main(void) {
             comm_rx = UART_PIN_NO_CHANGE;
         }
 #endif
+#ifdef CONFIG_CROWPANEL_EPAPER_42
+        /* GPIO7 is the factory display-power enable, not a UART input. This
+         * board has no wired peer-comm header, so leave the optional manager
+         * off rather than stealing the display rail. */
+        comm_tx = UART_PIN_NO_CHANGE;
+        comm_rx = UART_PIN_NO_CHANGE;
+#endif
         if (comm_tx != UART_PIN_NO_CHANGE || comm_rx != UART_PIN_NO_CHANGE) {
             MEASURE_INIT_RAM("Comm Manager", esp_comm_manager_init((gpio_num_t)comm_tx, (gpio_num_t)comm_rx, DEFAULT_BAUD_RATE));
         } else {
             ESP_LOGI(TAG, "Comm Manager disabled for this build");
         }
     }
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2)
     MEASURE_INIT_RAM("BLE Bridge restore", ble_bridge_apply_saved_enabled());
 #endif
     wardriving_register_stream_handler();
@@ -915,8 +987,8 @@ void app_main(void) {
     MEASURE_INIT_RAM("Mic Visualizer init", mic_visualizer_init());
     mic_visualizer_start();
 #endif
-#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER)
-    ESP_LOGI(TAG, "Initializing audio receiver for TLV320DAC3100 I2S");
+#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER) || defined(CONFIG_HAS_CROWPANEL_NS4168)
+    ESP_LOGI(TAG, "Initializing audio receiver");
     MEASURE_INIT_RAM("Audio Receiver", audio_receiver_manager_init());
 #endif
 #ifdef CONFIG_HAS_CAMERA
@@ -972,14 +1044,26 @@ void app_main(void) {
         joystick_init(&joysticks[4], CONFIG_D_BTN, HOLD_LIMIT, true);  // Down
     }
 #else
-    // Standard GPIO joystick mode - map to display manager expectations: [0]=Left, [1]=Select, [2]=Up, [3]=Right, [4]=Down
+    // Standard GPIO joystick mode - map to display manager expectations.
+#ifdef CONFIG_CROWPANEL_EPAPER_42
+    // The factory firmware labels these five GPIOs HOME, EXIT, PRV, NEXT, OK.
+    // Keep the five slots available to the existing input stack; the e-paper
+    // adapter translates HOME/EXIT and the prev/next actions at dispatch time.
+    joystick_init(&joysticks[0], CONFIG_L_BTN, HOLD_LIMIT, true);  // PRV
+    joystick_init(&joysticks[1], CONFIG_C_BTN, HOLD_LIMIT, true);  // OK
+    joystick_init(&joysticks[2], CONFIG_U_BTN, HOLD_LIMIT, true);  // HOME
+    joystick_init(&joysticks[3], CONFIG_R_BTN, HOLD_LIMIT, true);  // NEXT
+    joystick_init(&joysticks[4], CONFIG_D_BTN, HOLD_LIMIT, true);  // EXIT
+#else
+    // [0]=Left, [1]=Select, [2]=Up, [3]=Right, [4]=Down
     joystick_init(&joysticks[0], CONFIG_L_BTN, HOLD_LIMIT, true);  // Left
     joystick_init(&joysticks[1], CONFIG_C_BTN, HOLD_LIMIT, true);  // Select
     joystick_init(&joysticks[2], CONFIG_U_BTN, HOLD_LIMIT, true);  // Up
     joystick_init(&joysticks[3], CONFIG_R_BTN, HOLD_LIMIT, true);  // Right
     joystick_init(&joysticks[4], CONFIG_D_BTN, HOLD_LIMIT, true);  // Down
-#ifdef CONFIG_JOYSTICK_COM_PIN
-    if (CONFIG_JOYSTICK_COM_PIN >= 0) {
+#endif
+#if defined(CONFIG_JOYSTICK_COM_PIN) && CONFIG_JOYSTICK_COM_PIN >= 0
+    {
         gpio_config_t com_conf = {
             .pin_bit_mask = (1ULL << CONFIG_JOYSTICK_COM_PIN),
             .mode = GPIO_MODE_OUTPUT,
@@ -1076,7 +1160,15 @@ void app_main(void) {
         bool initialized = false;
         int32_t data_pin = settings_get_rgb_data_pin(&G_Settings);
         int rgb_led_count = settings_get_rgb_led_count(&G_Settings);
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+        /* CrowPanel P4 has no user RGB LED on the generic LEDC pins.  The
+         * generic fallback defaults can otherwise resolve to GPIO0 and claim
+         * LEDC channel 0, which is also the MIPI panel backlight channel. */
+        data_pin = GPIO_NUM_NC;
+        rgb_led_count = 0;
+#endif
         if (rgb_led_count <= 0) {
+#ifndef CONFIG_CROWPANEL_ADVANCED_P4
             if (rgb_manager.num_leds > 0) {
                 rgb_led_count = rgb_manager.num_leds;
             } else if (CONFIG_NUM_LEDS > 0) {
@@ -1084,6 +1176,7 @@ void app_main(void) {
             } else {
                 rgb_led_count = 1;
             }
+#endif
         }
         int32_t red_pin, green_pin, blue_pin;
         settings_get_rgb_separate_pins(&G_Settings, &red_pin, &green_pin, &blue_pin);

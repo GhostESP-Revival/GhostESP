@@ -8,7 +8,7 @@
 #include "managers/settings_manager.h"
 #include "managers/status_display_manager.h"
 #include "managers/wifi_manager.h"
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 #include "managers/ble_manager.h"
 #endif
 #include "vendor/pcap.h"
@@ -106,7 +106,7 @@ void handle_list(int argc, char **argv) {
         glog("Listed Stations...\n");
         return;
     }
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     else if (argc > 1 && strcmp(argv[1], "-airtags") == 0) {
         ble_list_airtags();
         return;
@@ -332,7 +332,7 @@ void handle_select_cmd(int argc, char **argv) {
         } else {
             glog("Error: '%s' is not a valid number.\n", argv[2]);
         }
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     } else if (strcmp(argv[1], "-airtag") == 0) {
         char *endptr;
         int num = (int)strtol(argv[2], &endptr, 10);

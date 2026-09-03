@@ -2,9 +2,13 @@
 #include "gui/gui_anim.h"
 #include "sdkconfig.h"
 #include "esp_heap_caps.h"
+#include "sdkconfig.h"
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+#include "gui/native_canvas_scale.h"
+#endif
 
 typedef struct {
     ghostesp_ui_obj_t parent;
@@ -99,6 +103,7 @@ typedef struct {
     const lv_img_dsc_t *source;
 } builtin_image_t;
 
+#ifdef CONFIG_WITH_SCREEN
 LV_IMG_DECLARE(angry_50x50);
 LV_IMG_DECLARE(banshee_50x50);
 LV_IMG_DECLARE(cake_50x50);
@@ -126,6 +131,7 @@ static const builtin_image_t s_builtin_images[] = {
     { "ghostchi/tired", &tired_50x50 },
     { "ghostchi/what", &what2_50x50 },
 };
+#endif
 
 typedef struct timer_bridge_s {
     ghostesp_ui_timer_cb_t cb;
@@ -528,6 +534,12 @@ static void plugin_api_ui_canvas_blit_rgb565_now(void *arg) {
     if (left >= right || top >= bottom) return;
 
     uint16_t *destination = (uint16_t *)image->data;
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+    native_canvas_scale_rgb565(destination, canvas_width, ctx->pixels,
+        ctx->src_width, ctx->src_height, ctx->src_stride,
+        ctx->dst_x, ctx->dst_y, ctx->dst_width, ctx->dst_height,
+        left, top, right, bottom, LV_COLOR_16_SWAP);
+#else
     const bool copy_rows = left == ctx->dst_x && right == dst_right &&
                            ctx->dst_width == ctx->src_width;
 #if defined(CONFIG_USE_C5_PARLIO_DISPLAY)
@@ -603,6 +615,7 @@ static void plugin_api_ui_canvas_blit_rgb565_now(void *arg) {
 #endif
         }
     }
+#endif
     lv_area_t area;
     lv_obj_get_coords(canvas, &area);
     area.x1 += left;
@@ -727,6 +740,7 @@ bool plugin_api_ui_canvas_is_rgb565_native_byte_order(void) {
 #endif
 }
 
+#ifdef CONFIG_WITH_SCREEN
 static void plugin_api_ui_image_set_builtin_now(void *arg) {
     builtin_image_src_ctx_t *ctx = (builtin_image_src_ctx_t *)arg;
     lv_obj_t *img = (lv_obj_t *)ctx->obj;
@@ -734,15 +748,18 @@ static void plugin_api_ui_image_set_builtin_now(void *arg) {
     lv_img_set_src(img, ctx->source);
     ctx->result = true;
 }
+#endif
 
 bool plugin_api_ui_image_set_builtin(ghostesp_ui_obj_t img, const char *image_name) {
     if (!plugin_api_internal_has_ui_permission() || !img || !image_name) return false;
+#ifdef CONFIG_WITH_SCREEN
     for (size_t i = 0; i < sizeof(s_builtin_images) / sizeof(s_builtin_images[0]); ++i) {
         if (strcmp(image_name, s_builtin_images[i].name) != 0) continue;
         builtin_image_src_ctx_t ctx = { .obj = img, .source = s_builtin_images[i].source, .result = false };
         plugin_api_internal_run_sync(plugin_api_ui_image_set_builtin_now, &ctx);
         return ctx.result;
     }
+#endif
     return false;
 }
 

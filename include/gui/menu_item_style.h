@@ -7,6 +7,10 @@
 extern "C" {
 #endif
 
+/* Touch menus show press feedback; hardware navigation keeps a focus cursor. */
+bool gui_menu_set_touch_input(bool touch);
+bool gui_menu_focus_visible(void);
+
 void gui_menu_card_apply(lv_obj_t *obj, bool background_enabled,
                          lv_color_t surface, lv_color_t border,
                          int border_width, int shadow_width);

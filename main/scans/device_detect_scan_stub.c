@@ -2,11 +2,13 @@
 #include "scans/ble/advertiser_scan.h"
 #include "scans/ble/gatt_scan.h"
 
-#ifdef CONFIG_IDF_TARGET_ESP32S2
+#if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(GHOSTESP_NO_NATIVE_BLE)
 
 void ble_device_detect_start(void) {}
 
 void ble_device_detect_stop(void) {}
+
+void ble_device_detect_clear_results(void) {}
 
 bool ble_device_detect_is_active(void) {
     return false;

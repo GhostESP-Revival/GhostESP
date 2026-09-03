@@ -1399,10 +1399,14 @@ void infrared_view_create(void) {
 
 #ifdef CONFIG_USE_TOUCHSCREEN
     const int STATUS_BAR_HEIGHT = GUI_STATUS_BAR_HEIGHT;
+#if GUI_LEGACY_TOUCH_BAR
     const int TOUCH_BAR_HEIGHT = IR_SCROLL_BTN_SIZE + IR_SCROLL_BTN_PADDING * 2;
+#else
+    const int TOUCH_BAR_HEIGHT = 0;
+#endif
     int list_h = LV_VER_RES - STATUS_BAR_HEIGHT - TOUCH_BAR_HEIGHT;
-    lv_obj_set_size(list, LV_HOR_RES, list_h);
-    lv_obj_align(list, LV_ALIGN_TOP_LEFT, 0, STATUS_BAR_HEIGHT);
+    lv_obj_set_size(list, GUI_OPTIONS_LIST_WIDTH, list_h);
+    lv_obj_align(list, LV_ALIGN_TOP_MID, 0, STATUS_BAR_HEIGHT);
 #endif
 
     has_remotes_option = true;
@@ -1494,6 +1498,7 @@ void infrared_view_create(void) {
     }
 
 #ifdef CONFIG_USE_TOUCHSCREEN
+#if GUI_LEGACY_TOUCH_BAR
     uint8_t ir_theme = settings_get_menu_theme(&G_Settings);
     lv_color_t ir_bg = lv_color_hex(theme_palette_get_background(ir_theme));
     lv_color_t ir_ctrl = lv_color_hex(theme_palette_get_surface_alt(ir_theme));
@@ -1551,6 +1556,7 @@ void infrared_view_create(void) {
     lv_obj_set_style_text_color(down_label, ir_ctrl_text, 0);
     lv_obj_center(down_label);
     lv_obj_add_flag(ir_scroll_down_btn, LV_OBJ_FLAG_HIDDEN);
+#endif /* GUI_LEGACY_TOUCH_BAR */
 
     if (list && lv_obj_is_valid(list)) {
         lv_coord_t scroll_bottom = lv_obj_get_scroll_bottom(list);

@@ -10,6 +10,9 @@
 #include "../../misc/lv_math.h"
 #include "../../hal/lv_hal_disp.h"
 #include "../../core/lv_refr.h"
+#ifdef GHOST_LVGL_S3_SIMD
+#include "lv_draw_sw_s3_simd.h"
+#endif
 
 /*********************
  *      DEFINES
@@ -253,7 +256,12 @@ static LV_ATTRIBUTE_FAST_MEM void fill_normal(lv_color_t * dest_buf, const lv_ar
     if(mask == NULL) {
         if(opa >= LV_OPA_MAX) {
             for(y = 0; y < h; y++) {
-                lv_color_fill(dest_buf, color, w);
+#ifdef GHOST_LVGL_S3_SIMD
+                if(!lv_draw_sw_s3_simd_fill(dest_buf, color.full, w))
+#endif
+                {
+                    lv_color_fill(dest_buf, color, w);
+                }
                 dest_buf += dest_stride;
             }
         }
@@ -654,7 +662,12 @@ static void LV_ATTRIBUTE_FAST_MEM map_normal(lv_color_t * dest_buf, const lv_are
     if(mask == NULL) {
         if(opa >= LV_OPA_MAX) {
             for(y = 0; y < h; y++) {
-                lv_memcpy(dest_buf, src_buf, w * sizeof(lv_color_t));
+#ifdef GHOST_LVGL_S3_SIMD
+                if(!lv_draw_sw_s3_simd_copy(dest_buf, src_buf, w * sizeof(lv_color_t)))
+#endif
+                {
+                    lv_memcpy(dest_buf, src_buf, w * sizeof(lv_color_t));
+                }
                 dest_buf += dest_stride;
                 src_buf += src_stride;
             }

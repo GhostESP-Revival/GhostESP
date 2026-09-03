@@ -31,6 +31,7 @@
 #include "freertos/portmacro.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 // Constants
 #define BEACON_LIST_MAX 16
@@ -49,7 +50,7 @@ extern uint16_t ap_count;
 extern FSettings G_Settings;
 
 // Local state
-static char g_beacon_list[BEACON_LIST_MAX][BEACON_SSID_MAX_LEN + 1];
+static char (*g_beacon_list)[BEACON_SSID_MAX_LEN + 1];
 static int g_beacon_list_count = 0;
 static TaskHandle_t beacon_task_handle = NULL;
 static volatile bool beacon_task_running = false;
@@ -493,6 +494,13 @@ void beacon_spam_start_list(void) {
 
 // Add an SSID to the beacon list
 void beacon_spam_add_ssid(const char *ssid) {
+    if (g_beacon_list == NULL) {
+        g_beacon_list = calloc(BEACON_LIST_MAX, sizeof(*g_beacon_list));
+        if (g_beacon_list == NULL) {
+            printf("Unable to allocate beacon list\n");
+            return;
+        }
+    }
     if (g_beacon_list_count >= BEACON_LIST_MAX) {
         printf("Beacon list full\n");
         return;
@@ -528,6 +536,8 @@ void beacon_spam_remove_ssid(const char *ssid) {
 
 // Clear the beacon list
 void beacon_spam_clear_list(void) {
+    free(g_beacon_list);
+    g_beacon_list = NULL;
     g_beacon_list_count = 0;
     printf("Cleared beacon list\n");
 }

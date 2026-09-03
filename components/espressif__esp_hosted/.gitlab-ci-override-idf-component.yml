@@ -1,0 +1,5 @@
+  espressif/esp_hosted:
+    version: ">=1.0"
+    override_path: "${OVERRIDE_PATH}"
+    rules:
+      - if: "target in [esp32p4, esp32h2]"

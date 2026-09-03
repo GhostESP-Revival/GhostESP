@@ -24,6 +24,9 @@ void handle_wifi_connection(int argc, char **argv);
 void handle_wifi_disconnect(int argc, char **argv);
 void handle_wifi_status(int argc, char **argv);
 void handle_wifi_autoreconnect_cmd(int argc, char **argv);
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+void handle_p4_slave_ota_cmd(int argc, char **argv);
+#endif
 void handle_ip_lookup(int argc, char **argv);
 void handle_track_ap_cmd(int argc, char **argv);
 void handle_track_sta_cmd(int argc, char **argv);
@@ -63,7 +66,7 @@ void handle_badble_cmd(int argc, char **argv);
 void handle_script_cmd(int argc, char **argv);
 #endif
 
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 // BLE, AirTag, Flipper, GATT, Chameleon, and BLE spam
 void handle_ble_scan_cmd(int argc, char **argv);
 void handle_ble_wardriving(int argc, char **argv);
@@ -166,9 +169,7 @@ void handle_mirror_cmd(int argc, char **argv);
 void handle_apps_cmd(int argc, char **argv);
 void handle_log_level_cmd(int argc, char **argv);
 void handle_fav_cmd(int argc, char **argv);
-#if CONFIG_IDF_TARGET_ESP32C5
 void handle_setcountry(int argc, char **argv);
-#endif
 
 // Capture commands
 void handle_capture_scan(int argc, char **argv);

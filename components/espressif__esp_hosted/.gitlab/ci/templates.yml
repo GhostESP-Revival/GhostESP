@@ -1,0 +1,326 @@
+# Holds templates used for jobs
+
+.premerge_check_template:
+  stage: pre
+  tags:
+    - build
+  script:
+    - source ${IDF_PATH}/export.sh
+    # check the exported fw versions
+    - python tools/check_fw_versions.py
+    # check the changelog
+    - python tools/check_changelog.py
+    # check weak functions # Can also pass --functions optionally # Can also pass --functions optionally.
+    - python tools/check_weak_functions.py --file host/api/src/esp_wifi_weak.c
+
+.build_template_coprocessor:
+  stage: build_coprocessor
+  tags:
+    - build
+  dependencies: []
+  artifacts:
+    when: always
+    expire_in: 4 days
+  script:
+    - export IDF_PYTHON_CHECK_CONSTRAINTS=yes
+    - ${IDF_PATH}/install.sh --enable-ci
+    - source ${IDF_PATH}/export.sh
+    - SDKCONFIG_PATTERN="sdkconfig.ci.${SLAVE_CI_FILE}"
+    # Build with IDF pedantic flags and IDF build apps script
+    - export ESP_HOSTED_CI_PEDANTIC=1
+    - export EXTRA_CFLAGS="-DIDF_CI_BUILD"
+    - export EXTRA_CXXFLAGS="-DIDF_CI_BUILD"
+    - |
+      if [[ -n ${CONFIG_OVERRIDE} ]]; then
+        CONFIG_OVERRIDE_STRING="--override-sdkconfig-items=${CONFIG_OVERRIDE}"
+        echo "adding ${CONFIG_OVERRIDE_STRING} to build"
+      fi
+    - cd slave
+    # use --enable-preview-targets to build for all targets
+    - idf-build-apps find -p . --enable-preview-targets --config ${SDKCONFIG_PATTERN} ${CONFIG_OVERRIDE_STRING} -vv --target ${IDF_TARGET}
+    - idf-build-apps build -p . --enable-preview-targets --config ${SDKCONFIG_PATTERN} ${CONFIG_OVERRIDE_STRING} -vv --target ${IDF_TARGET}
+
+.build_template_example:
+  stage: build_example
+  tags:
+    - build
+  dependencies: []
+  artifacts:
+    when: always
+    expire_in: 4 days
+  script:
+    - export IDF_PYTHON_CHECK_CONSTRAINTS=yes
+    - ${IDF_PATH}/install.sh --enable-ci
+    - source ${IDF_PATH}/export.sh
+    # Need to rename the cloned "esp_hosted_mcu" directory since the injected component name is "esp_hosted"
+    - cd .. && rm -rf esp_hosted && mv esp_hosted_mcu esp_hosted && cd esp_hosted
+    # Create components directory and link esp_hosted component
+    - export OVERRIDE_PATH=`pwd`
+    - cd examples/${EXAMPLE_TO_BUILD}
+    # Create components directory and link esp_hosted component
+    - mkdir -p components
+    - ln -sf ${OVERRIDE_PATH} components/esp_hosted
+    # Override component dependency as backup only if not already present
+    - |
+      if ! grep -q "esp_hosted" main/idf_component.yml 2>/dev/null; then
+        cat ${OVERRIDE_PATH}/.gitlab-ci-override-idf-component.yml >> main/idf_component.yml
+        echo "Added esp_hosted override to idf_component.yml"
+      fi
+    # Add slave target configuration if specified
+    # Also add wi-fi remote slave target for supported targets (not ESP32-H2)
+    - |
+      if [ ! -z "${IDF_SLAVE_TARGET}" ]; then
+        if [[ "${IDF_SLAVE_TARGET}" != "esp32h2" ]]; then
+          echo "CONFIG_SLAVE_IDF_TARGET_${IDF_SLAVE_TARGET^^}=y" >> sdkconfig.defaults
+          echo "Added target CONFIG_SLAVE_IDF_TARGET_${IDF_SLAVE_TARGET^^}=y to sdkconfig.defaults"
+        fi
+        echo "CONFIG_ESP_HOSTED_CP_TARGET_${IDF_SLAVE_TARGET^^}=y" >> sdkconfig.defaults
+        echo "Added target CONFIG_ESP_HOSTED_CP_TARGET_${IDF_SLAVE_TARGET^^}=y to sdkconfig.defaults"
+      fi
+    # Append sdkconfig.ci.common if available
+    - |
+      if [ -f sdkconfig.ci.common ]; then
+        cat sdkconfig.ci.common >> sdkconfig.defaults
+        echo "Appended sdkconfig.ci.common to sdkconfig.defaults"
+      fi
+    # Build with IDF pedantic flags and IDF build apps script
+    - export ESP_HOSTED_CI_PEDANTIC=1
+    - export EXTRA_CFLAGS="-DIDF_CI_BUILD"
+    - export EXTRA_CXXFLAGS="-DIDF_CI_BUILD"
+    # Build with extra ci config file if specified
+    - |
+      if [ ! -z "${EXAMPLE_CI_FILE}" ]; then
+        idf-build-apps find -p . -vv --config sdkconfig.ci.${EXAMPLE_CI_FILE} --target ${IDF_TARGET}
+        idf-build-apps build -p . -vv --config sdkconfig.ci.${EXAMPLE_CI_FILE} --target ${IDF_TARGET}
+      else
+        idf-build-apps find -p . -vv --target ${IDF_TARGET}
+        idf-build-apps build -p . -vv --target ${IDF_TARGET}
+      fi
+
+# build mqtt example from examples/protocol/mqtt
+# the example may be mqtt or mqtt/tcp, depending on IDF version
+.build_template_example_mqtt:
+  stage: build
+  tags:
+    - build
+  artifacts:
+    paths:
+      - "artifacts_*/"
+    when: always
+    expire_in: 4 days
+  script:
+    - export IDF_PYTHON_CHECK_CONSTRAINTS=yes
+    - ${IDF_PATH}/install.sh --enable-ci
+    - source ${IDF_PATH}/export.sh
+    # Need to rename the cloned "esp_hosted_mcu" directory since the injected component name is "esp_hosted"
+    - cd .. && rm -rf esp_hosted && mv esp_hosted_mcu esp_hosted && cd esp_hosted
+    - export OVERRIDE_PATH=`pwd`
+    # get path to mqtt example to build
+    - |
+      # Check if the newer path structure exists (latest and release-v6.0)
+      if [ -f "${IDF_PATH}/examples/protocols/mqtt/main/idf_component.yml" ]; then
+        MQTT_EXAMPLE_PATH="${IDF_PATH}/examples/protocols/mqtt"
+        # Fall back to older path structure (release-v5.x and earlier)
+      elif [ -f "${IDF_PATH}/examples/protocols/mqtt/tcp/main/idf_component.yml" ]; then
+        MQTT_EXAMPLE_PATH="${IDF_PATH}/examples/protocols/mqtt/tcp"
+      else
+        echo "Error: Could not find MQTT example at either path"
+        ls -la ${IDF_PATH}/examples/protocols/mqtt/ || true
+        exit 1
+      fi
+      echo "Using MQTT example path: ${MQTT_EXAMPLE_PATH}"
+    - cd ${MQTT_EXAMPLE_PATH}
+    # Create components directory and link esp_hosted component
+    - mkdir -p components
+    - ln -sf ${OVERRIDE_PATH} components/esp_hosted
+    # Override component dependency as backup only if not already present
+    - |
+      if ! grep -q "esp_hosted" main/idf_component.yml 2>/dev/null; then
+        cat ${OVERRIDE_PATH}/.gitlab-ci-override-idf-component.yml >> main/idf_component.yml
+        echo "Added esp_hosted override to idf_component.yml"
+      fi
+    # Add slave target configuration if specified
+    # Also add wi-fi remote slave target for supported targets (not ESP32-H2)
+    - |
+      if [ ! -z "${IDF_SLAVE_TARGET}" ]; then
+        if [[ "${IDF_SLAVE_TARGET}" != "esp32h2" ]]; then
+          echo "CONFIG_SLAVE_IDF_TARGET_${IDF_SLAVE_TARGET^^}=y" >> sdkconfig.defaults
+          echo "Added target CONFIG_SLAVE_IDF_TARGET_${IDF_SLAVE_TARGET^^}=y to sdkconfig.defaults"
+        fi
+        echo "CONFIG_ESP_HOSTED_CP_TARGET_${IDF_SLAVE_TARGET^^}=y" >> sdkconfig.defaults
+        echo "Added target CONFIG_ESP_HOSTED_CP_TARGET_${IDF_SLAVE_TARGET^^}=y to sdkconfig.defaults"
+      fi
+    # Append sdkconfig.ci.common if available
+    - |
+      if [ -f sdkconfig.ci.common ]; then
+        cat sdkconfig.ci.common >> sdkconfig.defaults
+        echo "Appended sdkconfig.ci.common to sdkconfig.defaults"
+      fi
+    # Build with IDF pedantic flags and IDF build apps script
+    - export ESP_HOSTED_CI_PEDANTIC=1
+    - export EXTRA_CFLAGS="-DIDF_CI_BUILD"
+    - export EXTRA_CXXFLAGS="-DIDF_CI_BUILD"
+    # use --config-file to override default IDF config file
+    # use --enable-preview-targets to build for all targets
+    # use --override-sdkconfig-items to override (possibly incorrect) build target that may be in provided config file
+    - idf-build-apps find -p . --enable-preview-targets --config-file "${OVERRIDE_PATH}/.idf_build_apps.toml" --override-sdkconfig-items=CONFIG_IDF_TARGET=${IDF_TARGET} -vv --target ${IDF_TARGET}
+    - idf-build-apps build -p . --enable-preview-targets --config-file "${OVERRIDE_PATH}/.idf_build_apps.toml" --override-sdkconfig-items=CONFIG_IDF_TARGET=${IDF_TARGET} -vv --target ${IDF_TARGET}
+    # Copy config files back to project directory for artifacts
+    - mkdir -p ${OVERRIDE_PATH}/artifacts_${IDF_TARGET}_${IDF_SLAVE_TARGET}
+    - cp sdkconfig* ${OVERRIDE_PATH}/artifacts_${IDF_TARGET}_${IDF_SLAVE_TARGET}/ 2>/dev/null || echo "No sdkconfig files found"
+    - cp main/idf_component.yml ${OVERRIDE_PATH}/artifacts_${IDF_TARGET}_${IDF_SLAVE_TARGET}/ 2>/dev/null || echo "No component file found"
+    # Clean up the component symlink
+    - unlink components/esp_hosted
+    - echo "Cleaned up esp_hosted component symlink"
+    # Rename back, since post scripts expect the original name
+    - cd ${OVERRIDE_PATH} && cd .. && mv esp_hosted esp_hosted_mcu
+
+# build mqtt/tcp example from espressif/mqtt Registry Component
+.build_template_mqtt_tcp_component:
+  stage: build
+  tags:
+    - build
+  artifacts:
+    paths:
+      - "artifacts_*/"
+    when: always
+    expire_in: 4 days
+  script:
+    - export IDF_PYTHON_CHECK_CONSTRAINTS=yes
+    - ${IDF_PATH}/install.sh --enable-ci
+    - source ${IDF_PATH}/export.sh
+    # Need to rename the cloned "esp_hosted_mcu" directory since the injected component name is "esp_hosted"
+    - cd .. && rm -rf esp_hosted && mv esp_hosted_mcu esp_hosted && cd esp_hosted
+    - export OVERRIDE_PATH=`pwd`
+    # get the example from Component Registry
+    - echo "Checking out example ${IDF_REGISTRY_COMPONENT}:${IDF_REGISTRY_COMPONENT_EXAMPLE}"
+    - cd ..
+    - idf.py create-project-from-example "${IDF_REGISTRY_COMPONENT}:${IDF_REGISTRY_COMPONENT_EXAMPLE}"
+    - cd "${IDF_REGISTRY_COMPONENT_EXAMPLE}"
+    # Override esp_hosted component in example's deps with the one from the current repository
+    - mkdir -p components
+    - ln -sf ${OVERRIDE_PATH} components/esp_hosted
+    # Add slave target configuration if specified
+    # Also add wi-fi remote slave target for supported targets (not ESP32-H2)
+    - |
+      if [ ! -z "${IDF_SLAVE_TARGET}" ]; then
+        if [[ "${IDF_SLAVE_TARGET}" != "esp32h2" ]]; then
+          echo "CONFIG_SLAVE_IDF_TARGET_${IDF_SLAVE_TARGET^^}=y" >> sdkconfig.defaults
+          echo "Added target CONFIG_SLAVE_IDF_TARGET_${IDF_SLAVE_TARGET^^}=y to sdkconfig.defaults"
+        fi
+        echo "CONFIG_ESP_HOSTED_CP_TARGET_${IDF_SLAVE_TARGET^^}=y" >> sdkconfig.defaults
+        echo "Added slave target CONFIG_ESP_HOSTED_CP_TARGET_${IDF_SLAVE_TARGET^^}=y to sdkconfig.defaults"
+      fi
+    # EXAMPLE_CI_FILE: use sdkconfig CI file in example directory
+    - |
+      if [ ! -z "${SDKCONFIG_CI_FILE}" ]; then
+        cp ${OVERRIDE_PATH}/${SDKCONFIG_CI_FILE} ./sdkconfig.ci.custom
+        echo "Using custom sdkconfig: ${SDKCONFIG_CI_FILE}"
+        SDKCONFIG_PATTERN="sdkconfig.ci.custom"
+      elif [ ! -z "${EXAMPLE_CI_FILE}" ]; then
+        echo "Using CI sdkconfig file in example: ${EXAMPLE_CI_FILE}"
+        SDKCONFIG_PATTERN="./${EXAMPLE_CI_FILE}"
+      else
+        SDKCONFIG_PATTERN="sdkconfig.ci*"
+      fi
+    - echo "SDKCONFIG_PATTERN is ${SDKCONFIG_PATTERN}"
+    # Build with IDF pedantic flags and IDF build apps script
+    - export ESP_HOSTED_CI_PEDANTIC=1
+    - export EXTRA_CFLAGS="-DIDF_CI_BUILD"
+    - export EXTRA_CXXFLAGS="-DIDF_CI_BUILD"
+    # use --config-file to override default IDF config file
+    # use --enable-preview-targets to build for all targets
+    # use --override-sdkconfig-items to override (possibly incorrect) build target that may be in provided config file
+    - idf-build-apps find -p . --enable-preview-targets --config-file "${OVERRIDE_PATH}/.idf_build_apps.toml" --config ${SDKCONFIG_PATTERN} --override-sdkconfig-items=CONFIG_IDF_TARGET=${IDF_TARGET} -vv --target ${IDF_TARGET}
+    - idf-build-apps build -p . --enable-preview-targets --config-file "${OVERRIDE_PATH}/.idf_build_apps.toml" --config ${SDKCONFIG_PATTERN} --override-sdkconfig-items=CONFIG_IDF_TARGET=${IDF_TARGET} -vv --target ${IDF_TARGET}
+    # Copy config files back to project directory for artifacts
+    - mkdir -p ${OVERRIDE_PATH}/artifacts_${IDF_TARGET}_${IDF_SLAVE_TARGET}
+    - cp sdkconfig* ${OVERRIDE_PATH}/artifacts_${IDF_TARGET}_${IDF_SLAVE_TARGET}/ 2>/dev/null || echo "No sdkconfig files found"
+    - cp main/idf_component.yml ${OVERRIDE_PATH}/artifacts_${IDF_TARGET}_${IDF_SLAVE_TARGET}/ 2>/dev/null || echo "No component file found"
+    # Clean up the component symlink
+    - unlink components/esp_hosted
+    - echo "Cleaned up esp_hosted component symlink"
+    # Rename back, since post scripts expect the original name
+    - cd ${OVERRIDE_PATH} && cd .. && mv esp_hosted esp_hosted_mcu
+
+
+.build_template:
+  stage: build
+  tags:
+    - build
+  artifacts:
+    paths:
+      - "artifacts_*/"
+    when: always
+    expire_in: 4 days
+  script:
+    - export IDF_PYTHON_CHECK_CONSTRAINTS=yes
+    - ${IDF_PATH}/install.sh --enable-ci
+    - source ${IDF_PATH}/export.sh
+    # Need to rename the cloned "esp_hosted_mcu" directory since the injected component name is "esp_hosted"
+    - cd .. && rm -rf esp_hosted && mv esp_hosted_mcu esp_hosted && cd esp_hosted
+    # Replaces esp_hosted component in example's deps with the one from the current repository
+    - export OVERRIDE_PATH=`pwd`
+    - cd ${IDF_PATH}/${IDF_EXAMPLE_PATH}
+    # Create components directory and link esp_hosted component
+    - mkdir -p components
+    - ln -sf ${OVERRIDE_PATH} components/esp_hosted
+    - echo "Created components directory with esp_hosted link:"
+    - ls -la components/
+    # Override component dependency as backup only if not already present
+    - |
+      if ! grep -q "esp_hosted" main/idf_component.yml 2>/dev/null; then
+        cat ${OVERRIDE_PATH}/.gitlab-ci-override-idf-component.yml >> main/idf_component.yml
+        echo "Added esp_hosted override to idf_component.yml"
+      fi
+    # Add slave target configuration if specified
+    # Also add wi-fi remote slave target for supported targets (not ESP32-H2)
+    - |
+      if [ ! -z "${IDF_SLAVE_TARGET}" ]; then
+        if [[ "${IDF_SLAVE_TARGET}" != "esp32h2" ]]; then
+          echo "CONFIG_SLAVE_IDF_TARGET_${IDF_SLAVE_TARGET^^}=y" >> sdkconfig.defaults
+          echo "Added target CONFIG_SLAVE_IDF_TARGET_${IDF_SLAVE_TARGET^^}=y to sdkconfig.defaults"
+        fi
+        echo "CONFIG_ESP_HOSTED_CP_TARGET_${IDF_SLAVE_TARGET^^}=y" >> sdkconfig.defaults
+        echo "Added slave target CONFIG_ESP_HOSTED_CP_TARGET_${IDF_SLAVE_TARGET^^}=y to sdkconfig.defaults"
+      fi
+    # HOSTED_CI_FILE: use custom sdkconfig CI file from esp_hosted directory, or
+    # EXAMPLE_CI_FILE: use sdkconfig CI file in example directory
+    - |
+      if [ ! -z "${SDKCONFIG_CI_FILE}" ]; then
+        cp ${OVERRIDE_PATH}/${SDKCONFIG_CI_FILE} ./sdkconfig.ci.custom
+        echo "Using custom sdkconfig: ${SDKCONFIG_CI_FILE}"
+        SDKCONFIG_PATTERN="sdkconfig.ci.custom"
+      elif [ ! -z "${EXAMPLE_CI_FILE}" ]; then
+        echo "Using CI sdkconfig file in example: ${EXAMPLE_CI_FILE}"
+        SDKCONFIG_PATTERN="./${EXAMPLE_CI_FILE}"
+      else
+        SDKCONFIG_PATTERN="sdkconfig.ci*"
+      fi
+    - echo "SDKCONFIG_PATTERN is ${SDKCONFIG_PATTERN}"
+    # Build with IDF pedantic flags and IDF build apps script
+    - export ESP_HOSTED_CI_PEDANTIC=1
+    - export EXTRA_CFLAGS="-DIDF_CI_BUILD"
+    - export EXTRA_CXXFLAGS="-DIDF_CI_BUILD"
+    # Remove the conflicting extconn config that disables hosted
+    - rm -f sdkconfig.ci.*extconn*
+    # use --config-file to override default IDF config file
+    # use --enable-preview-targets to build for all targets
+    # use --override-sdkconfig-items to override (possibly incorrect) build target that may be in provided config file
+    - idf-build-apps find -p . --enable-preview-targets --config-file "${OVERRIDE_PATH}/.idf_build_apps.toml" --config ${SDKCONFIG_PATTERN} --override-sdkconfig-items=CONFIG_IDF_TARGET=${IDF_TARGET} -vv --target ${IDF_TARGET}
+    - idf-build-apps build -p . --enable-preview-targets --config-file "${OVERRIDE_PATH}/.idf_build_apps.toml" --config ${SDKCONFIG_PATTERN} --override-sdkconfig-items=CONFIG_IDF_TARGET=${IDF_TARGET} -vv --target ${IDF_TARGET}
+#    - echo "----------- last sdkconfig.defaults,ci* used (${IDF_TARGET}-${IDF_SLAVE_TARGET}) --------------"
+#    - cat sdkconfig.defaults
+#    - cat sdkconfig.ci*
+#    - echo "----------- last (generated) sdkconfig used (${IDF_TARGET}-${IDF_SLAVE_TARGET}) --------------"
+#    - cat sdkconfig
+#    - echo "----------------------------------------------"
+    # Copy config files back to project directory for artifacts
+    - mkdir -p ${OVERRIDE_PATH}/artifacts_${IDF_TARGET}_${IDF_SLAVE_TARGET}
+    - cp sdkconfig* ${OVERRIDE_PATH}/artifacts_${IDF_TARGET}_${IDF_SLAVE_TARGET}/ 2>/dev/null || echo "No sdkconfig files found"
+    - cp main/idf_component.yml ${OVERRIDE_PATH}/artifacts_${IDF_TARGET}_${IDF_SLAVE_TARGET}/ 2>/dev/null || echo "No component file found"
+    # Clean up the component symlink
+    - unlink components/esp_hosted
+    - echo "Cleaned up esp_hosted component symlink"
+    # Rename back, since post scripts expect the original name
+    - cd ${OVERRIDE_PATH} && cd .. && mv esp_hosted esp_hosted_mcu

@@ -4,6 +4,9 @@
 #include "driver/sdmmc_defs.h"
 #include "driver/sdmmc_host.h"
 #include "driver/sdmmc_types.h"
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4)
+#include "sd_pwr_ctrl_by_on_chip_ldo.h"
+#endif
 #include "esp_heap_trace.h"
 #include "esp_log.h"
 #include "esp_private/esp_gpio_reserve.h"
@@ -35,6 +38,11 @@
 
 static const char *TAG = "SD_Card_Manager";
 static const char *NVS_NAMESPACE = "sd_config";
+
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4) && defined(CONFIG_ESP_HOSTED_SDIO_HOST_INTERFACE)
+static esp_err_t sdmmc_host_init_dummy(void) { return ESP_OK; }
+static esp_err_t sdmmc_host_deinit_dummy(void) { return ESP_OK; }
+#endif
 static bool s_sd_log_levels_tuned = false;
 static SemaphoreHandle_t s_sd_jit_mutex = NULL;
 static uint32_t s_sd_jit_mount_depth = 0;
@@ -47,6 +55,9 @@ static bool s_spi_bus_owned_by_sd = false;
 static int s_spi_host_id = -1;
 typedef enum { MOUNT_NONE = 0, MOUNT_VIRTUAL, MOUNT_SDMMC, MOUNT_SPI } sd_mount_type_t;
 static sd_mount_type_t s_mount_type = MOUNT_NONE;
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4)
+static sd_pwr_ctrl_handle_t s_crowpanel_sd_power = NULL;
+#endif
 static TickType_t s_next_unmount_tick = 0;
 
 static void sd_spi_bus_release_if_tracked(void);
@@ -326,6 +337,12 @@ static const char *sd_spi_host_name(int host_id) {
 }
 
 static int sd_spi_host_id(void) {
+#if defined(CONFIG_CROWPANEL_EPAPER_42) && defined(CONFIG_IDF_TARGET_ESP32S3)
+  /* Elecrow's factory firmware uses SPIClass(HSPI), i.e. SPI2_HOST, for the
+   * SD socket.  The e-paper adapter is factory-compatible GPIO bit-banged on
+   * GPIO11/12, so SPI2 is free here and is the known-good SD host. */
+  return SPI2_HOST;
+#endif
 #if defined(CONFIG_WITH_SCREEN) && defined(CONFIG_LV_TFT_DISPLAY_PROTOCOL_SPI) && defined(TFT_SPI_HOST)
   if (is_shared_display_sd_spi()) {
     return TFT_SPI_HOST;
@@ -457,15 +474,11 @@ static int choose_free_s3_sd_spi_host(const spi_bus_config_t *bus_config, int dm
 }
 #endif
 
-/* Every CYD board (and any classic-ESP32 board with the same topology) keeps
- * its display on SPI2 while SD owns a separate SPI3 bus: display and SD use
- * different pins, so is_shared_display_sd_spi() is false and sd_spi_host_id()
- * picks SPI3_HOST for SD. On the classic ESP32, tearing that SPI3 bus down
- * with spi_bus_free() on mount failure (no card) or unmount disturbs the live
- * SPI2 display and freezes it. So in that topology we leave SD's bus
- * initialized instead of freeing it; a later (re)mount reuses it via
- * ESP_ERR_INVALID_STATE, which is already handled above. Boards where SD
- * shares the display's bus are unaffected (the shared-bus path handles them). */
+/* Ordinary CYD boards keep their display on SPI2 while SD owns a separate
+ * SPI3 bus. The CrowPanel e-paper is the exception: its display is GPIO-SPI
+ * and the factory assigns SD to SPI2/HSPI. On classic ESP32 boards, tearing
+ * down the separate SPI3 bus on a no-card mount can disturb the live display,
+ * so that topology keeps the bus initialized for a later retry. */
 static bool sd_keep_spi_bus_for_board(void) {
 #if defined(CONFIG_IDF_TARGET_ESP32) && defined(CONFIG_WITH_SCREEN)
   return !is_shared_display_sd_spi();
@@ -688,6 +701,36 @@ esp_err_t sd_card_init(void) {
 
   sdmmc_host_t host = SDMMC_HOST_DEFAULT();
   host.flags = SDMMC_HOST_FLAG_1BIT;
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4)
+  if (!s_crowpanel_sd_power) {
+    const sd_pwr_ctrl_ldo_config_t ldo_config = {.ldo_chan_id = 4};
+    ret = sd_pwr_ctrl_new_on_chip_ldo(&ldo_config, &s_crowpanel_sd_power);
+    if (ret != ESP_OK) {
+      /* LDO4 may already be held by another driver (e.g. an older display
+       * init path).  On CrowPanel boards the SD card rail is powered by
+       * on-chip LDO4 at 3.3 V; if the channel is already enabled at the
+       * correct voltage the card will work even without our own handle. */
+      ESP_LOGW(TAG, "CrowPanel SD LDO4 acquire returned %s — rail may already be on",
+               esp_err_to_name(ret));
+      s_crowpanel_sd_power = NULL;
+    }
+  }
+  if (s_crowpanel_sd_power) {
+    host.pwr_ctrl_handle = s_crowpanel_sd_power;
+  }
+#endif
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4) && defined(CONFIG_ESP_HOSTED_SDIO_HOST_INTERFACE)
+  // ESP32-P4 has a single SDMMC host controller (SDMMC_LL_HOST_CTLR_NUMS=1).
+  // ESP-Hosted already claimed it for hosted SDIO on slot 1; use dummy
+  // init/deinit so the SD mount reuses that controller and only adds slot 0.
+  host.slot = SDMMC_HOST_SLOT_0;
+  host.max_freq_khz = SDMMC_FREQ_HIGHSPEED;
+  host.init = sdmmc_host_init_dummy;
+  host.deinit = sdmmc_host_deinit_dummy;
+#elif defined(CONFIG_CROWPANEL_ADVANCED_P4)
+  host.slot = SDMMC_HOST_SLOT_0;
+  host.max_freq_khz = SDMMC_FREQ_HIGHSPEED;
+#endif
 
   sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
   slot_config.width = 1;
@@ -720,6 +763,12 @@ esp_err_t sd_card_init(void) {
              esp_err_to_name(ret));
     }
     sd_card_manager.card = NULL;
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4)
+    if (s_crowpanel_sd_power) {
+      sd_pwr_ctrl_del_on_chip_ldo(s_crowpanel_sd_power);
+      s_crowpanel_sd_power = NULL;
+    }
+#endif
     toast_show("SD mount failed", TOAST_ERROR);
     return ret;
   }
@@ -1006,8 +1055,27 @@ esp_err_t sd_card_init(void) {
   }
 #elif defined(CONFIG_IDF_TARGET_ESP32S3)
   {
+#if !defined(CONFIG_CROWPANEL_EPAPER_42)
     int host_id = sd_host_id;
-#if defined(CONFIG_WITH_ETHERNET) || defined(CONFIG_HAS_NRF24)
+#endif
+#if defined(CONFIG_CROWPANEL_EPAPER_42)
+    /* Unlike the generic S3 path, this board has a factory-proven fixed
+     * topology: SD is on HSPI/SPI2. Do not run the free-host probe here,
+     * because it intentionally prefers SPI3 on ordinary S3 boards. */
+    esp_err_t bus_ret = spi_bus_initialize(SPI2_HOST, &bus_config, dmabus);
+    if (bus_ret == ESP_OK) {
+      bus_init_success = true;
+      sd_spi_bus_track(SPI2_HOST, true);
+    } else if (bus_ret == ESP_ERR_INVALID_STATE) {
+      sd_spi_bus_track(SPI2_HOST, false);
+    } else {
+      shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active, false);
+      printf("Failed to initialize factory SD SPI bus: %s\n", esp_err_to_name(bus_ret));
+      return bus_ret;
+    }
+    sd_host_id = SPI2_HOST;
+    host.slot = SPI2_HOST;
+#elif defined(CONFIG_WITH_ETHERNET) || defined(CONFIG_HAS_NRF24)
     /* SPI3 is reserved for Ethernet/NRF24 on this config. Use SPI2 directly
      * (old pre-refactor behaviour) so we don't steal SPI3 from those peripherals.
      * INVALID_STATE means the bus is already up — reuse it. */
@@ -1338,6 +1406,12 @@ void sd_card_unmount_with_context(sd_unmount_context_t context) {
     sd_card_manager.is_initialized = false;
     sd_card_manager.card = NULL;
     s_mount_type = MOUNT_NONE;
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4)
+    if (s_crowpanel_sd_power) {
+      sd_pwr_ctrl_del_on_chip_ldo(s_crowpanel_sd_power);
+      s_crowpanel_sd_power = NULL;
+    }
+#endif
     
     // Show appropriate status based on context
     switch (context) {
@@ -1374,6 +1448,12 @@ void sd_card_unmount_with_context(sd_unmount_context_t context) {
     sd_card_manager.is_initialized = false;
     sd_card_manager.card = NULL;
     s_mount_type = MOUNT_NONE;
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4)
+    if (s_crowpanel_sd_power) {
+      sd_pwr_ctrl_del_on_chip_ldo(s_crowpanel_sd_power);
+      s_crowpanel_sd_power = NULL;
+    }
+#endif
     s_sd_jit_mount_depth = 0;
     s_sd_jit_display_suspended = false;
     
@@ -1595,6 +1675,7 @@ esp_err_t sd_card_setup_directory_structure() {
   const char *scripts_dir = SD_DIR_SCRIPTS;
   const char *scriptdata_dir = SD_DIR_SCRIPTDATA;
   const char *downloads_dir = SD_DIR_DOWNLOADS;
+  const char *comics_dir = SD_DIR_COMICS;
   const char *themes_dir = SD_DIR_THEMES;
   const char *active_theme_dir = SD_DIR_THEMES "/active";
   const char *evil_portal_dir = SD_GHOSTESP_ROOT "/evil_portal";
@@ -1626,6 +1707,9 @@ esp_err_t sd_card_setup_directory_structure() {
   if (ret != ESP_OK) return ret;
 
   ret = ensure_sd_dir_exists(downloads_dir);
+  if (ret != ESP_OK) return ret;
+
+  ret = ensure_sd_dir_exists(comics_dir);
   if (ret != ESP_OK) return ret;
 
   ret = ensure_sd_dir_exists(themes_dir);
@@ -1805,6 +1889,15 @@ nvs_write_error:
 }
 
 esp_err_t sd_card_load_config() {
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4)
+  // CrowPanel wiring is fixed on the PCB. Do not let generic saved pin values
+  // obscure or override the board profile selected at build time.
+  sd_card_manager.clkpin = CONFIG_SD_MMC_CLK;
+  sd_card_manager.cmdpin = CONFIG_SD_MMC_CMD;
+  sd_card_manager.d0pin = CONFIG_SD_MMC_D0;
+  printf("CrowPanel SD wiring loaded from board profile.\n");
+  return ESP_OK;
+#endif
   nvs_handle_t nvs_handle;
   esp_err_t err;
 
@@ -1891,6 +1984,12 @@ void sd_card_print_config() {
     }
     return;
   }
+#endif
+
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4)
+  printf("SD pins: SDMMC slot 0, 1-bit (CLK %d, CMD %d, D0 %d), max 10 MHz\n",
+         CONFIG_SD_MMC_CLK, CONFIG_SD_MMC_CMD, CONFIG_SD_MMC_D0);
+  return;
 #endif
 
   printf("SD pins: MMC(CLK %d, CMD %d, D0 %d, D1 %d, D2 %d, D3 %d) "

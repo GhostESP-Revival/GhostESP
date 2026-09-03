@@ -3,6 +3,7 @@
 #include "managers/settings_manager.h"
 #include "gui/theme_palette_api.h"
 #include "gui/asset_pack.h"
+#include "gui/accessibility_fonts.h"
 #include "gui/design_tokens.h"
 #include "gui/gui_anim.h"
 #include "gui/ios_toggle.h"
@@ -50,11 +51,15 @@ static inline bool get_menu_rounded(void) {
 }
 
 static inline const lv_font_t *get_item_font(const options_view_t *ov) {
+#if GUI_LARGE_SCREEN
+    return accessibility_get_font_body();
+#else
     uint8_t fs = settings_get_font_size(&G_Settings);
     if (ov->btn_h <= 40) {
         return fs == 0 ? &lv_font_montserrat_10 : (fs == 1 ? &lv_font_montserrat_12 : &lv_font_montserrat_14);
     }
     return fs == 0 ? &lv_font_montserrat_12 : (fs == 1 ? &lv_font_montserrat_14 : &lv_font_montserrat_16);
+#endif
 }
 
 static inline void get_theme_surface_colors(lv_color_t *bg, lv_color_t *surface, lv_color_t *surface_alt, lv_color_t *text) {
@@ -134,23 +139,24 @@ static options_view_t *options_view_create_internal(lv_obj_t *parent, const char
     int h = LV_VER_RES;
     int status_bar_h = GUI_STATUS_BAR_H;
     bool small = (w <= 240 || h <= 240);
-    ov->btn_h = small ? 40 : 48;
+    ov->btn_h = small ? 40 : GUI_CONTROL_H;
 
     lv_color_t bg, surface, surface_alt, text;
     get_theme_surface_colors(&bg, &surface, &surface_alt, &text);
 
     ov->list = lv_list_create(parent);
-    lv_obj_set_size(ov->list, w, h - status_bar_h);
+    int list_w = GUI_OPTIONS_LIST_WIDTH;
+    lv_obj_set_size(ov->list, list_w, h - status_bar_h);
     lv_obj_align(ov->list, LV_ALIGN_TOP_MID, 0, status_bar_h);
     lv_obj_set_style_bg_color(ov->list, bg, 0);
     lv_obj_set_style_bg_opa(ov->list,
                             ov->use_asset_pack_background && asset_pack_get_background_tile()
                                 ? LV_OPA_TRANSP : LV_OPA_COVER,
                             0);
-    lv_obj_set_style_pad_left(ov->list, GUI_SAFEAREA_HOR, 0);
-    lv_obj_set_style_pad_right(ov->list, GUI_SAFEAREA_HOR, 0);
+    lv_obj_set_style_pad_left(ov->list, GUI_OPTIONS_LIST_PAD_HOR, 0);
+    lv_obj_set_style_pad_right(ov->list, GUI_OPTIONS_LIST_PAD_HOR, 0);
     lv_obj_set_style_pad_top(ov->list, GUI_SAFEAREA_VER, 0);
-    lv_obj_set_style_pad_bottom(ov->list, GUI_SAFEAREA_VER, 0);
+    lv_obj_set_style_pad_bottom(ov->list, GUI_SAFEAREA_VER + GUI_HOME_SAFE_H, 0);
     lv_obj_set_style_border_width(ov->list, 0, 0);
     lv_obj_set_style_radius(ov->list, 0, 0);
 
@@ -328,8 +334,8 @@ void options_view_refresh_styles(options_view_t *ov) {
                                     ? LV_OPA_TRANSP : LV_OPA_COVER,
                                 0);
         lv_obj_set_style_pad_row(ov->list, GUI_GRID, 0);
-        lv_obj_set_style_pad_left(ov->list, GUI_SAFEAREA_HOR, 0);
-        lv_obj_set_style_pad_right(ov->list, GUI_SAFEAREA_HOR, 0);
+        lv_obj_set_style_pad_left(ov->list, GUI_OPTIONS_LIST_PAD_HOR, 0);
+        lv_obj_set_style_pad_right(ov->list, GUI_OPTIONS_LIST_PAD_HOR, 0);
         lv_obj_set_style_pad_top(ov->list, GUI_SAFEAREA_VER, 0);
         lv_obj_set_style_pad_bottom(ov->list, GUI_SAFEAREA_VER, 0);
     }

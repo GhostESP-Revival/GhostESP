@@ -10,8 +10,12 @@
 #include "managers/ap_manager.h"
 #include "managers/ota_manager.h"
 #include "sdkconfig.h"
+#ifdef CONFIG_CROWPANEL_ADVANCE_RGB_LCD
+#include "vendor/drivers/ST7262.h"
+#include "src/draw/sw/lv_draw_sw_s3_simd.h"
+#endif
 #include "vendor/drivers/pcf8563.h"
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 #include "managers/ble_manager.h"
 #include "managers/ble_bridge_manager.h"
 #include "attacks/ble/ble_spam.h"
@@ -248,6 +252,119 @@ const char *command_name_at(size_t index) {
 
 
 
+#ifdef CONFIG_CROWPANEL_ADVANCE_RGB_LCD
+static void handle_lcdsimd_cmd(int argc, char **argv) {
+    if(argc == 2 && (strcmp(argv[1], "on") == 0 || strcmp(argv[1], "off") == 0)) {
+        if(!lv_draw_sw_s3_simd_set_enabled(strcmp(argv[1], "on") == 0)) {
+            glog("SIMD unavailable: boot self-test did not pass. Original renderer retained.\n");
+            return;
+        }
+        lv_draw_sw_s3_simd_reset_stats();
+    } else if(argc == 2 && strcmp(argv[1], "reset") == 0) {
+        lv_draw_sw_s3_simd_reset_stats();
+    } else if(argc != 1) {
+        glog("Usage: lcdsimd [on|off|reset]; runtime only, not saved.\n");
+        return;
+    }
+    lv_draw_sw_s3_simd_stats_t s;
+    lv_draw_sw_s3_simd_get_stats(&s);
+    glog("SIMD v1 available=%u enabled=%u vector_fill_pixels=%lu vector_copy_pixels=%lu\n",
+         (unsigned)s.available, (unsigned)s.enabled,
+         (unsigned long)s.fill_pixels, (unsigned long)s.copy_pixels);
+    glog("Opaque RGB565 operations only. Masks/alpha use LVGL; factory direct-GDMA scanout unchanged.\n");
+}
+
+static void handle_lcddiag_cmd(int argc, char **argv) {
+    if (argc == 2 && strcmp(argv[1], "reset") == 0) {
+        lcd_st7262_reset_rgb_stats();
+        glog("RGB diagnostic counters reset; clock and display unchanged.\n");
+        return;
+    }
+    if (argc != 1) {
+        glog("Usage: lcddiag [reset]; repeat with: watch 5 lcddiag\n");
+        return;
+    }
+    crowpanel_rgb_stats_t s;
+    lcd_st7262_get_rgb_stats(&s);
+    uint32_t r[16];
+    esp_err_t ret = lcd_st7262_get_hw_stats(r);
+    if (ret != ESP_OK) {
+        glog("RGB diagnostics unavailable: %s\n", esp_err_to_name(ret));
+        return;
+    }
+    unsigned long elapsed_ms = (unsigned long)((esp_timer_get_time() - s.started_us) / 1000);
+    glog("RGBdiag v5 vsync-double elapsed_ms=%lu requested_hz=%lu frames=%lu period_us[min/max]=%lu/%lu long=%lu short=%lu vsync_in_flush=%lu\n",
+         elapsed_ms, (unsigned long)s.requested_pclk_hz, (unsigned long)s.frames,
+         (unsigned long)s.frame_min_us, (unsigned long)s.frame_max_us,
+         (unsigned long)s.long_frames, (unsigned long)s.short_frames, (unsigned long)s.vsync_during_flush);
+    glog("RGBdiag flushes=%lu errors=%lu pixels=%llu total_us=%llu max_us=%lu last_rect=%d,%d..%d,%d\n",
+         (unsigned long)s.flushes, (unsigned long)s.flush_errors, (unsigned long long)s.pixels,
+         (unsigned long long)s.flush_total_us, (unsigned long)s.flush_max_us,
+         s.last_x1, s.last_y1, s.last_x2, s.last_y2);
+    glog("RGBdiag presented=%lu wait_timeouts=%lu render_total_us=%llu render_max_us=%lu\n",
+         (unsigned long)s.presented_frames, (unsigned long)s.present_wait_timeouts,
+         (unsigned long long)s.render_total_us, (unsigned long)s.render_max_us);
+    uint32_t bounce[7];
+    if (lcd_st7262_get_bounce_stats(bounce) == ESP_OK) {
+        glog("RGBdiag bounce=disabled copies=%lu cache_skips=%lu copy_max_us=%lu bounce_restarts=%lu short_eof=%lu last_eof=%lu budget_us=%lu\n",
+             (unsigned long)bounce[0], (unsigned long)bounce[1], (unsigned long)bounce[2],
+             (unsigned long)bounce[3], (unsigned long)bounce[4], (unsigned long)bounce[5],
+             (unsigned long)bounce[6]);
+    }
+    glog("RGBdiag LCD clock=%08lx user=%08lx ctrl=%08lx/%08lx/%08lx delay=%08lx data_delay=%08lx misc=%08lx\n",
+         (unsigned long)r[0], (unsigned long)r[1], (unsigned long)r[2], (unsigned long)r[3],
+         (unsigned long)r[4], (unsigned long)r[5], (unsigned long)r[6], (unsigned long)r[15]);
+    glog("RGBdiag DMA ch=%lu conf=%08lx/%08lx raw=%08lx fifo=%08lx dscr=%08lx state=%08lx link=%08lx\n",
+         (unsigned long)r[7], (unsigned long)r[8], (unsigned long)r[9], (unsigned long)r[10],
+         (unsigned long)r[11], (unsigned long)r[12], (unsigned long)r[13], (unsigned long)r[14]);
+    glog("RGBdiag heap internal=%u largest=%u psram=%u; cache_chunking=%d psram_mhz=%d\n",
+         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+         (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+#ifdef CONFIG_ESP_MM_CACHE_MSYNC_C2M_CHUNKED_OPS
+         1,
+#else
+         0,
+#endif
+#ifdef CONFIG_SPIRAM_SPEED
+         CONFIG_SPIRAM_SPEED
+#else
+         0
+#endif
+    );
+    glog("Counters since reset; long/short = requested frame period +/-500us. VSYNC selects one of two immutable circular DMA chains; no refill ISR; raw registers are asynchronous/sticky.\n");
+}
+
+static void handle_lcdclock_cmd(int argc, char **argv) {
+    if (argc > 2) {
+        glog("Usage: lcdclock [8..21 MHz]; factory default 21; no argument prints RGB stats\n");
+        return;
+    }
+    if (argc == 2) {
+        char *end = NULL;
+        unsigned long mhz = strtoul(argv[1], &end, 10);
+        if (end == argv[1] || *end || mhz < 8 || mhz > 21) {
+            glog("Pixel clock must be an integer from 8 to 21 MHz\n");
+            return;
+        }
+        esp_err_t ret = lcd_st7262_set_pclk_mhz((uint32_t)mhz);
+        if (ret != ESP_OK) {
+            glog("Cannot change LCD clock: %s\n", esp_err_to_name(ret));
+            return;
+        }
+        glog("Requested %lu MHz at next VSYNC; stats reset. Not saved to NVS.\n", mhz);
+        glog("Wait 10 seconds, then type lcdclock with NO number to read accumulated stats.\n");
+        return;
+    }
+    crowpanel_rgb_stats_t stats;
+    lcd_st7262_get_rgb_stats(&stats);
+    glog("RGB requested_pclk=%lu MHz frames=%lu; direct PSRAM DMA, restart every VSYNC\n",
+         (unsigned long)(stats.requested_pclk_hz / 1000000U),
+         (unsigned long)stats.frames);
+    glog("Frame count only; no hardware underrun measurement. Factory default: 21 MHz.\n");
+}
+#endif
+
 void register_commands() {
     command_init();
     register_command("echo", handle_echo_cmd);
@@ -281,6 +398,11 @@ void register_commands() {
     register_command("watch", handle_watch_cmd);
     register_command("help", handle_help);
     register_command("mem", handle_mem_cmd);
+#ifdef CONFIG_CROWPANEL_ADVANCE_RGB_LCD
+    register_command("lcdclock", handle_lcdclock_cmd);
+    register_command("lcddiag", handle_lcddiag_cmd);
+    register_command("lcdsimd", handle_lcdsimd_cmd);
+#endif
 #if defined(CONFIG_NFC_ST25R3916) || defined(CONFIG_NFC_PN532)
     register_command("nfc", handle_nfc_cmd);
     register_command("nfctest", handle_nfctest_cmd);
@@ -315,6 +437,9 @@ void register_commands() {
     register_command("govee", handle_govee_cmd);
     register_command("stop", handle_stop_flipper);
     register_command("reboot", handle_reboot);
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+    register_command("c6ota", handle_p4_slave_ota_cmd);
+#endif
     register_command("startwd", handle_startwd);
     register_command("wdstream", handle_wdstream_cmd);
     register_command("gpsinfo", handle_gps_info);
@@ -351,7 +476,7 @@ void register_commands() {
     register_command("otainfo", handle_otainfo_cmd);
 #endif
 
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     register_command("blescan", handle_ble_scan_cmd);
     register_command("blebridge", ble_bridge_handle_command);
     register_command("blewardriving", handle_ble_wardriving);
@@ -383,7 +508,7 @@ void register_commands() {
     register_command("timezone", handle_timezone_cmd);
     register_command("settime", handle_settime_cmd);
     register_command("time", handle_time_cmd);
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     register_command("listflippers", handle_list_flippers_cmd);
     register_command("selectflipper", handle_select_flipper_cmd);
     register_command("listgatt", handle_list_gatt_cmd);
@@ -401,12 +526,10 @@ void register_commands() {
     register_command("saeflood", handle_sae_flood_cmd);
     register_command("stopsaeflood", handle_stop_sae_flood_cmd);
     register_command("saefloodhelp", handle_sae_flood_help_cmd);
-#if CONFIG_IDF_TARGET_ESP32C5
     register_command("setcountry", handle_setcountry);
-#endif
     register_command("webauth", handle_web_auth_cmd);
     register_command("webuiap", handle_webuiap_cmd);
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     register_command("blespam", handle_ble_spam_cmd);
 #endif
     register_command("setrgbmode", handle_set_rgb_mode_cmd);

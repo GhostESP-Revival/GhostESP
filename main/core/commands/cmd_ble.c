@@ -15,7 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 #include "managers/ble_manager.h"
 #include "attacks/ble/ble_spam.h"
 #include "scans/ble/advertiser_scan.h"
@@ -51,7 +51,7 @@ static void chameleon_cli_progress_cb(int current, int total, void *user) {
     }
 }
 
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 void handle_ble_scan_cmd(int argc, char **argv) {
     if (argc > 1 && strcmp(argv[1], "-f") == 0) {
         glog("Starting Find the Flippers.\n");

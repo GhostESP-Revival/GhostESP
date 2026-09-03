@@ -507,7 +507,6 @@ void handle_pineap_detection(int argc, char **argv) {
 
 
 // Forward declaration for the new print function
-#if CONFIG_IDF_TARGET_ESP32C5
 void handle_setcountry(int argc, char **argv) {
     if (argc != 2) {
         glog("Usage: setcountry <CC>\n");
@@ -531,7 +530,6 @@ void handle_setcountry(int argc, char **argv) {
         status_display_show_status("Country Fail");
     }
 }
-#endif
 
 
 void handle_ap_enable_cmd(int argc, char **argv) {

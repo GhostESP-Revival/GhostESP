@@ -372,6 +372,9 @@ def get_build_targets() -> List[Dict[str, str]]:
         {"name": "esp32c3-generic", "idf_target": "esp32c3", "sdkconfig_file": "configs/sdkconfig.default.esp32c3", "zip_name": "esp32c3-generic.zip"},
         {"name": "esp32c5-generic", "idf_target": "esp32c5", "sdkconfig_file": "configs/sdkconfig.default.esp32c5", "zip_name": "esp32c5-generic-v01.zip"},
         {"name": "esp32c6-generic", "idf_target": "esp32c6", "sdkconfig_file": "configs/sdkconfig.default.esp32c6", "zip_name": "esp32c6-generic.zip"},
+        {"name": "CrowPanel Advanced P4 7/9/10.1-inch", "idf_target": "esp32p4", "sdkconfig_file": "configs/sdkconfig.crowpanel_advanced_p4_mipi_1024x600", "zip_name": "CrowPanel_Advanced_P4_7_9_10.1inch.zip"},
+        {"name": "CrowPanel Advanced P4 7/9/10.1-inch v1.1", "idf_target": "esp32p4", "sdkconfig_file": "configs/sdkconfig.crowpanel_advanced_p4_mipi_1024x600_v11", "zip_name": "CrowPanel_Advanced_P4_7_9_10.1inch_v1.1.zip"},
+        {"name": "CrowPanel Advanced P4 5-inch", "idf_target": "esp32p4", "sdkconfig_file": "configs/sdkconfig.crowpanel_advanced_p4_rgb_800x480", "zip_name": "CrowPanel_Advanced_P4_5inch.zip"},
         {"name": "Awok V5", "idf_target": "esp32s2", "sdkconfig_file": "configs/sdkconfig.default.esp32s2", "zip_name": "esp32v5_awok.zip"},
         {"name": "ghostboard", "idf_target": "esp32c6", "sdkconfig_file": "configs/sdkconfig.ghostboard", "zip_name": "ghostboard.zip"},
         {"name": "MarauderV4_FlipperHub", "idf_target": "esp32", "sdkconfig_file": "configs/sdkconfig.marauderv4", "zip_name": "MarauderV4_FlipperHub.zip"},
@@ -386,6 +389,14 @@ def get_build_targets() -> List[Dict[str, str]]:
         {"name": "CYD2432S028R", "idf_target": "esp32", "sdkconfig_file": "configs/sdkconfig.CYD2432S028R", "zip_name": "CYD2432S028R.zip"},
         {"name": "Waveshare_LCD", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.waveshare7inch", "zip_name": "Waveshare_LCD.zip"},
         {"name": "Crowtech_LCD", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.crowtech7inch", "zip_name": "Crowtech_LCD.zip"},
+        {"name": "CrowPanel 4.2-inch E-paper", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.crowpanel_42_epaper", "zip_name": "CrowPanel_4.2_Epaper.zip"},
+        {"name": "CrowPanel 5.79-inch E-paper", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.crowpanel_579_epaper", "zip_name": "CrowPanel_5.79_Epaper.zip"},
+        {"name": "CrowPanel Advance 2.4-inch", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.crowpanel_advance24", "zip_name": "CrowPanel_Advance_2.4inch.zip"},
+        {"name": "CrowPanel Advance 2.8-inch", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.crowpanel_advance28", "zip_name": "CrowPanel_Advance_2.8inch.zip"},
+        {"name": "CrowPanel Advance 3.5-inch", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.crowpanel_advance35", "zip_name": "CrowPanel_Advance_3.5inch.zip"},
+        {"name": "CrowPanel Advance 4.3-inch", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.crowpanel_advance43", "zip_name": "CrowPanel_Advance_4.3inch.zip"},
+        {"name": "CrowPanel Advance 5-inch", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.crowpanel_advance5", "zip_name": "CrowPanel_Advance_5inch.zip"},
+        {"name": "CrowPanel Advance 7-inch", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.crowpanel_advance7", "zip_name": "CrowPanel_Advance_7inch.zip"},
         {"name": "Sunton_LCD", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.sunton7inch", "zip_name": "Sunton_LCD.zip"},
         {"name": "JC3248W535EN_LCD", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.JC3248W535EN", "zip_name": "JC3248W535EN_LCD.zip"},
         {"name": "Flipper_JCMK_GPS", "idf_target": "esp32s2", "sdkconfig_file": "configs/sdkconfig.flipper.jcmk_gps", "zip_name": "Flipper_JCMK_GPS.zip"},
@@ -592,34 +603,16 @@ def build_target(target: Dict[str, str], env: Dict[str, str], cmd_prefix: str = 
     print(f"Config file found: {target['sdkconfig_file']}")
     
     # Apply custom SDK config
-    # Check if sdkconfig.defaults already exists (from menuconfig) and use it if it does
-    if os.path.exists("sdkconfig.defaults"):
-        print("Using existing sdkconfig.defaults (from menuconfig)...")
-        # Verify the existing file has content
-        if os.path.getsize("sdkconfig.defaults") == 0:
-            print("WARNING: sdkconfig.defaults is empty, copying from config file...")
-            try:
-                shutil.copy2(target['sdkconfig_file'], "sdkconfig.defaults")
-                shutil.copy2(target['sdkconfig_file'], "sdkconfig")
-            except Exception as e:
-                print(f"ERROR: Failed to copy config file: {e}")
-                return False
-        else:
-            # Sync sdkconfig with sdkconfig.defaults
-            try:
-                shutil.copy2("sdkconfig.defaults", "sdkconfig")
-            except Exception as e:
-                print(f"ERROR: Failed to sync sdkconfig: {e}")
-                return False
-    else:
-        print(f"Copying {target['sdkconfig_file']} to sdkconfig and sdkconfig.defaults...")
-        # Copy config file to both locations
-        try:
-            shutil.copy2(target['sdkconfig_file'], "sdkconfig.defaults")
-            shutil.copy2(target['sdkconfig_file'], "sdkconfig")
-        except Exception as e:
-            print(f"ERROR: Failed to copy config file: {e}")
-            return False
+    # Always copy the target's own config file.  A stale sdkconfig.defaults
+    # from a previous target (e.g. P4 with BT disabled) would otherwise leak
+    # into the next build and break it (missing NimBLE headers, etc.).
+    print(f"Applying config from {target['sdkconfig_file']}...")
+    try:
+        shutil.copy2(target['sdkconfig_file'], "sdkconfig.defaults")
+        shutil.copy2(target['sdkconfig_file'], "sdkconfig")
+    except Exception as e:
+        print(f"ERROR: Failed to copy config file: {e}")
+        return False
     
     # Verify the file was created and has content
     if not os.path.exists("sdkconfig.defaults"):
@@ -686,6 +679,10 @@ def build_target(target: Dict[str, str], env: Dict[str, str], cmd_prefix: str = 
         if not firmware_found:
             print("ERROR: Failed to find firmware binary")
             return False
+
+        if target['idf_target'] == 'esp32p4':
+            shutil.copy2(os.path.join('firmware', 'crowpanel_p4', 'network_adapter.bin'),
+                         os.path.join(artifact_dir, 'network_adapter.bin'))
             
     except Exception as e:
         print(f"ERROR: Failed to copy build artifacts: {e}")
@@ -762,6 +759,11 @@ def build_target(target: Dict[str, str], env: Dict[str, str], cmd_prefix: str = 
             partition_offset, partition_bin,
             firmware_offset, firmware_bin
         ]
+        if target['idf_target'] == 'esp32p4':
+            merge_cmd.extend([
+                "0xbe0000",
+                os.path.join("firmware", "crowpanel_p4", "network_adapter.bin")
+            ])
         print(f"Merging binaries with: {' '.join(merge_cmd)}")
         try:
             result = subprocess.run(merge_cmd, check=True, capture_output=True, text=True)

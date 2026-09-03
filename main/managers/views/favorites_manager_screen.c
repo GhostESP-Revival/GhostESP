@@ -641,7 +641,7 @@ static void fav_update_scroll_buttons(void) {
 #endif
 
 void favorites_manager_create(void) {
-#ifdef CONFIG_USE_TOUCHSCREEN
+#if defined(CONFIG_USE_TOUCHSCREEN) && GUI_LEGACY_TOUCH_BAR
     const int touch_bar_h = FAV_TOUCH_BAR_HEIGHT;
 #else
     const int touch_bar_h = 0;
@@ -658,11 +658,12 @@ void favorites_manager_create(void) {
     if (list && lv_obj_is_valid(list)) {
         int list_h = LV_VER_RES - GUI_STATUS_BAR_H - touch_bar_h;
         if (list_h < 40) list_h = 40;
-        lv_obj_set_size(list, LV_HOR_RES, list_h);
+        lv_obj_set_size(list, GUI_OPTIONS_LIST_WIDTH, list_h);
         lv_obj_align(list, LV_ALIGN_TOP_MID, 0, GUI_STATUS_BAR_H);
     }
 
 #ifdef CONFIG_USE_TOUCHSCREEN
+#if GUI_LEGACY_TOUCH_BAR
     // Standard bottom touch bar (scroll up / Back / scroll down).
     uint8_t ctrl_theme = settings_get_menu_theme(&G_Settings);
     lv_color_t ctrl_color = lv_color_hex(theme_palette_get_surface_alt(ctrl_theme));
@@ -720,6 +721,7 @@ void favorites_manager_create(void) {
     lv_obj_set_style_text_color(down_label, ctrl_text, 0);
     lv_obj_center(down_label);
     lv_obj_add_flag(s_scroll_down_btn, LV_OBJ_FLAG_HIDDEN);
+#endif /* GUI_LEGACY_TOUCH_BAR */
 #endif
 
     s_touch_started = false;

@@ -499,8 +499,10 @@ static void sd_browser_delete_cb(lv_event_t *e) {
     if (!browser_detail) return;
 
 #ifdef CONFIG_USE_TOUCHSCREEN
+#if GUI_LEGACY_TOUCH_BAR
     const int TOUCH_BAR_HEIGHT = SD_SCROLL_BTN_SIZE + SD_SCROLL_BTN_PADDING * 2;
     detail_view_set_bottom_reserved(browser_detail, TOUCH_BAR_HEIGHT);
+#endif
 #endif
 
     detail_view_add_info(browser_detail, "Name", selected_entry->name);
@@ -623,8 +625,10 @@ static void sd_browser_view_contents_cb(lv_event_t *e) {
     if (!browser_detail) return;
 
 #ifdef CONFIG_USE_TOUCHSCREEN
+#if GUI_LEGACY_TOUCH_BAR
     const int TOUCH_BAR_HEIGHT = SD_SCROLL_BTN_SIZE + SD_SCROLL_BTN_PADDING * 2;
     detail_view_set_bottom_reserved(browser_detail, TOUCH_BAR_HEIGHT);
+#endif
 #endif
 
     sd_browser_add_file_preview(browser_detail);
@@ -669,8 +673,10 @@ static void sd_browser_show_selected_file_detail(void) {
     if (!browser_detail) return;
 
 #ifdef CONFIG_USE_TOUCHSCREEN
+#if GUI_LEGACY_TOUCH_BAR
     const int TOUCH_BAR_HEIGHT = SD_SCROLL_BTN_SIZE + SD_SCROLL_BTN_PADDING * 2;
     detail_view_set_bottom_reserved(browser_detail, TOUCH_BAR_HEIGHT);
+#endif
 #endif
 
     char folder[96];
@@ -790,9 +796,13 @@ static void sd_browser_show_list(void) {
 #ifdef CONFIG_USE_TOUCHSCREEN
     lv_obj_t *list = options_view_get_list(browser_options);
     if (list && lv_obj_is_valid(list)) {
+#if GUI_LEGACY_TOUCH_BAR
         const int TOUCH_BAR_HEIGHT = SD_SCROLL_BTN_SIZE + SD_SCROLL_BTN_PADDING * 2;
         int container_height = LV_VER_RES - GUI_STATUS_BAR_H - TOUCH_BAR_HEIGHT;
-        lv_obj_set_size(list, LV_HOR_RES, container_height);
+#else
+        int container_height = LV_VER_RES - GUI_STATUS_BAR_H;
+#endif
+        lv_obj_set_size(list, GUI_OPTIONS_LIST_WIDTH, container_height);
         lv_obj_align(list, LV_ALIGN_TOP_MID, 0, GUI_STATUS_BAR_H);
     }
 #endif
@@ -870,6 +880,7 @@ void sd_browser_create(void) {
     }
 
 #ifdef CONFIG_USE_TOUCHSCREEN
+#if GUI_LEGACY_TOUCH_BAR
     const int TOUCH_BAR_HEIGHT = SD_SCROLL_BTN_SIZE + SD_SCROLL_BTN_PADDING * 2;
     lv_color_t bg_color = lv_color_hex(theme_palette_get_background(theme));
     lv_color_t ctrl_color = lv_color_hex(theme_palette_get_surface_alt(theme));
@@ -927,6 +938,7 @@ void sd_browser_create(void) {
     lv_obj_set_style_text_color(down_label, ctrl_text, 0);
     lv_obj_center(down_label);
     lv_obj_add_flag(sd_scroll_down_btn, LV_OBJ_FLAG_HIDDEN);
+#endif
 #endif
 
     page_offset = 0;

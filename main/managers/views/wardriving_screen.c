@@ -10,7 +10,7 @@
 #include "core/esp_comm_manager.h"
 #include "core/glog.h"
 #include "gui/design_tokens.h"
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 #include "managers/ble_manager.h"
 #endif
 #include "gui/screen_layout.h"
@@ -70,7 +70,11 @@ static lv_obj_t *wd_touch_scroll_target;
 static const int WD_TAP_THRESHOLD = 14;
 
 static int wardriving_touch_bar_height(void) {
+#if GUI_LEGACY_TOUCH_BAR
     return WD_SCROLL_BTN_SIZE + WD_SCROLL_BTN_PADDING * 2;
+#else
+    return 0;
+#endif
 }
 
 static int wd_resolve_drag_axis(int total_dx, int total_dy) {
@@ -497,7 +501,7 @@ static void update_display_cb(lv_timer_t *timer) {
     
     if (lbl_aps) {
         uint32_t ap_count = wardriving_ble_mode
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
             ? ble_wardriving_get_unique_device_count()
 #else
             ? 0
@@ -696,6 +700,7 @@ static void create_touch_control_bar(lv_obj_t *root) {
     lv_color_t ctrl_text = lv_color_hex(theme_palette_get_text(theme));
 
     const int bar_h = wardriving_touch_bar_height();
+    if (bar_h <= 0) return;
 
     touch_bar = lv_obj_create(root);
     lv_obj_remove_style_all(touch_bar);
@@ -797,7 +802,7 @@ void wardriving_view_create(void) {
 
     bool csv_ok = !observing_existing_session;
     if (!observing_existing_session && wardriving_ble_mode) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
         ble_wardriving_reset_unique_device_count();
         csv_ok = (csv_file_open("ble_wardriving") == ESP_OK);
         if (csv_ok) {
@@ -1032,7 +1037,7 @@ void wardriving_view_destroy(void) {
     }
 
     if (owned_csv_session && wardriving_ble_mode) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
         ble_stop();
         if (csv_buffer_has_pending_data()) {
             csv_flush_buffer_to_file();

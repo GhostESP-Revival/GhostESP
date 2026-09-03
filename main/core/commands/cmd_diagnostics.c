@@ -161,7 +161,7 @@ void handle_stop_flipper(int argc, char **argv) {
     wifi_manager_stop_auth_flood();
     wifi_manager_cancel_connect();
 
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     if (ble_spam_is_running()) {
         glog("Stopped BLE spam.\n");
         stopped_any = true;

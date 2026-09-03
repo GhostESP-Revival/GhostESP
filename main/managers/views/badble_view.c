@@ -63,7 +63,7 @@ static const char *badble_main_options[] = {
 
 #define MAX_SCRIPTS 32
 #define MAX_SCRIPT_NAME 64
-EXT_RAM_BSS_ATTR static char script_names[MAX_SCRIPTS][MAX_SCRIPT_NAME];
+static char (*script_names)[MAX_SCRIPT_NAME];
 static const char *script_options[MAX_SCRIPTS + 2];
 static int script_count = 0;
 
@@ -114,6 +114,14 @@ static void on_option_click(lv_event_t *e) {
 
 static void populate_script_list(void) {
     script_count = 0;
+
+    free(script_names);
+    script_names = calloc(MAX_SCRIPTS, sizeof(*script_names));
+    if (!script_names) {
+        script_options[0] = "< Back";
+        script_options[1] = NULL;
+        return;
+    }
 
     strncpy(script_names[script_count], BADUSB_BUILTIN_SCRIPT_NAME, MAX_SCRIPT_NAME - 1);
     script_names[script_count][MAX_SCRIPT_NAME - 1] = '\0';
@@ -455,13 +463,23 @@ void badble_view_create(void) {
 
     g_ov = options_view_create(root, "BadBLE");
     menu_container = options_view_get_list(g_ov);
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    /* Keep the P4 canvas edge-to-edge while the shared list padding keeps
+     * each option row visually inset from the panel edges. */
+    lv_obj_set_width(menu_container, GUI_OPTIONS_LIST_WIDTH);
+    lv_obj_set_style_bg_opa(menu_container, LV_OPA_COVER, 0);
+#endif
 
 #ifdef CONFIG_USE_TOUCHSCREEN
     int screen_height = LV_VER_RES;
     const int STATUS_BAR_HEIGHT = GUI_STATUS_BAR_H;
+#if GUI_LEGACY_TOUCH_BAR
     const int BUTTON_AREA_HEIGHT = SCROLL_BTN_SIZE + SCROLL_BTN_PADDING * 2;
+#else
+    const int BUTTON_AREA_HEIGHT = 0;
+#endif
     int container_height = screen_height - STATUS_BAR_HEIGHT - BUTTON_AREA_HEIGHT;
-    lv_obj_set_size(menu_container, LV_HOR_RES, container_height);
+    lv_obj_set_size(menu_container, GUI_OPTIONS_LIST_WIDTH, container_height);
     lv_obj_align(menu_container, LV_ALIGN_TOP_MID, 0, STATUS_BAR_HEIGHT);
 #endif
 
@@ -499,6 +517,7 @@ void badble_view_create(void) {
     }
 
 #ifdef CONFIG_USE_TOUCHSCREEN
+#if GUI_LEGACY_TOUCH_BAR
     uint8_t theme = settings_get_menu_theme(&G_Settings);
     lv_color_t bg_color = lv_color_hex(theme_palette_get_background(theme));
     lv_color_t ctrl_color = lv_color_hex(theme_palette_get_surface_alt(theme));
@@ -558,6 +577,7 @@ void badble_view_create(void) {
     lv_obj_add_flag(scroll_down_btn, LV_OBJ_FLAG_HIDDEN);
 
     update_scroll_buttons_visibility();
+#endif /* GUI_LEGACY_TOUCH_BAR */
 #endif
 }
 
@@ -570,6 +590,8 @@ void badble_view_destroy(void) {
     }
 
     lvgl_obj_del_safe(&root);
+    free(script_names);
+    script_names = NULL;
     badble_view.root = NULL;
     menu_container = NULL;
     scroll_up_btn = NULL;

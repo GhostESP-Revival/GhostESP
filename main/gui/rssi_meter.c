@@ -130,7 +130,7 @@ static void rssi_meter_relayout(rssi_meter_t *m) {
     if (!m || !m->container || !lv_obj_is_valid(m->container)) return;
 
     lv_coord_t content_w = LV_HOR_RES;
-    lv_coord_t content_h = LV_VER_RES - GUI_STATUS_BAR_H - m->reserved;
+    lv_coord_t content_h = LV_VER_RES - GUI_STATUS_BAR_H - GUI_HOME_SAFE_H - m->reserved;
     if (content_h < 60) content_h = 60;
 
     lv_obj_set_size(m->container, content_w, content_h);

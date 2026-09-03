@@ -20,7 +20,7 @@
 #include "esp_camera.h"
 #endif
 
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 #include "host/ble_gap.h"
 #include "host/ble_gatt.h"
 #include "host/ble_hs.h"
@@ -141,7 +141,7 @@ static uint8_t s_display_brightness = 100;
 static adc_oneshot_unit_handle_t s_adc_unit = NULL;
 static bool s_adc_channels[PLUGIN_ADC_CHANNEL_MAX];
 
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 static uint16_t s_ble_gatt_conn_handle = 0xffff;
 static SemaphoreHandle_t s_ble_gatt_sem = NULL;
 static uint8_t *s_ble_gatt_read_buf = NULL;
@@ -1053,7 +1053,7 @@ bool plugin_api_subghz_transmit_raw(uint32_t frequency_hz, const uint16_t *durat
 
 bool plugin_api_ble_adv_start(const uint8_t *data, size_t len) {
     if (!has_permission(PLUGIN_PERMISSION_BLE) || !data || len == 0) return false;
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     return ble_start_custom_adv(data, len);
 #else
     return false;
@@ -1062,7 +1062,7 @@ bool plugin_api_ble_adv_start(const uint8_t *data, size_t len) {
 
 bool plugin_api_ble_adv_stop(void) {
     if (!has_permission(PLUGIN_PERMISSION_BLE)) return false;
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     return ble_stop_custom_adv();
 #else
     return false;
@@ -1071,7 +1071,7 @@ bool plugin_api_ble_adv_stop(void) {
 
 bool plugin_api_ble_gatt_connect(const uint8_t mac[6]) {
     if (!has_permission(PLUGIN_PERMISSION_BLE) || !mac) return false;
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     if (s_ble_gatt_sem != NULL) {
         ble_gap_terminate(s_ble_gatt_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
         s_ble_gatt_conn_handle = 0xffff;
@@ -1099,7 +1099,7 @@ bool plugin_api_ble_gatt_connect(const uint8_t mac[6]) {
 
 bool plugin_api_ble_gatt_disconnect(void) {
     if (!has_permission(PLUGIN_PERMISSION_BLE)) return false;
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     if (s_ble_gatt_conn_handle != 0xffff) {
         ble_gap_terminate(s_ble_gatt_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
         s_ble_gatt_conn_handle = 0xffff;
@@ -1110,7 +1110,7 @@ bool plugin_api_ble_gatt_disconnect(void) {
 #endif
 }
 
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 static void plugin_ble_gatt_ensure_sem(void) {
     if (!s_ble_gatt_sem) s_ble_gatt_sem = xSemaphoreCreateBinary();
 }
@@ -1202,7 +1202,7 @@ static int plugin_ble_gattc_disc_svc_cb(uint16_t conn_handle, const struct ble_g
 
 int plugin_api_ble_gatt_read(uint16_t service_uuid, uint16_t char_uuid, void *buffer, size_t buffer_len) {
     if (!has_permission(PLUGIN_PERMISSION_BLE) || !buffer || buffer_len == 0) return -1;
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     if (s_ble_gatt_conn_handle == 0xffff) return -1;
     plugin_ble_gatt_ensure_sem();
     s_ble_gatt_read_buf = (uint8_t *)buffer;
@@ -1225,7 +1225,7 @@ int plugin_api_ble_gatt_read(uint16_t service_uuid, uint16_t char_uuid, void *bu
 
 bool plugin_api_ble_gatt_write(uint16_t service_uuid, uint16_t char_uuid, const void *data, size_t len) {
     if (!has_permission(PLUGIN_PERMISSION_BLE) || (!data && len > 0)) return false;
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     if (s_ble_gatt_conn_handle == 0xffff) return false;
     plugin_ble_gatt_ensure_sem();
     s_ble_gatt_read_buf = NULL;
@@ -1730,7 +1730,7 @@ void plugin_api_lowlevel_release(void) {
         s_wifi_packet_cb = NULL;
         s_wifi_packet_user = NULL;
     }
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     if (s_ble_gatt_conn_handle != 0xffff) {
         ble_gap_terminate(s_ble_gatt_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
         s_ble_gatt_conn_handle = 0xffff;

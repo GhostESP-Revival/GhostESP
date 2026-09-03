@@ -1,4 +1,5 @@
 #include "managers/views/lockscreen.h"
+#include "gui/menu_catalog.h"
 #include "managers/settings_manager.h"
 #include "managers/ghostchi_mood.h"
 #include "managers/views/main_menu_screen.h"
@@ -22,7 +23,9 @@
 #include <string.h>
 #include <stdlib.h>
 #include "gui/design_tokens.h"
+#include "sdkconfig.h"
 
+#ifdef CONFIG_WITH_SCREEN
 extern const lv_img_dsc_t tired_50x50;
 extern const lv_img_dsc_t what2_50x50;
 extern const lv_img_dsc_t angry_50x50;
@@ -31,6 +34,10 @@ extern const lv_img_dsc_t love_50x50;
 extern const lv_img_dsc_t evil_50x50;
 extern const lv_img_dsc_t sleep_50x50;
 extern const lv_img_dsc_t surpised_50x50;
+#define LOCKSCREEN_SPRITE(name) (&name)
+#else
+#define LOCKSCREEN_SPRITE(name) ((const lv_img_dsc_t *)NULL)
+#endif
 
 #define MAX_INPUT_LEN 31
 #define STORED_PIN_MARKER 0x80
@@ -136,6 +143,29 @@ static void lockscreen_destroy_fav_pill(void);
 static void lockscreen_fav_launch(const char *name);
 #ifdef CONFIG_USE_TOUCHSCREEN
 static void lockscreen_fav_update_scroll_buttons(void);
+#endif
+
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+static const char *lockscreen_fav_type(const char *name) {
+    if (!name) return "Favorite";
+    if (strncasecmp(name, "ir:", 3) == 0) return "IR Remote";
+    if (strncasecmp(name, "nfc:", 4) == 0) return "NFC Tag";
+    if (strncasecmp(name, "subghz:", 7) == 0) return "SubGHz File";
+    if (strncasecmp(name, "app:", 4) == 0) return "App";
+    if (strncasecmp(name, "gs:", 3) == 0) return "Script";
+    if (strncasecmp(name, "badusb:", 7) == 0) return "Payload";
+    return "Main Menu";
+}
+
+static const char *lockscreen_fav_display_name(const char *name) {
+    if (!name || !name[0]) return "Favorite";
+    const char *display = name;
+    const char *colon = strchr(name, ':');
+    if (colon && colon[1]) display = colon + 1;
+    const char *slash = strrchr(display, '/');
+    if (slash && slash[1]) display = slash + 1;
+    return display;
+}
 #endif
 
 static void lockscreen_clear_input(void);
@@ -340,12 +370,12 @@ static void lockscreen_update_dots(void) {
 
 static void lockscreen_update_ghost(bool immediate) {
     if (!s_ghost || !lv_obj_is_valid(s_ghost)) return;
-    const lv_img_dsc_t *src = &tired_50x50;
+    const lv_img_dsc_t *src = LOCKSCREEN_SPRITE(tired_50x50);
     switch (s_ghost_state) {
-        case GHOST_SLEEPING:  src = s_no_pin_mode ? lockscreen_companion_sprite() : &tired_50x50; break;
-        case GHOST_TYPING:    src = &what2_50x50; break;
-        case GHOST_ERROR:     src = &angry_50x50; break;
-        case GHOST_UNLOCKED:  src = &happy_50x50; break;
+        case GHOST_SLEEPING:  src = s_no_pin_mode ? lockscreen_companion_sprite() : LOCKSCREEN_SPRITE(tired_50x50); break;
+        case GHOST_TYPING:    src = LOCKSCREEN_SPRITE(what2_50x50); break;
+        case GHOST_ERROR:     src = LOCKSCREEN_SPRITE(angry_50x50); break;
+        case GHOST_UNLOCKED:  src = LOCKSCREEN_SPRITE(happy_50x50); break;
     }
     lv_img_set_src(s_ghost, src);
     int content_h = LV_VER_RES - GUI_STATUS_BAR_H;
@@ -569,8 +599,6 @@ static void lockscreen_build_numpad(void) {
     lv_obj_clear_flag(s_numpad_cont, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_flex_flow(s_numpad_cont, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_flex_align(s_numpad_cont, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_row(s_numpad_cont, 2, 0);
-    lv_obj_set_style_pad_column(s_numpad_cont, 2, 0);
 
     int content_h = LV_VER_RES - GUI_STATUS_BAR_H;
     int content_w = lv_obj_get_width(s_content);
@@ -578,6 +606,11 @@ static void lockscreen_build_numpad(void) {
     bool landscape = (content_w > content_h && content_h <= 146);
 
     int gap = 2;
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    gap = 8;
+#endif
+    lv_obj_set_style_pad_row(s_numpad_cont, gap, 0);
+    lv_obj_set_style_pad_column(s_numpad_cont, gap, 0);
     int btn_h, btn_w, numpad_x, numpad_y;
 
     if (landscape) {
@@ -596,11 +629,19 @@ static void lockscreen_build_numpad(void) {
     } else {
         int min_numpad_y = 94;
         int bottom_margin = 10;
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+        min_numpad_y = content_h / 4;
+        bottom_margin = 20;
+#endif
         int numpad_h = content_h - min_numpad_y - bottom_margin;
         if (numpad_h < 36) numpad_h = 36;
         btn_h = (numpad_h - (NUMPAD_ROWS - 1) * gap) / NUMPAD_ROWS;
         if (LV_VER_RES > 240) {
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+            if (btn_h > GUI_CONTROL_H) btn_h = GUI_CONTROL_H;
+#else
             if (btn_h > 42) btn_h = 42;
+#endif
         } else {
             if (btn_h > 30) btn_h = 30;
         }
@@ -638,7 +679,12 @@ static void lockscreen_build_numpad(void) {
         lv_obj_set_style_shadow_opa(s_numpad_btns[i], LV_OPA_TRANSP, 0);
         lv_obj_t *lbl = lv_label_create(s_numpad_btns[i]);
         lv_label_set_text(lbl, k_numpad_labels[i]);
-        const lv_font_t *f = (btn_h < 20) ? &lv_font_montserrat_10 : (btn_h >= 36 ? &lv_font_montserrat_16 : &lv_font_montserrat_12);
+        const lv_font_t *f;
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+        f = btn_h >= 56 ? gui_font_title() : gui_font_body();
+#else
+        f = (btn_h < 20) ? &lv_font_montserrat_10 : (btn_h >= 36 ? &lv_font_montserrat_16 : &lv_font_montserrat_12);
+#endif
         lv_obj_set_style_text_font(lbl, f, 0);
         lv_obj_set_style_text_color(lbl, lv_color_hex(0xFFFFFF), 0);
         lv_obj_center(lbl);
@@ -652,6 +698,12 @@ static void lockscreen_build_companion_layout(int content_w, int content_h) {
     int ghost_sz = 72;
     if (content_h <= 120) {
         ghost_sz = 64;
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    } else if (content_h >= 480) {
+        ghost_sz = 160;
+    } else if (content_h >= 320) {
+        ghost_sz = 128;
+#endif
     } else if (content_h >= 220) {
         ghost_sz = 96;
     }
@@ -690,6 +742,7 @@ static void lockscreen_build_companion_layout(int content_w, int content_h) {
 }
 
 static const lv_img_dsc_t *lockscreen_companion_sprite(void) {
+#ifdef CONFIG_WITH_SCREEN
     ghostchi_mood_snapshot_t mood = {0};
     ghostchi_mood_get_snapshot(&mood);
     switch (mood.mood) {
@@ -716,6 +769,9 @@ static const lv_img_dsc_t *lockscreen_companion_sprite(void) {
         default:
             return &love_50x50;
     }
+#else
+    return NULL;
+#endif
 }
 
 static void lockscreen_destroy_numpad(void) {
@@ -755,8 +811,12 @@ static void lockscreen_fav_set_selected(int idx) {
         } else {
             gui_menu_card_apply(btn, true, surface, surface, 0, 0);
         }
-        lv_obj_t *lbl = lv_obj_get_child(btn, 0);
-        if (lbl) lv_obj_set_style_text_color(lbl, sel ? (theme_palette_is_bright(theme) ? lv_color_hex(0x000000) : lv_color_hex(0xFFFFFF)) : text, 0);
+        lv_color_t selected_text = theme_palette_is_bright(theme) ? lv_color_hex(0x000000) : lv_color_hex(0xFFFFFF);
+        uint32_t child_count = lv_obj_get_child_cnt(btn);
+        for (uint32_t child_idx = 0; child_idx < child_count; child_idx++) {
+            lv_obj_t *child = lv_obj_get_child(btn, (int32_t)child_idx);
+            if (child) lv_obj_set_style_text_color(child, sel ? selected_text : text, 0);
+        }
     }
     if (s_fav_btns[s_fav_selected] && lv_obj_is_valid(s_fav_btns[s_fav_selected])) {
         lv_obj_scroll_to_view(s_fav_btns[s_fav_selected], LV_ANIM_ON);
@@ -860,10 +920,12 @@ static void lockscreen_fav_scroll_down_cb(lv_event_t *e) {
     lockscreen_fav_scroll_down();
 }
 
+#if GUI_LEGACY_TOUCH_BAR
 static void lockscreen_fav_touch_back_cb(lv_event_t *e) {
     (void)e;
     lockscreen_hide_favorites();
 }
+#endif
 #endif
 
 static void lockscreen_show_favorites(void) {
@@ -876,6 +938,9 @@ static void lockscreen_show_favorites(void) {
 #endif
     uint8_t theme = settings_get_menu_theme(&G_Settings);
     lv_color_t bg = lv_color_hex(theme_palette_get_background(theme));
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    lv_color_t text = lv_color_hex(theme_palette_get_text(theme));
+#endif
 #ifdef CONFIG_USE_TOUCHSCREEN
     const int touch_h = LS_FAV_TOUCH_BAR_HEIGHT;
 #else
@@ -919,8 +984,25 @@ static void lockscreen_show_favorites(void) {
     lv_obj_set_style_radius(s_fav_list, 0, 0);
     lv_obj_set_style_pad_all(s_fav_list, 2, 0);
     lv_obj_set_style_pad_row(s_fav_list, 3, 0);
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    // Landscape P4 panels have enough width for a touch-friendly launcher
+    // grid. Keep the cards bounded so the 1024px panels do not become a
+    // stretched single-column list.
+    int fav_columns = (LV_HOR_RES >= 960) ? 4 : 2;
+    int fav_gap = GUI_GRID;
+    int fav_card_w = (list_w - 4 - (fav_columns - 1) * fav_gap) / fav_columns;
+    lv_obj_set_style_pad_row(s_fav_list, fav_gap, 0);
+    lv_obj_set_style_pad_column(s_fav_list, fav_gap, 0);
+    lv_obj_set_style_pad_left(s_fav_list, 2, 0);
+    lv_obj_set_style_pad_right(s_fav_list, 2, 0);
+    lv_obj_set_style_pad_top(s_fav_list, 4, 0);
+    lv_obj_set_style_pad_bottom(s_fav_list, 4, 0);
+    lv_obj_set_flex_flow(s_fav_list, LV_FLEX_FLOW_ROW_WRAP);
+    lv_obj_set_flex_align(s_fav_list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+#else
     lv_obj_set_flex_flow(s_fav_list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(s_fav_list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+#endif
     lv_color_t surface = lv_color_hex(theme_palette_get_surface(theme));
     // Empty state
     if (s_fav_count == 0) {
@@ -938,6 +1020,7 @@ static void lockscreen_show_favorites(void) {
     if (s_fav_btns) {
         for (int i = 0; i < s_fav_count; i++) {
         const char *name = settings_get_favorite(&G_Settings, i);
+#ifndef CONFIG_CROWPANEL_ADVANCED_P4
         const char *display = name ? name : "";
         // Strip prefix for display: "ir:/path" -> basename, "menu:WiFi" -> "WiFi"
         const char *colon = name ? strchr(name, ':') : NULL;
@@ -950,21 +1033,54 @@ static void lockscreen_show_favorites(void) {
             }
         }
         if (!display || !display[0]) display = name ? name : "";
+#endif
         lv_obj_t *btn = lv_btn_create(s_fav_list);
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+        lv_obj_set_width(btn, fav_card_w);
+        lv_obj_set_height(btn, 112);
+        lv_obj_set_style_pad_all(btn, 12, 0);
+        lv_obj_set_flex_flow(btn, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(btn, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER);
+#else
         lv_obj_set_width(btn, list_w - 4);
         int row_h = (LV_VER_RES <= 160 || LV_HOR_RES <= 160) ? 26 : 34;
         lv_obj_set_height(btn, row_h);
+#endif
         lv_obj_set_style_radius(btn, GUI_RADIUS_SM, 0);
         gui_apply_pressed_style(btn);
         // Flat options-style row: plain surface, no border chrome.
         gui_menu_card_apply(btn, true, surface, surface, 0, 0);
         lv_obj_t *lbl = lv_label_create(btn);
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+        lv_label_set_text(lbl, lockscreen_fav_display_name(name));
+        lv_label_set_long_mode(lbl, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(lbl, fav_card_w - 24);
+        lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_text_font(lbl, gui_font_body(), 0);
+        lv_obj_set_style_text_color(lbl, text, 0);
+
+        lv_obj_t *type_lbl = lv_label_create(btn);
+        lv_label_set_text(type_lbl, lockscreen_fav_type(name));
+        lv_label_set_long_mode(type_lbl, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(type_lbl, fav_card_w - 24);
+        lv_obj_set_style_text_align(type_lbl, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_text_font(type_lbl, gui_font_caption(), 0);
+        lv_obj_set_style_text_color(type_lbl, lv_color_hex(theme_palette_get_text_muted(theme)), 0);
+
+        lv_obj_t *open_lbl = lv_label_create(btn);
+        lv_label_set_text(open_lbl, LV_SYMBOL_PLAY "  Tap to launch");
+        lv_obj_set_width(open_lbl, fav_card_w - 24);
+        lv_obj_set_style_text_align(open_lbl, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_text_font(open_lbl, gui_font_micro(), 0);
+        lv_obj_set_style_text_color(open_lbl, lv_color_hex(theme_palette_get_accent(theme)), 0);
+#else
         lv_label_set_text(lbl, display);
         lv_label_set_long_mode(lbl, LV_LABEL_LONG_DOT);
         lv_obj_set_width(lbl, list_w - 24);
         lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_style_text_font(lbl, accessibility_get_font_body(), 0);
         lv_obj_center(lbl);
+#endif
         lv_obj_add_event_cb(btn, lockscreen_fav_btn_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
         s_fav_btns[i] = btn;
         }
@@ -972,9 +1088,15 @@ static void lockscreen_show_favorites(void) {
         // Back row: identical styling to the favorite rows so joystick users
         // can scroll to it and press SELECT to leave the overlay.
         lv_obj_t *back_btn = lv_btn_create(s_fav_list);
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+        lv_obj_set_width(back_btn, list_w - 4);
+        lv_obj_set_height(back_btn, 56);
+        lv_obj_set_style_pad_all(back_btn, 8, 0);
+#else
         lv_obj_set_width(back_btn, list_w - 4);
         int back_h = (LV_VER_RES <= 160 || LV_HOR_RES <= 160) ? 26 : 34;
         lv_obj_set_height(back_btn, back_h);
+#endif
         lv_obj_set_style_radius(back_btn, GUI_RADIUS_SM, 0);
         gui_apply_pressed_style(back_btn);
         gui_menu_card_apply(back_btn, true, surface, surface, 0, 0);
@@ -983,7 +1105,11 @@ static void lockscreen_show_favorites(void) {
         lv_label_set_long_mode(back_lbl, LV_LABEL_LONG_DOT);
         lv_obj_set_width(back_lbl, list_w - 24);
         lv_obj_set_style_text_align(back_lbl, LV_TEXT_ALIGN_CENTER, 0);
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+        lv_obj_set_style_text_font(back_lbl, gui_font_body(), 0);
+#else
         lv_obj_set_style_text_font(back_lbl, accessibility_get_font_body(), 0);
+#endif
         lv_obj_center(back_lbl);
         lv_obj_add_event_cb(back_btn, lockscreen_fav_btn_cb, LV_EVENT_CLICKED,
                             (void *)(intptr_t)s_fav_count);
@@ -992,6 +1118,7 @@ static void lockscreen_show_favorites(void) {
         lockscreen_fav_set_selected(0);
     }
 #ifdef CONFIG_USE_TOUCHSCREEN
+#if GUI_LEGACY_TOUCH_BAR
     // Standard bottom touch bar (scroll up / Back / scroll down).
     lv_color_t ctrl_color = lv_color_hex(theme_palette_get_surface_alt(theme));
     lv_color_t ctrl_text = lv_color_hex(theme_palette_get_text(theme));
@@ -1050,6 +1177,7 @@ static void lockscreen_show_favorites(void) {
     lv_obj_add_flag(s_fav_scroll_down_btn, LV_OBJ_FLAG_HIDDEN);
 
     lockscreen_fav_update_scroll_buttons();
+#endif /* GUI_LEGACY_TOUCH_BAR */
 #endif
 }
 
@@ -1188,6 +1316,20 @@ static void lockscreen_fav_launch(const char *name) {
         target = &audio_player_view;
 #endif
     }
+    /* Built-ins moved from Apps to Main retain the existing favorite shortcut.
+     * Do not change overlay/PIN handling or the established file prefixes. */
+    if (!target) {
+        menu_catalog_item_t item;
+        for (int i = 0; i < menu_catalog_count(); ++i) {
+            if (menu_catalog_get(i, &item) && strncmp(item.id, "plugin:", 7) != 0 &&
+                strcmp(item.name, name) == 0) {
+                target = item.view;
+                opt_type = item.options_type;
+                is_options = target == &options_menu_view;
+                break;
+            }
+        }
+    }
     if (!target) { target = &options_menu_view; opt_type = OT_Settings; is_options = true; }
     if (is_options) SelectedMenuType = opt_type;
     // Favourite launched from lockscreen: backing out of the target
@@ -1232,7 +1374,7 @@ static void lockscreen_create_fav_pill(void) {
         lv_obj_set_style_radius(s_fav_hint, 6, 0);
         lv_obj_set_style_pad_hor(s_fav_hint, 6, 0);
         lv_obj_set_style_pad_ver(s_fav_hint, 2, 0);
-        lv_obj_align(s_fav_hint, LV_ALIGN_BOTTOM_MID, 0, -6);
+        lv_obj_align(s_fav_hint, LV_ALIGN_BOTTOM_MID, 0, -(GUI_HOME_SAFE_H + 6));
         lv_obj_add_flag(s_fav_hint, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(s_fav_hint, (lv_event_cb_t)lockscreen_show_favorites, LV_EVENT_CLICKED, NULL);
         lv_obj_set_ext_click_area(s_fav_hint, LS_FAV_TOUCH_PAD);
@@ -1694,7 +1836,7 @@ void lockscreen_create(void) {
         s_ghost_base_y = group_y;
 
         s_ghost = lv_img_create(s_content);
-        lv_img_set_src(s_ghost, &tired_50x50);
+        lv_img_set_src(s_ghost, LOCKSCREEN_SPRITE(tired_50x50));
         lv_obj_set_pos(s_ghost, ghost_x, s_ghost_base_y + lockscreen_ghost_bob_offset());
         lv_img_set_zoom(s_ghost, (ghost_sz * 256) / 50);
 
@@ -1724,28 +1866,52 @@ void lockscreen_create(void) {
     } else {
         int min_numpad_y = 94;
         int bottom_margin = 10;
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+        min_numpad_y = content_h / 4;
+        bottom_margin = 20;
+#endif
+        int numpad_gap = 2;
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+        numpad_gap = 8;
+#endif
         int numpad_h = content_h - min_numpad_y - bottom_margin;
         if (numpad_h < 36) numpad_h = 36;
-        int btn_h = (numpad_h - (NUMPAD_ROWS - 1) * 2) / NUMPAD_ROWS;
+        int btn_h = (numpad_h - (NUMPAD_ROWS - 1) * numpad_gap) / NUMPAD_ROWS;
         if (LV_VER_RES > 240) {
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+            if (btn_h > GUI_CONTROL_H) btn_h = GUI_CONTROL_H;
+#else
             if (btn_h > 42) btn_h = 42;
+#endif
         } else {
             if (btn_h > 30) btn_h = 30;
         }
         if (btn_h < 14) btn_h = 14;
-        int grid_h = NUMPAD_ROWS * btn_h + (NUMPAD_ROWS - 1) * 2;
+        int grid_h = NUMPAD_ROWS * btn_h + (NUMPAD_ROWS - 1) * numpad_gap;
         int numpad_y = content_h - grid_h - bottom_margin;
         if (numpad_y < min_numpad_y) numpad_y = min_numpad_y;
 
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+        int ghost_sz = content_h >= 480 ? 160 : 112;
+        int group_h = ghost_sz + 54;
+        int icon_y = (numpad_y - group_h) / 2;
+        if (icon_y < 8) icon_y = 8;
+        int prompt_y_offset = icon_y + ghost_sz + 8;
+        int dots_y_offset = icon_y + ghost_sz + 26;
+#else
         int icon_y = (numpad_y - 88) / 2;
         if (icon_y < 2) icon_y = 2;
         int prompt_y_offset = icon_y + 56;
         int dots_y_offset = icon_y + 72;
+#endif
         s_ghost_base_y = icon_y;
 
         s_ghost = lv_img_create(s_content);
-        lv_img_set_src(s_ghost, &tired_50x50);
+        lv_img_set_src(s_ghost, LOCKSCREEN_SPRITE(tired_50x50));
         lv_obj_set_pos(s_ghost, (content_w - 50) / 2, s_ghost_base_y + lockscreen_ghost_bob_offset());
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+        lv_img_set_zoom(s_ghost, (ghost_sz * 256) / 50);
+#endif
 
         s_prompt = lv_label_create(s_content);
         lv_obj_set_style_text_font(s_prompt, gui_font_caption(), 0);
@@ -1758,7 +1924,13 @@ void lockscreen_create(void) {
         lv_obj_align(s_prompt, LV_ALIGN_TOP_MID, 0, prompt_y_offset);
 
         s_dots = lv_label_create(s_content);
-        lv_obj_set_style_text_font(s_dots, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_font(s_dots,
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+                                   gui_font_body(),
+#else
+                                   &lv_font_montserrat_16,
+#endif
+                                   0);
         lv_obj_set_style_text_color(s_dots, lv_color_hex(0xFFFFFF), 0);
         lv_obj_set_style_bg_color(s_dots, lv_color_hex(0x000000), 0);
         lv_obj_set_style_bg_opa(s_dots, LV_OPA_60, 0);

@@ -583,8 +583,7 @@ static void lvgl_port_touchpad_read(lv_indev_drv_t *indev_drv, lv_indev_data_t *
     lvgl_port_touch_ctx_t *touch_ctx = (lvgl_port_touch_ctx_t *)indev_drv->user_data;
     assert(touch_ctx->handle);
 
-    uint16_t touchpad_x[1] = {0};
-    uint16_t touchpad_y[1] = {0};
+    esp_lcd_touch_point_data_t touchpad_data[1] = {0};
     uint8_t touchpad_cnt = 0;
 
     /* Read data from touch controller into memory */
@@ -595,11 +594,13 @@ static void lvgl_port_touchpad_read(lv_indev_drv_t *indev_drv, lv_indev_data_t *
     if (touch_int) {
         esp_lcd_touch_read_data(touch_ctx->handle);
         /* Read data from touch controller */
-        bool touchpad_pressed = esp_lcd_touch_get_coordinates(touch_ctx->handle, touchpad_x, touchpad_y, NULL, &touchpad_cnt, 1);
+        esp_err_t touch_read = esp_lcd_touch_get_data(touch_ctx->handle,
+                                                       touchpad_data,
+                                                       &touchpad_cnt, 1);
 
-        if (touchpad_pressed && touchpad_cnt > 0) {
-            data->point.x = touchpad_x[0];
-            data->point.y = touchpad_y[0];
+        if (touch_read == ESP_OK && touchpad_cnt > 0) {
+            data->point.x = touchpad_data[0].x;
+            data->point.y = touchpad_data[0].y;
 
             // in my testing the i2c touch panel doesn't cover the entire display, this rescales it so the rest
             // of the UI works correctly.
@@ -635,8 +636,12 @@ void touch_driver_read_axs15231b(lv_indev_drv_t *drv, lv_indev_data_t *data)
 
 static void lvgl_port_tick_increment(void *arg)
 {
+#if !LV_TICK_CUSTOM
     /* Tell LVGL how many milliseconds have elapsed */
     lv_tick_inc(lvgl_port_timer_period_ms);
+#else
+    (void)arg;
+#endif
 }
 
 static esp_err_t lvgl_port_tick_init(void)

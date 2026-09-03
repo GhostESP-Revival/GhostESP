@@ -120,6 +120,10 @@ void ili9488_init(void)
 	}
 
     ili9488_set_orientation(CONFIG_LV_DISPLAY_ORIENTATION);
+#if defined(CONFIG_CROWPANEL_ADVANCE_35_LCD)
+    /* Factory Panel_ILI9488 has invert=true. */
+    ili9488_send_cmd(0x21);
+#endif
 }
 
 // Flush function based on mvturnho repo
@@ -214,7 +218,13 @@ static void ili9488_set_orientation(uint8_t orientation)
 
     ESP_LOGI(TAG, "Display orientation: %s", orientation_str[orientation]);
 
-#if defined (CONFIG_LV_PREDEFINED_DISPLAY_NONE)
+#if defined(CONFIG_CROWPANEL_ADVANCE_35_LCD)
+    /* LVGL passes the orientation index directly.  For the 480x320
+     * landscape panel, the ILI9488 landscape MADCTL value is 0x28.
+     * Elecrow's LovyanGFX offset_rotation=3 is library-internal and must
+     * not be used as the direct LVGL orientation value here. */
+    uint8_t data[] = {0x48, 0x88, 0x28, 0xE8};
+#elif defined (CONFIG_LV_PREDEFINED_DISPLAY_NONE)
     uint8_t data[] = {0x48, 0x88, 0x28, 0xE8};
 #endif
 

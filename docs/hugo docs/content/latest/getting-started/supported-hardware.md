@@ -64,6 +64,17 @@ GhostESP runs on a variety of ESP32 boards with varying feature support. This co
       <tr><th scope="row">CYD 2.4″ variants</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>Manual</td><td>✗</td></tr>
       <tr><th scope="row">Waveshare 7″</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
       <tr><th scope="row">Crowtech 7″</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>Manual</td><td>✗</td></tr>
+      <tr><th scope="row">CrowPanel 4.2″ E-paper</th><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>E-paper 400×300</td><td>✓</td><td>Manual</td><td>✗</td></tr>
+      <tr><th scope="row">CrowPanel 5.79″ E-paper</th><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>E-paper 792×272</td><td>✓</td><td>Manual</td><td>✗</td></tr>
+      <tr><th scope="row">CrowPanel Advance 2.4″</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
+      <tr><th scope="row">CrowPanel Advance 2.8″</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
+      <tr><th scope="row">CrowPanel Advance 3.5″</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
+      <tr><th scope="row">CrowPanel Advance 4.3″</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
+      <tr><th scope="row">CrowPanel Advance 5″</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
+      <tr><th scope="row">CrowPanel Advance 7″</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
+      <tr><th scope="row">CrowPanel Advanced P4 5″ RGB</th><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
+      <tr><th scope="row">CrowPanel Advanced P4 7/9/10.1″ (v1.2+)</th><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
+      <tr><th scope="row">CrowPanel Advanced P4 7/9/10.1″ (v1.1)</th><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
       <tr><th scope="row">Sunton 7″</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✗</td></tr>
       <tr><th scope="row">Cardputer</th><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✗</td></tr>
       <tr><th scope="row">Cardputer ADV</th><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✗</td></tr>
@@ -122,6 +133,17 @@ The following table lists the vendor-specific boards supported by GhostESP with 
 | Board Name | Build Name | Image |
 |---|---|---|
 | CYDMicroUSB | `CYDMicroUSB.zip` | |
+| Elecrow CrowPanel 4.2″ E-paper | `CrowPanel_4.2_Epaper.zip` | |
+| Elecrow CrowPanel 5.79″ E-paper | `CrowPanel_5.79_Epaper.zip` | |
+| Elecrow CrowPanel Advance 2.4″ | `CrowPanel_Advance_24.zip` | |
+| Elecrow CrowPanel Advance 2.8″ | `CrowPanel_Advance_28.zip` | |
+| Elecrow CrowPanel Advance 3.5″ | `CrowPanel_Advance_35.zip` | |
+| Elecrow CrowPanel Advance 4.3″ | `CrowPanel_Advance_43.zip` | |
+| Elecrow CrowPanel Advance 5″ | `CrowPanel_Advance_5.zip` | |
+| Elecrow CrowPanel Advance 7″ | `CrowPanel_Advance_7inch.zip` | |
+| Elecrow CrowPanel Advanced P4 5″ RGB | `CrowPanel_Advanced_P4_5inch.zip` | |
+| Elecrow CrowPanel Advanced P4 7/9/10.1″ (v1.2+) | `CrowPanel_Advanced_P4_7_9_10.1inch.zip` | |
+| Elecrow CrowPanel Advanced P4 7/9/10.1″ (v1.1) | `CrowPanel_Advanced_P4_7_9_10.1inch_v1.1.zip` | |
 | CYDDualUSB | `CYDDualUSB.zip` | |
 | CYD2432S028R | `CYD2432S028R.zip` | <img src="../images/CYD2432S028R.jpg" alt="CYD2432S028R"> |
 | Waveshare 7″ | `Waveshare_LCD.zip` | |

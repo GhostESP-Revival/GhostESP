@@ -37,7 +37,9 @@
 #include "managers/views/subghz_view.h"
 #endif
 #include "managers/views/app_gallery_screen.h"
+#ifdef CONFIG_WITH_SCREEN
 #include "managers/views/ghostchi_screen.h"
+#endif
 #include "managers/views/lockscreen.h"
 #include "managers/views/splash_screen.h"
 #include "managers/encoder_manager.h"
@@ -141,6 +143,12 @@ static volatile bool g_cached_batt_valid = false;
 #include "vendor/drivers/ST7262.h"
 #endif
 
+#if defined(CONFIG_CROWPANEL_ADVANCE_RGB_LCD) || \
+    defined(CONFIG_CROWPANEL_ADVANCE_24_LCD) || \
+    defined(CONFIG_CROWPANEL_ADVANCE_28_LCD)
+#include "lvgl_i2c/i2c_manager.h"
+#endif
+
 #ifdef CONFIG_Waveshare_LCD
 #include "vendor/drivers/CH422G.h"
 #endif
@@ -149,6 +157,18 @@ static volatile bool g_cached_batt_valid = false;
 #include "axs15231b/esp_bsp.h"
 #include "axs15231b/lv_port.h"
 #include "vendor/drivers/axs15231b.h"
+#endif
+
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#include "gui/lv_draw_ppa_v8.h"
+#include "managers/views/plugin_runner_view.h"
+#include "lvgl_i2c/i2c_manager.h"
+#include "lvgl_touch/touch_driver.h"
+#include "vendor/drivers/crowpanel_p4_display.h"
+#endif
+
+#ifdef CONFIG_CROWPANEL_EPAPER_42
+#include "vendor/drivers/crowpanel_epaper.h"
 #endif
 
 #ifdef CONFIG_USE_TDECK
@@ -282,6 +302,13 @@ bool display_manager_init_success = false;
 static bool status_timer_initialized = false;
 static TaskHandle_t lvgl_task_handle = NULL;
 static TaskHandle_t input_task_handle = NULL;
+#ifdef CONFIG_CROWPANEL_EPAPER_42
+/* The e-paper reader, ZIP/FATFS paths, and LVGL callbacks can be much deeper
+ * than the normal display loop. Keep this stack in PSRAM so the LVGL task has
+ * room without consuming the board's small internal-heap reserve. */
+static StackType_t *epaper_lvgl_task_stack = NULL;
+static StaticTask_t *epaper_lvgl_task_buffer = NULL;
+#endif
 /* Cooperative quiesce gate for the LVGL render task. On shared-SPI boards the
  * SD path must free the SPI bus, but it can only do that safely while the render
  * task is OUTSIDE lv_timer_handler() (i.e. not mid-flush). The suspender raises
@@ -299,6 +326,17 @@ static SemaphoreHandle_t s_lvgl_call_mutex = NULL;
 static lv_timer_t *status_update_timer = NULL;
 static lv_timer_t *rainbow_timer = NULL;
 static uint16_t rainbow_hue = 0;
+/* Avoid redrawing a static status bar. Repeating the same update is expensive
+ * on the CrowPanel's PSRAM scanout framebuffer. */
+static bool status_snapshot_valid = false;
+static bool status_last_wifi_enabled;
+static bool status_last_bt_enabled;
+static bool status_last_sd_mounted;
+static int status_last_battery = -2;
+static bool status_last_power_save;
+static bool status_last_ap_active;
+static bool status_last_charging;
+static uint8_t status_last_theme;
 static TickType_t last_dim_time = 0; // Initialize to 0
 static TickType_t last_touch_time;
 static bool is_backlight_dimmed = false;
@@ -363,6 +401,18 @@ static inline uint32_t get_tdeck_repeat_delay(void) {
 }
 
 static void display_manager_flush_pending_scroll_if_due(void);
+static void display_manager_cancel_pending_scroll(void);
+
+#ifdef CONFIG_CROWPANEL_EPAPER_42
+static int crowpanel_epaper_logical_joystick_index(int physical_index) {
+  /* PRV/NEXT are the board's natural list navigation controls. The existing
+   * LVGL views already use slots 2/4 for Up/Down, so preserve that contract
+   * while reserving slot 2's physical button for Home below. */
+  if (physical_index == 0) return 2;
+  if (physical_index == 3) return 4;
+  return physical_index;
+}
+#endif
 
 static inline uint32_t get_tdeck_repeat_rate(void) {
     switch (settings_get_input_repeat_speed(&G_Settings)) {
@@ -373,7 +423,7 @@ static inline uint32_t get_tdeck_repeat_rate(void) {
     }
 }
 
-static uint16_t original_beacon_interval = 100;
+static uint16_t original_beacon_interval __attribute__((unused)) = 100;
 
 // Global keyboard key repeat: re-injects the last pressed key while held.
 // Uses the same input_repeat_speed setting as joystick repeat.
@@ -468,7 +518,7 @@ static void gpio_isr_handler(void* arg) {
 }
 #endif
 
-static void invert_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area,
+static __attribute__((unused)) void invert_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area,
                             lv_color_t *color_p) {
     if (settings_get_invert_colors(&G_Settings)) {
         int w = area->x2 - area->x1 + 1;
@@ -479,16 +529,41 @@ static void invert_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area,
         }
     }
     
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4)
+    // Direct-mode flushes carry the full framebuffer, including intermediate
+    // redraws. Mirror only the completed refresh, as the P4 panel driver does.
+    if (!drv->direct_mode || lv_disp_flush_is_last(drv)) {
+        screen_mirror_send_area(area, color_p);
+    }
+#else
     screen_mirror_send_area(area, color_p);
+#endif
     
 #if defined(CONFIG_USE_CARDPUTER) || defined(CONFIG_USE_CARDPUTER_ADV) || defined(CONFIG_IS_ATOMS3R)
     m5stack_lvgl_render_callback(drv, area, color_p);
 #elif defined(CONFIG_USE_TDISPLAY_S3)
     i80_display_flush_cb(drv, area, color_p);
+#elif defined(CONFIG_CROWPANEL_ADVANCED_P4)
+    crowpanel_p4_display_flush_cb(drv, area, color_p);
+#elif defined(CONFIG_CROWPANEL_EPAPER_42)
+    crowpanel_epaper_flush_cb(drv, area, color_p);
 #else
     disp_driver_flush(drv, area, color_p);
 #endif
 }
+
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+static void (*s_p4_buffer_copy)(lv_draw_ctx_t *, void *, lv_coord_t, const lv_area_t *,
+                                void *, lv_coord_t, const lv_area_t *);
+
+static void p4_buffer_copy(lv_draw_ctx_t *draw_ctx,
+                           void *dest_buf, lv_coord_t dest_stride, const lv_area_t *dest_area,
+                           void *src_buf, lv_coord_t src_stride, const lv_area_t *src_area)
+{
+    s_p4_buffer_copy(draw_ctx, dest_buf, dest_stride, dest_area,
+                     src_buf, src_stride, src_area);
+}
+#endif
 
 void set_backlight_brightness(uint8_t percentage); // forward declaration
 
@@ -944,7 +1019,7 @@ static bool g_use_slide_transition = true;
 
 void display_manager_fade_out(lv_obj_t *obj, lv_anim_ready_cb_t ready_cb,
                               View *view) {
-  if (settings_get_reduced_motion(&G_Settings)) {
+  if (settings_get_reduced_motion(&G_Settings) || GUI_EPAPER) {
     // Skip animation - set final state immediately
     lv_obj_set_style_opa(obj, LV_OPA_TRANSP, 0);
     if (ready_cb) {
@@ -982,7 +1057,7 @@ void display_manager_fade_out(lv_obj_t *obj, lv_anim_ready_cb_t ready_cb,
 
 void display_manager_fade_in(lv_obj_t *obj) {
   if (!obj) return;
-  if (settings_get_reduced_motion(&G_Settings)) {
+  if (settings_get_reduced_motion(&G_Settings) || GUI_EPAPER) {
     // Skip animation - set final state immediately
     lv_obj_set_style_opa(obj, LV_OPA_COVER, 0);
     return;
@@ -1084,6 +1159,28 @@ lv_color_t hex_to_lv_color(const char *hex_str) {
 
 void update_status_bar(bool wifi_enabled, bool bt_enabled, bool sd_card_mounted,
   int batteryPercentage, bool power_save_enabled, bool is_ap_active, bool is_charging) {
+  uint8_t theme = settings_get_menu_theme(&G_Settings);
+  bool changed = !status_snapshot_valid ||
+                 status_last_wifi_enabled != wifi_enabled ||
+                 status_last_bt_enabled != bt_enabled ||
+                 status_last_sd_mounted != sd_card_mounted ||
+                 status_last_battery != batteryPercentage ||
+                 status_last_power_save != power_save_enabled ||
+                 status_last_ap_active != is_ap_active ||
+                 status_last_charging != is_charging ||
+                 status_last_theme != theme;
+  if (!changed) return;
+
+  status_snapshot_valid = true;
+  status_last_wifi_enabled = wifi_enabled;
+  status_last_bt_enabled = bt_enabled;
+  status_last_sd_mounted = sd_card_mounted;
+  status_last_battery = batteryPercentage;
+  status_last_power_save = power_save_enabled;
+  status_last_ap_active = is_ap_active;
+  status_last_charging = is_charging;
+  status_last_theme = theme;
+
   // Update visibility of status icons
   if (sd_card_mounted) {
     lv_obj_clear_flag(sd_label, LV_OBJ_FLAG_HIDDEN);
@@ -1124,7 +1221,6 @@ void update_status_bar(bool wifi_enabled, bool bt_enabled, bool sd_card_mounted,
   lv_obj_invalidate(status_bar);
 
   // set status bar icon colors based on power save mode and AP state
-  uint8_t theme = settings_get_menu_theme(&G_Settings);
   lv_color_t default_color = lv_color_hex(theme_palette_get_text_muted(theme));
   
   // WiFi icon color logic
@@ -1173,7 +1269,7 @@ static void status_update_cb(lv_timer_t *timer) {
   if (is_backlight_off) return; // Skip updates when backlight is off
 
   bool HasBluetooth;
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
   HasBluetooth = true;
 #else
   HasBluetooth = false;
@@ -1213,7 +1309,11 @@ static void status_update_cb(lv_timer_t *timer) {
       if (xp < lv_xp[i]) { level = (unsigned int)i; break; }
       if (i == sizeof(lv_xp) / sizeof(lv_xp[0]) - 1) level = (unsigned int)i;
     }
-    lv_label_set_text_fmt(level_label, "Lv%u", level);
+    char level_text[16];
+    snprintf(level_text, sizeof(level_text), "Lv%u", level);
+    if (strcmp(lv_label_get_text(level_label), level_text) != 0) {
+      lv_label_set_text(level_label, level_text);
+    }
     lv_obj_clear_flag(level_label, LV_OBJ_FLAG_HIDDEN);
   }
 }
@@ -1257,7 +1357,9 @@ void display_manager_update_status_bar_color(void) {
 
 static void level_label_click_cb(lv_event_t *e) {
     (void)e;
+#ifdef CONFIG_WITH_SCREEN
     display_manager_switch_view(&ghostchi_view);
+#endif
 }
 
 const char *display_manager_get_status_title(void) {
@@ -1277,11 +1379,11 @@ void display_manager_add_status_bar(const char *CurrentMenuName) {
         if (mainlabel && lv_obj_is_valid(mainlabel)) {
             lv_label_set_text(mainlabel, label_text);
             lv_obj_move_foreground(status_bar);
-            lv_obj_invalidate(status_bar);
             return;
         }
         lv_obj_t *old_bar = status_bar;
         status_bar = NULL;
+        status_snapshot_valid = false;
         mainlabel = NULL;
         wifi_label = NULL;
         bt_label = NULL;
@@ -1361,7 +1463,7 @@ void display_manager_add_status_bar(const char *CurrentMenuName) {
   lv_obj_add_flag(battery_label, LV_OBJ_FLAG_HIDDEN);
 
   bool HasBluetooth;
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
   HasBluetooth = true;
 #else
   HasBluetooth = false;
@@ -1624,6 +1726,30 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
     ESP_LOGE(TAG, "Failed to initialize Waveshare I2C bus: %s", esp_err_to_name(ws_i2c_ret));
   }
 #endif
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+  esp_err_t crowpanel_i2c_ret = lvgl_i2c_init(CONFIG_LV_I2C_TOUCH_PORT);
+  if (crowpanel_i2c_ret != ESP_OK && crowpanel_i2c_ret != ESP_ERR_INVALID_STATE) {
+    ESP_LOGE(TAG, "Failed to initialize CrowPanel touch I2C bus: %s",
+             esp_err_to_name(crowpanel_i2c_ret));
+  }
+#endif
+#if defined(CONFIG_CROWPANEL_ADVANCE_24_LCD) || defined(CONFIG_CROWPANEL_ADVANCE_28_LCD)
+  /* The 2.4/2.8 GT911 shares the I2C bus with the RTC. Initialize it before
+   * the LVGL driver so touch probing cannot race another early I2C client. */
+  ESP_LOGI(TAG, "Pre-initializing CrowPanel 2.4/2.8 touch I2C bus (SDA=15, SCL=16)");
+  esp_err_t crowpanel_small_i2c_ret = lvgl_i2c_init(CONFIG_LV_I2C_TOUCH_PORT);
+  if (crowpanel_small_i2c_ret != ESP_OK && crowpanel_small_i2c_ret != ESP_ERR_INVALID_STATE) {
+    ESP_LOGE(TAG, "Failed to initialize CrowPanel 2.4/2.8 touch I2C bus: %s",
+             esp_err_to_name(crowpanel_small_i2c_ret));
+  }
+#endif
+#ifdef CONFIG_CROWPANEL_ADVANCE_RGB_LCD
+  esp_err_t crowpanel_7_i2c_ret = lvgl_i2c_init(CONFIG_LV_I2C_TOUCH_PORT);
+  if (crowpanel_7_i2c_ret != ESP_OK && crowpanel_7_i2c_ret != ESP_ERR_INVALID_STATE) {
+    ESP_LOGE(TAG, "Failed to initialize CrowPanel Advance 7 touch I2C bus: %s",
+             esp_err_to_name(crowpanel_7_i2c_ret));
+  }
+#endif
   ESP_LOGI(TAG, "display_manager: initializing LVGL...");
   lv_init();
   ESP_LOGI(TAG, "display_manager: LVGL core init done, free internal RAM: %d bytes", 
@@ -1640,11 +1766,52 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
    * be initialized here or its device handle stays NULL and every read fails
    * with "i2c handle not initialized". */
   touch_driver_init();
+#elif defined(CONFIG_CROWPANEL_ADVANCED_P4)
+  esp_err_t ret = crowpanel_p4_display_init();
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "CrowPanel Advanced P4 display initialization failed: %s", esp_err_to_name(ret));
+    return;
+  }
+  ret = lvgl_i2c_init(CONFIG_LV_I2C_TOUCH_PORT);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "CrowPanel touch I2C initialization failed: %s", esp_err_to_name(ret));
+    return;
+  }
+  ret = crowpanel_p4_display_touch_reset();
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "CrowPanel touch reset failed: %s", esp_err_to_name(ret));
+    return;
+  }
+  touch_driver_init();
+#elif defined(CONFIG_CROWPANEL_EPAPER_42)
+  esp_err_t ret = crowpanel_epaper_init();
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "CrowPanel 4.2 e-paper initialization failed: %s", esp_err_to_name(ret));
+    return;
+  }
+#elif defined(CONFIG_CROWPANEL_ADVANCE_RGB_LCD)
+  /* The Advance 7 uses the dedicated RGB driver below. Keep the legacy LVGL
+   * display helper out of this branch; only initialize GT911 touch here. */
+  touch_driver_init();
 #else
   lvgl_driver_init();
 #endif
   ESP_LOGI(TAG, "display_manager: display driver init done, free internal RAM: %d bytes", 
            (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+#if defined(CONFIG_CROWPANEL_ADVANCE_35_LCD) || defined(CONFIG_CROWPANEL_ADVANCE_24_LCD) || defined(CONFIG_CROWPANEL_ADVANCE_28_LCD)
+  // Factory HMI3-5 drives backlight via GPIO38 HIGH (ST7789/ILI9488 3.5" etc)
+  // Ghost generic ILI9488 path leaves it LOW → black screen.
+  gpio_config_t bl38 = {
+      .pin_bit_mask = 1ULL << 38,
+      .mode = GPIO_MODE_OUTPUT,
+      .pull_up_en = GPIO_PULLUP_DISABLE,
+      .pull_down_en = GPIO_PULLDOWN_DISABLE,
+      .intr_type = GPIO_INTR_DISABLE,
+  };
+  gpio_config(&bl38);
+  gpio_set_level(38, 1);
+  ESP_LOGI(TAG, "CrowPanel 3.5/2.4/2.8 backlight GPIO38 HIGH");
+#endif
 #endif // CONFIG_JC3248W535EN_LCD
 
 #if !defined(CONFIG_USE_7_INCHER) && !defined(CONFIG_JC3248W535EN_LCD)
@@ -1663,6 +1830,12 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
 #elif defined(CONFIG_USE_TDISPLAY_S3)
   int width = I80_LCD_H_RES;
   int height = I80_LCD_V_RES;
+#elif defined(CONFIG_CROWPANEL_ADVANCED_P4)
+  int width = CONFIG_TFT_WIDTH;
+  int height = CONFIG_TFT_HEIGHT;
+#elif defined(CONFIG_CROWPANEL_EPAPER_42)
+  int width = CROWPANEL_EPAPER_WIDTH;
+  int height = CROWPANEL_EPAPER_HEIGHT;
 #else
   int width = CONFIG_TFT_WIDTH;
   int height = CONFIG_TFT_HEIGHT;
@@ -1679,6 +1852,21 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
   buf2_pixels = 0;
 #elif defined(CONFIG_USE_CARDPUTER) || defined(CONFIG_USE_CARDPUTER_ADV)
   buf1_pixels = (size_t)width * 2;
+#elif defined(CONFIG_CROWPANEL_ADVANCED_P4)
+  buf1_pixels = (size_t)width * (size_t)height;
+  buf2_pixels = buf1_pixels;
+  esp_err_t fb_err = crowpanel_p4_display_get_frame_buffers((void **)&buf1, (void **)&buf2);
+  if (fb_err != ESP_OK) {
+    ESP_LOGE(TAG, "display_manager: failed to get CrowPanel frame buffers: %s",
+             esp_err_to_name(fb_err));
+    return;
+  }
+#elif defined(CONFIG_CROWPANEL_EPAPER_42)
+  /* The factory panel is a full-frame device. Keep one complete RGB565 LVGL
+     canvas so the SSD1683 adapter can threshold the rendered UI into its
+     15,000-byte MSB-first 1-bit framebuffer. */
+  buf1_pixels = (size_t)width * (size_t)height;
+  buf2_pixels = 0;
 #elif defined(CONFIG_IDF_TARGET_ESP32C5)
    /* Keep the C5 display buffers in DMA-capable internal RAM. PSRAM draw
      buffers force the SPI driver to allocate internal bounce buffers at flush
@@ -1713,7 +1901,9 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
   size_t buf2_bytes = buf2_pixels * sizeof(*buf2);
 
   if (!buf1) {
-#if defined(CONFIG_IS_ATOMS3R)
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4)
+    return;
+#elif defined(CONFIG_IS_ATOMS3R)
     buf1 = heap_caps_malloc(buf1_bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
     if (buf1) ESP_LOGI(TAG, "display_manager: AtomS3R buf1 allocated in internal DMA RAM (%d bytes)", (int)buf1_bytes);
     if (!buf1) {
@@ -1792,6 +1982,13 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
   lv_disp_drv_init(&disp_drv);
   disp_drv.hor_res = width;
   disp_drv.ver_res = height;
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+  disp_drv.direct_mode = 1;
+#endif
+#ifdef CONFIG_CROWPANEL_EPAPER_42
+  /* LVGL must render the complete canvas before a single e-paper update. */
+  disp_drv.full_refresh = 1;
+#endif
 #ifdef CONFIG_IS_ATOMS3R
   // Match the reference full-canvas present path and avoid stale GC9107 edge
   // pixels left behind by partial LVGL flush windows.
@@ -1800,7 +1997,19 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
 
   disp_drv.flush_cb = invert_flush_cb;
   disp_drv.draw_buf = &disp_buf;
-  lv_disp_drv_register(&disp_drv);
+#if CONFIG_GHOSTESP_P4_PPA_RENDER
+  if (!lv_draw_ppa_v8_install(&disp_drv)) {
+    ESP_LOGW(TAG, "display_manager: PPA backend unavailable; using LVGL software rendering");
+  }
+#endif
+  lv_disp_t *registered_disp = lv_disp_drv_register(&disp_drv);
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+  if (registered_disp && registered_disp->driver && registered_disp->driver->draw_ctx &&
+      registered_disp->driver->draw_ctx->buffer_copy) {
+    s_p4_buffer_copy = registered_disp->driver->draw_ctx->buffer_copy;
+    registered_disp->driver->draw_ctx->buffer_copy = p4_buffer_copy;
+  }
+#endif
   ESP_LOGI(TAG, "display_manager: display driver registered, free internal RAM: %d bytes", 
            (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
 
@@ -1821,6 +2030,9 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
   ret = lcd_st7262_lvgl_init();
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "LVGL initialization failed");
+#ifdef CONFIG_CROWPANEL_ADVANCE_RGB_LCD
+    lcd_st7262_deinit();
+#endif
     return;
   }
 
@@ -1952,8 +2164,33 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
 
 #ifndef CONFIG_JC3248W535EN_LCD
     // LVGL refresh must stay on an internal stack on C5; PSRAM stack can starve the idle WDT.
+#if (defined(CONFIG_CROWPANEL_ADVANCED_P4) || defined(CONFIG_CROWPANEL_ADVANCE_RGB_LCD)) && CONFIG_FREERTOS_NUMBER_OF_CORES > 1
+    xTaskCreatePinnedToCore(lvgl_tick_task, "LVGL Tick Task", LVGL_TICK_TASK_STACK_SIZE, NULL,
+                            RENDERING_TASK_PRIORITY, &lvgl_task_handle, 1);
+#else
+#ifdef CONFIG_CROWPANEL_EPAPER_42
+    epaper_lvgl_task_stack = heap_caps_malloc(12288 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
+    epaper_lvgl_task_buffer = heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (epaper_lvgl_task_stack && epaper_lvgl_task_buffer) {
+      lvgl_task_handle = xTaskCreateStatic(lvgl_tick_task, "LVGL Tick Task", 12288, NULL,
+                                           RENDERING_TASK_PRIORITY, epaper_lvgl_task_stack,
+                                           epaper_lvgl_task_buffer);
+      ESP_LOGI(TAG, "LVGL tick task stack allocated from PSRAM: %d bytes",
+               (int)(12288 * sizeof(StackType_t)));
+    } else {
+      if (epaper_lvgl_task_stack) heap_caps_free(epaper_lvgl_task_stack);
+      if (epaper_lvgl_task_buffer) heap_caps_free(epaper_lvgl_task_buffer);
+      epaper_lvgl_task_stack = NULL;
+      epaper_lvgl_task_buffer = NULL;
+      xTaskCreate(lvgl_tick_task, "LVGL Tick Task", LVGL_TICK_TASK_STACK_SIZE, NULL,
+                  RENDERING_TASK_PRIORITY, &lvgl_task_handle);
+      ESP_LOGW(TAG, "PSRAM LVGL stack allocation failed; using default stack");
+    }
+#else
     xTaskCreate(lvgl_tick_task, "LVGL Tick Task", LVGL_TICK_TASK_STACK_SIZE, NULL,
                 RENDERING_TASK_PRIORITY, &lvgl_task_handle);
+#endif
+#endif
     ESP_LOGI(TAG, "LVGL tick task stack allocated from internal RAM");
     ESP_LOGI(TAG, "After LVGL task creation, free internal RAM: %d bytes", 
              (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
@@ -1996,6 +2233,745 @@ bool display_manager_register_view(View *view) {
 
 static lv_obj_t *dm_pressed_obj = NULL;
 
+#if GUI_LARGE_TOUCH_UI
+static lv_obj_t *s_p4_home_indicator;
+static lv_obj_t *s_p4_back_indicator;
+static bool s_p4_home_gesture;
+static bool s_p4_back_gesture;
+static lv_point_t s_p4_home_start;
+static lv_point_t s_p4_back_start;
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4)
+static bool s_p4_skip_next_view_animation;
+#endif
+static bool s_p4_control_center_gesture;
+static bool s_p4_control_center_active;
+static bool s_p4_control_center_closing;
+static lv_point_t s_p4_control_center_start;
+static lv_obj_t *s_p4_control_center;
+static lv_obj_t *s_p4_control_center_scrim;
+static lv_obj_t *s_p4_control_center_brightness;
+static lv_obj_t *s_p4_control_center_brightness_fill;
+static lv_obj_t *s_p4_control_center_brightness_knob;
+static lv_obj_t *s_p4_control_center_wifi;
+static lv_obj_t *s_p4_control_center_timeout;
+static lv_obj_t *s_p4_control_center_home;
+static lv_obj_t *s_p4_control_center_lock;
+static uint8_t s_p4_control_center_brightness_value = 100;
+static bool s_p4_control_center_brightness_drag;
+static lv_point_t s_p4_control_center_touch_start;
+static lv_timer_t *s_p4_home_exit_timer;
+static View *s_p4_home_exit_view;
+static uint8_t s_p4_home_exit_phase;
+
+static bool dm_system_overlay_reduced_motion(void) {
+    return settings_get_reduced_motion(&G_Settings) || !GUI_SYSTEM_OVERLAY_ANIMATIONS;
+}
+
+static bool dm_p4_point_in_obj(lv_obj_t *obj, lv_point_t point) {
+    if (!obj || !lv_obj_is_valid(obj)) return false;
+    lv_area_t area;
+    lv_obj_get_coords(obj, &area);
+    return point.x >= area.x1 && point.x <= area.x2 &&
+           point.y >= area.y1 && point.y <= area.y2;
+}
+
+static void dm_p4_control_center_delete(void) {
+    if (s_p4_control_center && lv_obj_is_valid(s_p4_control_center)) {
+        lv_obj_del(s_p4_control_center);
+    }
+    if (s_p4_control_center_scrim && lv_obj_is_valid(s_p4_control_center_scrim)) {
+        lv_obj_del(s_p4_control_center_scrim);
+    }
+    s_p4_control_center = NULL;
+    s_p4_control_center_scrim = NULL;
+    s_p4_control_center_brightness = NULL;
+    s_p4_control_center_brightness_fill = NULL;
+    s_p4_control_center_brightness_knob = NULL;
+    s_p4_control_center_brightness_drag = false;
+    s_p4_control_center_wifi = NULL;
+    s_p4_control_center_timeout = NULL;
+    s_p4_control_center_home = NULL;
+    s_p4_control_center_lock = NULL;
+    s_p4_control_center_active = false;
+    s_p4_control_center_closing = false;
+}
+
+static void dm_p4_control_center_set_y(void *obj, int32_t value) {
+    if (obj && lv_obj_is_valid((lv_obj_t *)obj)) {
+        lv_obj_set_y((lv_obj_t *)obj, (lv_coord_t)value);
+    }
+}
+
+static void dm_p4_control_center_set_scrim_opa(void *obj, int32_t value) {
+    if (obj && lv_obj_is_valid((lv_obj_t *)obj)) {
+        lv_obj_set_style_bg_opa((lv_obj_t *)obj, (lv_opa_t)value, 0);
+    }
+}
+
+static void dm_p4_control_center_close_ready(lv_anim_t *anim) {
+    (void)anim;
+    dm_p4_control_center_delete();
+}
+
+static void dm_p4_control_center_close(lv_event_t *event) {
+    (void)event;
+    if (!s_p4_control_center_active || s_p4_control_center_closing) return;
+    if (!s_p4_control_center || !lv_obj_is_valid(s_p4_control_center) ||
+        dm_system_overlay_reduced_motion()) {
+        dm_p4_control_center_delete();
+        return;
+    }
+
+    s_p4_control_center_closing = true;
+    lv_obj_clear_flag(s_p4_control_center, LV_OBJ_FLAG_CLICKABLE);
+    if (s_p4_control_center_scrim && lv_obj_is_valid(s_p4_control_center_scrim)) {
+        lv_obj_clear_flag(s_p4_control_center_scrim, LV_OBJ_FLAG_CLICKABLE);
+        lv_anim_t fade;
+        lv_anim_init(&fade);
+        lv_anim_set_var(&fade, s_p4_control_center_scrim);
+        lv_anim_set_values(&fade, lv_obj_get_style_bg_opa(s_p4_control_center_scrim, 0),
+                           LV_OPA_TRANSP);
+        lv_anim_set_time(&fade, 180);
+        lv_anim_set_path_cb(&fade, lv_anim_path_ease_in);
+        lv_anim_set_exec_cb(&fade, dm_p4_control_center_set_scrim_opa);
+        lv_anim_start(&fade);
+    }
+
+    lv_anim_t slide;
+    lv_anim_init(&slide);
+    lv_anim_set_var(&slide, s_p4_control_center);
+    lv_anim_set_values(&slide, lv_obj_get_y(s_p4_control_center),
+                       -lv_obj_get_height(s_p4_control_center) - 12);
+    lv_anim_set_time(&slide, 240);
+    lv_anim_set_path_cb(&slide, lv_anim_path_ease_in);
+    lv_anim_set_exec_cb(&slide, dm_p4_control_center_set_y);
+    lv_anim_set_ready_cb(&slide, dm_p4_control_center_close_ready);
+    lv_anim_start(&slide);
+}
+
+static void dm_p4_control_center_set_brightness_visual(int32_t value) {
+    if (!s_p4_control_center_brightness ||
+        !lv_obj_is_valid(s_p4_control_center_brightness)) return;
+    if (value < 1) value = 1;
+    if (value > 100) value = 100;
+
+    lv_coord_t track_w = lv_obj_get_width(s_p4_control_center_brightness);
+    lv_coord_t knob_w = s_p4_control_center_brightness_knob &&
+                        lv_obj_is_valid(s_p4_control_center_brightness_knob)
+                            ? lv_obj_get_width(s_p4_control_center_brightness_knob) : 18;
+    lv_coord_t travel = LV_MAX(0, track_w - knob_w);
+    lv_coord_t knob_x = (lv_coord_t)(((int32_t)travel * value) / 100);
+    if (s_p4_control_center_brightness_fill &&
+        lv_obj_is_valid(s_p4_control_center_brightness_fill)) {
+        lv_obj_set_width(s_p4_control_center_brightness_fill, knob_x + knob_w / 2);
+    }
+    if (s_p4_control_center_brightness_knob &&
+        lv_obj_is_valid(s_p4_control_center_brightness_knob)) {
+        lv_obj_set_x(s_p4_control_center_brightness_knob, knob_x);
+    }
+}
+
+static void dm_p4_control_center_apply_brightness(int32_t value) {
+    /* Keep one real PWM step at the bottom: zero is reserved by the display
+     * manager for its sleep/backlight-off path. */
+    if (value < 1) value = 1;
+    if (value > 100) value = 100;
+    dm_p4_control_center_set_brightness_visual(value);
+    s_p4_control_center_brightness_value = (uint8_t)value;
+    settings_set_max_screen_brightness(&G_Settings, (uint8_t)value);
+#if defined(CONFIG_CROWPANEL_P4_PANEL_MIPI_1024X600) && defined(CONFIG_LV_DISP_BACKLIGHT_PWM)
+    /* The P4 MIPI panel's backlight is a plain LEDC input.  Do not route this
+     * quick-control value through set_backlight_brightness(): that function
+     * intentionally applies the global maximum again for timeout/wake paths,
+     * which makes the slider's duty value ambiguous. */
+    uint32_t duty = ((uint32_t)value * ((1U << LEDC_TIMER_10_BIT) - 1U)) / 100U;
+#if !defined(CONFIG_LV_BACKLIGHT_ACTIVE_LVL)
+    duty = ((1U << LEDC_TIMER_10_BIT) - 1U) - duty;
+#endif
+    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty);
+    ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
+    is_backlight_dimmed = false;
+    is_backlight_off = false;
+#else
+    set_backlight_brightness(100);
+#endif
+}
+
+static int32_t dm_p4_control_center_brightness_at(lv_point_t point) {
+    if (!s_p4_control_center_brightness ||
+        !lv_obj_is_valid(s_p4_control_center_brightness)) return 100;
+    lv_area_t area;
+    lv_obj_get_coords(s_p4_control_center_brightness, &area);
+    int32_t width = area.x2 - area.x1;
+    if (width <= 0) return 100;
+    int32_t x = point.x - area.x1;
+    if (x < 0) x = 0;
+    if (x > width) x = width;
+    return 1 + (x * 99) / width;
+}
+
+static void dm_p4_control_center_update_wifi(void) {
+    if (!s_p4_control_center_wifi || !lv_obj_is_valid(s_p4_control_center_wifi)) return;
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    bool enabled = settings_get_ap_enabled(&G_Settings);
+    lv_obj_t *title = lv_obj_get_child(s_p4_control_center_wifi, 0);
+    lv_obj_t *subtitle = lv_obj_get_child(s_p4_control_center_wifi, 1);
+    lv_obj_set_style_bg_color(
+        s_p4_control_center_wifi,
+        lv_color_hex(enabled ? theme_palette_get_accent(theme) :
+                               theme_palette_get_surface_alt(theme)), 0);
+    if (title) {
+        lv_obj_set_style_text_color(
+            title, lv_color_hex(enabled ? theme_palette_get_on_accent(theme) :
+                                          theme_palette_get_text(theme)), 0);
+    }
+    if (subtitle) {
+        lv_label_set_text(subtitle, enabled ? "GhostNet AP: On" : "GhostNet AP: Off");
+        lv_obj_set_style_text_color(
+            subtitle, lv_color_hex(enabled ? theme_palette_get_on_accent(theme) :
+                                             theme_palette_get_text_muted(theme)), 0);
+        lv_obj_set_style_text_opa(subtitle, enabled ? LV_OPA_80 : LV_OPA_COVER, 0);
+    }
+}
+
+static void dm_p4_control_center_wifi_cb(lv_event_t *event) {
+    (void)event;
+    bool enabled = !settings_get_ap_enabled(&G_Settings);
+    settings_set_ap_enabled(&G_Settings, enabled);
+    settings_save(&G_Settings);
+    if (enabled) {
+        (void)ap_manager_restore_after_attack("control center AP enable");
+    } else {
+        ap_manager_stop_services();
+    }
+    dm_p4_control_center_update_wifi();
+}
+
+static const uint32_t s_p4_control_center_timeout_values[] = {
+    15000, 30000, 60000, 120000, 300000, 0
+};
+
+static void dm_p4_control_center_update_timeout(void) {
+    if (!s_p4_control_center_timeout ||
+        !lv_obj_is_valid(s_p4_control_center_timeout)) return;
+
+    uint32_t timeout = settings_get_display_timeout(&G_Settings);
+    const char *text = "Never";
+    if (timeout != UINT32_MAX) {
+        if (timeout < 60000) {
+            static char seconds[16];
+            snprintf(seconds, sizeof(seconds), "%lus", (unsigned long)(timeout / 1000));
+            text = seconds;
+        } else {
+            static char minutes[16];
+            unsigned long mins = (unsigned long)(timeout / 60000);
+            snprintf(minutes, sizeof(minutes), "%lum", mins);
+            text = minutes;
+        }
+    }
+    lv_obj_t *subtitle = lv_obj_get_child(s_p4_control_center_timeout, 1);
+    if (subtitle) lv_label_set_text(subtitle, text);
+}
+
+static void dm_p4_control_center_timeout_cb(lv_event_t *event) {
+    (void)event;
+    uint32_t current = settings_get_display_timeout(&G_Settings);
+    size_t next = 0;
+    for (size_t i = 0; i < sizeof(s_p4_control_center_timeout_values) /
+                         sizeof(s_p4_control_center_timeout_values[0]); i++) {
+        uint32_t stored = s_p4_control_center_timeout_values[i] == 0
+                              ? UINT32_MAX : s_p4_control_center_timeout_values[i];
+        if (stored == current) {
+            next = (i + 1) % (sizeof(s_p4_control_center_timeout_values) /
+                              sizeof(s_p4_control_center_timeout_values[0]));
+            break;
+        }
+    }
+    settings_set_display_timeout(&G_Settings, s_p4_control_center_timeout_values[next]);
+    settings_save(&G_Settings);
+    dm_p4_control_center_update_timeout();
+}
+
+static lv_obj_t *dm_p4_control_center_button(lv_obj_t *parent, const char *title,
+                                              const char *subtitle, lv_coord_t x,
+                                              lv_coord_t y, lv_coord_t w,
+                                              lv_event_cb_t callback) {
+    lv_obj_t *button = lv_btn_create(parent);
+    if (!button) return NULL;
+    gui_apply_pressed_style(button);
+    lv_obj_set_size(button, w, 74);
+    lv_obj_set_pos(button, x, y);
+    lv_obj_set_style_bg_color(button,
+                              lv_color_hex(theme_palette_get_surface_alt(
+                                  settings_get_menu_theme(&G_Settings))), 0);
+    lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(button, GUI_RADIUS_MD, 0);
+    lv_obj_set_style_border_width(button, 0, 0);
+    lv_obj_set_style_shadow_width(button, 0, 0);
+    lv_obj_set_style_pad_all(button, 0, 0);
+    lv_obj_set_style_pad_left(button, 0, 0);
+    lv_obj_set_style_pad_row(button, 5, 0);
+    lv_obj_set_flex_flow(button, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(button, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(button, LV_OBJ_FLAG_SCROLLABLE);
+    if (callback) lv_obj_add_event_cb(button, callback, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *label = lv_label_create(button);
+    lv_label_set_text(label, title);
+    lv_obj_set_width(label, LV_PCT(100));
+    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(label, gui_font_body(), 0);
+    lv_obj_set_style_text_color(label,
+                                lv_color_hex(theme_palette_get_text(
+                                    settings_get_menu_theme(&G_Settings))), 0);
+    if (subtitle) {
+        lv_obj_t *sub = lv_label_create(button);
+        lv_label_set_text(sub, subtitle);
+        lv_obj_set_width(sub, LV_PCT(100));
+        lv_obj_set_style_text_align(sub, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_text_font(sub, gui_font_micro(), 0);
+        lv_obj_set_style_text_color(sub,
+                                    lv_color_hex(theme_palette_get_text_muted(
+                                        settings_get_menu_theme(&G_Settings))), 0);
+    }
+    return button;
+}
+
+static void dm_p4_go_home_through_view(void);
+
+static void dm_p4_control_center_home_cb(lv_event_t *event) {
+    (void)event;
+    dm_p4_control_center_close(NULL);
+    dm_p4_go_home_through_view();
+}
+
+static void dm_p4_finish_home_route(void) {
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4)
+    s_p4_skip_next_view_animation = true;
+#endif
+    gui_route_t home = {.id = GUI_ROUTE_VIEW, .view = &main_menu_view};
+    gui_router_reset(&home);
+}
+
+static void dm_p4_home_exit_timer_cb(lv_timer_t *timer) {
+    if (!timer || timer != s_p4_home_exit_timer) return;
+
+    /* The view completed its normal asynchronous back transition. Finish the
+     * Home gesture only after that cleanup path has run. */
+    if (dm.current_view != s_p4_home_exit_view) {
+        ESP_LOGI(TAG, "System Home: normal exit completed; finishing Home route");
+        lv_timer_del(timer);
+        s_p4_home_exit_timer = NULL;
+        s_p4_home_exit_view = NULL;
+        dm_p4_finish_home_route();
+        return;
+    }
+
+    /* Native apps can still be finishing a tick or engine bring-up. Forcing
+     * destruction after 280ms would join that worker on the UI task again. */
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+    if (s_p4_home_exit_view == &plugin_runner_view && plugin_runner_home_exit_pending()) return;
+#endif
+
+    if (s_p4_home_exit_phase == 0) {
+        /* A few legacy views do not implement INPUT_TYPE_EXIT_BUTTON on this
+         * board. Give them their keyboard back event as a delayed fallback. */
+        void (*input_callback)(InputEvent *) = s_p4_home_exit_view->input_callback;
+        if (input_callback) {
+            ESP_LOGW(TAG, "System Home: exit event did not navigate; trying Escape fallback");
+            InputEvent back = {.type = INPUT_TYPE_KEYBOARD};
+            back.data.key_value = LV_KEY_ESC;
+            input_callback(&back);
+        }
+        s_p4_home_exit_phase = 1;
+        lv_timer_set_period(timer, 140);
+        return;
+    }
+
+    /* A view with no back implementation must not trap the system gesture. */
+    lv_timer_del(timer);
+    s_p4_home_exit_timer = NULL;
+    s_p4_home_exit_view = NULL;
+    ESP_LOGW(TAG, "System Home: view did not handle exit; forcing Home route");
+    dm_p4_finish_home_route();
+}
+
+static void dm_p4_go_home_through_view(void) {
+    View *leaving = dm.current_view;
+    if (!leaving || leaving == &splash_view || leaving == &main_menu_view) return;
+
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+    if (leaving == &plugin_runner_view) {
+        ESP_LOGI(TAG, "P4 Home: waiting for native app tick before normal exit");
+        if (!plugin_runner_request_home_exit()) return;
+        if (s_p4_home_exit_timer) lv_timer_del(s_p4_home_exit_timer);
+        s_p4_home_exit_view = leaving;
+        s_p4_home_exit_phase = 0;
+        s_p4_home_exit_timer = lv_timer_create(dm_p4_home_exit_timer_cb, 140, NULL);
+        return;
+    }
+#endif
+
+    /* Use the same event as the physical exit button. Scan/attack views stop
+     * workers and restore their radio profile before navigating away. */
+    void (*input_callback)(InputEvent *) = leaving->input_callback;
+    if (!input_callback && leaving->get_hardwareinput_callback) {
+        leaving->get_hardwareinput_callback((void **)&input_callback);
+    }
+    if (input_callback) {
+        ESP_LOGI(TAG, "System Home: dispatching physical exit event to %s",
+                 leaving->name ? leaving->name : "unnamed view");
+        InputEvent back = {.type = INPUT_TYPE_EXIT_BUTTON};
+        back.data.exit_pressed = true;
+        input_callback(&back);
+        if (s_p4_home_exit_timer) lv_timer_del(s_p4_home_exit_timer);
+        s_p4_home_exit_view = leaving;
+        s_p4_home_exit_phase = 0;
+        s_p4_home_exit_timer = lv_timer_create(dm_p4_home_exit_timer_cb, 140, NULL);
+    } else {
+        dm_p4_finish_home_route();
+    }
+}
+
+static void dm_p4_control_center_lock_cb(lv_event_t *event) {
+    (void)event;
+    dm_p4_control_center_close(NULL);
+    display_manager_show_lockscreen();
+}
+
+static void dm_p4_control_center_create(void) {
+    if (s_p4_control_center_active || LV_HOR_RES < 600 || LV_VER_RES < 400) return;
+
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    lv_color_t bg = lv_color_hex(theme_palette_get_background(theme));
+    lv_color_t text = lv_color_hex(theme_palette_get_text(theme));
+    lv_color_t accent = lv_color_hex(theme_palette_get_accent(theme));
+
+    s_p4_control_center_scrim = lv_obj_create(lv_layer_top());
+    lv_obj_remove_style_all(s_p4_control_center_scrim);
+    lv_obj_set_size(s_p4_control_center_scrim, LV_HOR_RES, LV_VER_RES);
+    lv_obj_set_style_bg_color(s_p4_control_center_scrim, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(s_p4_control_center_scrim, LV_OPA_TRANSP, 0);
+    lv_obj_add_flag(s_p4_control_center_scrim, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(s_p4_control_center_scrim, dm_p4_control_center_close,
+                        LV_EVENT_CLICKED, NULL);
+
+    lv_coord_t panel_w = LV_HOR_RES - 32;
+    if (panel_w > 760) panel_w = 760;
+    lv_coord_t panel_h = 344;
+    if (panel_h > LV_VER_RES - 24) panel_h = LV_VER_RES - 24;
+    s_p4_control_center = lv_obj_create(lv_layer_top());
+    lv_obj_remove_style_all(s_p4_control_center);
+    lv_obj_set_size(s_p4_control_center, panel_w, panel_h);
+    lv_obj_align(s_p4_control_center, LV_ALIGN_TOP_MID, 0, 8);
+    lv_obj_set_style_bg_color(s_p4_control_center, bg, 0);
+    lv_obj_set_style_bg_opa(s_p4_control_center, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(s_p4_control_center, GUI_RADIUS_LG, 0);
+    lv_obj_set_style_border_color(s_p4_control_center, accent, 0);
+    lv_obj_set_style_border_opa(s_p4_control_center, LV_OPA_30, 0);
+    lv_obj_set_style_border_width(s_p4_control_center, 1, 0);
+    lv_obj_set_style_pad_all(s_p4_control_center, 0, 0);
+    lv_obj_clear_flag(s_p4_control_center, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *handle = lv_obj_create(s_p4_control_center);
+    lv_obj_remove_style_all(handle);
+    lv_obj_set_size(handle, 64, 5);
+    lv_obj_align(handle, LV_ALIGN_BOTTOM_MID, 0, -10);
+    lv_obj_set_style_bg_color(handle,
+                              lv_color_hex(theme_palette_get_text_muted(theme)), 0);
+    lv_obj_set_style_bg_opa(handle, LV_OPA_70, 0);
+    lv_obj_set_style_radius(handle, LV_RADIUS_CIRCLE, 0);
+
+    lv_coord_t card_gap = 10;
+    lv_coord_t card_w = (panel_w - 48 - card_gap * 3) / 4;
+    s_p4_control_center_wifi = dm_p4_control_center_button(
+        s_p4_control_center, "Wi-Fi", "GhostNet AP", 24, 28, card_w,
+        dm_p4_control_center_wifi_cb);
+    dm_p4_control_center_update_wifi();
+    dm_p4_control_center_button(s_p4_control_center, "BLE",
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+                                "C6 hosted",
+#else
+                                "ESP32-S3",
+#endif
+                                24 + card_w + card_gap, 28, card_w, NULL);
+    dm_p4_control_center_button(s_p4_control_center, "Storage", "SD card",
+                                24 + (card_w + card_gap) * 2, 28, card_w, NULL);
+    s_p4_control_center_timeout = dm_p4_control_center_button(
+        s_p4_control_center, "Timeout", "Screen", 24 + (card_w + card_gap) * 3,
+        28, card_w, dm_p4_control_center_timeout_cb);
+    dm_p4_control_center_update_timeout();
+
+    lv_obj_t *brightness_label = lv_label_create(s_p4_control_center);
+    lv_label_set_text(brightness_label, "Brightness");
+    lv_obj_set_style_text_font(brightness_label, gui_font_body(), 0);
+    lv_obj_set_style_text_color(brightness_label, text, 0);
+    lv_obj_align(brightness_label, LV_ALIGN_TOP_LEFT, 24, 142);
+
+    s_p4_control_center_brightness = lv_obj_create(s_p4_control_center);
+    lv_obj_remove_style_all(s_p4_control_center_brightness);
+    lv_obj_set_width(s_p4_control_center_brightness, panel_w - 208);
+    lv_obj_set_height(s_p4_control_center_brightness, 18);
+    lv_obj_align(s_p4_control_center_brightness, LV_ALIGN_TOP_LEFT, 160, 146);
+    lv_obj_set_style_bg_color(s_p4_control_center_brightness,
+                              lv_color_hex(theme_palette_get_surface_alt(theme)), 0);
+    lv_obj_set_style_bg_opa(s_p4_control_center_brightness, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(s_p4_control_center_brightness, LV_RADIUS_CIRCLE, 0);
+    lv_obj_clear_flag(s_p4_control_center_brightness,
+                      LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+
+    s_p4_control_center_brightness_fill = lv_obj_create(s_p4_control_center_brightness);
+    lv_obj_remove_style_all(s_p4_control_center_brightness_fill);
+    lv_obj_set_height(s_p4_control_center_brightness_fill, 18);
+    lv_obj_set_style_bg_color(s_p4_control_center_brightness_fill, accent, 0);
+    lv_obj_set_style_bg_opa(s_p4_control_center_brightness_fill, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(s_p4_control_center_brightness_fill, LV_RADIUS_CIRCLE, 0);
+    lv_obj_align(s_p4_control_center_brightness_fill, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_clear_flag(s_p4_control_center_brightness_fill,
+                      LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+
+    s_p4_control_center_brightness_knob = lv_obj_create(s_p4_control_center_brightness);
+    lv_obj_remove_style_all(s_p4_control_center_brightness_knob);
+    lv_obj_set_size(s_p4_control_center_brightness_knob, 18, 18);
+    lv_obj_set_style_bg_color(s_p4_control_center_brightness_knob, accent, 0);
+    lv_obj_set_style_bg_opa(s_p4_control_center_brightness_knob, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(s_p4_control_center_brightness_knob, LV_RADIUS_CIRCLE, 0);
+    lv_obj_clear_flag(s_p4_control_center_brightness_knob,
+                      LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    s_p4_control_center_brightness_value = settings_get_max_screen_brightness(&G_Settings);
+    dm_p4_control_center_set_brightness_visual(s_p4_control_center_brightness_value);
+
+    lv_coord_t action_w = (panel_w - 60) / 2;
+    s_p4_control_center_home = dm_p4_control_center_button(
+        s_p4_control_center, "Home", "Return to apps", 24, 216,
+        action_w, dm_p4_control_center_home_cb);
+    s_p4_control_center_lock = dm_p4_control_center_button(
+        s_p4_control_center, "Lock", "Lock screen", 36 + action_w, 216,
+        action_w, dm_p4_control_center_lock_cb);
+    s_p4_control_center_active = true;
+    s_p4_control_center_closing = false;
+
+    if (dm_system_overlay_reduced_motion()) {
+        lv_obj_set_style_bg_opa(s_p4_control_center_scrim, LV_OPA_40, 0);
+    } else {
+        lv_coord_t resting_y = 8;
+        lv_obj_set_y(s_p4_control_center, -panel_h - 12);
+
+        lv_anim_t slide;
+        lv_anim_init(&slide);
+        lv_anim_set_var(&slide, s_p4_control_center);
+        lv_anim_set_values(&slide, -panel_h - 12, resting_y);
+        lv_anim_set_time(&slide, 300);
+        lv_anim_set_path_cb(&slide, lv_anim_path_ease_out);
+        lv_anim_set_exec_cb(&slide, dm_p4_control_center_set_y);
+        lv_anim_start(&slide);
+
+        lv_anim_t fade;
+        lv_anim_init(&fade);
+        lv_anim_set_var(&fade, s_p4_control_center_scrim);
+        lv_anim_set_values(&fade, LV_OPA_TRANSP, LV_OPA_40);
+        lv_anim_set_time(&fade, 220);
+        lv_anim_set_path_cb(&fade, lv_anim_path_ease_out);
+        lv_anim_set_exec_cb(&fade, dm_p4_control_center_set_scrim_opa);
+        lv_anim_start(&fade);
+    }
+}
+
+static void dm_p4_control_center_open_cb(void *arg) {
+    (void)arg;
+    dm_p4_control_center_create();
+}
+
+static bool dm_p4_control_center_handle_input(const InputEvent *event) {
+    if (!event || event->type != INPUT_TYPE_TOUCH) return false;
+    if (s_p4_control_center_active) {
+        if (s_p4_control_center_closing) return true;
+        lv_point_t point = event->data.touch_data.point;
+        if (event->data.touch_data.state == LV_INDEV_STATE_PR && !event->is_touch_move) {
+            s_p4_control_center_touch_start = point;
+        }
+        if (event->data.touch_data.state == LV_INDEV_STATE_PR &&
+            (s_p4_control_center_brightness_drag ||
+             dm_p4_point_in_obj(s_p4_control_center_brightness, point))) {
+            int value = dm_p4_control_center_brightness_at(point);
+            s_p4_control_center_brightness_drag = true;
+            dm_p4_control_center_apply_brightness(value);
+        } else if (event->data.touch_data.state == LV_INDEV_STATE_REL) {
+            bool swipe_closed = (s_p4_control_center_touch_start.y - point.y) >= 70 &&
+                                abs(point.x - s_p4_control_center_touch_start.x) <= 300;
+            if (s_p4_control_center_brightness_drag) {
+                int value = dm_p4_control_center_brightness_at(point);
+                dm_p4_control_center_apply_brightness(value);
+                s_p4_control_center_brightness_drag = false;
+            } else if (swipe_closed) {
+                dm_p4_control_center_close(NULL);
+            } else if (dm_p4_point_in_obj(s_p4_control_center_wifi, point)) {
+                dm_p4_control_center_wifi_cb(NULL);
+            } else if (dm_p4_point_in_obj(s_p4_control_center_timeout, point)) {
+                dm_p4_control_center_timeout_cb(NULL);
+            } else
+            if (dm_p4_point_in_obj(s_p4_control_center_home, point)) {
+                dm_p4_control_center_home_cb(NULL);
+            } else if (dm_p4_point_in_obj(s_p4_control_center_lock, point)) {
+                dm_p4_control_center_lock_cb(NULL);
+            } else if (dm_p4_point_in_obj(s_p4_control_center_brightness, point)) {
+                int value = dm_p4_control_center_brightness_at(point);
+                dm_p4_control_center_apply_brightness(value);
+            } else if (!dm_p4_point_in_obj(s_p4_control_center, point)) {
+                dm_p4_control_center_close(NULL);
+            }
+        }
+        return true;
+    }
+    if (LV_HOR_RES < 600 || LV_VER_RES < 400) return false;
+
+    /* A raw top-edge pull has already captured this touch.  Some views also
+     * forward held samples; consume them without replacing the original
+     * top-edge start coordinate. */
+    if (event->is_touch_move && s_p4_control_center_gesture) return true;
+
+    if (event->data.touch_data.state == LV_INDEV_STATE_PRESSED) {
+        s_p4_control_center_start = event->data.touch_data.point;
+        /* Only a true top-edge pull opens Control Center. Content and option
+         * rows directly below the status bar must receive their own touch. */
+        s_p4_control_center_gesture = s_p4_control_center_start.y <= 24;
+        if (s_p4_control_center_gesture) {
+            ESP_LOGD(TAG, "Control Center gesture start: x=%d y=%d",
+                     (int)s_p4_control_center_start.x,
+                     (int)s_p4_control_center_start.y);
+        }
+        return s_p4_control_center_gesture;
+    }
+    if (s_p4_control_center_gesture) {
+        if (event->data.touch_data.state == LV_INDEV_STATE_REL) {
+            lv_point_t end = event->data.touch_data.point;
+            bool opened = (end.y - s_p4_control_center_start.y) >= 80 &&
+                          abs(end.x - s_p4_control_center_start.x) <= 260;
+            s_p4_control_center_gesture = false;
+            if (opened && !s_lockscreen_overlay_active) {
+                ESP_LOGI(TAG, "Opening Control Center");
+                dm_p4_control_center_create();
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4)
+static void dm_p4_animate_view_in(lv_obj_t *root) {
+    if (!root || settings_get_reduced_motion(&G_Settings)) return;
+    if (s_p4_skip_next_view_animation) {
+        s_p4_skip_next_view_animation = false;
+        return;
+    }
+    lv_obj_set_x(root, 36);
+    lv_anim_t anim;
+    lv_anim_init(&anim);
+    lv_anim_set_var(&anim, root);
+    lv_anim_set_values(&anim, 36, 0);
+    lv_anim_set_time(&anim, 180);
+    lv_anim_set_path_cb(&anim, lv_anim_path_ease_out);
+    lv_anim_set_exec_cb(&anim, slide_set_x);
+    lv_anim_start(&anim);
+}
+#endif
+
+static void dm_p4_ensure_home_indicator(void) {
+    if (!s_p4_home_indicator || !lv_obj_is_valid(s_p4_home_indicator)) {
+        s_p4_home_indicator = lv_obj_create(lv_layer_top());
+        lv_obj_remove_style_all(s_p4_home_indicator);
+        lv_obj_set_size(s_p4_home_indicator, 112, 5);
+        lv_obj_set_style_radius(s_p4_home_indicator, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_bg_color(s_p4_home_indicator,
+                                  lv_color_hex(theme_palette_get_text_muted(
+                                      settings_get_menu_theme(&G_Settings))), 0);
+        lv_obj_set_style_bg_opa(s_p4_home_indicator, LV_OPA_70, 0);
+        lv_obj_clear_flag(s_p4_home_indicator, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    }
+    lv_obj_align(s_p4_home_indicator, LV_ALIGN_BOTTOM_MID, 0, -7);
+    lv_obj_move_foreground(s_p4_home_indicator);
+}
+
+static void dm_p4_back_indicator_set_width(void *obj, int32_t value) {
+    if (obj && lv_obj_is_valid((lv_obj_t *)obj)) {
+        lv_obj_set_width((lv_obj_t *)obj, value);
+    }
+}
+
+static void dm_p4_back_indicator_set_opa(void *obj, int32_t value) {
+    if (obj && lv_obj_is_valid((lv_obj_t *)obj)) {
+        lv_obj_set_style_bg_opa((lv_obj_t *)obj, (lv_opa_t)value, 0);
+    }
+}
+
+static void dm_p4_back_indicator_delete(lv_anim_t *anim) {
+    lv_obj_t *indicator = anim ? (lv_obj_t *)anim->var : NULL;
+    if (indicator && lv_obj_is_valid(indicator)) {
+        lv_obj_del(indicator);
+    }
+    if (s_p4_back_indicator == indicator) {
+        s_p4_back_indicator = NULL;
+    }
+}
+
+static void dm_p4_back_indicator_cancel(void) {
+    if (s_p4_back_indicator && lv_obj_is_valid(s_p4_back_indicator)) {
+        lv_anim_del(s_p4_back_indicator, NULL);
+        lv_obj_del(s_p4_back_indicator);
+    }
+    s_p4_back_indicator = NULL;
+}
+
+static void dm_p4_back_indicator_begin(lv_point_t start) {
+    dm_p4_back_indicator_cancel();
+    s_p4_back_indicator = lv_obj_create(lv_layer_top());
+    if (!s_p4_back_indicator) return;
+    lv_obj_remove_style_all(s_p4_back_indicator);
+    lv_obj_set_size(s_p4_back_indicator, 8, 72);
+    lv_obj_set_pos(s_p4_back_indicator, 0, start.y - 36);
+    lv_obj_set_style_radius(s_p4_back_indicator, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(s_p4_back_indicator,
+                              lv_color_hex(theme_palette_get_accent(
+                                  settings_get_menu_theme(&G_Settings))), 0);
+    lv_obj_set_style_bg_opa(s_p4_back_indicator, LV_OPA_TRANSP, 0);
+    lv_obj_clear_flag(s_p4_back_indicator,
+                      LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_move_foreground(s_p4_back_indicator);
+
+    lv_anim_t fade;
+    lv_anim_init(&fade);
+    lv_anim_set_var(&fade, s_p4_back_indicator);
+    lv_anim_set_values(&fade, LV_OPA_TRANSP, LV_OPA_70);
+    lv_anim_set_time(&fade, 120);
+    lv_anim_set_exec_cb(&fade, dm_p4_back_indicator_set_opa);
+    lv_anim_start(&fade);
+}
+
+static void dm_p4_back_indicator_commit(void) {
+    if (!s_p4_back_indicator || !lv_obj_is_valid(s_p4_back_indicator)) return;
+    lv_anim_del(s_p4_back_indicator, NULL);
+
+    lv_anim_t width;
+    lv_anim_init(&width);
+    lv_anim_set_var(&width, s_p4_back_indicator);
+    lv_anim_set_values(&width, lv_obj_get_width(s_p4_back_indicator), 144);
+    lv_anim_set_time(&width, 160);
+    lv_anim_set_path_cb(&width, lv_anim_path_ease_out);
+    lv_anim_set_exec_cb(&width, dm_p4_back_indicator_set_width);
+    lv_anim_set_ready_cb(&width, dm_p4_back_indicator_delete);
+    lv_anim_start(&width);
+}
+#endif
+
+#if !GUI_LARGE_TOUCH_UI
+static bool dm_p4_control_center_handle_input(const InputEvent *event) {
+    (void)event;
+    return false;
+}
+#endif
+
 static void dm_clear_pressed_state(lv_obj_t *obj) {
     (void)obj;
     if (dm_pressed_obj) {
@@ -2008,6 +2984,12 @@ static void dm_clear_pressed_state(lv_obj_t *obj) {
 
 void display_manager_render_view(View *view) {
   if (view == NULL) return;
+  // A failed LCD/LVGL allocation must not let startup navigate into a NULL
+  // mutex and assert inside xQueueSemaphoreTake().
+  if (!display_manager_init_success || dm.mutex == NULL) {
+    ESP_LOGE(TAG, "Cannot render view: display manager is not initialized");
+    return;
+  }
 #ifdef CONFIG_JC3248W535EN_LCD
   bsp_display_lock(0);
 #endif
@@ -2019,6 +3001,7 @@ void display_manager_render_view(View *view) {
     if (dm.current_view && dm.current_view->root) {
       dm_clear_pressed_state(dm.current_view->root);
     }
+    display_manager_cancel_pending_scroll();
     if (dm.current_view && dm.current_view->root) {
       if (dm.current_view->destroy) {
         dm.current_view->destroy();
@@ -2039,6 +3022,12 @@ void display_manager_render_view(View *view) {
       lv_obj_set_style_opa(view->root, LV_OPA_COVER, 0);
       if (status_bar) lv_obj_set_style_opa(status_bar, LV_OPA_COVER, 0);
     }
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    dm_p4_animate_view_in(view->root);
+#endif
+#if GUI_LARGE_TOUCH_UI
+    dm_p4_ensure_home_indicator();
+#endif
     xSemaphoreGive(dm.mutex);
   } else {
     ESP_LOGE(TAG, "Failed to acquire mutex for switching view\n");
@@ -2301,6 +3290,7 @@ void display_manager_clear_lockscreen_return_view(void) {
 }
 
 void display_manager_destroy_current_view(void) {
+  display_manager_cancel_pending_scroll();
   if (dm.current_view) {
     if (dm.current_view->destroy) {
       dm.current_view->destroy();
@@ -2321,6 +3311,7 @@ static bool touch_move_events_enabled_for_view_name(const char *view_name) {
           strcmp(view_name, "Ethernet") == 0 ||
           strcmp(view_name, "AirspaceMonitorView") == 0 ||
           strcmp(view_name, "Audio Player") == 0 ||
+          strcmp(view_name, "Camera") == 0 ||
           strcmp(view_name, "Main Menu") == 0 ||
           strcmp(view_name, "Apps Menu") == 0 ||
           strcmp(view_name, "SD Browser") == 0 ||
@@ -2332,6 +3323,7 @@ static bool touch_move_events_enabled_for_view_name(const char *view_name) {
           strcmp(view_name, "Cloud Store") == 0 ||
           strcmp(view_name, "ENV-III") == 0 ||
           strcmp(view_name, "Favorites Manager") == 0 ||
+          strcmp(view_name, "Menu Editor") == 0 ||
           strcmp(view_name, "Lockscreen") == 0);
 }
 
@@ -2430,6 +3422,22 @@ static void display_manager_set_backlight_raw(uint8_t percentage) {
     ESP_LOGI(TAG, "TDisplay S3 backlight: %d%% (LEDC PWM)", percentage);
 #elif defined(CONFIG_IS_ATOMS3R)
     m5gfx_set_brightness(percentage);
+#elif defined(CONFIG_CROWPANEL_ADVANCED_P4) && defined(CONFIG_CROWPANEL_P4_PANEL_RGB_800X480)
+    esp_err_t err = crowpanel_p4_display_set_backlight(percentage);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "CrowPanel 5-inch backlight update failed: %s", esp_err_to_name(err));
+    }
+#elif defined(CONFIG_CROWPANEL_ADVANCE_RGB_LCD)
+    /* V1.2+ CrowPanel Advance 7-inch boards route backlight control through
+     * the onboard STC8H1K28 at 0x30. Its scale is inverted: 0=max and
+     * 245=off. The factory firmware uses the same raw one-byte command. */
+    uint8_t stc8_backlight = (uint8_t)(((100u - percentage) * 245u + 50u) / 100u);
+    esp_err_t err = lvgl_i2c_write(CONFIG_LV_I2C_TOUCH_PORT, 0x30, I2C_NO_REG,
+                                   &stc8_backlight, 1);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "CrowPanel Advance 7-inch STC8 backlight update failed: %s",
+                 esp_err_to_name(err));
+    }
 #elif defined(CONFIG_LV_DISP_BACKLIGHT_PWM)
     if (CONFIG_LV_DISP_PIN_BCKL >= 0) {
         uint32_t duty = (percentage * ((1 << LEDC_TIMER_10_BIT) - 1)) / 100;
@@ -2462,16 +3470,35 @@ static void display_manager_set_backlight_raw(uint8_t percentage) {
             s_switch_backlight_configured = true;
         }
         gpio_hold_dis(CONFIG_LV_DISP_PIN_BCKL);
-        gpio_set_level(CONFIG_LV_DISP_PIN_BCKL, percentage > 0 ? 1 : 0);
+        /* Factory T-Dongle-C5 firmware enables the LCD backlight by driving
+         * GPIO0 LOW (active-low BL), matching the rest of the codebase where
+         * CONFIG_LV_BACKLIGHT_ACTIVE_LVL unset == "on when low".  The switch
+         * path below honors that polarity; switch-mode boards with a
+         * high-active backlight (e.g. CYD) set CONFIG_LV_BACKLIGHT_ACTIVE_LVL
+         * and get the normal HIGH=on behavior. */
+        bool on = percentage > 0;
+#if defined(CONFIG_LV_BACKLIGHT_ACTIVE_LVL)
+        gpio_set_level(CONFIG_LV_DISP_PIN_BCKL, on ? 1 : 0);
+#else
+        gpio_set_level(CONFIG_LV_DISP_PIN_BCKL, on ? 0 : 1);
+#endif
         gpio_hold_en(CONFIG_LV_DISP_PIN_BCKL);
-        ESP_LOGI(TAG, "Backlight GPIO%d latched %s (requested=%u%%, scaled=%u%%)",
-                 CONFIG_LV_DISP_PIN_BCKL, percentage > 0 ? "ON" : "OFF",
+        ESP_LOGI(TAG, "Backlight GPIO%d latched %s (active%s, requested=%u%%, scaled=%u%%)",
+                 CONFIG_LV_DISP_PIN_BCKL, on ? "ON" : "OFF",
+#if defined(CONFIG_LV_BACKLIGHT_ACTIVE_LVL)
+                 "-high",
+#else
+                 "-low",
+#endif
                  (unsigned)((max_brightness > 0) ? (percentage * 100) / max_brightness : 0),
                  (unsigned)percentage);
     } else {
         ESP_LOGD(TAG, "Backlight GPIO not configured; skipping switch backlight");
     }
 #endif
+#elif defined(CONFIG_LV_DISP_BACKLIGHT_OFF)
+    ESP_LOGD(TAG, "Backlight hardware-fixed ON; ignoring %u%% request", (unsigned)percentage);
+    (void)percentage;
 #else
 # error "Either CONFIG_LV_DISP_BACKLIGHT_PWM or CONFIG_LV_DISP_BACKLIGHT_SWITCH must be set"
 #endif
@@ -2683,16 +3710,22 @@ void hardware_input_task(void *pvParameters) {
 #else
   const TickType_t tick_interval = pdMS_TO_TICKS(10);
 #endif
-  const int touch_move_min_delta = 1;
+  const int touch_move_min_delta = 8;
 
   lv_indev_drv_t touch_driver;
-  lv_indev_data_t touch_data;
-  uint16_t calData[5] = {339, 3470, 237, 3438, 2};
+  lv_indev_drv_init(&touch_driver);
+  touch_driver.disp = lv_disp_get_default();
+  lv_indev_data_t touch_data = {
+    .point = {0, 0},
+    .state = LV_INDEV_STATE_REL,
+  };
   bool touch_active = false;
   bool skip_next_release = false;
+#if GUI_LARGE_TOUCH_UI
+  bool system_edge_touch = false;
+#endif
   int last_touch_x = 0;
   int last_touch_y = 0;
-  int screen_width = LV_HOR_RES;
 #ifdef CONFIG_IS_S3TWATCH
   bool was_woken_by_interrupt = false; // New flag for S3T-Watch
 #endif
@@ -3272,9 +4305,53 @@ void hardware_input_task(void *pvParameters) {
       if (pressed_now != joystick_reported_pressed[i]) {
         joystick_reported_pressed[i] = pressed_now;
         ESP_LOGI(TAG, "Joystick %d %s", i, pressed_now ? "pressed" : "released");
+#ifdef CONFIG_CROWPANEL_EPAPER_42
+        /* HOME is a board-level route action, not an Up key. It is handled
+         * before the active view callback so every screen gets the same
+         * reliable escape-to-root behavior. */
+        if (i == 2) {
+          joystick_repeat_next_ms[i] = 0;
+          if (pressed_now) {
+            last_touch_time = xTaskGetTickCount();
+            if (!(is_backlight_dimmed || is_backlight_off)) {
+              InputEvent home_event = {0};
+              home_event.type = INPUT_TYPE_HOME_BUTTON;
+              home_event.data.home_pressed = true;
+              xQueueSend(input_queue, &home_event, pdMS_TO_TICKS(10));
+            }
+          }
+          continue;
+        }
+        /* The factory firmware calls GPIO1 EXIT_KEY. It occupies the fifth
+         * joystick slot in main.c only so the existing GPIO setup can be
+         * reused; expose it to every view as the shared Back event instead of
+         * pretending it is a Down key. */
+        if (i == 4) {
+          joystick_repeat_next_ms[i] = 0;
+          if (pressed_now) {
+            last_touch_time = xTaskGetTickCount();
+            if (is_backlight_dimmed || is_backlight_off) {
+              set_backlight_brightness(100);
+              is_backlight_dimmed = false;
+              is_backlight_off = false;
+            } else {
+              InputEvent back_event = {0};
+              back_event.type = INPUT_TYPE_EXIT_BUTTON;
+              back_event.data.exit_pressed = true;
+              xQueueSend(input_queue, &back_event, pdMS_TO_TICKS(10));
+            }
+          }
+          continue;
+        }
+#endif
         InputEvent event;
         event.type = INPUT_TYPE_JOYSTICK;
-        event.data.joystick_index = i;
+        event.data.joystick_index =
+#ifdef CONFIG_CROWPANEL_EPAPER_42
+            crowpanel_epaper_logical_joystick_index(i);
+#else
+            i;
+#endif
         event.data.joystick_pressed = pressed_now;
         if (pressed_now) {
           last_touch_time = xTaskGetTickCount();
@@ -3311,7 +4388,12 @@ void hardware_input_task(void *pvParameters) {
         last_touch_time = xTaskGetTickCount();
         InputEvent event;
         event.type = INPUT_TYPE_JOYSTICK;
-        event.data.joystick_index = i;
+        event.data.joystick_index =
+#ifdef CONFIG_CROWPANEL_EPAPER_42
+            crowpanel_epaper_logical_joystick_index(i);
+#else
+            i;
+#endif
         event.data.joystick_pressed = true;
 
         if (xQueueSend(input_queue, &event, 0) == pdTRUE) {
@@ -3522,6 +4604,24 @@ void hardware_input_task(void *pvParameters) {
       last_touch_time = xTaskGetTickCount();
       last_touch_x = touch_data.point.x;
       last_touch_y = touch_data.point.y;
+#if GUI_LARGE_TOUCH_UI
+      system_edge_touch = touch_data.point.x <= 48 ||
+                          touch_data.point.y >= (LV_VER_RES - 48);
+      /* Large touch panels use the manual touch queue rather than a registered
+       * LVGL indev. Claim top-edge pulls here, before per-view move filtering
+       * can discard the trajectory. */
+      if (!s_p4_control_center_active && !s_lockscreen_overlay_active &&
+          LV_HOR_RES >= 600 && LV_VER_RES >= 400 &&
+          touch_data.point.y <= 24) {
+        s_p4_control_center_start = touch_data.point;
+        s_p4_control_center_gesture = true;
+        system_edge_touch = false;
+        touch_active = true;
+        skip_event = true;
+        ESP_LOGD(TAG, "Control Center raw gesture start: x=%d y=%d",
+                 (int)touch_data.point.x, (int)touch_data.point.y);
+      }
+#endif
 #ifdef CONFIG_IS_S3TWATCH
       if (was_woken_by_interrupt) {
         was_woken_by_interrupt = false; // Consume the flag
@@ -3557,7 +4657,11 @@ void hardware_input_task(void *pvParameters) {
       if (abs(touch_data.point.x - last_touch_x) >= touch_move_min_delta ||
           abs(touch_data.point.y - last_touch_y) >= touch_move_min_delta) {
         last_touch_time = xTaskGetTickCount();
-        if (touch_move_events_enabled_for_current_view()) {
+        if (touch_move_events_enabled_for_current_view()
+#if GUI_LARGE_TOUCH_UI
+            || s_p4_control_center_active || system_edge_touch
+#endif
+            ) {
           InputEvent event;
           event.type = INPUT_TYPE_TOUCH;
           event.is_touch_move = true;
@@ -3574,6 +4678,21 @@ void hardware_input_task(void *pvParameters) {
     } else if (touch_data.state == LV_INDEV_STATE_REL && touch_active) {
       last_touch_time = xTaskGetTickCount();
       touch_active = false;
+#if GUI_LARGE_TOUCH_UI
+      if (s_p4_control_center_gesture) {
+        bool opened = (last_touch_y - s_p4_control_center_start.y) >= 80 &&
+                      abs(last_touch_x - s_p4_control_center_start.x) <= 360;
+        s_p4_control_center_gesture = false;
+        if (opened && !s_lockscreen_overlay_active) {
+          ESP_LOGI(TAG, "Opening Control Center (raw touch)");
+          display_manager_run_on_lvgl(dm_p4_control_center_open_cb, NULL);
+        }
+        system_edge_touch = false;
+        skip_next_release = false;
+        continue;
+      }
+      system_edge_touch = false;
+#endif
       if (skip_next_release) {
         skip_next_release = false; // eat the release that paired with the swallowed wake press
       } else {
@@ -3642,9 +4761,54 @@ void hardware_input_task(void *pvParameters) {
   vTaskDelete(NULL);
 }
 
-static void dm_update_manual_touch_pressed_state(InputEvent *ev) {
-    if (ev->type != INPUT_TYPE_TOUCH || ev->is_touch_move) return;
+static bool dm_update_manual_touch_pressed_state(InputEvent *ev) {
+    if (ev->type != INPUT_TYPE_TOUCH) return false;
+#if GUI_LARGE_TOUCH_UI
+    if (ev->is_touch_move) {
+        if (s_p4_home_gesture && s_p4_home_indicator) {
+            int32_t rise = s_p4_home_start.y - ev->data.touch_data.point.y;
+            lv_obj_set_width(s_p4_home_indicator, rise > 24 ? 144 : 112);
+        }
+        if (s_p4_back_gesture) {
+            int32_t dx = ev->data.touch_data.point.x - s_p4_back_start.x;
+            int32_t dy = ev->data.touch_data.point.y - s_p4_back_start.y;
+            /* Commit the gesture only once the drag is clearly horizontal;
+             * vertical movement cancels it so left-edge controls and scroll
+             * views do not unexpectedly navigate back. */
+            if (abs(dy) > abs(dx) + 24 || dx < -12) {
+                s_p4_back_gesture = false;
+                dm_p4_back_indicator_cancel();
+            } else if (s_p4_back_indicator && dx >= 0) {
+                int32_t indicator_width = 8 + dx / 2;
+                int32_t indicator_opa = LV_OPA_30 + dx;
+                if (indicator_width > 72) indicator_width = 72;
+                if (indicator_opa > LV_OPA_90) indicator_opa = LV_OPA_90;
+                lv_obj_set_width(s_p4_back_indicator, indicator_width);
+                lv_obj_set_style_bg_opa(s_p4_back_indicator,
+                                        (lv_opa_t)indicator_opa, 0);
+            }
+        }
+        return false;
+    }
+#else
+    if (ev->is_touch_move) return false;
+#endif
+    bool consumed = false;
     if (ev->data.touch_data.state == LV_INDEV_STATE_PRESSED) {
+#if GUI_LARGE_TOUCH_UI
+        s_p4_home_start = ev->data.touch_data.point;
+        s_p4_home_gesture = s_p4_home_start.y >= (LV_VER_RES - 48);
+        s_p4_back_start = ev->data.touch_data.point;
+        /* A generous but still edge-bound activation strip makes the gesture
+         * discoverable on a large panel while avoiding ordinary content taps. */
+        s_p4_back_gesture = s_p4_back_start.x <= 48;
+        if (s_p4_back_gesture) {
+            dm_p4_back_indicator_begin(s_p4_back_start);
+        }
+        if (s_p4_home_gesture && s_p4_home_indicator) {
+            lv_obj_set_style_bg_opa(s_p4_home_indicator, LV_OPA_COVER, 0);
+        }
+#endif
         if (dm_pressed_obj) {
             if (lv_obj_is_valid(dm_pressed_obj)) {
                 lv_obj_clear_state(dm_pressed_obj, LV_STATE_PRESSED);
@@ -3671,6 +4835,43 @@ static void dm_update_manual_touch_pressed_state(InputEvent *ev) {
             dm_pressed_obj = found;
         }
     } else {
+#if GUI_LARGE_TOUCH_UI
+        if (s_p4_home_gesture) {
+            lv_point_t end = ev->data.touch_data.point;
+            bool swipe_home = (s_p4_home_start.y - end.y) >= 90 &&
+                              abs(s_p4_home_start.x - end.x) <= 240;
+            s_p4_home_gesture = false;
+            if (s_p4_home_indicator) {
+                lv_obj_set_width(s_p4_home_indicator, 112);
+                lv_obj_set_style_bg_opa(s_p4_home_indicator, LV_OPA_70, 0);
+            }
+            if (swipe_home && !s_lockscreen_overlay_active &&
+                dm.current_view != &splash_view && dm.current_view != &main_menu_view) {
+                dm_p4_go_home_through_view();
+            }
+        }
+        if (s_p4_back_gesture) {
+            lv_point_t end = ev->data.touch_data.point;
+            bool swipe_back = (end.x - s_p4_back_start.x) >= 96 &&
+                              abs(end.y - s_p4_back_start.y) <= 96;
+            s_p4_back_gesture = false;
+            if (swipe_back && !s_lockscreen_overlay_active &&
+                dm.current_view != &splash_view && dm.current_view != &main_menu_view) {
+                dm_p4_back_indicator_commit();
+                /* Deliver the exact same event as physical joystick-left.
+                 * The active view decides what left means. */
+                InputEvent left = {
+                    .type = INPUT_TYPE_JOYSTICK,
+                    .data.joystick_index = 0,
+                    .data.joystick_pressed = true,
+                };
+                xQueueSend(input_queue, &left, pdMS_TO_TICKS(10));
+                consumed = true;
+            } else {
+                dm_p4_back_indicator_cancel();
+            }
+        }
+#endif
         if (dm_pressed_obj) {
             if (lv_obj_is_valid(dm_pressed_obj)) {
                 lv_obj_clear_state(dm_pressed_obj, LV_STATE_PRESSED);
@@ -3678,14 +4879,60 @@ static void dm_update_manual_touch_pressed_state(InputEvent *ev) {
             dm_pressed_obj = NULL;
         }
     }
+    return consumed;
 }
+
+#ifdef CONFIG_CROWPANEL_EPAPER_42
+static bool dm_handle_crowpanel_home_event(const InputEvent *event) {
+    if (!event || event->type != INPUT_TYPE_HOME_BUTTON ||
+        !event->data.home_pressed || s_lockscreen_overlay_active) {
+        return false;
+    }
+
+    View *leaving = NULL;
+    void (*input_callback)(InputEvent *) = NULL;
+    if (xSemaphoreTake(dm.mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) == pdTRUE) {
+        leaving = dm.current_view;
+        if (leaving) input_callback = leaving->input_callback;
+        xSemaphoreGive(dm.mutex);
+    }
+
+    if (!leaving || leaving == &splash_view || leaving == &lockscreen_view ||
+        leaving == &main_menu_view) {
+        return true;
+    }
+
+    /* Give the active screen its normal Back event first so its existing
+     * worker/radio cleanup still runs. Then reset the route, making HOME a
+     * true root action rather than one level of back navigation. */
+    if (input_callback) {
+        InputEvent back = {0};
+        back.type = INPUT_TYPE_EXIT_BUTTON;
+        back.data.exit_pressed = true;
+        input_callback(&back);
+    }
+
+    gui_route_t home = {.id = GUI_ROUTE_VIEW, .view = &main_menu_view};
+    gui_router_reset(&home);
+    return true;
+}
+#else
+static bool dm_handle_crowpanel_home_event(const InputEvent *event) {
+    (void)event;
+    return false;
+}
+#endif
 
 void processEvent() {  // do not process events until the display manager is up
   if (!display_manager_init_success) {
     return;
   }
 
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+  const int max_events = 32;
+#else
   const int max_events = 16;
+#endif
   int processed = 0;
   InputEvent event;
 
@@ -3705,8 +4952,19 @@ void processEvent() {  // do not process events until the display manager is up
       processed++;
       continue;
     }
-    dm_update_manual_touch_pressed_state(&event);
+    if (dm_p4_control_center_handle_input(&event)) {
+      processed++;
+      continue;
+    }
+    if (dm_update_manual_touch_pressed_state(&event)) {
+      processed++;
+      continue;
+    }
     if (crash_reporter_handle_input(&event)) {
+      processed++;
+      continue;
+    }
+    if (dm_handle_crowpanel_home_event(&event)) {
       processed++;
       continue;
     }
@@ -3787,8 +5045,16 @@ void processEvent() {  // do not process events until the display manager is up
         is_backlight_off = false;
         return;
       }
-      dm_update_manual_touch_pressed_state(&event);
+      if (dm_p4_control_center_handle_input(&event)) {
+        return;
+      }
+      if (dm_update_manual_touch_pressed_state(&event)) {
+        return;
+      }
       if (crash_reporter_handle_input(&event)) {
+        return;
+      }
+      if (dm_handle_crowpanel_home_event(&event)) {
         return;
       }
       if (xSemaphoreTake(dm.mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) == pdTRUE) {
@@ -3862,6 +5128,11 @@ typedef struct {
 static pending_scroll_t s_pending_scroll = { NULL, 0 };
 static TickType_t s_last_scroll_flush_tick = 0;
 
+static void display_manager_cancel_pending_scroll(void) {
+  s_pending_scroll.target = NULL;
+  s_pending_scroll.dy = 0;
+}
+
 void display_manager_queue_scroll(lv_obj_t *target, int32_t dy) {
   if (!target || dy == 0) return;
   if (s_pending_scroll.target && s_pending_scroll.target != target) {
@@ -3876,12 +5147,14 @@ void display_manager_queue_scroll(lv_obj_t *target, int32_t dy) {
 }
 
 void display_manager_flush_pending_scroll(void) {
-  if (s_pending_scroll.target && s_pending_scroll.dy != 0) {
-    lv_obj_scroll_by_bounded(s_pending_scroll.target, 0, s_pending_scroll.dy, LV_ANIM_OFF);
+  lv_obj_t *target = s_pending_scroll.target;
+  int32_t dy = s_pending_scroll.dy;
+  display_manager_cancel_pending_scroll();
+
+  if (target && dy != 0 && lv_obj_is_valid(target)) {
+    lv_obj_scroll_by_bounded(target, 0, dy, LV_ANIM_OFF);
     s_last_scroll_flush_tick = xTaskGetTickCount();
   }
-  s_pending_scroll.target = NULL;
-  s_pending_scroll.dy = 0;
 }
 
 static void display_manager_flush_pending_scroll_if_due(void) {
@@ -3979,9 +5252,17 @@ bool touch_drag_release(touch_drag_t *d, const lv_indev_data_t *data) {
 }
 
 void lvgl_tick_task(void *arg) {
-  const TickType_t tick_interval = pdMS_TO_TICKS(LVGL_TASK_PERIOD_MS);
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+  const uint32_t max_idle_delay_ms = 5;
+#elif defined(CONFIG_USE_C5_PARLIO_DISPLAY)
+  const uint32_t max_idle_delay_ms = 5;
+#else
+  const uint32_t max_idle_delay_ms = 10;
+#endif
   TickType_t last_mon = 0;
+#if !LV_TICK_CUSTOM
   TickType_t last_tick_time = xTaskGetTickCount();
+#endif
   while (1) {
       /* Cooperative quiesce point: if a shared-SPI consumer (SD) has asked us
        * to park, acknowledge here — outside any flush — and spin without
@@ -3994,6 +5275,16 @@ void lvgl_tick_task(void *arg) {
           }
           s_lvgl_gate_parked = false;
       }
+
+#if !LV_TICK_CUSTOM
+      TickType_t pass_start = xTaskGetTickCount();
+      uint32_t elapsed_ms = (uint32_t)(pass_start - last_tick_time) * portTICK_PERIOD_MS;
+      /* A long shared-SPI park must not slingshot animations to their end. */
+      if (elapsed_ms > 100) elapsed_ms = 100;
+      if (elapsed_ms > 0) lv_tick_inc(elapsed_ms);
+      last_tick_time = pass_start;
+#endif
+
       processEvent();
       /* Hold the same recursive mutex background tasks take in
        * display_manager_lvgl_async_call() for the whole timer/render pass, so a
@@ -4002,23 +5293,9 @@ void lvgl_tick_task(void *arg) {
        * portMAX_DELAY is safe here: the only other holders are brief enqueue
        * calls that always release promptly. */
       if (s_lvgl_call_mutex) xSemaphoreTakeRecursive(s_lvgl_call_mutex, portMAX_DELAY);
-      lv_timer_handler();
+      uint32_t next_timer_ms = lv_timer_handler();
       if (s_lvgl_call_mutex) xSemaphoreGiveRecursive(s_lvgl_call_mutex);
-      // Feed LVGL's animation clock the real elapsed time rather than a
-      // fixed 10ms: when a heavy frame (e.g. a full grid redraw) makes
-      // processEvent()+lv_timer_handler() run long, the wall-clock gap
-      // between ticks stretches well past 10ms. A hardcoded increment made
-      // every animation on the device play in slow motion during exactly
-      // the frames where smoothness mattered most.
       TickType_t now = xTaskGetTickCount();
-      uint32_t elapsed_ms = (uint32_t)(now - last_tick_time) * portTICK_PERIOD_MS;
-      if (elapsed_ms == 0) elapsed_ms = 1;
-      /* Clamp so a long shared-SPI JIT park (see s_lvgl_gate_closed above,
-       * which doesn't touch last_tick_time while parked) can't slingshot
-       * every in-flight animation/timer to its end state on resume. */
-      if (elapsed_ms > 100) elapsed_ms = 100;
-      lv_tick_inc(elapsed_ms);
-      last_tick_time = now;
       // Monitor input queue backlog periodically
       if (now - last_mon >= pdMS_TO_TICKS(500)) {
           UBaseType_t pending = uxQueueMessagesWaiting((QueueHandle_t)input_queue);
@@ -4055,7 +5332,20 @@ void lvgl_tick_task(void *arg) {
           }
       }
 
-      vTaskDelay(tick_interval);
+#if LV_TICK_CUSTOM
+      // The independent clock advances during rendering/waiting, so LVGL's
+      // returned delay already accounts for work. Do not subtract it twice.
+      uint32_t sleep_ms = next_timer_ms;
+#else
+      uint32_t work_ms = (uint32_t)(xTaskGetTickCount() - pass_start) * portTICK_PERIOD_MS;
+      uint32_t sleep_ms = next_timer_ms > work_ms ? next_timer_ms - work_ms : 0;
+#endif
+      if (sleep_ms > max_idle_delay_ms) sleep_ms = max_idle_delay_ms;
+      if (sleep_ms > 0) {
+          vTaskDelay(pdMS_TO_TICKS(sleep_ms));
+      } else {
+          vTaskDelay(1);
+      }
   }
   vTaskDelete(NULL);
 }

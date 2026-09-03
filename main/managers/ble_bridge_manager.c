@@ -25,7 +25,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 #include "host/ble_att.h"
 #include "host/ble_gap.h"
 #include "host/ble_gatt.h"
@@ -122,7 +122,7 @@ static void bridge_save_enabled(bool enabled);
 static bool bridge_load_bridged(void);
 static void bridge_save_bridged(bool bridged);
 
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 static int bridge_gatt_access_cb(uint16_t conn_handle, uint16_t attr_handle,
                                  struct ble_gatt_access_ctxt *ctxt, void *arg);
 static int bridge_gap_event_cb(struct ble_gap_event *event, void *arg);
@@ -223,7 +223,7 @@ static size_t bridge_notify_payload_cap(void) {
     return cap;
 }
 
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 static void bridge_clear_notify_queue(void) {
     if (!s_bridge.notify_queue) {
         return;
@@ -459,7 +459,7 @@ static bool bridge_is_local_ctrl(const char *cmd) {
     return strcmp(lower, "stop") == 0;
 }
 
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 /* Drops a GATT registration flag left over from a previous NimBLE host
  * incarnation. Full host teardown (ble_hs_deinit) owns the single legal
  * ble_gatts_stop() per incarnation, so profiles are never torn down on stop;
@@ -484,7 +484,7 @@ static void bridge_stop_locked(void) {
     s_bridge.active_command = false;
     s_bridge.active_cmd_id = 0;
     bridge_unlock();
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     bridge_clear_notify_queue();
     if (s_bridge.ble_connected && s_bridge.conn_handle != BLE_HS_CONN_HANDLE_NONE) {
         (void)ble_gap_terminate(s_bridge.conn_handle, BLE_ERR_REM_USER_CONN_TERM);
@@ -661,11 +661,11 @@ static void bridge_task(void *arg) {
     for (;;) {
         bridge_notify_item_t item = {0};
         if (xQueueReceive(s_bridge.notify_queue, &item, pdMS_TO_TICKS(100)) == pdTRUE) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
             int notify_result = bridge_notify_item(&item);
 #endif
             free(item.data);
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
             if (notify_result == 0) {
                 bridge_fail_transport(item.conn_handle, item.connection_generation,
                                       "notification retries exhausted");
@@ -682,7 +682,7 @@ static void bridge_task(void *arg) {
     vTaskDelete(NULL);
 }
 
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 static bool bridge_start_advertising(void) {
     if (ble_gap_adv_active()) {
         (void)ble_gap_adv_stop();
@@ -1021,7 +1021,7 @@ static void bridge_kick_wait_and_send(void) {
 }
 
 bool ble_bridge_start(void) {
-#ifdef CONFIG_IDF_TARGET_ESP32S2
+#if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(GHOSTESP_NO_NATIVE_BLE)
     glog("blebridge is not supported on ESP32-S2.\n");
     return false;
 #else
@@ -1163,7 +1163,7 @@ void ble_bridge_apply_saved_enabled(void) {
 }
 
 void ble_bridge_stop(void) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     if (!s_bridge.running) {
         return;
     }
@@ -1192,7 +1192,7 @@ static void bridge_print_status(bool machine) {
     }
 
     const char *ble_state = "idle";
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     if (s_bridge.ble_connected) {
         ble_state = "connected 1";
     } else if (s_bridge.running && ble_gap_adv_active()) {

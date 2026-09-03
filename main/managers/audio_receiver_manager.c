@@ -1,6 +1,6 @@
 #include "managers/audio_receiver_manager.h"
 
-#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER)
+#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER) || defined(CONFIG_HAS_CROWPANEL_NS4168)
 
 #include "managers/audio_i2s_output.h"
 #include "core/esp_comm_manager.h"
@@ -546,6 +546,23 @@ static void audio_decode_task(void *arg)
                 }
             }
             if (aerr == ESP_AUDIO_ERR_OK && out.decoded_size > 0) {
+                /* Query the decoder format before the first PCM write. The
+                 * output driver retains the previous track's source rate
+                 * between sessions; writing one block before updating it can
+                 * make a 48 kHz track start at the wrong pitch (and can leave
+                 * it wrong if decoder info is only reported once). */
+                if (s_recv.detected_sample_rate == 0) {
+                    esp_audio_simple_dec_info_t info = {0};
+                    if (esp_audio_simple_dec_get_info(s_recv.simple_dec, &info) == ESP_AUDIO_ERR_OK) {
+                        if (info.sample_rate > 0) {
+                            audio_receiver_manager_set_sample_rate(info.sample_rate);
+                        }
+                        if (info.channel > 0) {
+                            s_recv.output_channels = info.channel;
+                        }
+                    }
+                }
+
 #ifndef CONFIG_HAS_AW88298_SPEAKER
                 /* Light PCM attenuation (-6 dB) applied in-place in the
                  * heap-allocated decode buffer. This avoids clipping on a
@@ -575,18 +592,6 @@ static void audio_decode_task(void *arg)
                     }
                 }
 
-                /* Auto-detect sample rate on first successful decode */
-                if (s_recv.detected_sample_rate == 0) {
-                    esp_audio_simple_dec_info_t info = {0};
-                    if (esp_audio_simple_dec_get_info(s_recv.simple_dec, &info) == ESP_AUDIO_ERR_OK) {
-                        if (info.sample_rate > 0) {
-                            audio_receiver_manager_set_sample_rate(info.sample_rate);
-                        }
-                        if (info.channel > 0) {
-                            s_recv.output_channels = info.channel;
-                        }
-                    }
-                }
             } else if (aerr != ESP_AUDIO_ERR_OK && aerr != ESP_AUDIO_ERR_BUFF_NOT_ENOUGH) {
                 ESP_LOGW(TAG, "Decode error: %d", (int)aerr);
             }

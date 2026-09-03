@@ -2,6 +2,9 @@
 
 #include "gui/lvgl_safe.h"
 #include "gui/screen_layout.h"
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+#include "gui/native_canvas_touch.h"
+#endif
 #include "managers/plugin_api.h"
 #include "managers/plugin_loader.h"
 #include "managers/sd_card_manager.h"
@@ -35,6 +38,9 @@ static lv_timer_t *s_launch_timer = NULL;
 #define PLUGIN_RUNNER_OUTPUT_BUF_SIZE 2048
 static char *s_output_buf = NULL;
 static bool s_touch_started = false;
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+static bool s_touch_raw_canvas = false;
+#endif
 static bool s_touch_scrolling = false;
 static lv_point_t s_touch_start = {0};
 static lv_point_t s_touch_last = {0};
@@ -161,6 +167,9 @@ static void runner_show_load_error_toast(esp_err_t err) {
 
 static bool s_sd_eject_detected = false;
 static volatile bool s_exit_queued = false;
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+static lv_timer_t *s_home_exit_timer = NULL;
+#endif
 
 static void plugin_runner_launch_pending(void);
 
@@ -170,6 +179,43 @@ static uint32_t plugin_runner_tick_interval(const plugin_loaded_app_t *loaded) {
     }
     return PLUGIN_RUNNER_TICK_MS;
 }
+
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+static void plugin_runner_cancel_home_exit(void) {
+    if (s_home_exit_timer) lv_timer_del(s_home_exit_timer);
+    s_home_exit_timer = NULL;
+}
+
+static void plugin_runner_home_exit_poll(lv_timer_t *timer) {
+    (void)timer;
+    if (display_manager_get_current_view() != &plugin_runner_view) {
+        plugin_runner_cancel_home_exit();
+        return;
+    }
+    if (__atomic_load_n(&s_tick_task, __ATOMIC_ACQUIRE)) return;
+    plugin_runner_cancel_home_exit();
+    /* Rejoin the existing exit path only after on_tick has returned. */
+    plugin_runner_request_exit();
+}
+
+bool plugin_runner_home_exit_pending(void) {
+    return s_home_exit_timer != NULL;
+}
+
+bool plugin_runner_request_home_exit(void) {
+    /* P4 Home only. Leave joystick hold, Back and app-requested exits alone.
+     * Home runs on the UI task and must not join a worker waiting for a UI
+     * blit. Keep LVGL running while the worker completes its current tick. */
+    if (s_home_exit_timer) return true;
+    s_home_exit_timer = lv_timer_create(plugin_runner_home_exit_poll, 16, NULL);
+    if (!s_home_exit_timer) {
+        ESP_LOGE(TAG, "Cannot schedule Home exit");
+        return false;
+    }
+    s_tick_stop_requested = true;
+    return true;
+}
+#endif
 
 static void plugin_runner_go_back_async(void *arg) {
     (void)arg;
@@ -232,7 +278,11 @@ static void plugin_runner_tick_task(void *arg) {
         }
     }
 
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+    __atomic_store_n(&s_tick_task, NULL, __ATOMIC_RELEASE);
+#else
     s_tick_task = NULL;
+#endif
     if (s_tick_stopped) xSemaphoreGive(s_tick_stopped);
     vTaskDeleteWithCaps(NULL);
 }
@@ -320,6 +370,10 @@ static ghostesp_input_event_t convert_input(const InputEvent *event) {
             out.type = GHOSTESP_INPUT_BACK;
             out.pressed = event->data.exit_pressed;
             break;
+        case INPUT_TYPE_HOME_BUTTON:
+            out.type = GHOSTESP_INPUT_BACK;
+            out.pressed = event->data.home_pressed;
+            break;
     }
     return out;
 }
@@ -392,8 +446,17 @@ static bool plugin_runner_handle_touch(const InputEvent *event) {
             s_touch_start = data->point;
             s_touch_last = data->point;
             s_touch_scroll_target = NULL;
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+            plugin_loaded_app_t *loaded = plugin_loader_current();
+            s_touch_raw_canvas = loaded && loaded->running && loaded->app &&
+                loaded->app->on_input &&
+                native_canvas_touch_target(find_deepest_at(s_root, &data->point), s_root);
+#endif
             return false;
         }
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+        if (s_touch_raw_canvas) return false;
+#endif
         int total_dx = data->point.x - s_touch_start.x;
         int total_dy = data->point.y - s_touch_start.y;
         int dy = data->point.y - s_touch_last.y;
@@ -413,6 +476,12 @@ static bool plugin_runner_handle_touch(const InputEvent *event) {
     if (data->state != LV_INDEV_STATE_REL || !s_touch_started) return false;
     s_touch_started = false;
     s_touch_scroll_target = NULL;
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+    if (s_touch_raw_canvas) {
+        s_touch_raw_canvas = false;
+        return false;
+    }
+#endif
     if (s_touch_scrolling) {
         s_touch_scrolling = false;
         return true;
@@ -440,6 +509,9 @@ static bool plugin_runner_handle_touch(const InputEvent *event) {
 
 static void plugin_runner_event_handler(InputEvent *event) {
     if (!event) return;
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+    if (plugin_runner_home_exit_pending()) return;
+#endif
     if (esp_timer_get_time() < s_ignore_input_until_us) return;
     ghostesp_input_event_t app_event = convert_input(event);
     if (event->type == INPUT_TYPE_JOYSTICK && event->data.joystick_index == 1) {
@@ -508,6 +580,10 @@ static void plugin_runner_launch_cb(lv_timer_t *timer) {
 }
 
 static void plugin_runner_launch_pending(void) {
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+    /* A Home gesture can arrive before the deferred launch timer fires. */
+    if (plugin_runner_home_exit_pending()) return;
+#endif
     if (s_pending_app_id[0] == '\0') {
         runner_set_title_now("No app selected");
         runner_print_now("Return to Apps and select an SD app.\n");
@@ -635,6 +711,9 @@ void plugin_runner_preserve_for_keyboard_input(void) {
 }
 
 void plugin_runner_view_destroy(void) {
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+    plugin_runner_cancel_home_exit();
+#endif
     if (s_launch_timer) {
         lv_timer_del(s_launch_timer);
         s_launch_timer = NULL;

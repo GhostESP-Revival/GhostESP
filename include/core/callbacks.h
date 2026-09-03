@@ -66,7 +66,7 @@ typedef void (*wifi_raw_observer_t)(const wifi_promiscuous_pkt_t *pkt,
 void wifi_raw_set_observer(wifi_raw_observer_t observer);
 void wifi_eapol_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type);
 void wardriving_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type);
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 #include "host/ble_gap.h"
 void ble_wardriving_callback(struct ble_gap_event *event, void *arg);
 void ble_skimmer_scan_callback(struct ble_gap_event *event, void *arg);

@@ -153,7 +153,7 @@ progress_bar_view_t *progress_bar_view_create_with_cancel(const char *title, voi
     view->cancel_user_data = user_data;
     view->touch_bar = NULL;
 
-#ifdef CONFIG_USE_TOUCHSCREEN
+#if defined(CONFIG_USE_TOUCHSCREEN) && GUI_LEGACY_TOUCH_BAR
     {
 #else
     if (0) {

@@ -3,6 +3,7 @@
 #include "gui/lvgl_safe.h"
 #include "gui/screen_layout.h"
 #include "gui/theme_palette_api.h"
+#include "gui/design_tokens.h"
 #include "managers/display_manager.h"
 #include "managers/settings_manager.h"
 #include "gui/accessibility_fonts.h"
@@ -365,7 +366,7 @@ void music_visualizer_view_create(void) {
     debug_label = lv_label_create(root);
     lv_obj_set_style_text_font(debug_label, accessibility_get_font_small(), 0);
     lv_obj_set_style_text_color(debug_label, theme_muted, 0);
-    lv_obj_align(debug_label, LV_ALIGN_BOTTOM_MID, 0, -4);
+    lv_obj_align(debug_label, LV_ALIGN_BOTTOM_MID, 0, -(GUI_HOME_SAFE_H + 4));
     lv_label_set_text(debug_label, "frames 0  idle");
 
     if (!amplitude_queue) {

@@ -28,6 +28,22 @@
 
 #define KEYBOARD_COLUMNS 10
 
+static inline int keyboard_layout_padding(void) {
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    return 10;
+#else
+    return 5;
+#endif
+}
+
+static inline int keyboard_display_height(void) {
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    return 64;
+#else
+    return 40;
+#endif
+}
+
 static const char *TAG = "keyboard_screen";
 
 uint32_t theme_palette_get_background(uint8_t theme);
@@ -350,7 +366,9 @@ static void submit_text() {
         memset(input_buffer, 0, sizeof(input_buffer));
         input_len = 0;
         update_input_label();
-        display_manager_go_back();
+        /* Submit callbacks own the destination view.  Queuing a Back here
+         * races callbacks such as the terminal callback, which must restore
+         * and refresh its view before executing the command. */
         callback(submitted_text);
     } else if (input_len > 0) {
         terminal_set_return_view(&options_menu_view);
@@ -499,11 +517,14 @@ static void recreate_keyboard_buttons() {
     lv_obj_add_flag(root, LV_OBJ_FLAG_HIDDEN);
     int screen_height = LV_VER_RES;
     int status_bar_height = GUI_STATUS_BAR_HEIGHT;
-    int display_height = 40;
-    int padding = 5;
+    int display_height = keyboard_display_height();
+    int padding = keyboard_layout_padding();
     int keys_start_y = status_bar_height + display_height + padding * 2;
     int keys_area_height = screen_height - keys_start_y;
     int key_height = (keys_area_height / num_rows) - 4;
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    if (key_height > GUI_CONTROL_H) key_height = GUI_CONTROL_H;
+#endif
     int key_y = keys_start_y;
 
     int max_keys = 0;
@@ -591,11 +612,14 @@ static void keyboard_build_step(lv_timer_t *t) {
 
     int screen_height = LV_VER_RES;
     int status_bar_height = GUI_STATUS_BAR_HEIGHT;
-    int display_height = 40;
-    int padding = 5;
+    int display_height = keyboard_display_height();
+    int padding = keyboard_layout_padding();
     int keys_start_y = status_bar_height + display_height + padding * 2;
     int keys_area_height = screen_height - keys_start_y;
     int key_height = (keys_area_height / num_rows) - 4;
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    if (key_height > GUI_CONTROL_H) key_height = GUI_CONTROL_H;
+#endif
     int built = 0;
     const int batch = 4;
     // timing for profiling heavy steps
@@ -794,8 +818,8 @@ static void keyboard_create() {
     lv_obj_set_style_bg_color(root, kb_bg(), 0);
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
 
-    int padding = 5;
-    int display_height = 40;
+    int padding = keyboard_layout_padding();
+    int display_height = keyboard_display_height();
     lv_color_t text = kb_text();
     lv_color_t surface = kb_surface();
     lv_coord_t radius = kb_radius();
@@ -1261,8 +1285,8 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
         int screen_width = LV_HOR_RES;
         int screen_height = LV_VER_RES;
         int status_bar_height = GUI_STATUS_BAR_H;
-        int display_height = 40;
-        int padding = 5;
+        int display_height = keyboard_display_height();
+        int padding = keyboard_layout_padding();
         int keys_start_y = status_bar_height + display_height + padding * 2;
 
         int row = -1;
@@ -1543,8 +1567,8 @@ static void build_key_matrix(void) {
     int screen_width = LV_HOR_RES;
     int screen_height = LV_VER_RES;
     int status_bar_height = GUI_STATUS_BAR_H;
-    int padding = 5;
-    int display_height = 40;
+    int padding = keyboard_layout_padding();
+    int display_height = keyboard_display_height();
     int keys_start_y = status_bar_height + display_height + padding * 2;
     int keys_area_height = screen_height - keys_start_y - padding;
     int matrix_width = screen_width - 2 * padding;
@@ -1627,7 +1651,11 @@ static void build_key_matrix(void) {
     }
 
     lv_obj_set_style_text_font(key_matrix,
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+                               accessibility_get_font_body(),
+#else
                                key_target <= 22 ? &lv_font_montserrat_12 : &lv_font_montserrat_14,
+#endif
                                LV_PART_ITEMS);
 
     lv_btnmatrix_set_map(key_matrix, btn_map);
@@ -1680,7 +1708,7 @@ static void build_key_matrix(void) {
 
 static void get_key_position(int row, int col, int *x, int *width, bool symbols_mode) {
     int screen_width = LV_HOR_RES;
-    int padding = 5;
+    int padding = keyboard_layout_padding();
     const int *row_lens = symbols_mode ? symbols_row_lengths : row_lengths;
     int actual_len = row_lens[row];
     int special_count = 0;

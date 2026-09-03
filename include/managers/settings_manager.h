@@ -6,6 +6,7 @@
 #include <nvs_flash.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include "gui/menu_config.h"
 
 // Enum for RGB Modes
 typedef enum {
@@ -180,6 +181,9 @@ typedef enum {
     SETTING_FAVORITES_BYPASS,
     SETTING_MANAGE_FAVORITES,
     SETTING_THEME_BACKGROUND_EFFECTS,
+    SETTING_MENU_CONFIG,
+    SETTING_MAIN_MENU_ITEMS,
+    SETTING_APPS_MENU_ITEMS,
 } SettingsType;
 
 /* 16 slots x 64B names. The NVS blob is [count][FAVORITES_MAX x 64]; older
@@ -343,6 +347,7 @@ typedef struct {
     uint8_t favorites_count;
     char favorites[FAVORITES_MAX][FAVORITE_NAME_LEN];
     bool favorites_bypass_pin;
+    menu_config_t menu_config;
 
     // Lockscreen settings
     bool lockscreen_enabled;

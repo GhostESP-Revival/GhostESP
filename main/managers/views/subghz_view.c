@@ -4621,10 +4621,14 @@ void subghz_view_create(void) {
 
 #ifdef CONFIG_USE_TOUCHSCREEN
     const int STATUS_BAR_HEIGHT = GUI_STATUS_BAR_HEIGHT;
+#if GUI_LEGACY_TOUCH_BAR
     const int TOUCH_BAR_HEIGHT = SUBGHZ_SCROLL_BTN_SIZE + SUBGHZ_SCROLL_BTN_PADDING * 2;
+#else
+    const int TOUCH_BAR_HEIGHT = 0;
+#endif
     int list_h = LV_VER_RES - STATUS_BAR_HEIGHT - TOUCH_BAR_HEIGHT;
-    lv_obj_set_size(list, LV_HOR_RES, list_h);
-    lv_obj_align(list, LV_ALIGN_TOP_LEFT, 0, STATUS_BAR_HEIGHT);
+    lv_obj_set_size(list, GUI_OPTIONS_LIST_WIDTH, list_h);
+    lv_obj_align(list, LV_ALIGN_TOP_MID, 0, STATUS_BAR_HEIGHT);
 #endif
 
     s_scan_row = options_view_add_item(s_ov, "Capture", subghz_scan_row_cb, NULL);
@@ -4643,6 +4647,7 @@ void subghz_view_create(void) {
     options_view_set_selected(s_ov, s_root_selected_index);
 
 #ifdef CONFIG_USE_TOUCHSCREEN
+#if GUI_LEGACY_TOUCH_BAR
     lv_color_t ctrl_color = lv_color_hex(theme_palette_get_surface_alt(theme));
     lv_color_t ctrl_text_color = lv_color_hex(theme_palette_get_text(theme));
 
@@ -4698,6 +4703,7 @@ void subghz_view_create(void) {
     lv_obj_set_style_text_color(down_label, ctrl_text_color, 0);
     lv_obj_center(down_label);
     lv_obj_add_flag(s_scroll_down_btn, LV_OBJ_FLAG_HIDDEN);
+#endif /* GUI_LEGACY_TOUCH_BAR */
 #endif
 
     s_remote_mode = subghz_is_remote_mode();

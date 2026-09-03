@@ -31,7 +31,9 @@
 #include "managers/settings_manager.h"
 #include "managers/status_display_manager.h"
 #include "managers/ghostchi_manager.h"
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
 #include "esp_bt.h"
+#endif
 #include "managers/ap_manager.h"
 #include "managers/wifi_manager.h"
 #include "core/scan_saver.h"
@@ -933,9 +935,12 @@ bool ble_init_with_pre_host(ble_pre_host_init_fn init_fn,
         memset(handlers, 0, sizeof(handlers));
         handler_count = 0;
 
-        // Release Classic BT controller memory on non-ESP32 targets too to free RAM for NimBLE
-        // Safe to call multiple times; ignore return if already released
+        // Release Classic BT controller memory on native-controller targets.
+        // ESP32-P4 has no local controller; its hosted BT controller lives on
+        // the C6 and is initialized by app_main through ESP-Hosted.
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
         (void)esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT);
+#endif
 
         // log DMA-capable internal heap info right before NimBLE init
         size_t free_internal_dma = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT | MALLOC_CAP_DMA);

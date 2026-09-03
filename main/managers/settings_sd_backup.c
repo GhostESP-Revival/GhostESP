@@ -152,6 +152,17 @@ static cJSON *settings_to_json_object(const FSettings *s) {
   cJSON_AddBoolToObject(o, "infrared_easy_mode", s->infrared_easy_mode);
   cJSON_AddBoolToObject(o, "nav_buttons_enabled", s->nav_buttons_enabled);
   cJSON_AddNumberToObject(o, "menu_layout", (double)s->menu_layout);
+  cJSON *menu_items = cJSON_AddArrayToObject(o, "menu_items");
+  for (int i = 0; menu_items && i < s->menu_config.count && i < MENU_CONFIG_MAX; ++i) {
+    const menu_config_entry_t *entry = &s->menu_config.entries[i];
+    cJSON *item = cJSON_CreateObject();
+    if (!item) break;
+    cJSON_AddStringToObject(item, "id", entry->id);
+    cJSON_AddNumberToObject(item, "placement", entry->placement);
+    cJSON_AddNumberToObject(item, "main_order", entry->order[0]);
+    cJSON_AddNumberToObject(item, "apps_order", entry->order[1]);
+    cJSON_AddItemToArray(menu_items, item);
+  }
   cJSON_AddBoolToObject(o, "carousel_invert_direction", s->carousel_invert_direction);
   cJSON_AddNumberToObject(o, "neopixel_max_brightness", (double)s->neopixel_max_brightness);
   cJSON_AddBoolToObject(o, "encoder_invert_direction", s->encoder_invert_direction);
@@ -293,6 +304,22 @@ static void json_apply_to_settings(FSettings *s, const cJSON *root) {
     s->nav_buttons_enabled = jget_bool(root, "nav_buttons_enabled", s->nav_buttons_enabled);
   }
   s->menu_layout = (uint8_t)jget_int_clamp(root, "menu_layout", s->menu_layout, 0, 4);
+  const cJSON *menu_items = cJSON_GetObjectItemCaseSensitive(root, "menu_items");
+  if (cJSON_IsArray(menu_items)) {
+    menu_config_reset(&s->menu_config);
+    const cJSON *item;
+    cJSON_ArrayForEach(item, menu_items) {
+      const cJSON *id = cJSON_GetObjectItemCaseSensitive(item, "id");
+      if (!cJSON_IsString(id) || !id->valuestring || strlen(id->valuestring) >= MENU_CONFIG_ID_LEN) continue;
+      int placement = jget_int_clamp(item, "placement", MENU_PLACE_APPS, 1, 3);
+      if (!menu_config_set(&s->menu_config, id->valuestring, placement)) continue;
+      menu_config_order(&s->menu_config, id->valuestring, placement, MENU_PLACE_MAIN,
+                        jget_int_clamp(item, "main_order", MENU_ORDER_DEFAULT, 0, 255));
+      menu_config_order(&s->menu_config, id->valuestring, placement, MENU_PLACE_APPS,
+                        jget_int_clamp(item, "apps_order", MENU_ORDER_DEFAULT, 0, 255));
+    }
+    menu_config_validate(&s->menu_config);
+  }
   if (cJSON_GetObjectItemCaseSensitive(root, "carousel_invert_direction")) {
     s->carousel_invert_direction =
         jget_bool(root, "carousel_invert_direction", s->carousel_invert_direction);

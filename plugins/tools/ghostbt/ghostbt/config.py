@@ -84,10 +84,10 @@ def copy_bundled_sdk(dst_dir: pathlib.Path) -> pathlib.Path:
     return dst
 
 
-def load_manifest(app_dir: pathlib.Path) -> dict:
-    manifest_path = app_dir / "manifest.json"
+def load_manifest(app_dir: pathlib.Path, manifest_name: str = "manifest.json") -> dict:
+    manifest_path = app_dir / manifest_name
     if not manifest_path.is_file():
-        raise FileNotFoundError(f"manifest.json not found in {app_dir}")
+        raise FileNotFoundError(f"{manifest_name} not found in {app_dir}")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     for field in ("id", "entry"):
         if field not in manifest:
