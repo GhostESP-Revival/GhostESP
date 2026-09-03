@@ -49,6 +49,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Neighbour icons are pre-fetched into the asset cache after each carousel/Hero transition
 - Demoted hot-path navigation and input logs to verbose so UART output no longer stalls input handling
 - Raised the persistent shared-SPI SD clock to 20 MHz on the Banshee C5 (was 10 MHz) so SD reads finish faster and free the display bus sooner
+- Massively improved Banshee C5 display responsiveness by driving the screen over the PARLIO peripheral, freeing SPI for a permanent 20MHz SD mount - @Billi-Green
 - Audio player shows exact track length parsed from Xing/VBRI headers (CBR fallback excludes ID3 tags)
 - Audio progress now follows the audible playback clock: no jump at track start, and pause/resume continues from the same point
 - 320 kbps MP3s now play on the local speaker; the bitrate cap only applies to GhostLink streaming
