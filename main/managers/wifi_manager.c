@@ -50,6 +50,7 @@
 #include <mdns.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include <sys/time.h>
 #if defined(CONFIG_WITH_SCREEN) || defined(WITH_SCREEN)
 #include "managers/views/music_visualizer.h"
@@ -81,6 +82,9 @@
 #include "attacks/wifi/sae_flood.h"
 #include "attacks/wifi/channel_switch_attack.h"
 #include "attacks/wifi/gtk_abuse.h"
+#include "attacks/wifi/probe_request_flood.h"
+#include "attacks/wifi/bad_msg.h"
+#include "attacks/wifi/auth_flood.h"
 #include "scans/wifi/ap_scan.h"
 #include "scans/wifi/airspace_monitor.h"
 #include "scans/wifi/station_scan.h"
@@ -692,6 +696,14 @@ static bool wifi_reconnect_blocked(const char **reason_out) {
         if (reason_out) *reason_out = "radio reserved";
         return true;
     }
+    /* A manual connect owns the station configuration and performs its own
+     * retry/wait loop.  Starting the background reconnect worker here races
+     * that loop and can make the AP immediately drop the association. */
+    if (wifi_event_group &&
+        (xEventGroupGetBits(wifi_event_group) & WIFI_CONNECTING_BIT)) {
+        if (reason_out) *reason_out = "manual connection in progress";
+        return true;
+    }
     if (wifi_monitor_capture_active) {
         if (reason_out) *reason_out = "monitor mode";
         return true;
@@ -731,6 +743,13 @@ static void wifi_reconnect_timer_cb(void *arg) {
 
     const char *reason = NULL;
     if (wifi_reconnect_blocked(&reason)) {
+#if CONFIG_IDF_TARGET_ESP32P4
+        /* The manual connect loop owns retries until it finishes. */
+        if (wifi_event_group &&
+            (xEventGroupGetBits(wifi_event_group) & WIFI_CONNECTING_BIT)) {
+            return;
+        }
+#endif
         ESP_LOGI(TAG, "Skipping auto-reconnect while %s", reason ? reason : "busy");
         if (wifi_reconnect_timer) {
             esp_timer_start_once(wifi_reconnect_timer, 3000 * 1000);
@@ -845,6 +864,22 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
             glog("STA started\n");
             // No auto-connect here - handled by wifi_event_handler
             break;
+        case WIFI_EVENT_STA_CONNECTED:
+            /* ESP-Hosted delivers the association event through the remote
+             * Wi-Fi event wrapper.  Explicitly kick the P4-side DHCP client
+             * here as well; on some hosted/C6 boots the default netif action
+             * does not see the corresponding remote event. */
+            if (wifiSTA) {
+                esp_err_t dhcp_err = esp_netif_dhcpc_start(wifiSTA);
+                if (dhcp_err != ESP_OK &&
+                    dhcp_err != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED) {
+                    ESP_LOGW(TAG, "STA connected but DHCP start failed: %s",
+                             esp_err_to_name(dhcp_err));
+                } else {
+                    ESP_LOGI(TAG, "STA connected; host DHCP client is active");
+                }
+            }
+            break;
         case WIFI_EVENT_STA_DISCONNECTED:
             if (manual_disconnect) {
                 glog("Disconnected from Wi-Fi (manual)\n");
@@ -955,6 +990,38 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
         wifi_driver_started = true;
         ESP_LOGD(TAG, "STA started; saved-network connect is explicit/reconnect-only");
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_CONNECTED) {
+#if CONFIG_IDF_TARGET_ESP32P4
+        /* The default Wi-Fi handler has already registered RX, raised the
+         * netif and started DHCP. Do not run its actions a second time. */
+        esp_netif_dhcp_status_t dhcp_status = ESP_NETIF_DHCP_INIT;
+        esp_err_t dhcp_err = wifiSTA ? esp_netif_dhcpc_get_status(wifiSTA, &dhcp_status)
+                                    : ESP_ERR_INVALID_STATE;
+        if (dhcp_err == ESP_OK && dhcp_status == ESP_NETIF_DHCP_STARTED) {
+            ESP_LOGI(TAG, "STA associated; waiting for DHCP lease (netif up=%d)",
+                     esp_netif_is_netif_up(wifiSTA));
+        } else {
+            ESP_LOGW(TAG, "STA associated but DHCP is not running: status=%d err=%s",
+                     (int)dhcp_status, esp_err_to_name(dhcp_err));
+        }
+#else
+        /* With ESP-Hosted, association can arrive without the normal local
+         * netif action starting DHCP.  This is the registered handler, so make
+         * the host STA obtain its address as soon as the C6 reports success. */
+        if (wifiSTA) {
+            /* Ensure the lwIP netif is up and the hosted station receive path
+             * is treated exactly like a normal local Wi-Fi connection. */
+            esp_netif_action_connected(wifiSTA, event_base, event_id, event_data);
+            esp_err_t dhcp_err = esp_netif_dhcpc_start(wifiSTA);
+            if (dhcp_err != ESP_OK &&
+                dhcp_err != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED) {
+                ESP_LOGW(TAG, "STA connected but DHCP start failed: %s",
+                         esp_err_to_name(dhcp_err));
+            } else {
+                ESP_LOGI(TAG, "STA connected; host DHCP client is active");
+            }
+        }
+#endif
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_STOP) {
         wifi_driver_started = false;
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
@@ -962,6 +1029,34 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
         
         // Provide more detailed reason descriptions
         const char* reason_str = "Unknown";
+#if CONFIG_IDF_TARGET_ESP32P4
+        /* Use IDF constants: the old numeric table mislabeled reasons 200-205. */
+        switch(disconnected->reason) {
+            case WIFI_REASON_AUTH_EXPIRE: reason_str = "Authentication expired"; break;
+            case WIFI_REASON_AUTH_LEAVE: reason_str = "Authentication leave"; break;
+            case WIFI_REASON_DISASSOC_DUE_TO_INACTIVITY: reason_str = "Association inactive"; break;
+            case WIFI_REASON_ASSOC_TOOMANY: reason_str = "AP has too many stations"; break;
+            case WIFI_REASON_ASSOC_LEAVE: reason_str = "Association leave"; break;
+            case WIFI_REASON_STA_LEAVING: reason_str = "Station leaving"; break;
+            case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT: reason_str = "4-way handshake timeout"; break;
+            case WIFI_REASON_BEACON_TIMEOUT: reason_str = "Beacon timeout"; break;
+            case WIFI_REASON_NO_AP_FOUND: reason_str = "AP not found"; break;
+            case WIFI_REASON_AUTH_FAIL: reason_str = "Authentication failed"; break;
+            case WIFI_REASON_ASSOC_FAIL: reason_str = "Association failed"; break;
+            case WIFI_REASON_HANDSHAKE_TIMEOUT: reason_str = "Handshake timeout"; break;
+            case WIFI_REASON_CONNECTION_FAIL: reason_str = "Connection failed"; break;
+            case WIFI_REASON_NO_AP_FOUND_W_COMPATIBLE_SECURITY: reason_str = "No AP with compatible security"; break;
+            case WIFI_REASON_NO_AP_FOUND_IN_AUTHMODE_THRESHOLD: reason_str = "AP security below configured threshold"; break;
+            case WIFI_REASON_NO_AP_FOUND_IN_RSSI_THRESHOLD: reason_str = "AP signal below configured threshold"; break;
+        }
+        /* Keep the actual cause visible even when a manual attempt owns retries.
+         * SSID is length-delimited in IDF and need not be null-terminated. */
+        int ssid_len = disconnected->ssid_len;
+        if (ssid_len > sizeof(disconnected->ssid)) ssid_len = sizeof(disconnected->ssid);
+        ESP_LOGW(TAG, "STA disconnect: %s (reason %u), SSID=\"%.*s\", RSSI=%d",
+                 reason_str, (unsigned)disconnected->reason,
+                 ssid_len, disconnected->ssid, (int)disconnected->rssi);
+#else
         switch(disconnected->reason) {
             case 2: reason_str = "Auth Expired"; break;
             case 3: reason_str = "Auth Leave"; break;
@@ -977,6 +1072,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
             case 204: reason_str = "Assoc Fail"; break;
             case 205: reason_str = "Handshake Timeout"; break;
         }
+#endif
         
         // Clean, single-line disconnect logging
         const char *reason = NULL;
@@ -987,10 +1083,17 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
         } else if (wifi_reconnect_blocked(&reason)) {
             glog("WiFi disconnected while %s\n", reason ? reason : "busy");
             manual_disconnect = false;
-            if (wifi_reconnect_count == 0) {
-                wifi_reconnect_count = 1;
+#if CONFIG_IDF_TARGET_ESP32P4
+            if (xEventGroupGetBits(wifi_event_group) & WIFI_CONNECTING_BIT) {
+                wifi_reconnect_reset();
+            } else
+#endif
+            {
+                if (wifi_reconnect_count == 0) {
+                    wifi_reconnect_count = 1;
+                }
+                wifi_reconnect_schedule();
             }
-            wifi_reconnect_schedule();
         } else if (manual_disconnect) {
             glog("WiFi disconnected manually\n");
             status_display_show_status("WiFi Disconnected");
@@ -1018,6 +1121,14 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
         }
         
         xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
+
+#if !CONFIG_IDF_TARGET_ESP32P4
+        /* Preserve the legacy non-P4 connection handling. On P4 the default
+         * Wi-Fi handler has already taken down the netif and DHCP client. */
+        if (wifiSTA) {
+            esp_netif_action_disconnected(wifiSTA, event_base, event_id, event_data);
+        }
+#endif
 
         {
             dns_server_handle_t h = dns_handle_take();
@@ -2217,7 +2328,7 @@ void wifi_manager_stop_evil_portal_keep_wifi(void) {
     // DON'T call wifi_stop_safely() - keep STA connected
     vTaskDelay(pdMS_TO_TICKS(50));
 
-    ap_manager_start_services();
+    (void)ap_manager_restore_after_attack("portal stop");
 
     esp_log_level_set("wifi", ESP_LOG_ERROR);
 
@@ -2373,8 +2484,10 @@ void wifi_manager_init(void) {
 
     esp_log_level_set("wifi", ESP_LOG_ERROR); // Only show errors, not warnings
 
+#if !CONFIG_IDF_TARGET_ESP32P4
     // Disable WiFi power saving to improve connection stability
     esp_wifi_set_ps(WIFI_PS_NONE);
+#endif
 
     ESP_LOGI(TAG, "wifi_manager: initializing NVS...");
     esp_err_t ret = nvs_flash_init();
@@ -2397,39 +2510,31 @@ void wifi_manager_init(void) {
              (int)(mem_start - heap_caps_get_free_size(MALLOC_CAP_INTERNAL)));
 
     // Initialize WiFi with default settings
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-
     ESP_LOGI(TAG, "wifi_manager: initializing WiFi driver...");
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    ret = ap_manager_ensure_wifi_init();
+    if (ret != ESP_OK) {
+        // Wi-Fi is optional for boards whose primary interface is local. A
+        // driver/configuration failure must not reboot the display firmware.
+        ESP_LOGE(TAG, "wifi_manager: WiFi driver init failed: %s; continuing without WiFi",
+                 esp_err_to_name(ret));
+        TERMINAL_VIEW_ADD_TEXT("WiFi init failed: %s\n", esp_err_to_name(ret));
+        return;
+    }
     ESP_LOGI(TAG, "wifi_manager: WiFi driver init done, free internal RAM: %d bytes (used: %d)", 
              (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL), 
              (int)(mem_start - heap_caps_get_free_size(MALLOC_CAP_INTERNAL)));
 
     // configure country based on saved setting
-    static const struct { const char *code; uint8_t schan; uint8_t nchan; } country_table[] = {
-        {"US", 1, 11}, {"GB", 1, 13}, {"JP", 1, 14}, {"AU", 1, 13}, {"CN", 1, 13}, {"01", 1, 11}
-    };
+    static const char *country_table[] = {"US", "GB", "JP", "AU", "CN", "01"};
     uint8_t country_idx = settings_get_wifi_country(&G_Settings);
     if (country_idx >= sizeof(country_table)/sizeof(country_table[0])) country_idx = 5; // default to World Safe
-    
-#if CONFIG_IDF_TARGET_ESP32C5
-    esp_err_t country_err = esp_wifi_set_country_code(country_table[country_idx].code, true);
+
+    esp_err_t country_err = esp_wifi_set_country_code(country_table[country_idx], true);
     if (country_err == ESP_OK) {
-        ESP_LOGI(TAG, "ESP32-C5 Country set to: %s", country_table[country_idx].code);
+        ESP_LOGI(TAG, "Country set to: %s", country_table[country_idx]);
     } else {
-        ESP_LOGW(TAG, "ESP32-C5: Failed to set country: %s", esp_err_to_name(country_err));
+        ESP_LOGW(TAG, "Failed to set country: %s", esp_err_to_name(country_err));
     }
-#else
-    wifi_country_t country_to_set = {
-        .cc     = {country_table[country_idx].code[0], country_table[country_idx].code[1], 0},
-        .schan  = country_table[country_idx].schan,
-        .nchan  = country_table[country_idx].nchan,
-        .policy = WIFI_COUNTRY_POLICY_MANUAL
-    };
-    ESP_LOGI(TAG, "Setting country: CC='%s', schan=%d, nchan=%d",
-             country_to_set.cc, country_to_set.schan, country_to_set.nchan);
-    ESP_ERROR_CHECK(esp_wifi_set_country(&country_to_set));
-#endif
 
     // Create the WiFi event group
     ESP_LOGI(TAG, "wifi_manager: creating event group...");
@@ -2499,6 +2604,14 @@ void wifi_manager_init(void) {
     // Start Wi-Fi
     ESP_LOGI(TAG, "wifi_manager: starting WiFi (esp_wifi_start)...");
     ESP_ERROR_CHECK(esp_wifi_start());
+#if CONFIG_IDF_TARGET_ESP32P4
+    /* The C6 rejects this before Wi-Fi init (ESP_ERR_WIFI_NOT_INIT).
+     * Apply it after start, before the saved STA connection is requested. */
+    esp_err_t ps_err = esp_wifi_set_ps(WIFI_PS_NONE);
+    if (ps_err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to disable STA power save: %s", esp_err_to_name(ps_err));
+    }
+#endif
     ESP_LOGI(TAG, "wifi_manager: WiFi started, free internal RAM: %d bytes", 
               (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
      
@@ -2549,19 +2662,50 @@ static void wifi_manager_handle_sntp_sync(struct timeval *tv) {
 #endif
 }
 
+/* A stale/default RTC value makes certificate verification fail even though
+ * Wi-Fi and DNS are already working. Keep this floor aligned with OTA's TLS
+ * guard and use the same gate for P4 Cloud Store requests. */
+#define WIFI_TLS_TIME_VALID_AFTER 1767225600LL /* 2026-01-01 */
+
+static bool wifi_manager_system_time_valid(void) {
+    return time(NULL) >= WIFI_TLS_TIME_VALID_AFTER;
+}
+
 void wifi_manager_start_sntp(void) {
+    // Register this for every target. Previously it was accidentally omitted
+    // on boards without an RTC, making P4 SNTP success invisible in logs.
+    esp_sntp_set_time_sync_notification_cb(wifi_manager_handle_sntp_sync);
     if (esp_sntp_enabled()) return;
 
     esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
     esp_sntp_setservername(0, "pool.ntp.org");
-#ifdef CONFIG_HAS_RTC_CLOCK
-    esp_sntp_set_time_sync_notification_cb(wifi_manager_handle_sntp_sync);
-#endif
     esp_sntp_init();
+}
+
+bool wifi_manager_wait_for_valid_time(uint32_t timeout_ms) {
+    if (wifi_manager_system_time_valid()) return true;
+
+    wifi_manager_start_sntp();
+    TickType_t start = xTaskGetTickCount();
+    TickType_t timeout = pdMS_TO_TICKS(timeout_ms);
+    do {
+        if (wifi_manager_system_time_valid()) return true;
+        vTaskDelay(pdMS_TO_TICKS(250));
+    } while ((xTaskGetTickCount() - start) < timeout);
+
+    ESP_LOGW(TAG, "HTTPS skipped: system time is not valid for certificate verification");
+    return false;
 }
 
 void wifi_manager_configure_sta_from_settings(void) {
     wifi_reconnect_reset();
+
+    // wifi_manager_init() can leave the local UI running when the radio
+    // cannot initialize. Do not dereference the event group in that state.
+    if (wifi_event_group == NULL) {
+        ESP_LOGW(TAG, "Skipping STA configuration because WiFi is not initialized");
+        return;
+    }
 
     if (!wifi_driver_started) {
         esp_err_t start_err = esp_wifi_start();
@@ -2578,7 +2722,7 @@ void wifi_manager_configure_sta_from_settings(void) {
     if (saved_ssid && strlen(saved_ssid) > 0) {
         wifi_config_t sta_config = {
             .sta = {
-                .threshold.authmode = (saved_password && strlen(saved_password) > 0) ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN,
+                .threshold.authmode = (saved_password && strlen(saved_password) > 0) ? WIFI_AUTH_WPA_WPA2_PSK : WIFI_AUTH_OPEN,
                 .pmf_cfg = {.capable = true, .required = false},
             },
         };
@@ -3853,8 +3997,18 @@ void wifi_manager_connect_wifi(const char *ssid, const char *password) {
     wifi_connect_cancel_requested = false;
 
     wifi_ap_record_t current_ap = {0};
+#if CONFIG_IDF_TARGET_ESP32P4
+    esp_netif_ip_info_t current_ip = {0};
+    bool has_ip = wifiSTA && esp_netif_is_netif_up(wifiSTA) &&
+                  esp_netif_get_ip_info(wifiSTA, &current_ip) == ESP_OK &&
+                  current_ip.ip.addr != 0;
+#endif
     if (esp_wifi_sta_get_ap_info(&current_ap) == ESP_OK &&
-        strncmp((const char *)current_ap.ssid, ssid, sizeof(current_ap.ssid)) == 0) {
+        strncmp((const char *)current_ap.ssid, ssid, sizeof(current_ap.ssid)) == 0
+#if CONFIG_IDF_TARGET_ESP32P4
+        && has_ip
+#endif
+        ) {
         printf("Already connected to %s\n", ssid);
         TERMINAL_VIEW_ADD_TEXT("Already connected to %s\n", ssid);
         xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
@@ -4082,7 +4236,7 @@ esp_err_t wifi_manager_start_scan_with_time(int seconds) {
 
 cleanup:
     wifi_timed_scan_active = false;
-    ap_manager_start_services();
+    (void)ap_manager_restore_after_attack("timed scan");
     return err;
 }
 
@@ -4559,6 +4713,45 @@ bool wifi_manager_is_channel_switch_attack_running(void) {
     return channel_switch_attack_is_running();
 }
 
+// Probe Request Flood Attack - delegated to probe_request_flood module
+void wifi_manager_start_probe_flood(void) {
+    probe_request_flood_start();
+}
+
+void wifi_manager_stop_probe_flood(void) {
+    probe_request_flood_stop();
+}
+
+bool wifi_manager_is_probe_flood_running(void) {
+    return probe_request_flood_is_running();
+}
+
+// Bad Msg Attack - delegated to bad_msg module
+void wifi_manager_start_bad_msg(void) {
+    bad_msg_start();
+}
+
+void wifi_manager_stop_bad_msg(void) {
+    bad_msg_stop();
+}
+
+bool wifi_manager_is_bad_msg_running(void) {
+    return bad_msg_is_running();
+}
+
+// Auth Flood Attack - delegated to auth_flood module
+void wifi_manager_start_auth_flood(void) {
+    auth_flood_start();
+}
+
+void wifi_manager_stop_auth_flood(void) {
+    auth_flood_stop();
+}
+
+bool wifi_manager_is_auth_flood_running(void) {
+    return auth_flood_is_running();
+}
+
 void wifi_manager_set_html_from_uart(void) {
     use_html_buffer = true;
     if (html_buffer == NULL) {
@@ -4627,7 +4820,7 @@ static bool karma_running = false;
 static TaskHandle_t karma_task_handle = NULL;
 
 // Add these globals near your other Karma variables
-EXT_RAM_BSS_ATTR static char karma_ssid_cache[KARMA_MAX_SSIDS][33];
+static char (*karma_ssid_cache)[33];
 static int karma_ssid_count = 0;
 static int karma_ssid_index = 0;
 static uint32_t last_ssid_change_time = 0;
@@ -4638,6 +4831,13 @@ static char karma_portal_file[256] = "default"; // non-zero initializer: must st
 // Helper to add SSID to cache if not present
 static void karma_add_ssid(const char *ssid) {
     if (ssid == NULL || strlen(ssid) == 0) return;
+    if (karma_ssid_cache == NULL) {
+        karma_ssid_cache = calloc(KARMA_MAX_SSIDS, sizeof(*karma_ssid_cache));
+        if (karma_ssid_cache == NULL) {
+            printf("Karma: unable to allocate SSID cache\n");
+            return;
+        }
+    }
     // Check for duplicate
     for (int i = 0; i < karma_ssid_count; ++i) {
         if (strcmp(karma_ssid_cache[i], ssid) == 0) return;
@@ -4655,6 +4855,13 @@ static void karma_add_ssid(const char *ssid) {
 void wifi_manager_set_karma_ssid_list(const char **ssids, int count) {
     if (count > KARMA_MAX_SSIDS) count = KARMA_MAX_SSIDS;
     karma_ssid_count = 0;
+    if (count > 0 && karma_ssid_cache == NULL) {
+        karma_ssid_cache = calloc(KARMA_MAX_SSIDS, sizeof(*karma_ssid_cache));
+        if (karma_ssid_cache == NULL) {
+            printf("Karma: unable to allocate SSID cache\n");
+            return;
+        }
+    }
     for (int i = 0; i < count; ++i) {
         if (ssids[i] && strlen(ssids[i]) > 0 && strlen(ssids[i]) < 33) {
             strncpy(karma_ssid_cache[karma_ssid_count], ssids[i], 32);
@@ -4896,6 +5103,8 @@ void wifi_manager_stop_karma(void) {
     }
     karma_running = false;
     karma_ssid_count = 0;
+    free(karma_ssid_cache);
+    karma_ssid_cache = NULL;
     karma_ssid_index = 0;
     karma_ssid_manual_mode = false;
     strncpy(karma_portal_file, "default", sizeof(karma_portal_file));

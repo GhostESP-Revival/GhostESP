@@ -43,6 +43,7 @@ static size_t buffer_offset = 0;
 static FILE *pcap_file = NULL;
 static SemaphoreHandle_t pcap_mutex = NULL;
 static volatile bool s_capture_active = false;
+static pcap_capture_stats_t s_capture_stats;
 
 #define HCX_MAX_SSIDS 8
 #define HCX_MAX_M2 4
@@ -501,6 +502,11 @@ esp_err_t pcap_file_open_in_dir(const char *base_file_name,
 
   buffer_offset = 0;
   s_capture_active = false;
+  memset(&s_capture_stats, 0, sizeof(s_capture_stats));
+  struct timeval start_tv;
+  gettimeofday(&start_tv, NULL);
+  s_capture_stats.started_us = (uint64_t)start_tv.tv_sec * 1000000ULL +
+                               (uint64_t)start_tv.tv_usec;
 
   if (sd_card_exists(pcap_dir_path)) {
     get_next_pcap_file_name(file_name, pcap_dir_path, pcap_base_name);
@@ -760,7 +766,9 @@ static bool is_valid_beacon_fixed_params(const uint8_t *frame, size_t offset,
 esp_err_t pcap_write_packet_to_buffer(const void *packet, size_t length,
                                       pcap_capture_type_t capture_type) {
   s_capture_type = capture_type;
+  s_capture_stats.packets_seen++;
   if (packet == NULL || length < 2) {
+    s_capture_stats.packets_dropped++;
     ESP_LOGE(PCAP_TAG, "Invalid packet data");
     return ESP_ERR_INVALID_ARG;
   }
@@ -842,6 +850,7 @@ esp_err_t pcap_write_packet_to_buffer(const void *packet, size_t length,
   size_t total_packet_size = sizeof(packet_header) + total_length;
 
   if (total_packet_size > PCAP_BUFFER_SIZE) {
+    s_capture_stats.packets_dropped++;
     xSemaphoreGive(pcap_mutex);
     ESP_LOGE(PCAP_TAG, "Packet too large for buffer: %zu", total_packet_size);
     return ESP_ERR_NO_MEM;
@@ -850,6 +859,7 @@ esp_err_t pcap_write_packet_to_buffer(const void *packet, size_t length,
   if (buffer_offset + total_packet_size > PCAP_BUFFER_SIZE) {
     esp_err_t ret = _pcap_flush_buffer_to_file_nolock();
     if (ret != ESP_OK) {
+      s_capture_stats.packets_dropped++;
       xSemaphoreGive(pcap_mutex);
       ESP_LOGE(PCAP_TAG, "Buffer flush failed");
       return ret;
@@ -882,6 +892,8 @@ esp_err_t pcap_write_packet_to_buffer(const void *packet, size_t length,
     memcpy(pcap_buffer + buffer_offset, packet, actual_length);
     buffer_offset += actual_length;
   }
+
+  s_capture_stats.packets_written++;
 
   if (pcap_file == NULL && s_pcap_mode == PCAP_MODE_WIRESHARK) {
     _pcap_flush_wireshark_stream_nolock();
@@ -946,6 +958,7 @@ static esp_err_t _pcap_flush_wireshark_stream_nolock() {
 
 static esp_err_t _pcap_flush_buffer_to_file_nolock() {
   if (buffer_offset > 0) {
+    s_capture_stats.buffer_flushes++;
     if (pcap_file) { // If file is open, write to file
       size_t written = fwrite(pcap_buffer, 1, buffer_offset, pcap_file);
       if (written < buffer_offset) {
@@ -1086,6 +1099,10 @@ void pcap_file_close() {
     }
 
     if (pcap_file != NULL) {
+      struct timeval stop_tv;
+      gettimeofday(&stop_tv, NULL);
+      s_capture_stats.stopped_us = (uint64_t)stop_tv.tv_sec * 1000000ULL +
+                                   (uint64_t)stop_tv.tv_usec;
       fclose(pcap_file);
       pcap_file = NULL;
       ESP_LOGI(PCAP_TAG, "PCAP file closed.");
@@ -1101,6 +1118,16 @@ void pcap_file_close() {
   cleanup_pcap_queue();
   pcap_release_idle_resources();
   ghostscript_emit_event("capture_stopped", pcap_file_path);
+}
+
+void pcap_get_stats(pcap_capture_stats_t *out) {
+  if (!out) return;
+  if (pcap_mutex && xSemaphoreTake(pcap_mutex, pdMS_TO_TICKS(20)) == pdTRUE) {
+    *out = s_capture_stats;
+    xSemaphoreGive(pcap_mutex);
+  } else {
+    *out = s_capture_stats;
+  }
 }
 
 void pcap_wireshark_stop(void) {

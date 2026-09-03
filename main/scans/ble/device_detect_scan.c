@@ -1,11 +1,13 @@
 #include "scans/ble/device_detect_scan.h"
 
 #include <string.h>
+#include <stdlib.h>
 
 #include "core/glog.h"
 #include "core/utils.h"
 #include "esp_attr.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "host/ble_gap.h"
@@ -66,10 +68,12 @@ typedef struct {
     ble_addr_t addr;
     BLEDetectDeviceType type;
     TickType_t last_log_tick;
+    int8_t last_rssi;
+    int64_t last_rx_us;   // esp_timer timestamp of the last matching advertisement
 } BLEDetectTrackingState;
 
 static const char *TAG = "BLEDetect";
-EXT_RAM_BSS_ATTR static BLEDetectDevice s_devices[MAX_BLE_DETECT_DEVICES];
+static BLEDetectDevice *s_devices;
 static int s_device_count = 0;
 static bool s_scan_active = false;
 static BLEDetectTrackingState s_tracking = {0};
@@ -251,10 +255,44 @@ static void log_tracking_update(const BLEDetectDevice *device) {
     s_tracking.last_log_tick = now;
 }
 
+static bool is_tracking_addr(const ble_addr_t *addr) {
+    return s_tracking.active && addr != NULL && s_tracking.addr.type == addr->type &&
+           memcmp(s_tracking.addr.val, addr->val, sizeof(addr->val)) == 0;
+}
+
 static void ble_device_detect_callback(struct ble_gap_event *event, size_t len) {
     (void)len;
 
     if (!s_scan_active || event == NULL || event->type != BLE_GAP_EVENT_DISC) {
+        return;
+    }
+
+    /* While tracking, update RSSI for the tracked MAC unconditionally (like
+     * advertiser_scan) and ignore all other advertisements to keep the list
+     * stable under the RSSI meter overlay. */
+    if (s_tracking.active) {
+        if (!is_tracking_addr(&event->disc.addr)) {
+            return;
+        }
+        s_tracking.last_rssi = event->disc.rssi;
+        s_tracking.last_rx_us = esp_timer_get_time();
+        /* Keep the stored device entry in sync so the list shows latest RSSI. */
+        for (int i = 0; i < s_device_count; i++) {
+            if (s_devices[i].addr.type == event->disc.addr.type &&
+                memcmp(s_devices[i].addr.val, event->disc.addr.val, sizeof(event->disc.addr.val)) == 0) {
+                s_devices[i].rssi = event->disc.rssi;
+                if (s_devices[i].type == BLE_DETECT_DEVICE_AIRTAG) {
+                    char mac[18];
+                    format_mac_address(s_devices[i].addr.val, mac, sizeof(mac), false);
+                    glog("Tracking AirTag: RSSI %d dBm (%s)\n"
+                         "     MAC: %s\n",
+                         s_devices[i].rssi, rssi_to_proximity(s_devices[i].rssi), mac);
+                } else {
+                    log_tracking_update(&s_devices[i]);
+                }
+                break;
+            }
+        }
         return;
     }
 
@@ -298,6 +336,8 @@ static void ble_device_detect_callback(struct ble_gap_event *event, size_t len) 
         if (s_tracking.active && existing->type == s_tracking.type &&
             existing->addr.type == s_tracking.addr.type &&
             memcmp(existing->addr.val, s_tracking.addr.val, sizeof(existing->addr.val)) == 0) {
+            s_tracking.last_rssi = existing->rssi;
+            s_tracking.last_rx_us = esp_timer_get_time();
             if (existing->type == BLE_DETECT_DEVICE_AIRTAG) {
                 char mac[18];
                 format_mac_address(existing->addr.val, mac, sizeof(mac), false);
@@ -362,15 +402,19 @@ static void ble_device_detect_callback(struct ble_gap_event *event, size_t len) 
     if (s_tracking.active && device->type == s_tracking.type &&
         device->addr.type == s_tracking.addr.type &&
         memcmp(device->addr.val, s_tracking.addr.val, sizeof(device->addr.val)) == 0) {
+        s_tracking.last_rssi = device->rssi;
+        s_tracking.last_rx_us = esp_timer_get_time();
         log_tracking_update(device);
     }
 }
 
 void ble_device_detect_start(void) {
-    memset(s_devices, 0, sizeof(s_devices));
+    free(s_devices);
+    s_devices = calloc(MAX_BLE_DETECT_DEVICES, sizeof(*s_devices));
     s_device_count = 0;
     s_tracking.active = false;
     s_tracking.last_log_tick = 0;
+    s_tracking.last_rx_us = 0;
 
     if (!ble_is_initialized()) {
         ble_init();
@@ -379,6 +423,13 @@ void ble_device_detect_start(void) {
     if (!ble_wait_for_ready()) {
         ESP_LOGE(TAG, "BLE stack not ready for detect scan");
         status_display_show_status("BLE Not Ready");
+        free(s_devices);
+        s_devices = NULL;
+        return;
+    }
+
+    if (s_devices == NULL) {
+        status_display_show_status("BLE Detect No Mem");
         return;
     }
 
@@ -389,6 +440,8 @@ void ble_device_detect_start(void) {
     if (!ble_start_scanning()) {
         s_scan_active = false;
         ble_unregister_handler(ble_device_detect_callback);
+        free(s_devices);
+        s_devices = NULL;
         status_display_show_status("BLE Scan Fail");
         return;
     }
@@ -397,12 +450,20 @@ void ble_device_detect_start(void) {
     status_display_show_status("BLE Detect On");
 }
 
+void ble_device_detect_clear_results(void) {
+    if (s_scan_active || s_tracking.active) return;
+    free(s_devices);
+    s_devices = NULL;
+    s_device_count = 0;
+}
+
 void ble_device_detect_stop(void) {
     bool was_active = s_scan_active || s_tracking.active;
 
     s_scan_active = false;
     s_tracking.active = false;
     s_tracking.last_log_tick = 0;
+    s_tracking.last_rx_us = 0;
     ble_unregister_handler(ble_device_detect_callback);
 
     if (was_active) {
@@ -423,7 +484,7 @@ int ble_device_detect_get_count(void) {
 }
 
 int ble_device_detect_get_device(int index, BLEDetectDeviceInfo *out_info) {
-    if (out_info == NULL || index < 0 || index >= s_device_count) {
+    if (s_devices == NULL || out_info == NULL || index < 0 || index >= s_device_count) {
         return -1;
     }
 
@@ -444,11 +505,6 @@ bool ble_device_detect_start_tracking(int index) {
     if (index < 0 || index >= s_device_count) {
         glog("Invalid BLE device index %d\n", index);
         return false;
-    }
-
-    if (s_devices[index].type == BLE_DETECT_DEVICE_FLIPPER) {
-        return flipper_scan_track_device(s_devices[index].addr.val, s_devices[index].addr.type,
-                                         s_devices[index].name, s_devices[index].rssi);
     }
 
     BLEDetectDevice dev;
@@ -475,6 +531,8 @@ bool ble_device_detect_start_tracking(int index) {
     s_tracking.type = dev.type;
     memcpy(&s_tracking.addr, &dev.addr, sizeof(s_tracking.addr));
     s_tracking.last_log_tick = 0;
+    s_tracking.last_rssi = dev.rssi;
+    s_tracking.last_rx_us = esp_timer_get_time();
 
     char mac[18];
     format_mac_address(dev.addr.val, mac, sizeof(mac), false);
@@ -515,8 +573,25 @@ bool ble_device_detect_start_airtag_spoof(int index) {
 void ble_device_detect_stop_tracking(void) {
     s_tracking.active = false;
     s_tracking.last_log_tick = 0;
+    s_tracking.last_rx_us = 0;
 }
 
 bool ble_device_detect_is_tracking(void) {
     return s_tracking.active;
+}
+
+bool ble_device_detect_get_track_status(int8_t *out_rssi, bool *out_fresh) {
+    if (!s_tracking.active) {
+        return false;
+    }
+    if (out_rssi) {
+        *out_rssi = s_tracking.last_rssi;
+    }
+    if (out_fresh) {
+        int64_t now = esp_timer_get_time();
+        // AirTags and similar beacons advertise infrequently (~2 s), so allow a
+        // longer window than the 1.5 s used for dense Wi-Fi/BLE-adv streams.
+        *out_fresh = (s_tracking.last_rx_us != 0) && ((now - s_tracking.last_rx_us) < 3500000);
+    }
+    return true;
 }

@@ -39,30 +39,18 @@ void wifi_manager_configure_sta_from_settings(void);
 void wifi_manager_set_reconnect_hold(bool hold);
 
 static void restore_wifi_after_scan(void) {
-    (void)ap_manager_start_services();
+    (void)ap_manager_restore_after_attack("ap scan stop");
     wifi_manager_configure_sta_from_settings();
     wifi_manager_set_reconnect_hold(false);
 }
 
 static void apply_country_for_scan(void) {
-    static const struct { const char *code; uint8_t schan; uint8_t nchan; } tbl[] = {
-        {"US", 1, 11}, {"GB", 1, 13}, {"JP", 1, 14}, {"AU", 1, 13}, {"CN", 1, 13}, {"01", 1, 11}
-    };
+    static const char *tbl[] = {"US", "GB", "JP", "AU", "CN", "01"};
     uint8_t idx = settings_get_wifi_country(&G_Settings);
     if (idx >= sizeof(tbl) / sizeof(tbl[0])) idx = 5;
-#if defined(CONFIG_IDF_TARGET_ESP32C5)
-    esp_err_t err = esp_wifi_set_country_code(tbl[idx].code, true);
-#else
-    wifi_country_t c = {
-        .cc = {tbl[idx].code[0], tbl[idx].code[1], 0},
-        .schan = tbl[idx].schan,
-        .nchan = tbl[idx].nchan,
-        .policy = WIFI_COUNTRY_POLICY_MANUAL
-    };
-    esp_err_t err = esp_wifi_set_country(&c);
-#endif
+    esp_err_t err = esp_wifi_set_country_code(tbl[idx], true);
     if (err == ESP_OK) {
-        ESP_LOGI(TAG, "Country re-applied: %s", tbl[idx].code);
+        ESP_LOGI(TAG, "Country re-applied: %s", tbl[idx]);
     } else {
         ESP_LOGW(TAG, "Country re-apply failed: %s", esp_err_to_name(err));
     }
@@ -241,8 +229,7 @@ void ap_scan_start(void) {
     esp_err_t err = esp_wifi_get_mode(&current_mode);
     if (err == ESP_ERR_WIFI_NOT_INIT) {
         ESP_LOGW(TAG, "Wi-Fi not initialized, reinitializing driver...");
-        wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-        err = esp_wifi_init(&cfg);
+        err = ap_manager_ensure_wifi_init();
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "Failed to reinit Wi-Fi: %s", esp_err_to_name(err));
             TERMINAL_VIEW_ADD_TEXT("WiFi init failed: %s\n", esp_err_to_name(err));
@@ -356,8 +343,7 @@ esp_err_t ap_scan_start_async(void) {
     esp_err_t err = esp_wifi_get_mode(&current_mode);
     if (err == ESP_ERR_WIFI_NOT_INIT) {
         ESP_LOGW(TAG, "Wi-Fi not initialized, reinitializing driver...");
-        wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-        err = esp_wifi_init(&cfg);
+        err = ap_manager_ensure_wifi_init();
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "Failed to reinit Wi-Fi: %s", esp_err_to_name(err));
             TERMINAL_VIEW_ADD_TEXT("WiFi init failed: %s\n", esp_err_to_name(err));

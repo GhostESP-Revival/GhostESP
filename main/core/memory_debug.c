@@ -10,6 +10,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "sdkconfig.h"
+#include "suppress_noisy_logs.h"
 
 #define MEMORY_DEBUG_TRACE_RECORDS 256
 #define MEMORY_DEBUG_TRACE_TOP_COUNT 12
@@ -62,10 +63,17 @@ void memory_debug_log_snapshot(const char *reason) {
              (unsigned)s_failed_alloc_count);
 
     if (s_failed_alloc_count > 0) {
+#if !SUPPRESS_MEMORY_DEBUG_LOGS
         ESP_LOGW(TAG, "last allocation failure: size=%u caps=0x%08x function=%s",
                  (unsigned)s_last_failed_alloc_size,
                  (unsigned)s_last_failed_alloc_caps,
                  s_last_failed_alloc_function ? s_last_failed_alloc_function : "unknown");
+#else
+        ESP_LOGD(TAG, "last allocation failure: size=%u caps=0x%08x function=%s (suppressed 61137)",
+                 (unsigned)s_last_failed_alloc_size,
+                 (unsigned)s_last_failed_alloc_caps,
+                 s_last_failed_alloc_function ? s_last_failed_alloc_function : "unknown");
+#endif
     }
 }
 

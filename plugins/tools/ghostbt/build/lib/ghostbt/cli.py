@@ -48,6 +48,55 @@ def main(argv=None) -> int:
     p_fw.add_argument("--repo", default=None, help="Path to GhostESP repo (default: auto-detect)")
     p_fw.add_argument("--skip-set-target", action="store_true", help="Skip idf.py set-target step")
 
+    p_flash = sub.add_parser("flash", help="Flash firmware or app to device")
+    p_flash.add_argument("target", nargs="?", default="firmware", choices=["firmware", "app"],
+                         help="What to flash: firmware (default) or app")
+    p_flash.add_argument("--port", "-p", default=None, help="Serial port (auto-detected if omitted)")
+    p_flash.add_argument("--baud", "-b", type=int, default=None, help="Baud rate (default: 460800)")
+    p_flash.add_argument("--board", default=None, help="Board config (builds firmware if needed)")
+    p_flash.add_argument("--app-dir", default=None, help="App directory (for 'app' target)")
+    p_flash.add_argument("--build-dir", default=None, help="Custom build directory")
+    p_flash.add_argument("--verify", action="store_true", help="Verify after writing")
+    p_flash.add_argument("--erase", action="store_true", help="Erase entire flash before writing")
+    p_flash.add_argument("--monitor", "-m", action="store_true", help="Open serial monitor after flashing")
+
+    p_mon = sub.add_parser("monitor", help="Open serial monitor")
+    p_mon.add_argument("--port", "-p", default=None, help="Serial port (auto-detected if omitted)")
+    p_mon.add_argument("--baud", "-b", type=int, default=115200, help="Baud rate (default: 115200)")
+
+    p_ports = sub.add_parser("ports", help="List available serial ports")
+
+    p_asset = sub.add_parser("asset", help="Create GhostESP asset pack images and bundles")
+    asset_sub = p_asset.add_subparsers(dest="asset_command")
+
+    p_script = sub.add_parser("script", help="Compile GhostScript .gs to .gsb bytecode")
+    script_sub = p_script.add_subparsers(dest="script_command")
+
+    p_script_compile = script_sub.add_parser("compile", help="Compile .gs files to .gsb")
+    p_script_compile.add_argument("path", nargs="?", default=".", help="File or directory (default: .)")
+    p_script_compile.add_argument("--out", default=None, help="Output file or directory")
+    p_script_compile.add_argument("--deploy", action="store_true", help="Also copy to SD card")
+    p_script_compile.add_argument("--deploy-dir", default=None, help="Destination scripts directory for --deploy")
+
+    p_script_deploy = script_sub.add_parser("deploy", help="Compile and copy to SD card")
+    p_script_deploy.add_argument("path", nargs="?", default=".", help="File or directory (default: .)")
+    p_script_deploy.add_argument("--deploy-dir", default=None, help="Destination scripts directory")
+
+    p_asset_image = asset_sub.add_parser("image", help="Convert a PNG into a GhostESP .gimg image")
+    p_asset_image.add_argument("png", help="Source PNG")
+    p_asset_image.add_argument("--out", required=True, help="Output .gimg path")
+    p_asset_image.add_argument("--width", type=int, required=True, help="Output width in pixels")
+    p_asset_image.add_argument("--height", type=int, required=True, help="Output height in pixels")
+    p_asset_image.add_argument("--format", choices=["rgb565", "rgb565a8", "indexed_4bpp", "indexed_1bpp"], default="rgb565a8",
+                               help="Pixel format (default: rgb565a8)")
+    p_asset_image.add_argument("--no-compress", action="store_true", help="Store raw payload without deflate compression")
+
+    p_asset_pack = asset_sub.add_parser("pack", help="Build an SD-ready asset pack from a source manifest")
+    p_asset_pack.add_argument("pack_dir", nargs="?", default=".", help="Asset pack source directory (default: .)")
+    p_asset_pack.add_argument("--out", default=None, help="Output dist directory")
+    p_asset_pack.add_argument("--archive", action="store_true", help="Also create a .gtheme zip archive")
+    p_asset_pack.add_argument("--compress", action="store_true", help="Deflate .gimg payloads (not recommended for firmware runtime themes)")
+
     args = parser.parse_args(argv)
 
     if not args.command:
@@ -109,6 +158,73 @@ def main(argv=None) -> int:
             repo_root=args.repo,
             skip_set_target=args.skip_set_target,
         )
+    elif args.command == "flash":
+        from .flash import flash_firmware, flash_app, monitor
+        if args.target == "app":
+            if not args.app_dir:
+                print("--app-dir is required for 'app' target", file=sys.stderr)
+                return 2
+            used_port = flash_app(
+                app_dir=args.app_dir,
+                port=args.port,
+                baud=args.baud,
+            )
+        else:
+            used_port = flash_firmware(
+                port=args.port,
+                baud=args.baud,
+                board=args.board,
+                build_dir=args.build_dir,
+                verify=args.verify,
+                erase_flash=args.erase,
+            )
+        if args.monitor and used_port:
+            monitor(port=used_port)
+    elif args.command == "monitor":
+        from .flash import monitor
+        monitor(port=args.port, baud=args.baud)
+    elif args.command == "ports":
+        from .flash import list_serial_ports
+        ports = list_serial_ports()
+        if not ports:
+            print("No serial ports found.")
+            return 1
+        print(f"{'Port':<20} {'Description'}")
+        print("-" * 60)
+        for p in ports:
+            print(f"{p['device']:<20} {p['description']}")
+        print(f"\n{len(ports)} port(s) available")
+    elif args.command == "asset":
+        if not args.asset_command:
+            p_asset.print_help()
+            return 0
+        from .asset import make_asset_image, make_asset_pack
+        if args.asset_command == "image":
+            make_asset_image(
+                src=args.png,
+                out=args.out,
+                width=args.width,
+                height=args.height,
+                fmt=args.format,
+                compress=not args.no_compress,
+            )
+        elif args.asset_command == "pack":
+            make_asset_pack(
+                pack_dir=args.pack_dir,
+                out=args.out,
+                archive=args.archive,
+                compress=args.compress,
+            )
+    elif args.command == "script":
+        if not args.script_command:
+            p_script.print_help()
+            return 0
+        from .script import compile_scripts
+        if args.script_command == "compile":
+            return compile_scripts(path=args.path, out=args.out, deploy=args.deploy,
+                                   deploy_dir=args.deploy_dir)
+        elif args.script_command == "deploy":
+            return compile_scripts(path=args.path, deploy=True, deploy_dir=args.deploy_dir)
 
     return 0
 

@@ -239,7 +239,7 @@ static void ota_restore_ap_after_download_failure(void) {
     ota_restore_ap_marker_clear();
     ota_restore_ap_enabled_setting();
     ESP_LOGI(TAG, "Restored AP/Web UI setting after failed OTA download");
-    ap_manager_start_services();
+    (void)ap_manager_restore_after_attack("ota restore");
 #endif
 }
 

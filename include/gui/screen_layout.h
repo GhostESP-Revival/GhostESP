@@ -22,6 +22,12 @@ extern "C" {
 #endif
 
 void gui_screen_apply_background(lv_obj_t *root);
+/* Re-apply the active palette's background treatment (flat fill + optional
+ * pattern) to a root whose fill came from the theme background. */
+void gui_screen_apply_theme_background(lv_obj_t *root);
+/* Same, for an explicit theme id (used by previews). Removes any previous
+ * pattern widget first. */
+void gui_screen_apply_theme_background_for(lv_obj_t *root, uint8_t theme);
 lv_obj_t *gui_screen_create_root(lv_obj_t *parent, const char *title, lv_color_t bg_color, lv_opa_t bg_opa);
 
 /*

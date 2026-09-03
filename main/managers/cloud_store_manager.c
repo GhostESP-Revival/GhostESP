@@ -15,6 +15,7 @@
 #include "managers/sd_card_manager.h"
 #include "managers/ghostscript_manager.h"
 #include "managers/settings_manager.h"
+#include "managers/wifi_manager.h"
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
@@ -87,6 +88,7 @@ typedef struct {
     size_t buf_cap;
     bool jit;                // flushes mount/unmount only on JIT boards
     bool file_started;       // first flush of an attempt truncates ("wb"), rest append ("ab")
+    size_t resume_off;       // byte offset this attempt resumes from (Range request)
 } download_ctx_t;
 
 // Push a live download update to the UI at most every ~4KB so the progress
@@ -237,7 +239,7 @@ static void cloud_store_restore_ap_if_needed(void) {
     s_ap_paused_for_cloud = false;
     if (settings_get_ap_enabled(&G_Settings)) {
         ESP_LOGI(TAG, "Restoring AP/Web UI services after Cloud Store network request");
-        ap_manager_start_services();
+        (void)ap_manager_restore_after_attack("cloud store");
     }
 #endif
 }
@@ -881,8 +883,16 @@ static esp_err_t download_event_handler(esp_http_client_event_t *evt) {
     if (s_ctx && s_ctx->cancel_requested) return ESP_FAIL;
 
     if (evt->event_id == HTTP_EVENT_ON_HEADER) {
-        if (evt->header_key && evt->header_value &&
-            strcasecmp(evt->header_key, "Content-Length") == 0) {
+        if (!evt->header_key || !evt->header_value) return ESP_OK;
+        if (strcasecmp(evt->header_key, "Content-Range") == 0) {
+            // "bytes <first>-<last>/<total>" -- authoritative full size on a
+            // 206 response, where Content-Length is only the remaining bytes.
+            const char *slash = strrchr(evt->header_value, '/');
+            if (slash) {
+                long len = atol(slash + 1);
+                if (len > 0) ctx->total = (size_t)len;
+            }
+        } else if (strcasecmp(evt->header_key, "Content-Length") == 0 && ctx->total == 0) {
             long len = atol(evt->header_value);
             if (len > 0) ctx->total = (size_t)len;
         }
@@ -896,6 +906,23 @@ static esp_err_t download_event_handler(esp_http_client_event_t *evt) {
         ctx->ok = false;
         ESP_LOGW(TAG, "download body rejected: HTTP %d", status);
         return ESP_FAIL;
+    }
+
+    // A resume that comes back as 200 means the server ignored the Range
+    // header and is streaming the whole body: discard the partial file and
+    // restart byte accounting from zero so the result stays contiguous.
+    if (ctx->resume_off > 0 && status == 200) {
+        ESP_LOGW(TAG, "server ignored Range resume at %u; restarting from 0",
+                 (unsigned)ctx->resume_off);
+        ctx->resume_off = 0;
+        ctx->written = 0;
+        ctx->buf_len = 0;
+        ctx->file_started = false;
+        if (ctx->file) {
+            fclose(ctx->file);
+            ctx->file = NULL;
+        }
+        remove(ctx->path);
     }
 
     if (ctx->buf) {
@@ -918,7 +945,8 @@ static esp_err_t download_event_handler(esp_http_client_event_t *evt) {
     } else {
         // Open lazily after validating the response so an HTTP error cannot
         // truncate a prior package or leave its error page on the SD card.
-        if (!ctx->file) ctx->file = fopen(ctx->path, "wb");
+        // A resumed attempt appends to the partial file it continues from.
+        if (!ctx->file) ctx->file = fopen(ctx->path, ctx->resume_off > 0 ? "ab" : "wb");
         if (!ctx->file || fwrite(evt->data, 1, evt->data_len, ctx->file) != (size_t)evt->data_len) {
             ctx->ok = false;
             return ESP_FAIL;
@@ -965,16 +993,27 @@ static esp_err_t download_with_retries(const cloud_store_item_t *item, const cha
     }
 
     esp_err_t result = ESP_FAIL;
-    for (int attempt = 1; attempt <= CLOUD_DOWNLOAD_RANGE_ATTEMPTS; ++attempt) {
+    // Byte offset already safely on the SD card across attempts. Transient
+    // connection drops resume from here with a Range request instead of
+    // throwing away everything fetched so far (large packages die repeatedly
+    // at the same early offset otherwise -- e.g. the TLS link being reset
+    // ~50KB in -- and can never finish).
+    size_t done = 0;
+    int stalled = 0; // consecutive attempts that added zero bytes
+    int attempt = 0;
+    while (stalled < CLOUD_DOWNLOAD_RANGE_ATTEMPTS) {
         if (s_ctx && s_ctx->cancel_requested) { result = ESP_FAIL; break; }
-        ctx.written = 0;
-        ctx.last_reported = 0;
+        attempt++;
+        size_t done_at_start = done;
+        ctx.written = done;
+        ctx.last_reported = done;
         ctx.last_report_tick = xTaskGetTickCount();
-        ctx.total = 0;
+        if (done == 0) ctx.total = 0; // keep the full size learned on a resume
         ctx.ok = true;
         ctx.buf_len = 0;
-        ctx.file_started = false;
+        ctx.file_started = done > 0; // resumed flushes append to the partial file
         ctx.file = NULL;
+        ctx.resume_off = done;
 
         // Direct mode holds the SD mount on a JIT board for the whole transfer.
         // Its output file opens only after the first successful response byte.
@@ -1010,29 +1049,59 @@ static esp_err_t download_with_retries(const cloud_store_item_t *item, const cha
             result = ESP_FAIL;
             break;
         }
+        if (done > 0) {
+            char range_hdr[32];
+            snprintf(range_hdr, sizeof(range_hdr), "bytes=%u-", (unsigned)done);
+            esp_http_client_set_header(client, "Range", range_hdr);
+        }
 
         esp_err_t err = esp_http_client_perform(client);
         int status = esp_http_client_get_status_code(client);
         esp_http_client_cleanup(client);
 
-        ESP_LOGI(TAG, "download attempt %d: err=%s http=%d written=%u total=%u",
-                 attempt, esp_err_to_name(err), status, (unsigned)ctx.written, (unsigned)ctx.total);
+        ESP_LOGI(TAG, "download attempt %d: err=%s http=%d written=%u total=%u resume_from=%u",
+                 attempt, esp_err_to_name(err), status, (unsigned)ctx.written,
+                 (unsigned)ctx.total, (unsigned)done_at_start);
 
-        // Flush whatever tail is still staged before judging completeness.
-        if (ctx.buf && ctx.ok && err == ESP_OK && !(s_ctx && s_ctx->cancel_requested)) {
+        // Flush whatever tail is still staged before judging completeness --
+        // also on transport errors, so the bytes already received survive as
+        // the resume point for the next attempt.
+        if (ctx.buf && ctx.ok && !(s_ctx && s_ctx->cancel_requested)) {
             if (download_flush_buffer(&ctx) != ESP_OK) ctx.ok = false;
         }
         if (ctx.file) { fclose(ctx.file); ctx.file = NULL; }
         if (direct_mounted) sd_card_jit_end(direct_suspended);
+
+        // Only count bytes that were actually persisted to the SD card.
+        if (ctx.ok && !(s_ctx && s_ctx->cancel_requested) && ctx.written > done) {
+            done = ctx.written;
+        }
+        bool progressed = done > done_at_start;
 
         if (ctx.written > 0 || ctx.total > 0) {
             set_status(CLOUD_STORE_STATE_DOWNLOADING, item->name, ctx.written, ctx.total, NULL);
         }
 
         if (s_ctx && s_ctx->cancel_requested) { result = ESP_FAIL; break; }
+        // Every byte is already on the SD card: a transport error on the very
+        // last read must not discard a fully received package (the follow-up
+        // Range request would be unsatisfiable and fail the install).
+        if (ctx.total > 0 && done >= ctx.total) {
+            result = ESP_OK;
+            break;
+        }
         if (err != ESP_OK || !ctx.ok || (status != 200 && status != 206)) {
-            ESP_LOGW(TAG, "Download failed err=%s http=%d written=%u total=%u",
-                     esp_err_to_name(err), status, (unsigned)ctx.written, (unsigned)ctx.total);
+            // A dropped connection that still delivered bytes is normal on
+            // flaky links -- the download resumes from the persisted offset,
+            // so log it as routine progress, not a failure. Only attempts that
+            // advanced nothing are worth a warning.
+            if (progressed) {
+                ESP_LOGI(TAG, "connection dropped at %u/%u, resuming",
+                         (unsigned)done, (unsigned)ctx.total);
+            } else {
+                ESP_LOGW(TAG, "Download failed err=%s http=%d written=%u total=%u",
+                         esp_err_to_name(err), status, (unsigned)ctx.written, (unsigned)ctx.total);
+            }
             // A missing/unauthorized package will not appear on a retry. Keep
             // retrying transient server and transport failures instead.
             if (status >= 400 && status < 500 && status != 408 && status != 429) {
@@ -1040,15 +1109,23 @@ static esp_err_t download_with_retries(const cloud_store_item_t *item, const cha
                 result = ESP_FAIL;
                 break;
             }
-            vTaskDelay(pdMS_TO_TICKS(400 * attempt));
+            if (progressed) stalled = 0; else stalled++;
+            vTaskDelay(pdMS_TO_TICKS(400 * (stalled > 0 ? stalled : 1)));
             continue;
         }
-        if ((ctx.total > 0 && ctx.written == ctx.total) || (ctx.total == 0 && ctx.written > 0)) {
+        if ((ctx.total > 0 && ctx.written >= ctx.total) || (ctx.total == 0 && ctx.written > 0)) {
             result = ESP_OK;
             break;
         }
-        ESP_LOGW("CloudStore", "Incomplete download: %d/%d bytes, retrying", (int)ctx.written, (int)ctx.total);
-        vTaskDelay(pdMS_TO_TICKS(400 * attempt));
+        if (progressed) {
+            ESP_LOGI(TAG, "incomplete response at %u/%u, resuming",
+                     (unsigned)done, (unsigned)ctx.total);
+        } else {
+            ESP_LOGW(TAG, "Incomplete download: %u/%u bytes, retrying",
+                     (unsigned)ctx.written, (unsigned)ctx.total);
+        }
+        if (progressed) stalled = 0; else stalled++;
+        vTaskDelay(pdMS_TO_TICKS(400 * (stalled > 0 ? stalled : 1)));
     }
 
     free(ctx.buf);
@@ -1260,7 +1337,18 @@ bool cloud_store_apps_available(void) {
 static void refresh_task(void *arg) {
     bool caps_task = arg != NULL;
     cloud_store_pause_ap_if_needed();
-    esp_err_t err = refresh_manifest();
+    esp_err_t err = ESP_OK;
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4)
+    // P4 can obtain its lease before SNTP has completed. Do not let the first
+    // Cloud Store request race the certificate validity check.
+    if (!wifi_manager_wait_for_valid_time(20000)) {
+        err = ESP_ERR_TIMEOUT;
+    } else {
+        err = refresh_manifest();
+    }
+#else
+    err = refresh_manifest();
+#endif
     xSemaphoreTake(s_ctx->mutex, portMAX_DELAY);
     s_ctx->status.state = err == ESP_OK ? CLOUD_STORE_STATE_READY : CLOUD_STORE_STATE_FAILED;
     strncpy(s_ctx->status.active_name, "Cloud Store", sizeof(s_ctx->status.active_name) - 1);

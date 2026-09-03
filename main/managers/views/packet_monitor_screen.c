@@ -47,7 +47,8 @@ static uint8_t *s_custom_channels;
 static size_t s_custom_channel_count;
 static bool s_monitor_active;
 static bool s_touch_started;
-static lv_point_t s_touch_start;
+static lv_obj_t *s_mode_buttons[3];
+static lv_point_t s_selector_touch_start;
 
 static volatile uint32_t s_total_packets;
 static volatile uint32_t s_management_packets;
@@ -123,7 +124,7 @@ static void packet_monitor_return(void) {
     free(s_custom_channels);
     s_custom_channels = NULL;
     s_custom_channel_count = 0;
-    display_manager_switch_view(&options_menu_view);
+    display_manager_go_back();
 }
 
 static bool parse_channels(const char *text, uint8_t *channels, size_t *count) {
@@ -327,9 +328,9 @@ static void packet_monitor_create_selector(void) {
     packet_monitor_view.root = s_root;
     s_mode_options = options_view_create(s_root, "Packet Visualizer");
     if (!s_mode_options) return;
-    options_view_add_item(s_mode_options, "Channel Hopping", packet_mode_click, (void *)(intptr_t)0);
-    options_view_add_item(s_mode_options, "Choose Channel(s)...", packet_mode_click, (void *)(intptr_t)1);
-    options_view_add_item(s_mode_options, LV_SYMBOL_LEFT " Back", packet_mode_click, (void *)(intptr_t)2);
+    s_mode_buttons[0] = options_view_add_item(s_mode_options, "Channel Hopping", packet_mode_click, (void *)(intptr_t)0);
+    s_mode_buttons[1] = options_view_add_item(s_mode_options, "Choose Channel(s)...", packet_mode_click, (void *)(intptr_t)1);
+    s_mode_buttons[2] = options_view_add_item(s_mode_options, LV_SYMBOL_LEFT " Back", packet_mode_click, (void *)(intptr_t)2);
     options_view_set_selected(s_mode_options, 0);
 }
 
@@ -489,14 +490,6 @@ static void packet_monitor_create_visualizer(void) {
     status_display_show_status("Packet Visualizer");
 }
 
-static bool point_in_obj(lv_obj_t *obj, const lv_point_t *point) {
-    if (!obj || !point || !lv_obj_is_valid(obj)) return false;
-    lv_area_t area;
-    lv_obj_get_coords(obj, &area);
-    return point->x >= area.x1 && point->x <= area.x2 &&
-           point->y >= area.y1 && point->y <= area.y2;
-}
-
 static void packet_monitor_input(InputEvent *event) {
     if (!event) return;
 
@@ -525,23 +518,35 @@ static void packet_monitor_input(InputEvent *event) {
     }
 
     if (!s_mode_options) return;
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    /* CrowPanel P4 touch is delivered through the manual InputEvent queue,
+     * not a registered LVGL indev, so LV_EVENT_CLICKED is never generated.
+     * Resolve the released point against the actual row coordinates here.
+     * Other targets retain the LVGL callbacks and therefore cannot dispatch
+     * the same selection twice. */
     if (event->type == INPUT_TYPE_TOUCH) {
-        const lv_indev_data_t *touch = &event->data.touch_data;
-        if (touch->state == LV_INDEV_STATE_PR) {
-            s_touch_started = true;
-            s_touch_start = touch->point;
-        } else if (touch->state == LV_INDEV_STATE_REL && s_touch_started) {
-            s_touch_started = false;
-            lv_obj_t *list = options_view_get_list(s_mode_options);
-            for (int i = 0; i < options_view_get_item_count(s_mode_options); i++) {
-                lv_obj_t *row = lv_obj_get_child(list, i);
-                if (point_in_obj(row, &s_touch_start) && point_in_obj(row, &touch->point)) {
-                    packet_mode_activate(i);
-                    break;
+        if (event->data.touch_data.state == LV_INDEV_STATE_PR && !event->is_touch_move) {
+            s_selector_touch_start = event->data.touch_data.point;
+        } else if (event->data.touch_data.state == LV_INDEV_STATE_REL) {
+            lv_point_t end = event->data.touch_data.point;
+            if (abs(end.x - s_selector_touch_start.x) <= 24 &&
+                abs(end.y - s_selector_touch_start.y) <= 24) {
+                for (int i = 0; i < 3; i++) {
+                    if (!s_mode_buttons[i] || !lv_obj_is_valid(s_mode_buttons[i])) continue;
+                    lv_area_t area;
+                    lv_obj_get_coords(s_mode_buttons[i], &area);
+                    if (end.x >= area.x1 && end.x <= area.x2 &&
+                        end.y >= area.y1 && end.y <= area.y2) {
+                        options_view_set_selected(s_mode_options, i);
+                        packet_mode_activate(i);
+                        break;
+                    }
                 }
             }
         }
-    } else if (event->type == INPUT_TYPE_JOYSTICK && event->data.joystick_pressed) {
+    } else
+#endif
+    if (event->type == INPUT_TYPE_JOYSTICK && event->data.joystick_pressed) {
         int button = event->data.joystick_index;
         if (button == 0) packet_monitor_return();
         else if (button == 2) options_view_move_selection(s_mode_options, -1);
@@ -590,6 +595,7 @@ static void packet_monitor_destroy(void) {
     s_root = NULL;
     s_summary = NULL;
     s_legend = NULL;
+    memset(s_mode_buttons, 0, sizeof(s_mode_buttons));
     packet_monitor_view.root = NULL;
 }
 

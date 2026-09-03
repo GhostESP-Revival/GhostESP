@@ -190,7 +190,9 @@ static bool badusb_send_string(const char *text, size_t len, void *ctx) {
             continue;  // Skip unmappable characters
         }
 
-        badusb_send_key(modifier, keycode, ctx);
+        if (!badusb_send_key(modifier, keycode, ctx)) {
+            return false;
+        }
         tud_hid_n_keyboard_report(ITF_NUM_HID_KEYBOARD, 0, 0, NULL);
         vTaskDelay(pdMS_TO_TICKS(MIN_KEY_DELAY_MS));
     }
@@ -214,11 +216,17 @@ static bool badusb_release_keys(void *ctx) {
     return true;
 }
 
+static bool badusb_transport_cancelled(void *ctx) {
+    (void)ctx;
+    return s_stop_requested;
+}
+
 static const hid_transport_t usb_transport = {
     .send_key     = badusb_send_key,
     .send_string  = badusb_send_string,
     .delay        = badusb_delay,
     .release_keys = badusb_release_keys,
+    .is_cancelled = badusb_transport_cancelled,
     .ctx          = NULL,
 };
 
@@ -706,8 +714,6 @@ typedef struct {
 static void badusb_exec_task(void *arg) {
     exec_task_params_t *params = (exec_task_params_t *)arg;
 
-    s_stop_requested = false;
-
     // If VSENSE is available, wait for USB cable to be plugged in BEFORE
     // installing TinyUSB.  The ESP32-S3 internal PHY needs VBUS present for
     // the device stack to enumerate correctly.
@@ -802,6 +808,8 @@ esp_err_t badusb_manager_execute_file(const char *path) {
     params->from_file = true;
     strncpy(params->path, path, sizeof(params->path) - 1);
 
+    s_stop_requested = false;
+
     if (xTaskCreate(badusb_exec_task, "badusb_exec", 8192, params, 5, &s_exec_task_handle) != pdPASS) {
         free(params);
         return ESP_FAIL;
@@ -886,6 +894,8 @@ esp_err_t badusb_manager_execute_buffer(char *buf, size_t len) {
     params->from_file = false;
     params->buf = buf;
     params->buf_len = len;
+
+    s_stop_requested = false;
 
     if (xTaskCreate(badusb_exec_task, "badusb_exec", 8192, params, 5, &s_exec_task_handle) != pdPASS) {
         free(buf);

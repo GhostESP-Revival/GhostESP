@@ -173,6 +173,10 @@ void wifi_manager_configure_sta_from_settings(void);
 
 void wifi_manager_start_sntp(void);
 
+// Returns true once the system clock is valid for HTTPS, waiting for SNTP
+// when necessary.
+bool wifi_manager_wait_for_valid_time(uint32_t timeout_ms);
+
 void wifi_manager_start_ip_lookup();
 
 #ifdef CONFIG_SPIRAM
@@ -311,6 +315,21 @@ void wifi_manager_gtk_abuse_display(void);
 void wifi_manager_start_channel_switch_attack(void);
 void wifi_manager_stop_channel_switch_attack(void);
 bool wifi_manager_is_channel_switch_attack_running(void);
+
+// Probe Request Flood Attack
+void wifi_manager_start_probe_flood(void);
+void wifi_manager_stop_probe_flood(void);
+bool wifi_manager_is_probe_flood_running(void);
+
+// Bad Msg Attack (EAPOL key install + zero MIC)
+void wifi_manager_start_bad_msg(void);
+void wifi_manager_stop_bad_msg(void);
+bool wifi_manager_is_bad_msg_running(void);
+
+// Auth Flood Attack
+void wifi_manager_start_auth_flood(void);
+void wifi_manager_stop_auth_flood(void);
+bool wifi_manager_is_auth_flood_running(void);
 
 // Handshake + Deauth combined attack
 void wifi_manager_start_handshake_deauth(void);

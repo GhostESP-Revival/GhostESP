@@ -13,13 +13,13 @@ For other USB features, see [Mouse Jiggler]({{< relref "mouse-jiggler.md" >}}) a
 **Note:** Configs with VSENSE support will wait for a USB connection before starting the script.
 
 With VSENSE support:
-- The Wired Hatters Banshee
+- The Wired Hatters Banshee (both C5 and S3 builds)
 
 Without VSENSE support:
 - Cardputer
 - Cardputer ADV
-- LilyGo T-Deck/T-Deck Plus
-- Banshee S3 (`Banshee_S3` build; S3 worker paired with the C5 display)
+- LilyGo T-Dongle-S3
+- LilyGo TEmbed C1101
 
 ## Supported DuckyScript Commands
 

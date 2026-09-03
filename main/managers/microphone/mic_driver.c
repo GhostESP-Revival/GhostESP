@@ -51,7 +51,7 @@ esp_err_t mic_init(const mic_config_t *config) {
     memcpy(&mic_cfg, config, sizeof(mic_config_t));
 
     // I2S channel configuration
-    i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
+    i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(config->i2s_port, I2S_ROLE_MASTER);
     chan_cfg.auto_clear = true;
 
     esp_err_t ret = i2s_new_channel(&chan_cfg, NULL, &i2s_rx_chan);
@@ -65,7 +65,7 @@ esp_err_t mic_init(const mic_config_t *config) {
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(config->sample_rate),
         .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_STEREO),
         .gpio_cfg = {
-            .mclk = I2S_GPIO_UNUSED,
+            .mclk = config->mclk_pin,
             .bclk = config->bclk_pin,
             .ws = config->ws_pin,
             .dout = I2S_GPIO_UNUSED,

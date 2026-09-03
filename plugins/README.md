@@ -206,20 +206,19 @@ Custom streaming archive (not ZIP). Header: 4-byte magic `GAPP`, version, flags,
 
 Drop `.gapp` files into `/mnt/ghostesp/apps/`, then reboot the device. GhostESP discovers new packages during startup, extracts them into cache, and registers the app.
 
+Native apps receive the five-way joystick as directional/select input. While an app is running, hold the joystick Select button for four seconds to exit back to the Apps view.
+
 ## Quick Start
 
 ```powershell
-# Scaffold
-python plugins/tools/new_app.py my_tool --name "My Tool"
+# One-time setup
+gbt setup --target esp32s3
 
-# Build
-python plugins/tools/build_app.py plugins/examples/my_tool --target esp32s3
+# Create a standalone source repository
+gbt create my_tool --name "My Tool"
 
-# Package (folder)
-python plugins/tools/package_app.py plugins/examples/my_tool
-
-# Package (.gapp archive)
-python plugins/tools/package_app.py plugins/examples/my_tool --gapp
+# Build and package a .gapp archive
+gbt dist my_tool --target esp32s3 --gapp
 ```
 
 Copy `manifest.json` and the `.so` to `/mnt/ghostesp/apps/<id>/` on the SD card, or drop the `.gapp` into `/mnt/ghostesp/apps/` and reboot.

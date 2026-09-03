@@ -136,6 +136,11 @@ typedef struct _lv_disp_drv_t {
     /** OPTIONAL: called when start rendering */
     void (*render_start_cb)(struct _lv_disp_drv_t * disp_drv);
 
+    /** OPTIONAL: called after direct double buffering copies an unchanged area
+     * from the on-screen buffer to the off-screen buffer. Cache-backed display
+     * drivers can publish exactly that copied rectangle for DMA visibility. */
+    void (*sync_area_cb)(struct _lv_disp_drv_t * disp_drv, void * buf, const lv_area_t * area);
+
     /** On CHROMA_KEYED images this color will be transparent.
      * `LV_COLOR_CHROMA_KEY` by default. (lv_conf.h)*/
     lv_color_t color_chroma_key;

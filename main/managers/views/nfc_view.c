@@ -19,6 +19,7 @@
 #include "gui/popup.h"
 #include "gui/lvgl_safe.h"
 #include "gui/design_tokens.h"
+#include "gui/gui_router.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -214,6 +215,8 @@ static bool saved_details_parsed_view = false;
 static bool saved_has_extra_details = false;
 static char *saved_details_text = NULL;
 static char g_saved_current_path[256] = {0};
+// Deep-link request (favorite launch): saved tag to open on create/live view.
+static char *s_pending_saved_open = NULL;
 static popup_confirm_t *saved_delete_confirm_popup = NULL;
 
 // user mfc keys popup
@@ -1523,7 +1526,7 @@ static bool nfc_init_local_reader_st25r(const char *tag) {
             (gpio_num_t)CONFIG_NFC_SCL_PIN,
             (gpio_num_t)CONFIG_NFC_RST_PIN,
             (gpio_num_t)CONFIG_NFC_IRQ_PIN,
-            I2C_NUM_0,
+            CONFIG_NFC_ST25R3916_I2C_PORT,
             CONFIG_NFC_ST25R3916_I2C_ADDR,
             g_pn532) != ESP_OK) {
         ESP_LOGE(tag, "st25r3916_new_driver_i2c failed");
@@ -2056,7 +2059,7 @@ void nfc_view_input_cb(InputEvent *event) {
             }
             update_nfc_popup_selection();
         }
-#ifdef CONFIG_USE_ENCODER
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_IS_ATOMS3R)
         else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
             // Hardware back button closes the NFC scan popup
             nfc_scan_cancel_cb(NULL);
@@ -2182,7 +2185,7 @@ void nfc_view_input_cb(InputEvent *event) {
             }
             update_saved_popup_selection();
         }
-#ifdef CONFIG_USE_ENCODER
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_IS_ATOMS3R)
         else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
             // Hardware back button closes the saved details popup
             saved_close_cb(NULL);
@@ -2268,7 +2271,7 @@ void nfc_view_input_cb(InputEvent *event) {
                 return;
             }
         }
-#ifdef CONFIG_USE_ENCODER
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_IS_ATOMS3R)
         else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
             nfc_credits_close_cb(NULL);
             return;
@@ -2304,7 +2307,7 @@ void nfc_view_input_cb(InputEvent *event) {
             }
             update_keys_popup_selection();
         }
-#ifdef CONFIG_USE_ENCODER
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_IS_ATOMS3R)
         else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
             // Hardware back button closes the keys popup
             keys_close_cb(NULL);
@@ -2377,7 +2380,7 @@ void nfc_view_input_cb(InputEvent *event) {
             }
             update_cu_popup_selection();
         }
-#ifdef CONFIG_USE_ENCODER
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_IS_ATOMS3R)
         else if (event->type == INPUT_TYPE_EXIT_BUTTON) { cu_close_cb(NULL); return; }
 #endif
         else if (event->type == INPUT_TYPE_JOYSTICK) {
@@ -2463,7 +2466,7 @@ void nfc_view_input_cb(InputEvent *event) {
             }
             update_nfc_write_popup_selection();
         }
-#ifdef CONFIG_USE_ENCODER
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_IS_ATOMS3R)
         else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
             // Hardware back button closes the NFC write popup
             nfc_write_cancel_cb(NULL);
@@ -2510,7 +2513,7 @@ void nfc_view_input_cb(InputEvent *event) {
             int kv = event->data.key_value;
             if (kv == 13 || kv == 10 || kv == 27 || kv == 'c' || kv == 'C' || kv == 29 || kv == '`') { nfc_emu_cancel_cb(NULL); return; }
         }
-#ifdef CONFIG_USE_ENCODER
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_IS_ATOMS3R)
         else if (event->type == INPUT_TYPE_EXIT_BUTTON) { nfc_emu_cancel_cb(NULL); return; }
 #endif
         return;
@@ -2676,7 +2679,7 @@ void nfc_view_input_cb(InputEvent *event) {
         } else if (kv == 29 || kv == '`') {
             if (nfc_is_submenu_open()) back_to_root_menu(); else display_manager_go_back();
         }
-#ifdef CONFIG_USE_ENCODER
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_IS_ATOMS3R)
     } else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
         if (nfc_is_submenu_open()) back_to_root_menu(); else display_manager_go_back();
 #endif
@@ -5963,6 +5966,29 @@ static void nfc_write_go_cb(lv_event_t *e) {
 
 // ---- End Write Flow ----
 
+// Deep-link support for favorites: open the Saved list and show the details
+// popup for a specific tag file. Safe to call before the view exists.
+static void nfc_view_apply_pending_open(void);
+void nfc_view_open_saved(const char *path) {
+    if (!path || !path[0]) return;
+    free(s_pending_saved_open);
+    s_pending_saved_open = strdup(path);
+    if (g_nfc_ov && lv_obj_is_valid(g_nfc_ov)) {
+        nfc_view_apply_pending_open();
+    }
+}
+
+static void nfc_view_apply_pending_open(void) {
+    if (!s_pending_saved_open) return;
+    char path[256];
+    strncpy(path, s_pending_saved_open, sizeof(path) - 1);
+    path[sizeof(path) - 1] = '\0';
+    free(s_pending_saved_open);
+    s_pending_saved_open = NULL;
+    saved_enter_list();
+    create_saved_details_popup(path);
+}
+
 void nfc_view_create(void) {
     lv_obj_clear_flag(lv_scr_act(), LV_OBJ_FLAG_SCROLLABLE);
     root = gui_screen_create_root_no_bg(NULL, NULL, lv_color_hex(GUI_DEFAULT_BG_COLOR), LV_OPA_TRANSP);
@@ -5975,11 +6001,16 @@ void nfc_view_create(void) {
 
 #ifdef CONFIG_USE_TOUCHSCREEN
     const int STATUS_BAR_HEIGHT = GUI_STATUS_BAR_H;
+#if GUI_LEGACY_TOUCH_BAR
     const int TOUCH_BAR_HEIGHT = SCROLL_BTN_SIZE + SCROLL_BTN_PADDING * 2;
+#else
+    const int TOUCH_BAR_HEIGHT = 0;
+#endif
     int container_height = LV_VER_RES - STATUS_BAR_HEIGHT - TOUCH_BAR_HEIGHT;
-    lv_obj_set_size(menu_container, LV_HOR_RES, container_height);
+    lv_obj_set_size(menu_container, GUI_OPTIONS_LIST_WIDTH, container_height);
     lv_obj_align(menu_container, LV_ALIGN_TOP_MID, 0, STATUS_BAR_HEIGHT);
 
+#if GUI_LEGACY_TOUCH_BAR
     uint8_t theme = settings_get_menu_theme(&G_Settings);
     lv_color_t bg_color = lv_color_hex(theme_palette_get_background(theme));
     lv_color_t ctrl_color = lv_color_hex(theme_palette_get_surface_alt(theme));
@@ -6037,6 +6068,7 @@ void nfc_view_create(void) {
     lv_obj_set_style_text_color(down_label, ctrl_text, 0);
     lv_obj_center(down_label);
     lv_obj_add_flag(scroll_down_btn, LV_OBJ_FLAG_HIDDEN);
+#endif /* GUI_LEGACY_TOUCH_BAR */
 #endif
 
     scan_btn = options_view_add_item(g_nfc_ov, "Scan", nfc_option_event_cb, (void *)"Scan");
@@ -6062,7 +6094,7 @@ void nfc_view_create(void) {
      * elsewhere and back) restores the previously highlighted row instead
      * of always landing on the first item. Submenu state (in_saved_list
      * etc.) still always resets to root on re-entry, unchanged. */
-    if (display_manager_previous_view == &main_menu_view) {
+    if (gui_router_previous_view() == &main_menu_view) {
         selected_index = 0;
     } else if (selected_index < 0 || selected_index >= num_items) {
         selected_index = 0;
@@ -6078,6 +6110,9 @@ void nfc_view_create(void) {
 #ifdef CONFIG_USE_TOUCHSCREEN
     update_nfc_scroll_buttons_visibility();
 #endif
+
+    // Consume any pending favorite deep-link (nfc_view_open_saved).
+    nfc_view_apply_pending_open();
 }
 
 void nfc_view_destroy(void) {

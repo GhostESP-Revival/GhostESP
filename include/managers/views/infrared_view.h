@@ -19,6 +19,12 @@ void infrared_view_destroy(void);
  */
 void infrared_view_input_cb(InputEvent *event);
 
+/**
+ * @brief Deep-link: open a specific remote file (full path). Safe to call
+ *        before the view is created; applied on create or immediately if live.
+ */
+void infrared_view_open_remote(const char *path);
+
 extern View infrared_view;
 
 #endif // INFRARED_VIEW_H 

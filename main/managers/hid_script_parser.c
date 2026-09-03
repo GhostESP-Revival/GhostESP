@@ -1,6 +1,6 @@
 #include "sdkconfig.h"
 
-#ifdef CONFIG_HAS_BADUSB
+#if defined(CONFIG_HAS_BADUSB) || defined(CONFIG_HAS_BADBLE)
 
 #include "managers/hid_script_parser.h"
 #include <string.h>
@@ -437,8 +437,17 @@ typedef struct {
     uint32_t delay_ms;
 } prev_action_t;
 
+static bool transport_cancelled(const hid_transport_t *transport) {
+    return transport && transport->is_cancelled && transport->is_cancelled(transport->ctx);
+}
+
 static int process_line(const char *line, const hid_transport_t *transport,
                         uint32_t *default_delay, prev_action_t *prev, bool *stop_flag) {
+    if (!line || !transport || !default_delay || !prev || !stop_flag ||
+        transport_cancelled(transport)) {
+        if (stop_flag) *stop_flag = true;
+        return -1;
+    }
     if (line[0] == '\0') return 0;
 
     if (strncmp(line, "REM ", 4) == 0 || strcmp(line, "REM") == 0) {
@@ -457,6 +466,10 @@ static int process_line(const char *line, const hid_transport_t *transport,
     if (strncmp(line, "DELAY ", 6) == 0) {
         uint32_t ms = (uint32_t)atoi(line + 6);
         transport->delay(ms, transport->ctx);
+        if (transport_cancelled(transport)) {
+            *stop_flag = true;
+            return -1;
+        }
         prev->type = ACTION_DELAY;
         prev->delay_ms = ms;
         return 0;
@@ -465,12 +478,19 @@ static int process_line(const char *line, const hid_transport_t *transport,
     if (strncmp(line, "STRING ", 7) == 0) {
         const char *text = line + 7;
         size_t len = strlen(text);
-        transport->send_string(text, len, transport->ctx);
+        if (!transport->send_string(text, len, transport->ctx) ||
+            transport_cancelled(transport)) {
+            *stop_flag = true;
+            return -1;
+        }
         prev->type = ACTION_STRING;
         prev->string_ptr = text;
         prev->string_len = len;
         if (*default_delay > 0) transport->delay(*default_delay, transport->ctx);
-        transport->release_keys(transport->ctx);
+        if (!transport->release_keys(transport->ctx) || transport_cancelled(transport)) {
+            *stop_flag = true;
+            return -1;
+        }
         return 0;
     }
 
@@ -478,19 +498,39 @@ static int process_line(const char *line, const hid_transport_t *transport,
         int count = atoi(line + 7);
         if (count < 1) count = 1;
         for (int i = 0; i < count; i++) {
+            if (transport_cancelled(transport)) {
+                *stop_flag = true;
+                return -1;
+            }
             switch (prev->type) {
                 case ACTION_KEY:
-                    transport->send_key(prev->modifiers, prev->keycode, transport->ctx);
+                    if (!transport->send_key(prev->modifiers, prev->keycode, transport->ctx)) {
+                        *stop_flag = true;
+                        return -1;
+                    }
                     if (*default_delay > 0) transport->delay(*default_delay, transport->ctx);
-                    transport->release_keys(transport->ctx);
+                    if (!transport->release_keys(transport->ctx) || transport_cancelled(transport)) {
+                        *stop_flag = true;
+                        return -1;
+                    }
                     break;
                 case ACTION_STRING:
-                    transport->send_string(prev->string_ptr, prev->string_len, transport->ctx);
+                    if (!transport->send_string(prev->string_ptr, prev->string_len, transport->ctx)) {
+                        *stop_flag = true;
+                        return -1;
+                    }
                     if (*default_delay > 0) transport->delay(*default_delay, transport->ctx);
-                    transport->release_keys(transport->ctx);
+                    if (!transport->release_keys(transport->ctx) || transport_cancelled(transport)) {
+                        *stop_flag = true;
+                        return -1;
+                    }
                     break;
                 case ACTION_DELAY:
                     transport->delay(prev->delay_ms, transport->ctx);
+                    if (transport_cancelled(transport)) {
+                        *stop_flag = true;
+                        return -1;
+                    }
                     break;
                 default:
                     break;
@@ -531,12 +571,18 @@ static int process_line(const char *line, const hid_transport_t *transport,
         }
 
         if (modifiers || keycode != HID_KEY_NONE) {
-            transport->send_key(modifiers, keycode, transport->ctx);
+            if (!transport->send_key(modifiers, keycode, transport->ctx)) {
+                *stop_flag = true;
+                return -1;
+            }
             prev->type = ACTION_KEY;
             prev->modifiers = modifiers;
             prev->keycode = keycode;
             if (*default_delay > 0) transport->delay(*default_delay, transport->ctx);
-            transport->release_keys(transport->ctx);
+            if (!transport->release_keys(transport->ctx) || transport_cancelled(transport)) {
+                *stop_flag = true;
+                return -1;
+            }
             return 0;
         }
     }
@@ -555,12 +601,14 @@ int hid_script_execute_file(FILE *f, const hid_transport_t *transport) {
 
     while (fgets(line, sizeof(line), f) && !stop) {
         strip_trailing(line);
-        process_line(line, transport, &default_delay, &prev, &stop);
+        if (process_line(line, transport, &default_delay, &prev, &stop) < 0) {
+            break;
+        }
         lines_executed++;
     }
 
-    transport->release_keys(transport->ctx);
-    return lines_executed;
+    bool released = transport->release_keys(transport->ctx);
+    return (stop || !released) ? -1 : lines_executed;
 }
 
 int hid_script_execute(char *script_buf, const hid_transport_t *transport) {
@@ -575,13 +623,15 @@ int hid_script_execute(char *script_buf, const hid_transport_t *transport) {
     char *line = strtok_r(script_buf, "\n", &saveptr);
     while (line && !stop) {
         strip_trailing(line);
-        process_line(line, transport, &default_delay, &prev, &stop);
+        if (process_line(line, transport, &default_delay, &prev, &stop) < 0) {
+            break;
+        }
         lines_executed++;
         line = strtok_r(NULL, "\n", &saveptr);
     }
 
-    transport->release_keys(transport->ctx);
-    return lines_executed;
+    bool released = transport->release_keys(transport->ctx);
+    return (stop || !released) ? -1 : lines_executed;
 }
 
-#endif // CONFIG_HAS_BADUSB
+#endif // CONFIG_HAS_BADUSB || CONFIG_HAS_BADBLE

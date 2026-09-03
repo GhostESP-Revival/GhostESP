@@ -84,6 +84,9 @@ my_pack/
 | `clock_icon` | Main menu |
 | `settings_icon` | Main menu |
 | `GESPAppGallery` | Main menu / App gallery |
+| `folder` | App gallery / plugin categories |
+| `description` | App gallery |
+| `storefront` | App gallery |
 | `lock` | Main menu |
 | `dualcomm` | Main menu |
 | `lan_50dp_FFFFFF_FILL0_wght400_GRAD0_opsz48` | Main menu |

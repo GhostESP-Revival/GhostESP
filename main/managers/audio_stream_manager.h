@@ -144,6 +144,25 @@ void audio_stream_manager_update_receiver_status(size_t fill_bytes, size_t capac
 uint32_t audio_stream_manager_get_playback_ms(void);
 
 /**
+ * @brief Whether the receiver/peer has ever reported a playback position.
+ *
+ * Once any status has arrived, the UI should trust get_playback_ms()
+ * completely - including 0 while the prebuffer fills at track start -
+ * instead of estimating from the sender's byte offset (which runs ahead
+ * of the audible position and makes the progress bar jump around).
+ */
+bool audio_stream_manager_has_receiver_feedback(void);
+
+/**
+ * @brief Return and clear the last asynchronous playback error.
+ *
+ * The precheck runs on a worker task, so refusals (e.g. bitrate too high
+ * for the GhostLink link) can't be returned from play() directly. The UI
+ * polls this to surface a toast. Returns ESP_OK when nothing is pending.
+ */
+esp_err_t audio_stream_manager_consume_last_error(void);
+
+/**
  * @brief Get estimated track duration in milliseconds.
  */
 uint32_t audio_stream_manager_get_duration_ms(void);

@@ -1,4 +1,5 @@
 #include "managers/settings_manager.h"
+#include "gui/theme_palette_api.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "lvgl.h"
@@ -15,7 +16,11 @@
 #define S_TAG "SETTINGS"
 
 static bool settings_should_use_noop_dualcomm_pins(void) {
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+#if defined(CONFIG_CROWPANEL_ADVANCE_S3_LCD)
+  // Standalone SD profile: the generic UART pins overlap SD MOSI and RGB R0.
+  // Override saved defaults too, so existing installations need no NVS erase.
+  return true;
+#elif defined(CONFIG_BUILD_CONFIG_TEMPLATE)
   return strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "Pancake") == 0 ||
          strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "MarauderV8") == 0;
 #else
@@ -112,6 +117,8 @@ static const char *NVS_MIC_MIRROR_MODE_KEY = "mic_mirror";
 
 static const char *NVS_GHOSTLINK_SPLIT_VIEW_KEY = "glink_split";
 static const char *NVS_MENU_BG_SHADE_KEY = "menu_bg_shd";
+static const char *NVS_THEME_SCHEMA_KEY = "theme_schema";
+static const char *NVS_THEME_BG_EFFECTS_KEY = "theme_bg_fx";
 static const char *NVS_MENU_ROUNDED_KEY = "menu_rounded";
 static const char *NVS_EPILEPSY_WARNING_KEY = "epil_warn";
 static const char *NVS_FONT_SIZE_KEY = "font_size";
@@ -120,6 +127,9 @@ static const char *NVS_INPUT_REPEAT_SPEED_KEY = "repeat_spd";
 static const char *NVS_HIGH_CONTRAST_KEY = "high_contrast";
 static const char *NVS_SUN_MODE_KEY = "sun_mode";
 static const char *NVS_SUN_MODE_SAVED_BRIGHTNESS_KEY = "sun_mode_pb";
+static const char *NVS_LOG_LEVEL_KEY = "log_level";
+static const char *NVS_FAVORITES_KEY = "favs";
+static const char *NVS_FAVS_BYPASS_KEY = "favs_bypass";
 static const char *NVS_MENU_ITEM_BORDERS_KEY = "menu_itm_brd";
 static const char *NVS_MENU_CARD_BG_KEY = "menu_card_bg";
 static const char *NVS_TOUCH_DRAG_SCROLL_KEY = "touch_drg_scr";
@@ -177,6 +187,7 @@ void settings_init(FSettings *settings) {
 void settings_deinit(void) { nvs_close(nvsHandle); }
 
 void settings_set_defaults(FSettings *settings) {
+  menu_config_reset(&settings->menu_config);
   settings->rgb_mode = RGB_MODE_NORMAL;
   settings->channel_delay = 1.0f;
   settings->broadcast_speed = 1;
@@ -262,15 +273,23 @@ void settings_set_defaults(FSettings *settings) {
   settings->mic_contrast = 2; // Medium contrast
   settings->mic_mirror_mode = false;
   settings->ghostlink_split_view = true; // Default to split view
-  settings->menu_bg_shade = 2;
+  settings->menu_bg_shade = 1;
+  settings->theme_background_effects = true;
   settings->menu_rounded = true;
   settings->epilepsy_warning_enabled = true;
   settings->font_size = 1; // Normal (0=Small, 1=Normal, 2=Large)
+#ifdef CONFIG_IS_ATOMS3R
+  settings->font_size = 0; // Small is the default on the AtomS3R display
+#endif
   settings->reduced_motion = false;
   settings->input_repeat_speed = 1; // Normal (0=Slow, 1=Normal, 2=Fast)
   settings->high_contrast = false;
   settings->sun_mode = false;
   settings->sun_mode_saved_brightness = 100;
+  settings->log_level = ESP_LOG_WARN;
+  settings->favorites_count = 0;
+  memset(settings->favorites, 0, sizeof(settings->favorites));
+  settings->favorites_bypass_pin = false;
   settings->menu_item_borders = false;
   settings->menu_card_bg = false;
   settings->touch_drag_scroll = true;
@@ -591,7 +610,25 @@ void settings_load(FSettings *settings) {
   }
 
   err = nvs_get_u8(nvsHandle, NVS_MENU_THEME_KEY, &value_u8);
-  if (err == ESP_OK) settings->menu_theme = value_u8;
+  if (err == ESP_OK) {
+    /* Schema 0 = pre-descriptor accent presets; remap once to palette IDs. */
+    uint8_t schema = 0;
+    bool migrate_theme = nvs_get_u8(nvsHandle, NVS_THEME_SCHEMA_KEY, &schema) != ESP_OK || schema == 0;
+    settings->menu_theme = migrate_theme ? theme_palette_migrate_legacy(value_u8)
+                                         : theme_palette_clamp_id(value_u8);
+    if (migrate_theme) {
+      if (nvs_set_u8(nvsHandle, NVS_THEME_SCHEMA_KEY, 1) == ESP_OK) {
+        nvs_commit(nvsHandle);
+      }
+    }
+  } else {
+    /* Fresh device: stamp the current schema so nothing remaps later. */
+    uint8_t schema = 0;
+    if (nvs_get_u8(nvsHandle, NVS_THEME_SCHEMA_KEY, &schema) != ESP_OK) {
+      nvs_set_u8(nvsHandle, NVS_THEME_SCHEMA_KEY, 1);
+      nvs_commit(nvsHandle);
+    }
+  }
   err = nvs_get_u32(nvsHandle, NVS_TERMINAL_TEXT_COLOR_KEY, &value_u32);
   if (err == ESP_OK) {
     settings->terminal_text_color = value_u32;
@@ -825,6 +862,10 @@ void settings_load(FSettings *settings) {
   if (err == ESP_OK) {
     settings->menu_bg_shade = value_u8;
   }
+  err = nvs_get_u8(nvsHandle, NVS_THEME_BG_EFFECTS_KEY, &value_u8);
+  if (err == ESP_OK) {
+    settings->theme_background_effects = value_u8 != 0;
+  }
   
   err = nvs_get_u8(nvsHandle, NVS_MENU_ROUNDED_KEY, &value_u8);
   if (err == ESP_OK) {
@@ -861,6 +902,97 @@ void settings_load(FSettings *settings) {
   if (err == ESP_OK) {
     settings->sun_mode_saved_brightness = value_u8;
   }
+  settings_normalize_modes(settings);
+  err = nvs_get_u8(nvsHandle, NVS_LOG_LEVEL_KEY, &value_u8);
+  if (err == ESP_OK && value_u8 <= ESP_LOG_VERBOSE) {
+    settings->log_level = value_u8;
+  }
+  size_t menu_config_size = sizeof(settings->menu_config);
+  menu_config_reset(&settings->menu_config);
+  err = nvs_get_blob(nvsHandle, "menu_config", &settings->menu_config, &menu_config_size);
+  if (err != ESP_OK || menu_config_size != menu_config_storage_size(&settings->menu_config)) {
+    menu_config_reset(&settings->menu_config);
+  }
+  menu_config_validate(&settings->menu_config);
+
+  size_t req_sz = 0;
+  err = nvs_get_blob(nvsHandle, NVS_FAVORITES_KEY, NULL, &req_sz);
+  if (err == ESP_OK) {
+    /* Blob layouts seen in the wild (oldest first). Legacy sizes are pinned
+     * to the original 8-slot array so raising FAVORITES_MAX never makes an
+     * old blob match a new-format size check:
+     *   [8 x 32B]              = 256   raw, no count
+     *   [count][8 x 32B]       = 257
+     *   [8 x 64B]              = 512   raw, no count
+     *   [count][8 x 64B]       = 513
+     *   [count][MAX x 64B]     = current format */
+    int legacy_slots = -1;
+    int slot_len = 0;
+    bool has_count = false;
+    if (req_sz == (size_t)(1 + sizeof(settings->favorites))) {
+      uint8_t *blob = (uint8_t *)malloc(req_sz);
+      if (blob) {
+        size_t r = req_sz;
+        if (nvs_get_blob(nvsHandle, NVS_FAVORITES_KEY, blob, &r) == ESP_OK && r == req_sz) {
+          uint8_t c = blob[0];
+          if (c <= FAVORITES_MAX) {
+            settings->favorites_count = c;
+            memcpy(settings->favorites, blob + 1, sizeof(settings->favorites));
+          }
+        }
+        free(blob);
+      }
+    } else if (req_sz == sizeof(settings->favorites)) {
+      // Same generation but without the leading count byte.
+      size_t r = req_sz;
+      if (nvs_get_blob(nvsHandle, NVS_FAVORITES_KEY, settings->favorites, &r) == ESP_OK) {
+        uint8_t cnt = 0;
+        for (int i = 0; i < FAVORITES_MAX; i++) if (settings->favorites[i][0]) cnt++;
+        settings->favorites_count = cnt;
+      }
+    } else if (req_sz == 1 + 8 * 64) { legacy_slots = 8; slot_len = 64; has_count = true; }
+    else if (req_sz == 8 * 64)      { legacy_slots = 8; slot_len = 64; }
+    else if (req_sz == 1 + 8 * 32)  { legacy_slots = 8; slot_len = 32; has_count = true; }
+    else if (req_sz == 8 * 32)      { legacy_slots = 8; slot_len = 32; }
+
+    if (legacy_slots > 0 && slot_len > 0) {
+      // Migrate an 8-slot blob into the current FAVORITES_MAX-slot layout.
+      uint8_t *blob = (uint8_t *)malloc(req_sz);
+      if (blob) {
+        size_t r = req_sz;
+        if (nvs_get_blob(nvsHandle, NVS_FAVORITES_KEY, blob, &r) == ESP_OK && r == req_sz) {
+          memset(settings->favorites, 0, sizeof(settings->favorites));
+          int c;
+          if (has_count) {
+            c = blob[0];
+            if (c > legacy_slots) c = legacy_slots;
+            if (c > FAVORITES_MAX) c = FAVORITES_MAX;
+            for (int i = 0; i < c; i++) {
+              const char *src = (const char *)blob + 1 + i * slot_len;
+              size_t cp = (slot_len < FAVORITE_NAME_LEN) ? (size_t)slot_len : (size_t)(FAVORITE_NAME_LEN - 1);
+              memcpy(settings->favorites[i], src, cp);
+              settings->favorites[i][cp] = '\0';
+            }
+          } else {
+            // Raw layout: carry over every non-empty slot in order.
+            c = 0;
+            for (int i = 0; i < legacy_slots && c < FAVORITES_MAX; i++) {
+              const char *src = (const char *)blob + i * slot_len;
+              if (!src[0]) continue;
+              size_t cp = (slot_len < FAVORITE_NAME_LEN) ? (size_t)slot_len : (size_t)(FAVORITE_NAME_LEN - 1);
+              memcpy(settings->favorites[c], src, cp);
+              settings->favorites[c][cp] = '\0';
+              c++;
+            }
+          }
+          settings->favorites_count = (uint8_t)c;
+        }
+        free(blob);
+      }
+    }
+  }
+  err = nvs_get_u8(nvsHandle, NVS_FAVS_BYPASS_KEY, &value_u8);
+  if (err == ESP_OK) settings->favorites_bypass_pin = (bool)value_u8;
   err = nvs_get_u8(nvsHandle, NVS_MENU_ITEM_BORDERS_KEY, &value_u8);
   if (err == ESP_OK) {
     settings->menu_item_borders = (bool)value_u8;
@@ -1108,6 +1240,7 @@ void settings_persist_setting(SettingsType setting) {
         case SETTING_EXPORT_SETTINGS_SD:
         case SETTING_IMPORT_SETTINGS_SD:
         case SETTING_FACTORY_RESET:
+        case SETTING_MANAGE_FAVORITES:
              // Actions, not saved
              return;
         case SETTING_SETUP_COMPLETE:
@@ -1199,6 +1332,10 @@ void settings_persist_setting(SettingsType setting) {
             err = nvs_set_u8(nvsHandle, NVS_MENU_BG_SHADE_KEY, G_Settings.menu_bg_shade);
             key = NVS_MENU_BG_SHADE_KEY;
             break;
+        case SETTING_THEME_BACKGROUND_EFFECTS:
+            err = nvs_set_u8(nvsHandle, NVS_THEME_BG_EFFECTS_KEY, G_Settings.theme_background_effects ? 1 : 0);
+            key = NVS_THEME_BG_EFFECTS_KEY;
+            break;
         case SETTING_MENU_ROUNDED:
             err = nvs_set_u8(nvsHandle, NVS_MENU_ROUNDED_KEY, G_Settings.menu_rounded ? 1 : 0);
             key = NVS_MENU_ROUNDED_KEY;
@@ -1227,6 +1364,26 @@ void settings_persist_setting(SettingsType setting) {
             err = nvs_set_u8(nvsHandle, NVS_SUN_MODE_KEY, G_Settings.sun_mode ? 1 : 0);
             key = NVS_SUN_MODE_KEY;
             nvs_set_u8(nvsHandle, NVS_SUN_MODE_SAVED_BRIGHTNESS_KEY, G_Settings.sun_mode_saved_brightness);
+            break;
+        case SETTING_LOG_LEVEL:
+            err = nvs_set_u8(nvsHandle, NVS_LOG_LEVEL_KEY, G_Settings.log_level);
+            key = NVS_LOG_LEVEL_KEY;
+            break;
+        case SETTING_FAVORITES: {
+            uint8_t blob[1 + sizeof(G_Settings.favorites)];
+            blob[0] = G_Settings.favorites_count;
+            memcpy(blob + 1, G_Settings.favorites, sizeof(G_Settings.favorites));
+            err = nvs_set_blob(nvsHandle, NVS_FAVORITES_KEY, blob, sizeof(blob));
+            key = NVS_FAVORITES_KEY;
+            break;
+        }
+        case SETTING_FAVORITES_BYPASS:
+            err = nvs_set_u8(nvsHandle, NVS_FAVS_BYPASS_KEY, G_Settings.favorites_bypass_pin ? 1 : 0);
+            key = NVS_FAVS_BYPASS_KEY;
+            break;
+        case SETTING_MENU_CONFIG:
+            err = nvs_set_blob(nvsHandle, "menu_config", &G_Settings.menu_config, menu_config_storage_size(&G_Settings.menu_config));
+            key = "menu_config";
             break;
         case SETTING_MENU_ITEM_BORDERS:
             err = nvs_set_u8(nvsHandle, NVS_MENU_ITEM_BORDERS_KEY, G_Settings.menu_item_borders ? 1 : 0);
@@ -1480,6 +1637,7 @@ esp_err_t settings_save(const FSettings *settings) {
     NVS_SET(nvs_set_u8(nvsHandle, NVS_MIC_MIRROR_MODE_KEY, settings->mic_mirror_mode ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_GHOSTLINK_SPLIT_VIEW_KEY, settings->ghostlink_split_view ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_MENU_BG_SHADE_KEY, settings->menu_bg_shade));
+    NVS_SET(nvs_set_u8(nvsHandle, NVS_THEME_BG_EFFECTS_KEY, settings->theme_background_effects ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_MENU_ROUNDED_KEY, settings->menu_rounded ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_EPILEPSY_WARNING_KEY, settings->epilepsy_warning_enabled ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_FONT_SIZE_KEY, settings->font_size));
@@ -1488,6 +1646,15 @@ esp_err_t settings_save(const FSettings *settings) {
     NVS_SET(nvs_set_u8(nvsHandle, NVS_HIGH_CONTRAST_KEY, settings->high_contrast ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_SUN_MODE_KEY, settings->sun_mode ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_SUN_MODE_SAVED_BRIGHTNESS_KEY, settings->sun_mode_saved_brightness));
+    NVS_SET(nvs_set_u8(nvsHandle, NVS_LOG_LEVEL_KEY, settings->log_level));
+    {
+        uint8_t blob[1 + sizeof(settings->favorites)];
+        blob[0] = settings->favorites_count;
+        memcpy(blob + 1, settings->favorites, sizeof(settings->favorites));
+        NVS_SET(nvs_set_blob(nvsHandle, NVS_FAVORITES_KEY, blob, sizeof(blob)));
+    }
+    NVS_SET(nvs_set_u8(nvsHandle, NVS_FAVS_BYPASS_KEY, settings->favorites_bypass_pin ? 1 : 0));
+    NVS_SET(nvs_set_blob(nvsHandle, "menu_config", &settings->menu_config, menu_config_storage_size(&settings->menu_config)));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_MENU_ITEM_BORDERS_KEY, settings->menu_item_borders ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_MENU_CARD_BG_KEY, settings->menu_card_bg ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_TOUCH_DRAG_SCROLL_KEY, settings->touch_drag_scroll ? 1 : 0));
@@ -1737,7 +1904,7 @@ bool settings_get_thirds_control_enabled(const FSettings *settings) {
 }
 
 void settings_set_menu_theme(FSettings *settings, uint8_t theme) {
-  settings->menu_theme = theme;
+  settings->menu_theme = theme_palette_clamp_id(theme);
 }
 
 uint8_t settings_get_menu_theme(const FSettings *settings) {
@@ -1934,12 +2101,12 @@ bool settings_get_auto_save_scans(const FSettings *settings) {
 
 // Menu layout settings
 void settings_set_menu_layout(FSettings *settings, uint8_t layout) {
-    if (layout > 3) layout = 1;
+    if (layout > 4) layout = 1;
     settings->menu_layout = layout;
 }
 
 uint8_t settings_get_menu_layout(const FSettings *settings) {
-    return settings->menu_layout <= 3 ? settings->menu_layout : 1;
+    return settings->menu_layout <= 4 ? settings->menu_layout : 1;
 }
 
 void settings_set_carousel_invert_direction(FSettings *settings, bool enabled) {
@@ -2115,6 +2282,7 @@ void settings_reset_badusb_defaults(FSettings *settings) {
   settings->badusb_randomize = false;
   settings->badusb_kb_layout = KB_LAYOUT_US;
 }
+#endif
 
 // MIC RGB Visualizer getters and setters
 void settings_set_mic_visualizer_mode(FSettings *settings, MicVisualizerMode mode) {
@@ -2194,7 +2362,6 @@ bool settings_get_mic_calibrate(const FSettings *settings) {
   // Calibration is a one-shot action, always returns false
   return false;
 }
-#endif
 
 void settings_set_ghostlink_split_view(FSettings *settings, bool enabled) {
   if (settings) {
@@ -2214,6 +2381,14 @@ void settings_set_menu_bg_shade(FSettings *settings, uint8_t shade) {
 
 uint8_t settings_get_menu_bg_shade(const FSettings *settings) {
   return settings ? settings->menu_bg_shade : 1;
+}
+
+void settings_set_theme_background_effects(FSettings *settings, bool enabled) {
+  if (settings) settings->theme_background_effects = enabled;
+}
+
+bool settings_get_theme_background_effects(const FSettings *settings) {
+  return settings ? settings->theme_background_effects : true;
 }
 
 void settings_set_menu_rounded(FSettings *settings, bool enabled) {
@@ -2266,9 +2441,17 @@ uint8_t settings_get_input_repeat_speed(const FSettings *settings) {
   return settings ? settings->input_repeat_speed : 1;
 }
 
+void settings_normalize_modes(FSettings *settings) {
+  /* High Contrast and Sun Mode are exclusive; High Contrast wins. */
+  if (settings && settings->high_contrast && settings->sun_mode) {
+    settings->sun_mode = false;
+  }
+}
+
 void settings_set_high_contrast(FSettings *settings, bool enabled) {
   if (settings) {
     settings->high_contrast = enabled;
+    if (enabled) settings->sun_mode = false;
   }
 }
 
@@ -2279,11 +2462,77 @@ bool settings_get_high_contrast(const FSettings *settings) {
 void settings_set_sun_mode(FSettings *settings, bool enabled) {
   if (settings) {
     settings->sun_mode = enabled;
+    if (enabled) settings->high_contrast = false;
   }
 }
 
 bool settings_get_sun_mode(const FSettings *settings) {
   return settings ? settings->sun_mode : false;
+}
+
+void settings_set_log_level(FSettings *settings, uint8_t level) {
+  if (settings && level <= ESP_LOG_VERBOSE) {
+    settings->log_level = level;
+  }
+}
+
+uint8_t settings_get_log_level(const FSettings *settings) {
+  return settings ? settings->log_level : ESP_LOG_WARN;
+}
+
+bool settings_is_favorite(const FSettings *settings, const char *name) {
+  if (!settings || !name || !name[0]) return false;
+  for (int i = 0; i < settings->favorites_count && i < FAVORITES_MAX; i++) {
+    if (strncmp(settings->favorites[i], name, FAVORITE_NAME_LEN) == 0) return true;
+  }
+  return false;
+}
+
+bool settings_add_favorite(FSettings *settings, const char *name) {
+  if (!settings || !name || !name[0]) return false;
+  if (settings_is_favorite(settings, name)) return true;
+  if (settings->favorites_count >= FAVORITES_MAX) return false;
+  strncpy(settings->favorites[settings->favorites_count], name, FAVORITE_NAME_LEN - 1);
+  settings->favorites[settings->favorites_count][FAVORITE_NAME_LEN - 1] = '\0';
+  settings->favorites_count++;
+  return true;
+}
+
+bool settings_remove_favorite(FSettings *settings, const char *name) {
+  if (!settings || !name) return false;
+  for (int i = 0; i < settings->favorites_count; i++) {
+    if (strncmp(settings->favorites[i], name, FAVORITE_NAME_LEN) == 0) {
+      for (int j = i; j < settings->favorites_count - 1; j++) {
+        strncpy(settings->favorites[j], settings->favorites[j + 1], FAVORITE_NAME_LEN);
+      }
+      memset(settings->favorites[settings->favorites_count - 1], 0, FAVORITE_NAME_LEN);
+      settings->favorites_count--;
+      return true;
+    }
+  }
+  return false;
+}
+
+bool settings_toggle_favorite(FSettings *settings, const char *name) {
+  if (settings_is_favorite(settings, name)) return settings_remove_favorite(settings, name);
+  return settings_add_favorite(settings, name);
+}
+
+uint8_t settings_get_favorites_count(const FSettings *settings) {
+  return settings ? settings->favorites_count : 0;
+}
+
+const char *settings_get_favorite(const FSettings *settings, uint8_t idx) {
+  if (!settings || idx >= settings->favorites_count) return NULL;
+  return settings->favorites[idx];
+}
+
+void settings_set_favorites_bypass(FSettings *settings, bool bypass) {
+  if (settings) settings->favorites_bypass_pin = bypass;
+}
+
+bool settings_get_favorites_bypass(const FSettings *settings) {
+  return settings ? settings->favorites_bypass_pin : false;
 }
 
 void settings_set_menu_item_borders(FSettings *settings, bool enabled) {

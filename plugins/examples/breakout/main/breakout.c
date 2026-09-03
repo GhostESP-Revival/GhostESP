@@ -5,18 +5,21 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define GAME_W 100
-#define GAME_H 150
+static int game_width;
+static int game_height;
+static bool landscape_layout;
+#define GAME_W game_width
+#define GAME_H game_height
 #define BRICK_ROWS 6
 #define BRICK_COLS 8
-#define BRICK_W 11
-#define BRICK_H 5
-#define BRICK_GAP 1
-#define BRICK_X 3
-#define BRICK_Y 25
-#define PADDLE_W 24
+#define BRICK_W (landscape_layout ? 22 : 11)
+#define BRICK_H (landscape_layout ? 6 : 5)
+#define BRICK_GAP (landscape_layout ? 2 : 1)
+#define BRICK_X (landscape_layout ? 20 : 3)
+#define BRICK_Y (landscape_layout ? 18 : 25)
+#define PADDLE_W (landscape_layout ? 42 : 24)
 #define PADDLE_H 4
-#define PADDLE_Y 137
+#define PADDLE_Y (GAME_H - (landscape_layout ? 10 : 13))
 #define BALL_R 2
 #define FRAME_MS 16
 #define TOUCH_BAR_HEIGHT 34
@@ -36,7 +39,7 @@ static ghostesp_ui_obj_t canvas, touch_bar;
 static ghostesp_ui_timer_t frame_timer;
 static uint16_t *framebuffer;
 static size_t framebuffer_size;
-static int canvas_width, canvas_height, canvas_left;
+static int canvas_width, canvas_height, view_width, view_height, view_left, view_top;
 static int paddle_x, ball_x, ball_y, ball_dx, ball_dy;
 static int old_paddle_x, old_ball_x, old_ball_y;
 static int score, lives, level, old_score, old_lives, old_level;
@@ -71,8 +74,8 @@ static void fill_rect(int x, int y, int w, int h, uint16_t color) {
     if (x2 > GAME_W) x2 = GAME_W;
     if (y2 > GAME_H) y2 = GAME_H;
     if (x >= x2 || y >= y2) return;
-    int left = x * canvas_width / GAME_W, right = x2 * canvas_width / GAME_W;
-    int top = y * canvas_height / GAME_H, bottom = y2 * canvas_height / GAME_H;
+    int left = view_left + x * view_width / GAME_W, right = view_left + x2 * view_width / GAME_W;
+    int top = view_top + y * view_height / GAME_H, bottom = view_top + y2 * view_height / GAME_H;
     if (right <= left) right = left + 1;
     if (bottom <= top) bottom = top + 1;
     for (int row = top; row < bottom; ++row) {
@@ -114,8 +117,8 @@ static void draw_number(int value, int x, int y) {
 }
 
 static void blit_region(int x, int y, int w, int h) {
-    int left = x * canvas_width / GAME_W, top = y * canvas_height / GAME_H;
-    int right = (x + w) * canvas_width / GAME_W, bottom = (y + h) * canvas_height / GAME_H;
+    int left = view_left + x * view_width / GAME_W, top = view_top + y * view_height / GAME_H;
+    int right = view_left + (x + w) * view_width / GAME_W, bottom = view_top + (y + h) * view_height / GAME_H;
     if (left < 0) left = 0;
     if (top < 0) top = 0;
     if (right > canvas_width) right = canvas_width;
@@ -130,9 +133,10 @@ static void render(void) {
     fill_rect(0, 9, 2, GAME_H - 9, C_WALL);
     fill_rect(GAME_W - 2, 9, 2, GAME_H - 9, C_WALL);
     fill_rect(0, 9, GAME_W, 2, C_WALL);
+    int hud_col = GAME_W / 3;
     draw_text("S", 3, 2, C_TEXT); draw_number(score, 8, 2);
-    draw_text("L", 47, 2, C_TEXT); draw_number(level, 52, 2);
-    draw_text("V", 79, 2, C_TEXT); draw_number(lives, 84, 2);
+    draw_text("L", hud_col, 2, C_TEXT); draw_number(level, hud_col + 5, 2);
+    draw_text("V", GAME_W - 22, 2, C_TEXT); draw_number(lives, GAME_W - 17, 2);
     for (int row = 0; row < BRICK_ROWS; ++row)
         for (int col = 0; col < BRICK_COLS; ++col)
             if (bricks[row][col]) fill_rect(BRICK_X + col * (BRICK_W + BRICK_GAP),
@@ -145,8 +149,9 @@ static void render(void) {
         const char *message = state == STATE_READY ? "TAP TO PLAY" : state == STATE_PAUSED ? "PAUSED" :
                               state == STATE_WON ? "YOU WIN" : "GAME OVER";
         int width = (int)strlen(message) * 4 + 6;
-        fill_rect((GAME_W-width)/2, 82, width, 11, C_PANEL);
-        draw_text(message, (GAME_W-(int)strlen(message)*4+1)/2, 85,
+        int message_y = GAME_H / 2 - 5;
+        fill_rect((GAME_W-width)/2, message_y, width, 11, C_PANEL);
+        draw_text(message, (GAME_W-(int)strlen(message)*4+1)/2, message_y + 3,
                   state == STATE_LOST ? brick_colors[1] : C_TEXT);
     }
 }
@@ -272,8 +277,15 @@ static void breakout_start(void) {
     touch_bar=gh_touch_bar(api,true,touch_back,NULL);
     int width=api->ui_screen_get_content_width(), height=api->ui_screen_get_content_height();
     api->ui_obj_set_size(screen,width,height);
-    canvas_width=width; canvas_height=height-(touch_bar?TOUCH_BAR_HEIGHT:0);
-    if (canvas_width<50 || canvas_height<75) {
+    int usable_height=height-(touch_bar?TOUCH_BAR_HEIGHT:0);
+    landscape_layout = width > usable_height;
+    game_width = landscape_layout ? 240 : 100;
+    game_height = landscape_layout ? 100 : 150;
+    canvas_width=width; canvas_height=usable_height;
+    view_width=usable_height*GAME_W/GAME_H; view_height=usable_height;
+    if (view_width>width) { view_width=width; view_height=width*GAME_H/GAME_W; }
+    view_left=(width-view_width)/2; view_top=(usable_height-view_height)/2;
+    if (view_width<50 || view_height<75) {
         if (api->toast) api->toast("Display is too small for Breakout");
         request_exit(); return;
     }
@@ -281,7 +293,7 @@ static void breakout_start(void) {
     if (!canvas) { request_exit(); return; }
     framebuffer_size=(size_t)canvas_width*canvas_height*sizeof(*framebuffer); framebuffer=malloc(framebuffer_size);
     if (!framebuffer) { request_exit(); return; }
-    canvas_left=0; if (api->ui_obj_set_pos) api->ui_obj_set_pos(canvas,canvas_left,0);
+    if (api->ui_obj_set_pos) api->ui_obj_set_pos(canvas,0,0);
     new_game(); present(); last_frame_ms=api->system_uptime_ms?api->system_uptime_ms():0;
     frame_timer=api->ui_timer_create(game_frame,FRAME_MS,NULL); if (!frame_timer) request_exit();
 }
@@ -295,15 +307,17 @@ static void breakout_input(const ghostesp_input_event_t *event) {
     if (!event || exit_requested) return;
     if (event->type==GHOSTESP_INPUT_BACK && event->pressed) { request_exit(); return; }
     if (event->type==GHOSTESP_INPUT_TOUCH) {
-        if (event->y < 0 || event->y >= canvas_height) {
+        if (event->x < view_left || event->x >= view_left + view_width ||
+            event->y < view_top || event->y >= view_top + view_height) {
             touch_active=false;
             gh_touch_reset(&touch_state);
             return;
         }
         bool tap=false; ghostesp_input_type_t swipe=gh_touch_update_tap(&touch_state,event,&tap);
-        touch_active=event->pressed; touch_target=((event->x-canvas_left)*GAME_W)/canvas_width;
+        touch_active=event->pressed; touch_target=((event->x-view_left)*GAME_W)/view_width;
         if (touch_target<0) touch_target=0;
         if (touch_target>=GAME_W) touch_target=GAME_W-1;
+        if (event->pressed) paddle_x=clamp_paddle(touch_target-PADDLE_W/2);
         if (swipe==GHOSTESP_INPUT_LEFT) paddle_x=clamp_paddle(paddle_x-8);
         else if (swipe==GHOSTESP_INPUT_RIGHT) paddle_x=clamp_paddle(paddle_x+8);
         else if (swipe==GHOSTESP_INPUT_UP || tap) activate();

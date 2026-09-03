@@ -25,7 +25,6 @@ extern View keyboard_view;
 extern void keyboard_view_set_return_view(View *view);
 extern void keyboard_view_set_start_caps(bool start_caps);
 
-static View *terminal_return_view = NULL;
 
 #include "lvgl.h"
 #include "managers/settings_manager.h"
@@ -40,11 +39,19 @@ static void keyboard_input_callback(const char *text);
 
 static const lv_font_t *terminal_font(void) {
     uint8_t size = settings_get_terminal_font_size(&G_Settings);
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    switch (size) {
+        case 0: return &lv_font_montserrat_14;
+        case 2: return &lv_font_montserrat_20;
+        default: return &lv_font_montserrat_16;
+    }
+#else
     switch (size) {
         case 0: return &lv_font_montserrat_10;
         case 2: return &lv_font_montserrat_14;
         default: return &lv_font_montserrat_12;
     }
+#endif
 }
 
 static const char *TAG = "Terminal";
@@ -61,8 +68,13 @@ static bool terminal_dualcomm_only = false;
 #define PROCESSING_INTERVAL_MS 10
 #define PROCESSING_INTERVAL_FAST_MS 5
 #define MIN_SCREEN_SIZE 239
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+#define BUTTON_SIZE 48
+#define BUTTON_PADDING 6
+#else
 #define BUTTON_SIZE 28
 #define BUTTON_PADDING 3
+#endif
 
 static lv_obj_t *back_btn = NULL;
 static lv_obj_t *input_label = NULL;
@@ -92,12 +104,14 @@ static void keyboard_input_callback(const char *text) {
         input_buffer[sizeof(input_buffer) - 1] = '\0';
         input_len = strlen(input_buffer);
         update_input_label();
-        
+
+        /* The keyboard submit callback runs while the keyboard is still the
+         * active view.  Restore the terminal synchronously so its canvas and
+         * update timer are live before command output starts arriving. */
+        display_manager_switch_view_and_wait_for_refresh(&terminal_view);
+
         // Submit the text to the terminal
         submit_text();
-        
-        // Return to terminal view
-        display_manager_switch_view(&terminal_view);
     }
 }
 
@@ -667,17 +681,14 @@ static void stop_all_operations(void) {
         handle_stop_flipper(0, NULL);
     }
 
-    // now switch the view
-    if (terminal_return_view) {
-        display_manager_switch_view(terminal_return_view);
-        terminal_return_view = NULL;
-    } else {
-        display_manager_go_back();
-    }
+    display_manager_go_back();
 }
 #if defined(CONFIG_USE_HW_KB) || defined(CONFIG_USE_TOUCHSCREEN) || defined(CONFIG_USE_JOYSTICK)
 void text_box_click_cb(lv_event_t *e){
   keyboard_view_set_return_view(&terminal_view);
+  keyboard_view_set_submit_callback(keyboard_input_callback);
+  keyboard_view_set_placeholder("Enter command...");
+  keyboard_view_set_initial_text(input_buffer);
   keyboard_view_set_start_caps(false);
   display_manager_switch_view(&keyboard_view);
 
@@ -728,15 +739,20 @@ void terminal_view_create(void) {
 
     const int STATUS_BAR_HEIGHT = GUI_STATUS_BAR_HEIGHT;
     const int padding = 3;
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    const int textbox_height = GUI_CONTROL_H - 4;
+#else
     const int textbox_height = 28;
+#endif
 
     int back_button_height = 0;
     bool show_back_btn = false;
     bool show_input_bar = false;
 
-#ifdef CONFIG_USE_TOUCHSCREEN
-    if ((LV_HOR_RES > MIN_SCREEN_SIZE && LV_VER_RES > MIN_SCREEN_SIZE) ||
-        (LV_HOR_RES == 320 && LV_VER_RES == 170)) {
+#if defined(CONFIG_USE_TOUCHSCREEN) && GUI_LEGACY_TOUCH_BAR
+    if (GUI_LEGACY_TOUCH_BAR &&
+        ((LV_HOR_RES > MIN_SCREEN_SIZE && LV_VER_RES > MIN_SCREEN_SIZE) ||
+         (LV_HOR_RES == 320 && LV_VER_RES == 170))) {
         show_back_btn = true;
         back_button_height = BUTTON_SIZE + BUTTON_PADDING * 2;
     }
@@ -760,7 +776,7 @@ void terminal_view_create(void) {
     }
 
     // Calculate the height for the terminal readout area
-    int textarea_height = LV_VER_RES - STATUS_BAR_HEIGHT - input_area_height;
+    int textarea_height = LV_VER_RES - STATUS_BAR_HEIGHT - GUI_HOME_SAFE_H - input_area_height;
 
     // Create the terminal_page to fill all space above the input box and back button
     terminal_scroller = lv_obj_create(terminal_view.root);
@@ -834,7 +850,8 @@ void terminal_view_create(void) {
         lv_obj_set_style_text_align(input_label, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_style_border_width(input_label, 0, 0);
         lv_obj_set_style_shadow_width(input_label, 0, 0);
-        lv_obj_align(input_label, LV_ALIGN_BOTTOM_RIGHT, -padding, -padding);
+        lv_obj_align(input_label, LV_ALIGN_BOTTOM_RIGHT, -padding,
+                     -(GUI_HOME_SAFE_H + padding));
         lv_obj_add_event_cb(input_label, text_box_click_cb, LV_EVENT_CLICKED, NULL);
         lv_obj_add_flag(input_label, LV_OBJ_FLAG_CLICKABLE);
         lv_label_set_long_mode(input_label, LV_LABEL_LONG_CLIP);
@@ -1048,8 +1065,9 @@ void terminal_view_hardwareinput_callback(InputEvent *event) {
     }
 
     // Handle back button touch on larger screens and T-Display S3
-    if ((LV_HOR_RES > MIN_SCREEN_SIZE && LV_VER_RES > MIN_SCREEN_SIZE) ||
-        (LV_HOR_RES == 320 && LV_VER_RES == 170)) {
+    if (GUI_LEGACY_TOUCH_BAR &&
+        ((LV_HOR_RES > MIN_SCREEN_SIZE && LV_VER_RES > MIN_SCREEN_SIZE) ||
+         (LV_HOR_RES == 320 && LV_VER_RES == 170))) {
       int button_y_min = LV_VER_RES - (BUTTON_SIZE + BUTTON_PADDING * 2);
       int button_y_max = LV_VER_RES - BUTTON_PADDING;
       
@@ -1100,7 +1118,7 @@ void terminal_view_hardwareinput_callback(InputEvent *event) {
     }
   } else if (event->type == INPUT_TYPE_KEYBOARD) {
     uint8_t key = event->data.key_value;
-    if (key == 29 || key == '`') {
+    if (key == LV_KEY_ESC || key == 27 || key == 29 || key == '`') {
       stop_all_operations();
     } else if (key == 59 || key == ';') {// up arrow
       scroll_terminal_up();
@@ -1160,11 +1178,8 @@ void terminal_view_hardwareinput_callback(InputEvent *event) {
         scroll_terminal_up();
       }
     }
-#ifdef CONFIG_USE_ENCODER
   } else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
     stop_all_operations();
-    display_manager_switch_view(&main_menu_view);
-#endif
   }
 }
 
@@ -1188,7 +1203,8 @@ View terminal_view = {
 };
 
 void terminal_set_return_view(View *view) {
-    terminal_return_view = view;
+    /* Compatibility no-op. The preceding route is now the return target. */
+    (void)view;
 }
 
 void terminal_set_dualcomm_filter(bool enable) {

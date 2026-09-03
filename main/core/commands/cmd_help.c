@@ -56,12 +56,15 @@ void handle_help(int argc, char **argv) {
         glog("attack\n");
         glog("    Description: Launch an attack (e.g., deauthentication attack).\n");
         glog("                 Supports multiple selected APs when using 'select -a 1,2,3'.\n");
-        glog("    Usage: attack -d (deauth) | attack -hsd (handshake+deauth) | attack -c (channel switch) | attack -e (EAPOL logoff) | attack -s (SAE flood)\n");
+        glog("    Usage: attack -d (deauth) | attack -hsd (handshake+deauth) | attack -c (channel switch) | attack -e (EAPOL logoff) | attack -p (probe flood) | attack -b (bad msg) | attack -a (auth flood) | attack -s (SAE flood)\n");
         glog("    Arguments:\n");
         glog("        -d  : Start deauth attack (supports multiple APs)\n");
         glog("        -hsd: Start handshake capture + deauth attack (forces handshakes)\n");
         glog("        -c  : Start channel switch attack (supports multiple APs)\n");
         glog("        -e  : Start EAPOL logoff attack\n");
+        glog("        -p  : Start probe request flood attack (supports multiple APs)\n");
+        glog("        -b  : Start bad msg attack (EAPOL key install + zero MIC)\n");
+        glog("        -a  : Start auth flood attack (supports multiple APs)\n");
         glog("        -s  : Start SAE flood attack (ESP32-C5/C6 only)\n\n");
         glog("list\n");
         glog("    Description: List Wi-Fi scan results or connected stations.\n");
@@ -70,11 +73,11 @@ void handle_help(int argc, char **argv) {
         glog("        -a  : Show access points from Wi-Fi scan\n");
         glog("        -s  : List connected stations\n");
         glog("        -airtags: List discovered AirTags\n\n");
-        glog("wpa3check\n");
-        glog("    Description: Run a WPA3 compliance check on the currently selected AP.\n");
+         glog("wpa3check\n");
+         glog("    Description: Run a passive Wi-Fi security check on the currently selected AP.\n");
         glog("                 If no AP is selected, scans all APs and prints a\n");
         glog("                 summary table with WPA3 presence, transition mode,\n");
-        glog("                 PMF posture, and a short security finding per AP.\n");
+         glog("                 PMF, cipher, Enterprise/EAP limitations, and a finding per AP.\n");
         glog("    Usage: wpa3check (after 'scanap' and optionally 'select -a <index>')\n\n");
         glog("beaconspam\n");
         glog("    Description: Start beacon spam with different modes.\n");
@@ -166,19 +169,20 @@ void handle_help(int argc, char **argv) {
         glog("    Description: track selected station signal strength (rssi)\n");
         glog("    Usage: tracksta\n");
         glog("    Note: select a station first with 'select -s <index>'\n\n");
-#if CONFIG_IDF_TARGET_ESP32C5
         glog("setcountry\n");
-        glog("    Description: Set the Wi-Fi country code.\n");
+        glog("    Description: Set the Wi-Fi country code. 2.4 GHz-only targets use the full\n");
+        glog("                 1-13 channel range regardless of the code; the C5 applies the real\n");
+        glog("                 regulatory range.\n");
         glog("    Usage: setcountry <CC>\n");
         glog("    Arguments:\n");
         glog("        <CC> : Country code (\"01\" world-safe) or two-letter ISO (e.g., US)\n");
+        glog("    Persisted across reboots: US, GB, JP, AU, CN, 01\n");
         glog("    Supported: 01, AT, AU, BE, BG, BR, CA, CH, CN, CY, CZ, DE, DK, EE, ES, FI, FR, GB, GR, HK, HR, HU,\n");
         glog("               IE, IN, IS, IT, JP, KR, LI, LT, LU, LV, MT, MX, NL, NO, NZ, PL, PT, RO, SE, SI, SK, TW, US\n\n");
-#endif
         return;
     }
 
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     if (strcmp(category, "ble") == 0) {
         glog("\nBLE Commands:\n\n");
         glog("blescan\n");
@@ -260,7 +264,7 @@ void handle_help(int argc, char **argv) {
         glog("commstatus\n    Show communication status.\n    Usage: commstatus\n\n");
         glog("commdisconnect\n    Disconnect from current peer.\n    Usage: commdisconnect\n\n");
         glog("commsetpins\n    Change communication GPIO pins at runtime.\n    Usage: commsetpins <tx_pin> <rx_pin>\n    Example: commsetpins 4 5\n\n");
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
         glog("blebridge\n    Start/status/stop the BLE GhostLink bridge.\n    Usage: blebridge [start|stop|status|pair <peer_name>]\n\n");
 #endif
         return;
@@ -394,6 +398,9 @@ void handle_help(int argc, char **argv) {
         glog("        settings get ap_ssid\n");
         glog("        settings set rgb_mode 1\n");
         glog("        settings reset\n\n");
+        glog("loglevel\n");
+        glog("    Description: View or change the global ESP-IDF log level.\n");
+        glog("    Usage: loglevel [none|error|warn|info|debug|verbose]\n\n");
         glog("    Description: View or change the status display idle animation (status OLED only).\n");
         glog("    Usage: statusidle [list|set <life|ghost|starfield|hud|matrix|ghosts|spiral|leaves|bouncing|0|1|2|3|4|5|6|7|8>]\n\n");
         return;
@@ -518,7 +525,7 @@ void handle_help(int argc, char **argv) {
         glog("                    Usage: capture -wireshark [-c <channel>|-channel <channel>]\n");
         glog("                    -channel <n>: Lock to specific channel (1-%d)\n", MAX_WIFI_CHANNEL);
         glog("        -wiresharkble : Stream BLE PCAP to USB/UART for Wireshark\n");
-        #ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
         glog("        -ble       : Start BLE packet capture\n");
         glog("        -skimmer   : Start skimmer (BLE) detection\n");
         #endif

@@ -19,7 +19,8 @@ typedef enum {
     INPUT_TYPE_JOYSTICK,
     INPUT_TYPE_KEYBOARD,
     INPUT_TYPE_ENCODER,         // --- new
-    INPUT_TYPE_EXIT_BUTTON      // --- new for IO6 exit button
+    INPUT_TYPE_EXIT_BUTTON,     // --- new for IO6 exit button
+    INPUT_TYPE_HOME_BUTTON      // Board-level Home action
 } InputType;
 
 typedef struct {
@@ -35,6 +36,7 @@ typedef struct {
     uint8_t key_value;          // Used for keyboard inputs
     struct { int8_t direction; bool button; } encoder; // Added for encoder input
     bool exit_pressed;          // Used for IO6 exit button
+    bool home_pressed;          // Used for a board-level Home button
   } data;
 } InputEvent;
 
@@ -47,7 +49,7 @@ extern QueueHandle_tt input_queue;
 #define HARDWARE_INPUT_TASK_PRIORITY (14)
 #define RENDERING_TASK_PRIORITY (15)
 
-typedef struct {
+typedef struct View {
   lv_obj_t *root;
   void (*create)(void);
   void (*destroy)(void);
@@ -72,7 +74,6 @@ extern View enviii_view;
 extern View wardriving_view;
 extern View ethernet_screen_view;
 extern View lockscreen_view;
-extern View *display_manager_previous_view;
 
 /* Function prototypes */
 
@@ -90,6 +91,9 @@ bool display_manager_register_view(View *view);
  * @brief Switch to a new view.
  */
 void display_manager_switch_view(View *view);
+
+/** Render a view without changing route history. Only the GUI router calls this. */
+void display_manager_render_view(View *view);
 
 /**
  * @brief Switch to a new view on the LVGL task and wait for the first refresh.
@@ -198,6 +202,10 @@ lv_color_t hex_to_lv_color(const char *hex_str);
 void update_status_bar(bool wifi_enabled, bool bt_enabled, bool sd_card_mounted, int batteryPercentage, bool power_save_enabled, bool is_ap_active, bool is_charging);
 
 void display_manager_add_status_bar(const char *CurrentMenuName);
+
+/* Current status-bar title text ("" if none). Valid until the next
+ * add_status_bar call - copy if you need to keep it. */
+const char *display_manager_get_status_title(void);
 void display_manager_raise_status_bar(void);
 void display_manager_restore_status_bar(void);
 
@@ -269,6 +277,7 @@ LV_IMG_DECLARE(wifi);
 LV_IMG_DECLARE(rave);
 LV_IMG_DECLARE(ghost);
 LV_IMG_DECLARE(GESPAppGallery);
+LV_IMG_DECLARE(camera_icon);
 LV_IMG_DECLARE(clock_icon);
 LV_IMG_DECLARE(settings_icon);
 LV_IMG_DECLARE(infrared);

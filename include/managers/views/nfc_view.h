@@ -39,6 +39,11 @@ bool nfc_view_t2_read(nfc_view_t2_tag_info_t *out_info,
                       size_t *ndef_bytes_out);
 bool nfc_view_t2_write_ndef(const uint8_t *ndef, size_t ndef_len);
 
+/* Deep-link: open the Saved list and show details for a specific tag file
+ * (full path). Safe to call before the view is created; applied on create
+ * or immediately if the view is already live. */
+void nfc_view_open_saved(const char *path);
+
 #ifdef __cplusplus
 }
 #endif

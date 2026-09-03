@@ -6,6 +6,8 @@
 #include "core/glog.h"
 #include "core/memory_debug.h"
 #include "gui/design_tokens.h"
+#include "gui/theme_palette_api.h"
+#include "managers/settings_manager.h"
 #include "gui/screen_layout.h"
 #include "managers/badusb_manager.h"
 #include "managers/ble_manager.h"
@@ -18,6 +20,7 @@
 #include "managers/sd_card_manager.h"
 #include "managers/subghz_remote_manager.h"
 #include "managers/views/app_gallery_screen.h"
+#include "managers/views/plugin_runner_view.h"
 #include "managers/wifi_manager.h"
 #include "managers/ap_manager.h"
 #include "scans/ble/advertiser_scan.h"
@@ -359,7 +362,7 @@ bool plugin_api_feature_supported(const char *feature) {
     }
     if (strcmp(feature, "compact_screen") == 0) return plugin_api_ui_screen_is_compact();
     if (strcmp(feature, "wifi") == 0) return true;
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     if (strcmp(feature, "ble") == 0) return true;
 #endif
 #if defined(CONFIG_HAS_SUBGHZ) || defined(CONFIG_HAS_SUBGHZ_REMOTE)
@@ -463,18 +466,20 @@ lv_obj_t *plugin_api_internal_parent_or_current(ghostesp_ui_obj_t parent) {
 }
 
 static void plugin_ui_style_panel(lv_obj_t *obj) {
-    lv_obj_set_style_bg_color(obj, lv_color_hex(0x181818), LV_PART_MAIN);
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    lv_obj_set_style_bg_color(obj, lv_color_hex(theme_palette_get_surface(theme)), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_color(obj, lv_color_hex(0x303030), LV_PART_MAIN);
+    lv_obj_set_style_border_color(obj, lv_color_hex(theme_palette_get_border(theme)), LV_PART_MAIN);
     lv_obj_set_style_border_width(obj, 1, LV_PART_MAIN);
     lv_obj_set_style_radius(obj, GUI_RADIUS_MD, LV_PART_MAIN);
     lv_obj_set_style_pad_all(obj, GUI_GRID * 3, LV_PART_MAIN);
 }
 
 static void plugin_ui_style_button(lv_obj_t *obj) {
-    lv_obj_set_style_bg_color(obj, lv_color_hex(0x2B2B2B), LV_PART_MAIN);
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    lv_obj_set_style_bg_color(obj, lv_color_hex(theme_palette_get_surface_alt(theme)), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_color(obj, lv_color_hex(0x4A4A4A), LV_PART_MAIN);
+    lv_obj_set_style_border_color(obj, lv_color_hex(theme_palette_get_border(theme)), LV_PART_MAIN);
     lv_obj_set_style_border_width(obj, 1, LV_PART_MAIN);
     lv_obj_set_style_radius(obj, GUI_RADIUS_MD, LV_PART_MAIN);
     lv_obj_set_style_shadow_width(obj, 0, LV_PART_MAIN);
@@ -560,7 +565,8 @@ static void plugin_api_ui_screen_create_now(void *arg) {
     if (!root) return;
 
     lv_obj_clean(root);
-    lv_obj_set_style_bg_color(root, lv_color_hex(0x121212), LV_PART_MAIN);
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    lv_obj_set_style_bg_color(root, lv_color_hex(theme_palette_get_background(theme)), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, LV_PART_MAIN);
     display_manager_add_status_bar(ctx->title && ctx->title[0] ? ctx->title : "SD App");
 
@@ -605,7 +611,8 @@ static void plugin_api_ui_label_create_now(void *arg) {
     lv_label_set_text(label, ctx->text ? ctx->text : "");
     lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(label, LV_PCT(100));
-    lv_obj_set_style_text_color(label, lv_color_hex(0xE6E6E6), LV_PART_MAIN);
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    lv_obj_set_style_text_color(label, lv_color_hex(theme_palette_get_text(theme)), LV_PART_MAIN);
     lv_obj_set_style_text_font(label, gui_font_body(), LV_PART_MAIN);
     ctx->result = label;
 }
@@ -629,7 +636,8 @@ static void plugin_api_ui_button_create_now(void *arg) {
     lv_label_set_text(label, ctx->text ? ctx->text : "");
     lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
     lv_obj_center(label);
-    lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    lv_obj_set_style_text_color(label, lv_color_hex(theme_palette_get_text(theme)), LV_PART_MAIN);
     lv_obj_set_style_text_font(label, gui_font_body(), LV_PART_MAIN);
 
     plugin_ui_button_ctx_t *button_ctx = calloc(1, sizeof(*button_ctx));
@@ -730,14 +738,15 @@ static void plugin_api_ui_show_popup_now(void *arg) {
     lv_obj_t *title = lv_label_create(box);
     lv_label_set_text(title, ctx->title ? ctx->title : "App");
     lv_obj_set_width(title, LV_PCT(100));
-    lv_obj_set_style_text_color(title, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    lv_obj_set_style_text_color(title, lv_color_hex(theme_palette_get_text(theme)), LV_PART_MAIN);
     lv_obj_set_style_text_font(title, gui_font_title(), LV_PART_MAIN);
 
     lv_obj_t *body = lv_label_create(box);
     lv_label_set_text(body, ctx->text ? ctx->text : "");
     lv_label_set_long_mode(body, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(body, LV_PCT(100));
-    lv_obj_set_style_text_color(body, lv_color_hex(0xD0D0D0), LV_PART_MAIN);
+    lv_obj_set_style_text_color(body, lv_color_hex(theme_palette_get_text_muted(theme)), LV_PART_MAIN);
     lv_obj_set_style_text_font(body, gui_font_body(), LV_PART_MAIN);
 
     lv_obj_t *close = lv_btn_create(box);
@@ -746,6 +755,7 @@ static void plugin_api_ui_show_popup_now(void *arg) {
     lv_obj_set_width(close, LV_PCT(100));
     lv_obj_t *close_label = lv_label_create(close);
     lv_label_set_text(close_label, "Close");
+    lv_obj_set_style_text_color(close_label, lv_color_hex(theme_palette_get_text(theme)), LV_PART_MAIN);
     lv_obj_center(close_label);
     lv_obj_add_event_cb(close, plugin_ui_delete_user_obj_event_cb, LV_EVENT_CLICKED, overlay);
 }
@@ -970,13 +980,8 @@ static void plugin_api_asset_session_end(void) {
     sd_card_jit_end(display_was_suspended);
 }
 
-static void plugin_api_request_exit_now(void *arg) {
-    (void)arg;
-    display_manager_go_back();
-}
-
 static void plugin_api_request_exit(void) {
-    display_manager_run_on_lvgl(plugin_api_request_exit_now, NULL);
+    plugin_runner_request_exit();
 }
 
 void plugin_api_record_joystick_state(unsigned int index, bool pressed) {
@@ -1124,7 +1129,7 @@ static bool plugin_api_nfc_stop(void) {
 
 static bool plugin_api_ble_start_scan(void) {
     if (!plugin_api_has_permission(PLUGIN_PERMISSION_BLE)) return false;
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     ghostscript_runtime_reset_ble_seen();
     s_plugin_ble_started = gatt_scan_start();
     return s_plugin_ble_started;
@@ -1135,7 +1140,7 @@ static bool plugin_api_ble_start_scan(void) {
 
 static bool plugin_api_ble_stop_scan(void) {
     if (!plugin_api_has_permission(PLUGIN_PERMISSION_BLE)) return false;
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     s_plugin_ble_started = false;
     ble_stop();
     return true;
@@ -1146,7 +1151,7 @@ static bool plugin_api_ble_stop_scan(void) {
 
 static int plugin_api_ble_device_count(void) {
     if (!plugin_api_has_permission(PLUGIN_PERMISSION_BLE)) return 0;
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     return ble_get_gatt_device_count();
 #else
     return 0;
@@ -1155,7 +1160,7 @@ static int plugin_api_ble_device_count(void) {
 
 static bool plugin_api_ble_get_device(int index, ghostesp_ble_device_info_t *out) {
     if (!plugin_api_has_permission(PLUGIN_PERMISSION_BLE) || !out) return false;
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     memset(out, 0, sizeof(*out));
     return ble_get_gatt_device_data(index, out->mac, &out->rssi, out->name, sizeof(out->name)) == 0;
 #else
@@ -1566,7 +1571,7 @@ static void plugin_api_wifi_live_scan_stop(void) {
     if (stop_err != ESP_OK) {
         ESP_LOGW(TAG, "wifi stop after live scan: %s", esp_err_to_name(stop_err));
     }
-    ap_manager_start_services();
+    (void)ap_manager_restore_after_attack("plugin live scan");
     plugin_wifi_snapshot_scan_results();
 }
 
@@ -1642,7 +1647,7 @@ static bool plugin_api_espnow_receive(ghostesp_espnow_message_t *out) {
 
 static void plugin_api_app_exit(void) {
     if (!s_api_active) return;
-    display_manager_switch_view(&apps_menu_view);
+    plugin_runner_request_exit();
 }
 
 static void plugin_api_ble_detect_start(void) {
@@ -2533,7 +2538,7 @@ void plugin_api_release(void) {
     display_manager_resume_lvgl_task();
 
     /* Safety: stop hardware that a misbehaving script may have left running. */
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     if (s_plugin_ble_started && ble_is_initialized()) {
         ble_stop();
     }
@@ -2543,7 +2548,7 @@ void plugin_api_release(void) {
         s_plugin_live_scan_active = false;
         wifi_manager_stop_monitor_mode();
         esp_wifi_stop();
-        ap_manager_start_services();
+        (void)ap_manager_restore_after_attack("plugin cleanup");
     }
     if (s_plugin_espnow_started) {
         espnow_manager_stop();

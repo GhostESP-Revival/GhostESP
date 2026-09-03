@@ -62,7 +62,7 @@ static void activate_row(int selected) {
         if (s_resume_path) s_resume_path[0] = '\0';
         s_resume_offset = 0;
         s_switch_pending = true;
-        display_manager_switch_view(&apps_menu_view);
+        display_manager_go_back();
         return;
     }
     if (row.type == ROW_UP) { parent_dir(); s_offset = 0; refresh(); return; }
@@ -211,7 +211,7 @@ static void event_handler(InputEvent *event) {
         if (s_resume_path) s_resume_path[0] = '\0';
         s_resume_offset = 0;
         s_switch_pending = true;
-        display_manager_switch_view(&apps_menu_view);
+        display_manager_go_back();
         return;
     }
     if (browser_handle_touch(event)) return;

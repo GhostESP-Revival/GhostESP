@@ -67,6 +67,8 @@ def write_gapp(package_dir: pathlib.Path, out_path: pathlib.Path, no_compress: b
 def main() -> int:
     parser = argparse.ArgumentParser(description="Package a GhostESP native SD app")
     parser.add_argument("app_dir", help="App project directory")
+    parser.add_argument("--manifest", default="manifest.json",
+                        help="Manifest filename under app_dir (default: manifest.json)")
     parser.add_argument("--out", default=None, help="Output dist directory")
     parser.add_argument("--gapp", action="store_true", help="Also create a compressed native .gapp archive")
     parser.add_argument("--zip", action="store_true", help="Deprecated alias for --gapp")
@@ -74,7 +76,7 @@ def main() -> int:
     args = parser.parse_args()
 
     app_dir = pathlib.Path(args.app_dir).resolve()
-    manifest_path = app_dir / "manifest.json"
+    manifest_path = app_dir / args.manifest
     if not manifest_path.exists():
         print(f"manifest not found: {manifest_path}", file=sys.stderr)
         return 2

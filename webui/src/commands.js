@@ -145,6 +145,16 @@ const CMD = {
   badusbSetRand:   (on) => ({ cmd: `badusb set_rand ${on ? '1' : '0'}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Toggle VID/PID randomize' }),
   badusbSetLayout: (n) => ({ cmd: `badusb set_layout ${n}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Keyboard layout (0=US 1=DE 2=FR 3=UK 4=ES)' }),
 
+  // BadBLE (BLE HID keyboard)
+  badbleStatus:    () => ({ cmd: 'badble status',    risky: false, stopFirst: false, cat: 'BadBLE', desc: 'BadBLE state (advertising / connected / script)' }),
+  badbleList:      () => ({ cmd: 'badble list',      risky: false, stopFirst: false, cat: 'BadBLE', desc: 'List DuckyScripts in /mnt/ghostesp/badble/' }),
+  badbleStart:     () => ({ cmd: 'badble keyboard_start', risky: false, stopFirst: false, cat: 'BadBLE', desc: 'Advertise BLE HID keyboard for live typing' }),
+  badbleStop:      () => ({ cmd: 'badble stop',      risky: false, stopFirst: false, cat: 'BadBLE', desc: 'Stop BadBLE and restore BLE stack' }),
+  badbleName:      () => ({ cmd: 'badble name',      risky: false, stopFirst: false, cat: 'BadBLE', desc: 'Show advertised BadBLE name' }),
+  badbleSetName:   (text) => ({ cmd: `badble set_name ${JSON.stringify(text || '')}`, risky: false, stopFirst: false, cat: 'BadBLE', desc: 'Set advertised BadBLE name (max 31 chars)' }),
+  badbleRun:       (file) => ({ cmd: `badble run ${file}`, risky: false, stopFirst: false, cat: 'BadBLE', desc: 'Wait for a BLE host, then run a DuckyScript' }),
+  badbleRunBuiltin:() => ({ cmd: 'badble run "Ghost Art (Built-in)"', risky: false, stopFirst: false, cat: 'BadBLE', desc: 'Run the built-in Ghost Art script over BLE' }),
+
   // GPS
   gpsInfo:         (stop) => ({ cmd: stop ? 'gpsinfo -s' : 'gpsinfo', risky: false, stopFirst: false, cat: 'GPS', desc: 'GPS information' }),
   startWardrive:   (stop) => ({ cmd: stop ? 'startwd -s' : 'startwd', risky: !stop, stopFirst: !stop, cat: 'GPS', desc: 'Start wardriving' }),
@@ -287,6 +297,21 @@ const BLE_GROUPS = {
 
 const BLE_ACTIONS = Object.values(BLE_GROUPS).flat();
 
+/** BadBLE (BLE HID keyboard) action definitions. Kept as its own group inside
+ * the BLE page because it advertises a HID profile and cannot run at the same
+ * time as BLE scans or the bridge. */
+const BADBLE_GROUPS = {
+  'Keyboard': [
+    { label: 'Run Built-in Script', factory: () => CMD.badbleRunBuiltin() },
+    { label: 'Start Keyboard',     factory: () => CMD.badbleStart() },
+    { label: 'Stop Keyboard',      factory: () => CMD.badbleStop() },
+    { label: 'Status',             factory: () => CMD.badbleStatus() },
+    { label: 'List Scripts',       factory: () => CMD.badbleList() },
+    { label: 'Show Name',          factory: () => CMD.badbleName() },
+    { label: 'Set Name',           factory: () => CMD.badbleSetName('GhostESP BadBLE') },
+  ]
+};
+
 /** Settings schema with categories, descriptions, and validation */
 const SETTINGS_SCHEMA = [
   {
@@ -334,8 +359,15 @@ const SETTINGS_SCHEMA = [
       { id: 'max_bright',      label: 'Max Brightness',       type: 'number', min: 0, max: 100 },
       { id: 'invert_colors',   label: 'Invert Colors',        type: 'bool' },
       { id: 'terminal_color',  label: 'Terminal Color',       type: 'color' },
-      { id: 'menu_theme',      label: 'Menu Theme',           type: 'number', min: 0, max: 255, hint: 'Theme index 0-255' },
-      { id: 'accent_color',    label: 'Accent Color',         type: 'color' },
+      { id: 'theme_bg_fx',     label: 'Background Effects',   type: 'bool' },
+      { id: 'menu_theme',      label: 'Menu Theme',           type: 'enum', options: [
+        ['0', 'Ghost'], ['1', 'Catppuccin Mocha'], ['2', 'Flexoki'], ['3', 'Bright'],
+        ['4', 'Solarized Dark'], ['5', 'Monochrome'], ['6', 'Rose Pine'], ['7', 'Dracula'],
+        ['8', 'Nord'], ['9', 'Gruvbox Dark'], ['10', 'Everforest Dark'], ['11', 'Tokyo Night'],
+        ['12', 'Catppuccin Latte'], ['13', 'Solarized Light'], ['14', 'Kanagawa Wave'],
+        ['15', 'Rose Pine Dawn'], ['16', 'PaperColor Light'],
+        ['17', 'Cherry'], ['18', 'Glacier'], ['19', 'Orchid'], ['20', 'Umber']
+      ] },
     ]
   },
   {
@@ -363,7 +395,7 @@ const SETTINGS_SCHEMA = [
       { id: 'power_save',       label: 'Power Save',           type: 'bool' },
       { id: 'zebra_menus',      label: 'Zebra Menus',          type: 'bool' },
       { id: 'nav_buttons',      label: 'Nav Buttons',          type: 'bool' },
-      { id: 'menu_layout',      label: 'Menu Layout',          type: 'enum', options: [['0','List'],['1','Grid'],['2','Cards']] },
+      { id: 'menu_layout',      label: 'Menu Layout',          type: 'enum', options: [['0','Carousel'],['1','Grid'],['2','List'],['3','Compact'],['4','Hero']] },
       { id: 'infrared_easy',    label: 'Infrared Easy Mode',   type: 'bool' },
       { id: 'web_auth',         label: 'Web Auth Enabled',     type: 'bool' },
       { id: 'rts_enabled',      label: 'RTS Enabled',          type: 'bool' },
@@ -441,6 +473,7 @@ function commandCategory(commandString) {
   if (c.startsWith('startportal') || c.startsWith('stopportal') || c.startsWith('listportals')) return 'Portal';
   if (c.startsWith('sd ')) return 'Files';
   if (c.startsWith('badusb')) return 'BadUSB';
+  if (c.startsWith('badble')) return 'BadBLE';
   if (c.startsWith('comm')) return 'GhostLink';
   if (c.startsWith('settings')) return 'Settings';
   return 'System';

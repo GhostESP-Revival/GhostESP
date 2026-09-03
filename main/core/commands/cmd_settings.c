@@ -3,6 +3,7 @@
 
 #include "core/commands.h"
 #include "core/glog.h"
+#include "gui/theme_palette_api.h"
 #include "managers/config_manager.h"
 #include "managers/settings_manager.h"
 #include "managers/settings_sd_backup.h"
@@ -79,12 +80,13 @@ static const SettingDescriptor k_settings_desc[] = {
     {"invert_colors", ST_BOOL, OFF(invert_colors), "Display", 0, 0, 0},
     {"terminal_color", ST_COLOR_HEX, OFF(terminal_text_color), "Display", 0, 0, 0},
     {"terminal_font_size", ST_U8, OFF(terminal_font_size), "Display", 0, 0, 2},
-    {"menu_theme", ST_U8, OFF(menu_theme), "Display", 0, 0, 255},
+    {"menu_theme", ST_U8, OFF(menu_theme), "Display", 0, 0, THEME_PALETTE_THEME_COUNT - 1},
     {"font_size", ST_U8, OFF(font_size), "Display", 0, 0, 2},
     {"reduce_motion", ST_BOOL, OFF(reduced_motion), "Display", 0, 0, 0},
     {"repeat_speed", ST_U8, OFF(input_repeat_speed), "Display", 0, 0, 2},
     {"high_contrast", ST_BOOL, OFF(high_contrast), "Display", 0, 0, 0},
     {"sun_mode", ST_BOOL, OFF(sun_mode), "Display", 0, 0, 0},
+    {"theme_bg_fx", ST_BOOL, OFF(theme_background_effects), "Display", 0, 0, 0},
     {"channel_delay", ST_FLOAT, OFF(channel_delay), "System", 0, 0, 0},
     {"broadcast_speed", ST_U16, OFF(broadcast_speed), "System", 0, 0, 65535},
     {"gps_rx_pin", ST_I32, OFF(gps_rx_pin), "System", 0, 0, 0},
@@ -92,7 +94,7 @@ static const SettingDescriptor k_settings_desc[] = {
     {"power_save", ST_BOOL, OFF(power_save_enabled), "System", 0, 0, 0},
     {"zebra_menus", ST_BOOL, OFF(zebra_menus_enabled), "System", 0, 0, 0},
     {"nav_buttons", ST_BOOL, OFF(nav_buttons_enabled), "System", 0, 0, 0},
-    {"menu_layout", ST_U8, OFF(menu_layout), "System", 0, 0, 3},
+    {"menu_layout", ST_U8, OFF(menu_layout), "System", 0, 0, 4},
     {"infrared_easy", ST_BOOL, OFF(infrared_easy_mode), "System", 0, 0, 0},
     {"web_auth", ST_BOOL, OFF(web_auth_enabled), "System", 0, 0, 0},
     {"rts_enabled", ST_BOOL, OFF(rts_enabled), "System", 0, 0, 0},
@@ -511,7 +513,7 @@ void handle_settings_cmd(int argc, char **argv) {
         glog("    invert_colors     - Invert screen colors (true/false)\n");
         glog("    terminal_color    - Terminal text color (hex)\n");
         glog("    terminal_font_size - Terminal font size (0=Small,1=Normal,2=Large)\n");
-        glog("    menu_theme        - Menu theme (0=OG)\n");
+        glog("    menu_theme        - Menu theme palette index\n");
         glog("    font_size         - Global font size (0=Small,1=Normal,2=Large)\n");
         glog("    reduce_motion     - Reduce animations (true/false)\n");
         glog("    repeat_speed      - Input repeat speed (0-2)\n");
@@ -525,7 +527,7 @@ void handle_settings_cmd(int argc, char **argv) {
         glog("    power_save        - Power save mode (true/false)\n");
         glog("    zebra_menus       - Zebra menus (true/false)\n");
         glog("    nav_buttons       - Navigation buttons (true/false)\n");
-        glog("    menu_layout       - Menu layout (0=Carousel, 1=Grid, 2=List, 3=Compact)\n");
+        glog("    menu_layout       - Menu layout (0=Carousel, 1=Grid, 2=List, 3=Compact, 4=Hero)\n");
         glog("    infrared_easy     - Infrared easy mode (true/false)\n");
         glog("    web_auth          - Web authentication (true/false)\n");
         glog("    rts_enabled       - RTS enabled (true/false)\n");
@@ -580,6 +582,7 @@ void handle_settings_cmd(int argc, char **argv) {
             }
             return;
         }
+        settings_normalize_modes(settings);
         settings_save(settings);
         log_set_confirmation(d, settings);
         return;
@@ -598,8 +601,17 @@ void handle_settings_cmd(int argc, char **argv) {
                 glog("Use 'settings list' to see available settings\n");
                 return;
             }
-            FSettings defaults; settings_set_defaults(&defaults);
-            reset_setting_value(d, &G_Settings, &defaults);
+            // A local FSettings makes every settings command reserve several
+            // KB of stack, including get/set. SerialTask also needs stack for
+            // NVS calls, so allocate defaults only when resetting one field.
+            FSettings *defaults = malloc(sizeof(*defaults));
+            if (!defaults) {
+                glog("Not enough memory to reset setting\n");
+                return;
+            }
+            settings_set_defaults(defaults);
+            reset_setting_value(d, &G_Settings, defaults);
+            free(defaults);
             settings_save(&G_Settings);
             glog("Reset %s to default\n", d->name);
         } else {

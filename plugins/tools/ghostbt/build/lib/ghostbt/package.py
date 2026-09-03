@@ -4,19 +4,56 @@ import shutil
 import sys
 
 from .config import load_manifest
-from .utils import checksum_file, copy_if_exists, write_gapp
+from .icon import png_to_rgb565, png_to_rgb565a8, png_to_true_color_alpha
+from .utils import checksum_bytes, checksum_file, copy_if_exists, write_gapp
+
+
+def _write_icon_from_source(app_path: pathlib.Path, package_dir: pathlib.Path, manifest: dict, checksums: dict) -> bool:
+    icon_source = manifest.get("icon_source")
+    icon = manifest.get("icon")
+    if not icon_source:
+        return False
+    if not icon:
+        raise ValueError("manifest icon_source requires icon output path")
+    width = int(manifest.get("icon_width", 0))
+    height = int(manifest.get("icon_height", 0))
+    if width <= 0 or height <= 0:
+        raise ValueError("manifest icon_source requires icon_width and icon_height")
+    fmt = manifest.get("icon_format", "rgb565a8")
+    src = app_path / icon_source
+    if not src.exists():
+        print(f"warning: icon_source not found, icon will not be generated: {src}", file=sys.stderr)
+        return False
+    if src.suffix.lower() != ".png":
+        raise ValueError(f"unsupported icon_source format: {src}")
+
+    if fmt == "rgb565a8":
+        data = png_to_rgb565a8(src, width, height)
+    elif fmt == "true_color_alpha":
+        data = png_to_true_color_alpha(src, width, height)
+    elif fmt == "rgb565":
+        data = png_to_rgb565(src, width, height)
+    else:
+        raise ValueError(f"unsupported icon_format for packing: {fmt}")
+
+    dst = package_dir / icon
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    dst.write_bytes(data)
+    checksums[icon.replace("\\", "/")] = f"{checksum_bytes(data):016x}"
+    return True
 
 
 def package_app(
     app_dir: str = ".",
     out: str = None,
     make_gapp: bool = False,
+    target: str = None,
 ) -> pathlib.Path:
     app_path = pathlib.Path(app_dir).resolve()
     manifest = load_manifest(app_path)
     app_id = manifest["id"]
     version = manifest.get("version", "0.0.0")
-    target = manifest.get("target", "unknown")
+    target = target or manifest.get("target", "unknown")
     entry = manifest["entry"]
 
     so_path = app_path / "build" / entry
@@ -31,13 +68,25 @@ def package_app(
     package_dir.mkdir(parents=True, exist_ok=True)
 
     checksums: dict = {}
-    copy_if_exists(app_path / "manifest.json", package_dir / "manifest.json", checksums, "manifest.json")
+    packaged_manifest = dict(manifest)
+    if target:
+        packaged_manifest["target"] = target
+    manifest_data = json.dumps(packaged_manifest, indent=2) + "\n"
+    manifest_path = package_dir / "manifest.json"
+    manifest_path.write_text(manifest_data, encoding="utf-8")
+    checksums["manifest.json"] = checksum_file(manifest_path)
     copy_if_exists(so_path, package_dir / entry, checksums, entry)
 
-    for key in ("icon",):
-        rel = manifest.get(key)
-        if rel:
-            copy_if_exists(app_path / rel, package_dir / rel, checksums, rel)
+    packed_icon = _write_icon_from_source(app_path, package_dir, manifest, checksums)
+    if not packed_icon:
+        for key in ("icon",):
+            rel = manifest.get(key)
+            if rel:
+                src = app_path / rel
+                if not src.exists():
+                    print(f"warning: icon file not found, package will use firmware fallback icon: {src}", file=sys.stderr)
+                    continue
+                copy_if_exists(src, package_dir / rel, checksums, rel)
 
     for rel in manifest.get("assets", []):
         src = app_path / rel
@@ -57,7 +106,8 @@ def package_app(
         gapp_path = dist_root / f"{app_id}-{version}-{target}.gapp"
         if gapp_path.exists():
             gapp_path.unlink()
-        write_gapp(package_dir, gapp_path)
+        store_prefixes = ("assets/",) if manifest.get("direct_read_assets") else ()
+        write_gapp(package_dir, gapp_path, store_prefixes=store_prefixes)
         print(gapp_path)
         return gapp_path
     else:

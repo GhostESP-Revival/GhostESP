@@ -9,6 +9,7 @@
 // Copyright (c) 2025 jbohack, Licensed under MIT
 //
 #include "managers/aerial_detector_manager.h"
+#include "managers/ap_manager.h"
 #include "managers/ble_manager.h"
 #include "managers/ghostchi_manager.h"
 #include "core/glog.h"
@@ -22,7 +23,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 #include "nimble/nimble_port.h"
 #include "host/ble_hs.h"
 #include "host/ble_gap.h"
@@ -343,9 +344,9 @@ static void start_wifi_phase(void) {
     wifi_mode_t current_mode;
     esp_err_t ret = esp_wifi_get_mode(&current_mode);
     if (ret != ESP_OK) {
-        wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-        esp_wifi_init(&cfg);
-        esp_wifi_set_storage(WIFI_STORAGE_RAM);
+        if (ap_manager_ensure_wifi_init() != ESP_OK) {
+            ESP_LOGW(TAG, "wifi driver init failed for scan phase");
+        }
         esp_wifi_set_mode(WIFI_MODE_STA);
         esp_wifi_start();
     }
@@ -396,7 +397,7 @@ static void stop_wifi_phase(void) {
     ESP_LOGI(TAG, "wifi scan phase stopped");
 }
 
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 static void aerial_ble_data_handler(struct ble_gap_event *event, size_t len) {
     if (!event || !ble_scan_phase) return;
     
@@ -508,7 +509,7 @@ static void aerial_ble_data_handler(void *event, size_t len) {
 #endif
 
 static void start_ble_phase(void) {
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     wifi_scan_phase = false;
     ble_scan_phase = true;
     
@@ -533,7 +534,7 @@ static void start_ble_phase(void) {
 static void stop_ble_phase(void) {
     if (!ble_scan_phase) return;
     
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     // unregister our handler
     ble_unregister_handler(aerial_ble_data_handler);
     
@@ -1266,7 +1267,7 @@ static void encode_location_message(uint8_t *msg, double lat, double lon, float 
 static void emulation_broadcast_callback(void *arg) {
     if (!is_emulating || !emulation_ble_advertising) return;
     
-    #ifndef CONFIG_IDF_TARGET_ESP32S2
+    #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     // alternate between basicid and location messages
     const uint8_t *msg_to_send = (emulation_msg_counter % 2 == 0) ? 
                                   emulation_basic_msg : emulation_location_msg;
@@ -1313,7 +1314,7 @@ esp_err_t aerial_detector_start_emulation(const char *device_id, double lat, dou
     encode_basic_id_message(emulation_basic_msg, emulated_device_id);
     encode_location_message(emulation_location_msg, emulated_lat, emulated_lon, emulated_alt);
     
-    #ifndef CONFIG_IDF_TARGET_ESP32S2
+    #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     // use ble_manager's ble_init() which suspends wifi automatically
     ble_init();
     
@@ -1422,7 +1423,7 @@ esp_err_t aerial_detector_stop_emulation(void) {
         emulation_timer = NULL;
     }
     
-    #ifndef CONFIG_IDF_TARGET_ESP32S2
+    #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     if (emulation_ble_advertising) {
         ble_gap_adv_stop();
         emulation_ble_advertising = false;

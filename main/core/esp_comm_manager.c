@@ -67,6 +67,25 @@
 
 static const char* TAG = "esp_comm_manager";
 
+static bool comm_pins_conflict_with_rgb_display(gpio_num_t tx_pin, gpio_num_t rx_pin)
+{
+#if defined(CONFIG_CROWPANEL_P4_PANEL_RGB_800X480)
+    // 5-inch P4: RGB data uses GPIO4..19, DE/PCLK use 2/3, HSYNC/VSYNC use 40/41.
+    const int pins[] = { (int)tx_pin, (int)rx_pin };
+    for (size_t i = 0; i < sizeof(pins) / sizeof(pins[0]); ++i) {
+        if ((pins[i] >= 2 && pins[i] <= 19) || pins[i] == 40 || pins[i] == 41) {
+            ESP_LOGW(TAG, "GhostLink TX:%d RX:%d conflicts with 5-inch RGB display; choose free pins",
+                     (int)tx_pin, (int)rx_pin);
+            return true;
+        }
+    }
+#else
+    (void)tx_pin;
+    (void)rx_pin;
+#endif
+    return false;
+}
+
 typedef enum {
     PACKET_TYPE_DISCOVERY = 0x01,
     PACKET_TYPE_HANDSHAKE_REQ = 0x02,
@@ -1299,6 +1318,12 @@ void esp_comm_manager_init_with_defaults(void) {
 }
 
 void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_rate) {
+#if defined(CONFIG_CROWPANEL_ADVANCE_S3_LCD)
+    // This profile selects the SD slot, not the mutually exclusive wireless
+    // socket. Also block direct CLI initialization with the generic 6/7 pins.
+    printf("ESP Comm Manager disabled on CrowPanel Advance S3 (SD/display profile)\n");
+    return;
+#endif
     ESP_LOGI(TAG, "esp_comm_manager_init: starting, free internal RAM: %d bytes",
              (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
     if (s_comm_manager) {
@@ -1360,12 +1385,29 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
             resolved_tx = GPIO_NUM_11;
             resolved_rx = GPIO_NUM_12;
         }
+    } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "ghostlink_p1_core") == 0) {
+        desired_uart = UART_NUM_1;
+        if ((int)tx_pin == (int)DEFAULT_TX_PIN && (int)rx_pin == (int)DEFAULT_RX_PIN) {
+            // Straight-through wiring: core TX5 -> peer RX5, peer TX6 -> core RX6.
+            resolved_tx = GPIO_NUM_5;
+            resolved_rx = GPIO_NUM_6;
+        }
+    } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "ghostlink_p1_peer") == 0) {
+        desired_uart = UART_NUM_1;
+        if ((int)tx_pin == (int)DEFAULT_TX_PIN && (int)rx_pin == (int)DEFAULT_RX_PIN) {
+            resolved_tx = GPIO_NUM_6;
+            resolved_rx = GPIO_NUM_5;
+        }
     } else {
         desired_uart = UART_NUM_1;
     }
 #else
     desired_uart = UART_NUM_1;
 #endif
+
+    if (comm_pins_conflict_with_rgb_display(resolved_tx, resolved_rx)) {
+        return;
+    }
 
     /* If another subsystem (e.g. GPS NMEA parser) already owns this UART, do not init DualComm. */
     // prefer PSRAM if available, fall back to internal RAM (e.g. ESP32-C6 lacks SPIRAM)
@@ -1584,6 +1626,9 @@ bool esp_comm_manager_register_stream_handler(uint8_t channel, comm_stream_callb
 }
 
 bool esp_comm_manager_set_pins(gpio_num_t tx_pin, gpio_num_t rx_pin) {
+    if (comm_pins_conflict_with_rgb_display(tx_pin, rx_pin)) {
+        return false;
+    }
     if (!s_comm_manager || !s_comm_manager->initialized) {
         printf("E: Not initialized\n");
         return false;

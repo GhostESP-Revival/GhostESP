@@ -263,7 +263,15 @@ static void snake_input(const ghostesp_input_event_t *event) {
     if (event->type == GHOSTESP_INPUT_BACK && event->pressed) { request_exit(); return; }
     if (event->type == GHOSTESP_INPUT_TOUCH) {
         bool tap = false;
-        ghostesp_input_type_t swipe = gh_touch_update_tap(&touch_state, event, &tap);
+        bool was_triggered = touch_state.triggered;
+        ghostesp_input_type_t swipe = gh_touch_update_live(&touch_state, event);
+        if (!event->pressed && !was_triggered) {
+            int dx = event->x - touch_state.start_x;
+            int dy = event->y - touch_state.start_y;
+            int abs_dx = dx < 0 ? -dx : dx;
+            int abs_dy = dy < 0 ? -dy : dy;
+            tap = abs_dx < GH_SWIPE_THRESHOLD && abs_dy < GH_SWIPE_THRESHOLD;
+        }
         if (swipe == GHOSTESP_INPUT_UP) turn(DIR_UP); else if (swipe == GHOSTESP_INPUT_RIGHT) turn(DIR_RIGHT);
         else if (swipe == GHOSTESP_INPUT_DOWN) turn(DIR_DOWN); else if (swipe == GHOSTESP_INPUT_LEFT) turn(DIR_LEFT);
         else if (tap) activate();

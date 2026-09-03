@@ -2855,6 +2855,7 @@ static void runtime_process_input(ghostscript_runtime_t *rt, const InputEvent *e
         case INPUT_TYPE_KEYBOARD: type = "keyboard"; break;
         case INPUT_TYPE_ENCODER: type = "encoder"; break;
         case INPUT_TYPE_EXIT_BUTTON: type = "back"; break;
+        case INPUT_TYPE_HOME_BUTTON: type = "home"; break;
     }
     lua_pushstring(rt->L, type); lua_setfield(rt->L, -2, "type");
     if (event->type == INPUT_TYPE_KEYBOARD) { lua_pushinteger(rt->L, event->data.key_value); lua_setfield(rt->L, -2, "key"); }

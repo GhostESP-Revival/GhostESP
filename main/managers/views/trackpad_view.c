@@ -28,6 +28,7 @@
 #include <string.h>
 
 static const char *TAG = "trackpad_view";
+#define TRACKPAD_BOTTOM_BAR_H 28
 
 static View *s_return_view = NULL;
 static lv_obj_t *s_root = NULL;
@@ -200,8 +201,8 @@ static void trackpad_stop_and_exit(void) {
         badusb_manager_trackpad_stop();
 #endif
     }
-    View *back = s_return_view ? s_return_view : &badusb_view;
-    display_manager_switch_view(back);
+    s_return_view = NULL;
+    display_manager_go_back();
 }
 
 static int trackpad_accel_step(void) {
@@ -253,10 +254,11 @@ void trackpad_view_create(void) {
     lv_color_t pad_grid = bright ? lv_color_hex(0xCCCCCC) : lv_color_hex(0x404040);
 
     // Trackpad surface
-    int bar_h = 28;
+    int bar_h = TRACKPAD_BOTTOM_BAR_H;
     s_pad = lv_obj_create(s_root);
     lv_obj_remove_style_all(s_pad);
-    lv_obj_set_size(s_pad, LV_HOR_RES, LV_VER_RES - GUI_STATUS_BAR_H - bar_h);
+    lv_obj_set_size(s_pad, LV_HOR_RES,
+                    LV_VER_RES - GUI_STATUS_BAR_H - GUI_HOME_SAFE_H - bar_h);
     lv_obj_align(s_pad, LV_ALIGN_TOP_MID, 0, GUI_STATUS_BAR_H);
     lv_obj_set_style_bg_color(s_pad, bg, 0);
     lv_obj_set_style_bg_opa(s_pad, LV_OPA_COVER, 0);
@@ -284,7 +286,7 @@ void trackpad_view_create(void) {
     lv_obj_t *bar = lv_obj_create(s_root);
     lv_obj_remove_style_all(bar);
     lv_obj_set_size(bar, LV_HOR_RES, bar_h);
-    lv_obj_align(bar, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_align(bar, LV_ALIGN_BOTTOM_MID, 0, -GUI_HOME_SAFE_H);
     lv_obj_set_style_bg_color(bar, surface, 0);
     lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
     lv_obj_set_flex_flow(bar, LV_FLEX_FLOW_ROW);
@@ -345,7 +347,8 @@ static void trackpad_input_cb(InputEvent *event) {
 #ifdef CONFIG_USE_TOUCHSCREEN
 
         if (data->state == LV_INDEV_STATE_PR && !event->is_touch_move) {
-            if (data->point.y >= LV_VER_RES - 28) {
+            if (data->point.y >= LV_VER_RES - GUI_HOME_SAFE_H - TRACKPAD_BOTTOM_BAR_H &&
+                data->point.y < LV_VER_RES - GUI_HOME_SAFE_H) {
                 trackpad_stop_and_exit();
                 return;
             }
@@ -518,6 +521,10 @@ static void trackpad_input_cb(InputEvent *event) {
         return;
 
     case INPUT_TYPE_EXIT_BUTTON:
+        trackpad_stop_and_exit();
+        return;
+
+    case INPUT_TYPE_HOME_BUTTON:
         trackpad_stop_and_exit();
         return;
     }

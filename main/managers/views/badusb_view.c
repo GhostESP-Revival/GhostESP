@@ -12,6 +12,7 @@
 #include "gui/screen_layout.h"
 #include "gui/popup.h"
 #include "gui/lvgl_safe.h"
+#include "gui/gui_router.h"
 #include "managers/views/error_popup.h"
 #include "esp_attr.h"
 #include "managers/views/keyboard_screen.h"
@@ -23,6 +24,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <string.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <dirent.h>
 #include <sys/stat.h>
@@ -854,6 +856,40 @@ static void go_back(void) {
     }
 }
 
+// Deep-link support for favorites: run a specific script by name (as shown
+// in the Select Script list). Safe to call before the view exists - the
+// request is consumed by badusb_view_create().
+static char *s_pending_script = NULL;
+static void badusb_view_apply_pending_open(void);
+
+void badusb_view_open_script(const char *name) {
+    if (!name || !name[0]) return;
+    free(s_pending_script);
+    s_pending_script = strdup(name);
+    // View already live (e.g. lockscreen overlay on top of it): apply now.
+    if (g_ov && lv_obj_is_valid(g_ov)) {
+        badusb_view_apply_pending_open();
+    }
+}
+
+static void badusb_view_apply_pending_open(void) {
+    if (!s_pending_script) return;
+    char name[MAX_SCRIPT_NAME];
+    strncpy(name, s_pending_script, sizeof(name) - 1);
+    name[sizeof(name) - 1] = '\0';
+    free(s_pending_script);
+    s_pending_script = NULL;
+
+    if (badusb_is_remote() && !esp_comm_manager_is_connected()) {
+        error_popup_create("Not connected to peer");
+        return;
+    }
+    populate_script_list();
+    current_menu_state = BADUSB_MENU_SCRIPT_SELECT;
+    rebuild_menu();
+    handle_option(name); // executes the payload exactly as the picker would
+}
+
 static void rebuild_menu(void) {
     if (!g_ov) return;
 
@@ -907,9 +943,13 @@ void badusb_view_create(void) {
 #ifdef CONFIG_USE_TOUCHSCREEN
     int screen_height = LV_VER_RES;
     const int STATUS_BAR_HEIGHT = GUI_STATUS_BAR_H;
+#if GUI_LEGACY_TOUCH_BAR
     const int BUTTON_AREA_HEIGHT = SCROLL_BTN_SIZE + SCROLL_BTN_PADDING * 2;
+#else
+    const int BUTTON_AREA_HEIGHT = 0;
+#endif
     int container_height = screen_height - STATUS_BAR_HEIGHT - BUTTON_AREA_HEIGHT;
-    lv_obj_set_size(menu_container, LV_HOR_RES, container_height);
+    lv_obj_set_size(menu_container, GUI_OPTIONS_LIST_WIDTH, container_height);
     lv_obj_align(menu_container, LV_ALIGN_TOP_MID, 0, STATUS_BAR_HEIGHT);
 #endif
 
@@ -917,7 +957,7 @@ void badusb_view_create(void) {
      * entry from the Main Menu; returning here (e.g. after a hardware
      * shortcut jumped elsewhere and back) restores whichever submenu and
      * row were active instead of always landing back on the root menu. */
-    if (display_manager_previous_view == &main_menu_view) {
+    if (gui_router_previous_view() == &main_menu_view) {
         current_menu_state = BADUSB_MENU_MAIN;
         selected_item_index = 0;
     }
@@ -949,6 +989,7 @@ void badusb_view_create(void) {
     }
 
 #ifdef CONFIG_USE_TOUCHSCREEN
+#if GUI_LEGACY_TOUCH_BAR
     uint8_t theme = settings_get_menu_theme(&G_Settings);
     lv_color_t bg_color = lv_color_hex(theme_palette_get_background(theme));
     lv_color_t ctrl_color = lv_color_hex(theme_palette_get_surface_alt(theme));
@@ -1008,7 +1049,11 @@ void badusb_view_create(void) {
     lv_obj_add_flag(scroll_down_btn, LV_OBJ_FLAG_HIDDEN);
 
     update_scroll_buttons_visibility();
+#endif /* GUI_LEGACY_TOUCH_BAR */
 #endif
+
+    // Consume any pending favorite deep-link (badusb_view_open_script).
+    badusb_view_apply_pending_open();
 }
 
 void badusb_view_destroy(void) {
@@ -1241,9 +1286,9 @@ void badusb_view_input_cb(InputEvent *event) {
         return;
     }
 
-#ifdef CONFIG_USE_ENCODER
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_IS_ATOMS3R)
     if (event->type == INPUT_TYPE_EXIT_BUTTON) {
-        display_manager_switch_view(&main_menu_view);
+        display_manager_go_back();
     }
 #endif
 }

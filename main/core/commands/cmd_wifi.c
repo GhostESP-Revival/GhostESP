@@ -8,7 +8,7 @@
 #include "managers/settings_manager.h"
 #include "managers/status_display_manager.h"
 #include "managers/wifi_manager.h"
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 #include "managers/ble_manager.h"
 #endif
 #include "vendor/pcap.h"
@@ -76,7 +76,7 @@ void cmd_wifi_scan_stop(int argc, char **argv) {
     // entry, so this function is the only thing that brings the AP back for
     // those flows. Always restore AP services before returning, regardless
     // of whether the Wi-Fi driver restart succeeded.
-    ap_manager_start_services();
+    (void)ap_manager_restore_after_attack("scan stop");
 
     if (stop_err != ESP_OK || start_err != ESP_OK) {
         glog("WiFi scan stop completed with recovery errors (stop=%s, start=%s).\n",
@@ -106,7 +106,7 @@ void handle_list(int argc, char **argv) {
         glog("Listed Stations...\n");
         return;
     }
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     else if (argc > 1 && strcmp(argv[1], "-airtags") == 0) {
         ble_list_airtags();
         return;
@@ -186,6 +186,21 @@ void handle_attack_cmd(int argc, char **argv) {
             wifi_manager_start_eapollogoff_attack();
             status_display_show_status("EAPOL Start");
             return;
+        } else if (strcmp(argv[1], "-p") == 0) {
+            glog("Probe Request Flood starting...\n");
+            wifi_manager_start_probe_flood();
+            status_display_show_status("Probe Flood Start");
+            return;
+        } else if (strcmp(argv[1], "-b") == 0) {
+            glog("Bad Msg attack starting...\n");
+            wifi_manager_start_bad_msg();
+            status_display_show_status("Bad Msg Start");
+            return;
+        } else if (strcmp(argv[1], "-a") == 0) {
+            glog("Auth Flood attack starting...\n");
+            wifi_manager_start_auth_flood();
+            status_display_show_status("Auth Flood Start");
+            return;
         } else if (strcmp(argv[1], "-s") == 0) {
             if (argc < 3) {
                 glog("Usage: attack -s <password>\n");
@@ -208,7 +223,7 @@ void handle_attack_cmd(int argc, char **argv) {
             return;
         }
     }
-    glog("Usage: attack -d (deauth) | attack -hsd (handshake+deauth) | attack -c (channel switch) | attack -e (EAPOL logoff) | attack -s <password> (SAE flood) | attack -g <ssid> <password> (GTK abuse)\n");
+    glog("Usage: attack -d (deauth) | attack -hsd (handshake+deauth) | attack -c (channel switch) | attack -e (EAPOL logoff) | attack -p (probe flood) | attack -b (bad msg) | attack -a (auth flood) | attack -s <password> (SAE flood) | attack -g <ssid> <password> (GTK abuse)\n");
     status_display_show_status("Attack Usage");
 }
 
@@ -247,6 +262,9 @@ void handle_stop_deauth(int argc, char **argv) {
     wifi_manager_stop_sae_flood();
     wifi_manager_stop_channel_switch_attack();
     wifi_manager_stop_gtk_abuse();
+    wifi_manager_stop_probe_flood();
+    wifi_manager_stop_bad_msg();
+    wifi_manager_stop_auth_flood();
     glog("All WiFi attacks stopped...\n");
     status_display_show_status("Attacks Off");
 }
@@ -314,7 +332,7 @@ void handle_select_cmd(int argc, char **argv) {
         } else {
             glog("Error: '%s' is not a valid number.\n", argv[2]);
         }
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     } else if (strcmp(argv[1], "-airtag") == 0) {
         char *endptr;
         int num = (int)strtol(argv[2], &endptr, 10);

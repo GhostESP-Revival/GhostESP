@@ -1911,7 +1911,7 @@ class ESP32ControlGUI(QMainWindow):
         system_form.addRow("Navigation Buttons:", nav_buttons)
 
         menu_layout = QComboBox()
-        menu_layout.addItems(["Carousel", "Grid", "List"])
+        menu_layout.addItems(["Carousel", "Grid", "List", "Compact", "Hero"])
         menu_layout.currentIndexChanged.connect(
             lambda i: self.send_command(f"settings set menu_layout {i}")
         )

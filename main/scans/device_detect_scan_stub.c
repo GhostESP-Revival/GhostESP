@@ -2,11 +2,13 @@
 #include "scans/ble/advertiser_scan.h"
 #include "scans/ble/gatt_scan.h"
 
-#ifdef CONFIG_IDF_TARGET_ESP32S2
+#if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(GHOSTESP_NO_NATIVE_BLE)
 
 void ble_device_detect_start(void) {}
 
 void ble_device_detect_stop(void) {}
+
+void ble_device_detect_clear_results(void) {}
 
 bool ble_device_detect_is_active(void) {
     return false;
@@ -35,6 +37,12 @@ bool ble_device_detect_start_airtag_spoof(int index) {
 void ble_device_detect_stop_tracking(void) {}
 
 bool ble_device_detect_is_tracking(void) {
+    return false;
+}
+
+bool ble_device_detect_get_track_status(int8_t *out_rssi, bool *out_fresh) {
+    (void)out_rssi;
+    (void)out_fresh;
     return false;
 }
 

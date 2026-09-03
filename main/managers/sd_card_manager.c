@@ -4,6 +4,9 @@
 #include "driver/sdmmc_defs.h"
 #include "driver/sdmmc_host.h"
 #include "driver/sdmmc_types.h"
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4)
+#include "sd_pwr_ctrl_by_on_chip_ldo.h"
+#endif
 #include "esp_heap_trace.h"
 #include "esp_log.h"
 #include "esp_private/esp_gpio_reserve.h"
@@ -40,6 +43,11 @@
 
 static const char *TAG = "SD_Card_Manager";
 static const char *NVS_NAMESPACE = "sd_config";
+
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4) && defined(CONFIG_ESP_HOSTED_SDIO_HOST_INTERFACE)
+static esp_err_t sdmmc_host_init_dummy(void) { return ESP_OK; }
+static esp_err_t sdmmc_host_deinit_dummy(void) { return ESP_OK; }
+#endif
 static bool s_sd_log_levels_tuned = false;
 static SemaphoreHandle_t s_sd_jit_mutex = NULL;
 static uint32_t s_sd_jit_mount_depth = 0;
@@ -52,6 +60,9 @@ static bool s_spi_bus_owned_by_sd = false;
 static int s_spi_host_id = -1;
 typedef enum { MOUNT_NONE = 0, MOUNT_VIRTUAL, MOUNT_SDMMC, MOUNT_SPI } sd_mount_type_t;
 static sd_mount_type_t s_mount_type = MOUNT_NONE;
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4)
+static sd_pwr_ctrl_handle_t s_crowpanel_sd_power = NULL;
+#endif
 static TickType_t s_next_unmount_tick = 0;
 
 static void sd_spi_bus_release_if_tracked(void);
@@ -269,15 +280,37 @@ static bool display_spi_suspend_for_sd(void) { return false; }
 static bool display_spi_resume_after_sd(void) { return true; }
 #endif
 
-static inline void shared_spi_guard_resume_lvgl_if_needed(bool guard_active) {
+/* CoreS3-SE shares GPIO35 between LCD D/C and SD MISO. The display drives it
+ * while its CS is active; the SD card must be allowed to drive it as an input
+ * during the shared-bus mount. */
+static void shared_spi_set_display_dc_mode(bool sd_mode)
+{
+#if defined(CONFIG_LV_DISPLAY_USE_SPI_MISO) && defined(CONFIG_LV_DISP_PIN_DC) && \
+    defined(CONFIG_SD_SPI_MISO_PIN) && (CONFIG_LV_DISP_PIN_DC == CONFIG_SD_SPI_MISO_PIN)
+  esp_err_t ret = gpio_set_direction(CONFIG_LV_DISP_PIN_DC,
+                                     sd_mode ? GPIO_MODE_INPUT : GPIO_MODE_OUTPUT);
+  if (ret != ESP_OK) {
+    ESP_LOGW(TAG, "Failed to switch shared LCD D/C GPIO%d to %s: %s",
+             CONFIG_LV_DISP_PIN_DC, sd_mode ? "SD input" : "LCD output",
+             esp_err_to_name(ret));
+  }
+#else
+  (void)sd_mode;
+#endif
+}
+
+static inline void shared_spi_guard_resume_lvgl_if_needed(bool guard_active, bool sd_mounted) {
 #if defined(CONFIG_WITH_SCREEN) && defined(CONFIG_LV_TFT_DISPLAY_PROTOCOL_SPI) && !defined(CONFIG_USE_TDECK)
-  ESP_LOGI(TAG, "shared_spi_guard_resume_lvgl_if_needed(%d)", guard_active);
+  ESP_LOGI(TAG, "shared_spi_guard_resume_lvgl_if_needed(%d, mounted=%d)",
+           guard_active, sd_mounted);
   if (guard_active) {
+    shared_spi_set_display_dc_mode(sd_mounted);
     display_manager_resume_lvgl_task();
     display_manager_resume_input_task();
   }
 #else
   (void)guard_active;
+  (void)sd_mounted;
 #endif
 }
 
@@ -295,6 +328,12 @@ static const char *sd_spi_host_name(int host_id) {
 }
 
 static int sd_spi_host_id(void) {
+#if defined(CONFIG_CROWPANEL_EPAPER_42) && defined(CONFIG_IDF_TARGET_ESP32S3)
+  /* Elecrow's factory firmware uses SPIClass(HSPI), i.e. SPI2_HOST, for the
+   * SD socket.  The e-paper adapter is factory-compatible GPIO bit-banged on
+   * GPIO11/12, so SPI2 is free here and is the known-good SD host. */
+  return SPI2_HOST;
+#endif
 #if defined(CONFIG_WITH_SCREEN) && defined(CONFIG_LV_TFT_DISPLAY_PROTOCOL_SPI) && defined(TFT_SPI_HOST)
   if (is_shared_display_sd_spi()) {
     return TFT_SPI_HOST;
@@ -380,6 +419,12 @@ static esp_err_t sd_card_mount_spi_with_retry(
     const sdspi_device_config_t *slot_config,
     const esp_vfs_fat_sdmmc_mount_config_t *mount_config) {
   esp_err_t ret = ESP_FAIL;
+  // The IDF SD driver logs a scary multi-line error (with a reboot HINT)
+  // for every attempt. Silence it during retries and emit ONE clear,
+  // user-friendly summary at the end instead - the raw spam was generating
+  // bogus bug reports for the normal "no card inserted" case.
+  esp_log_level_t prev_vfs = esp_log_level_get("vfs_fat_sdmmc");
+  esp_log_level_set("vfs_fat_sdmmc", ESP_LOG_NONE);
   for (int attempt = 1; attempt <= 3; ++attempt) {
     esp_err_t prepare_ret = sd_card_prepare_shared_spi_card();
     if (prepare_ret != ESP_OK) {
@@ -388,9 +433,16 @@ static esp_err_t sd_card_mount_spi_with_retry(
     sd_card_manager.card = NULL;
     ret = esp_vfs_fat_sdspi_mount("/mnt", host, slot_config, mount_config,
                                   &sd_card_manager.card);
-    if (ret == ESP_OK) return ESP_OK;
-    ESP_LOGW(TAG, "SD mount attempt %d/3 failed: %s", attempt, esp_err_to_name(ret));
+    if (ret == ESP_OK) break;
+    ESP_LOGD(TAG, "SD mount attempt %d/3 failed: %s", attempt, esp_err_to_name(ret));
     if (attempt < 3) vTaskDelay(pdMS_TO_TICKS(100));
+  }
+  esp_log_level_set("vfs_fat_sdmmc", prev_vfs);
+  if (ret != ESP_OK) {
+    bool no_card = (ret == ESP_ERR_TIMEOUT);
+    ESP_LOGW(TAG, "No SD card detected after 3 attempts (%s)%s",
+             esp_err_to_name(ret),
+             no_card ? " - insert a card and reboot to enable SD features" : "");
   }
   return ret;
 }
@@ -444,15 +496,11 @@ static int choose_free_s3_sd_spi_host(const spi_bus_config_t *bus_config, int dm
 }
 #endif
 
-/* Every CYD board (and any classic-ESP32 board with the same topology) keeps
- * its display on SPI2 while SD owns a separate SPI3 bus: display and SD use
- * different pins, so is_shared_display_sd_spi() is false and sd_spi_host_id()
- * picks SPI3_HOST for SD. On the classic ESP32, tearing that SPI3 bus down
- * with spi_bus_free() on mount failure (no card) or unmount disturbs the live
- * SPI2 display and freezes it. So in that topology we leave SD's bus
- * initialized instead of freeing it; a later (re)mount reuses it via
- * ESP_ERR_INVALID_STATE, which is already handled above. Boards where SD
- * shares the display's bus are unaffected (the shared-bus path handles them). */
+/* Ordinary CYD boards keep their display on SPI2 while SD owns a separate
+ * SPI3 bus. The CrowPanel e-paper is the exception: its display is GPIO-SPI
+ * and the factory assigns SD to SPI2/HSPI. On classic ESP32 boards, tearing
+ * down the separate SPI3 bus on a no-card mount can disturb the live display,
+ * so that topology keeps the bus initialized for a later retry. */
 static bool sd_keep_spi_bus_for_board(void) {
 #if defined(CONFIG_IDF_TARGET_ESP32) && defined(CONFIG_WITH_SCREEN)
   return !is_shared_display_sd_spi();
@@ -512,7 +560,7 @@ void sd_card_get_cached_stats(sd_card_cached_stats_t *out) {
     }
 }
 
-#ifdef CONFIG_IS_S3TWATCH
+#if defined(CONFIG_IS_S3TWATCH) || defined(CONFIG_IS_ATOMS3R)
 static wl_handle_t s_wl_handle = WL_INVALID_HANDLE;
 static bool s_virtual_storage_mounted = false;
 
@@ -647,8 +695,8 @@ esp_err_t sd_card_init(void) {
   sd_card_manager.card = NULL;
 
 
-#ifdef CONFIG_IS_S3TWATCH
-  ESP_LOGI(TAG, "S3TWatch detected - attempting virtual storage mount");
+#if defined(CONFIG_IS_S3TWATCH) || defined(CONFIG_IS_ATOMS3R)
+  ESP_LOGI(TAG, "Board without SD card detected - attempting virtual storage mount");
   
   vTaskDelay(pdMS_TO_TICKS(100));
   
@@ -675,6 +723,36 @@ esp_err_t sd_card_init(void) {
 
   sdmmc_host_t host = SDMMC_HOST_DEFAULT();
   host.flags = SDMMC_HOST_FLAG_1BIT;
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4)
+  if (!s_crowpanel_sd_power) {
+    const sd_pwr_ctrl_ldo_config_t ldo_config = {.ldo_chan_id = 4};
+    ret = sd_pwr_ctrl_new_on_chip_ldo(&ldo_config, &s_crowpanel_sd_power);
+    if (ret != ESP_OK) {
+      /* LDO4 may already be held by another driver (e.g. an older display
+       * init path).  On CrowPanel boards the SD card rail is powered by
+       * on-chip LDO4 at 3.3 V; if the channel is already enabled at the
+       * correct voltage the card will work even without our own handle. */
+      ESP_LOGW(TAG, "CrowPanel SD LDO4 acquire returned %s — rail may already be on",
+               esp_err_to_name(ret));
+      s_crowpanel_sd_power = NULL;
+    }
+  }
+  if (s_crowpanel_sd_power) {
+    host.pwr_ctrl_handle = s_crowpanel_sd_power;
+  }
+#endif
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4) && defined(CONFIG_ESP_HOSTED_SDIO_HOST_INTERFACE)
+  // ESP32-P4 has a single SDMMC host controller (SDMMC_LL_HOST_CTLR_NUMS=1).
+  // ESP-Hosted already claimed it for hosted SDIO on slot 1; use dummy
+  // init/deinit so the SD mount reuses that controller and only adds slot 0.
+  host.slot = SDMMC_HOST_SLOT_0;
+  host.max_freq_khz = SDMMC_FREQ_HIGHSPEED;
+  host.init = sdmmc_host_init_dummy;
+  host.deinit = sdmmc_host_deinit_dummy;
+#elif defined(CONFIG_CROWPANEL_ADVANCED_P4)
+  host.slot = SDMMC_HOST_SLOT_0;
+  host.max_freq_khz = SDMMC_FREQ_HIGHSPEED;
+#endif
 
   sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
   slot_config.width = 1;
@@ -707,6 +785,12 @@ esp_err_t sd_card_init(void) {
              esp_err_to_name(ret));
     }
     sd_card_manager.card = NULL;
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4)
+    if (s_crowpanel_sd_power) {
+      sd_pwr_ctrl_del_on_chip_ldo(s_crowpanel_sd_power);
+      s_crowpanel_sd_power = NULL;
+    }
+#endif
     toast_show("SD mount failed", TOAST_ERROR);
     return ret;
   }
@@ -780,23 +864,34 @@ esp_err_t sd_card_init(void) {
 
   bool shared_spi_guard_active = false;
   bool display_rebind_required = false;
+  bool concurrent_shared_spi = false;
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+  concurrent_shared_spi = strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "m5cores3se") == 0;
+#endif
 #if defined(CONFIG_WITH_SCREEN) && defined(CONFIG_LV_TFT_DISPLAY_PROTOCOL_SPI) && !defined(CONFIG_USE_TDECK)
   ESP_LOGI(TAG, "Checking shared SPI: is_shared_display_sd_spi()=%d, display_sd_spi_pins_match()=%d",
            is_shared_display_sd_spi(), display_sd_spi_pins_match());
   display_rebind_required = display_spi_requires_rebind_for_sd();
   ESP_LOGI(TAG, "display_rebind_required=%d", display_rebind_required);
   if (is_shared_display_sd_spi() && !display_rebind_required) {
-    /* Pins match the display, so the display's SPI device is still attached
-     * to the shared host. Pause LVGL and defer panel detach to the
-     * gating/rebind block below before SD claims the bus. */
-    shared_spi_guard_active = true;
-    ESP_LOGI(TAG, "Suspending LVGL task for shared SPI access");
-    display_manager_suspend_input_task();
-    display_manager_suspend_lvgl_task();
-    disp_wait_for_pending_transactions();
+    if (concurrent_shared_spi) {
+      /* CoreS3-SE has a real shared SPI bus. Keep LVGL alive and let the SPI
+       * host arbitrate display and SD transactions normally. */
+      shared_spi_set_display_dc_mode(true);
+    } else {
+      /* Pins match the display, so the display's SPI device is still attached
+       * to the shared host. Pause LVGL and defer panel detach to the
+       * gating/rebind block below before SD claims the bus. */
+      shared_spi_guard_active = true;
+      ESP_LOGI(TAG, "Suspending LVGL task for shared SPI access");
+      display_manager_suspend_input_task();
+      display_manager_suspend_lvgl_task();
+      disp_wait_for_pending_transactions();
 #ifdef CONFIG_LV_DISP_SPI_CS
-    gpio_set_level(CONFIG_LV_DISP_SPI_CS, 1);
+      gpio_set_level(CONFIG_LV_DISP_SPI_CS, 1);
 #endif
+      shared_spi_set_display_dc_mode(true);
+    }
   }
 #else
   ESP_LOGI(TAG, "Shared SPI code path not compiled in");
@@ -913,7 +1008,7 @@ esp_err_t sd_card_init(void) {
   host.max_freq_khz = 4000;       /* more reliable init on shared SPI bus boards */
 #endif
   if (experimental_shared_spi) {
-    host.max_freq_khz = 10000;    /* Persistent routing avoids JIT churn; use a conservative faster clock. */
+    host.max_freq_khz = 20000;    /* Persistent routing avoids JIT churn; raised from 10 MHz after stress-testing reads on Banshee C5. */
   }
   /* select spi host slot for target */
   host.slot = sd_spi_host_id();
@@ -962,7 +1057,7 @@ esp_err_t sd_card_init(void) {
       ESP_LOGW(TAG, "SPI bus %d already initialized. Reusing existing bus.", SPI2_HOST);
       sd_spi_bus_track(SPI2_HOST, false);
     } else {
-      shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active);
+      shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active, false);
       printf("Failed to initialize SPI bus: %s\n", esp_err_to_name(bus_ret));
       return bus_ret;
     }
@@ -989,15 +1084,34 @@ esp_err_t sd_card_init(void) {
       sd_spi_bus_track(sd_host_id, false);
     } else {
       ESP_LOGE(TAG, "ESP32: spi_bus_initialize failed with %s", esp_err_to_name(bus_ret));
-      shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active);
+      shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active, false);
       printf("Failed to initialize SPI bus: %s\n", esp_err_to_name(bus_ret));
       return bus_ret;
     }
   }
 #elif defined(CONFIG_IDF_TARGET_ESP32S3)
   {
+#if !defined(CONFIG_CROWPANEL_EPAPER_42)
     int host_id = sd_host_id;
-#if defined(CONFIG_WITH_ETHERNET) || defined(CONFIG_HAS_NRF24)
+#endif
+#if defined(CONFIG_CROWPANEL_EPAPER_42)
+    /* Unlike the generic S3 path, this board has a factory-proven fixed
+     * topology: SD is on HSPI/SPI2. Do not run the free-host probe here,
+     * because it intentionally prefers SPI3 on ordinary S3 boards. */
+    esp_err_t bus_ret = spi_bus_initialize(SPI2_HOST, &bus_config, dmabus);
+    if (bus_ret == ESP_OK) {
+      bus_init_success = true;
+      sd_spi_bus_track(SPI2_HOST, true);
+    } else if (bus_ret == ESP_ERR_INVALID_STATE) {
+      sd_spi_bus_track(SPI2_HOST, false);
+    } else {
+      shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active, false);
+      printf("Failed to initialize factory SD SPI bus: %s\n", esp_err_to_name(bus_ret));
+      return bus_ret;
+    }
+    sd_host_id = SPI2_HOST;
+    host.slot = SPI2_HOST;
+#elif defined(CONFIG_WITH_ETHERNET) || defined(CONFIG_HAS_NRF24)
     /* SPI3 is reserved for Ethernet/NRF24 on this config. Use SPI2 directly
      * (old pre-refactor behaviour) so we don't steal SPI3 from those peripherals.
      * INVALID_STATE means the bus is already up — reuse it. */
@@ -1006,7 +1120,7 @@ esp_err_t sd_card_init(void) {
       bus_init_success = true;
       sd_spi_bus_track(SPI2_HOST, true);
     } else if (bus_ret != ESP_ERR_INVALID_STATE) {
-      shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active);
+      shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active, false);
       printf("Failed to initialize SPI bus: %s\n", esp_err_to_name(bus_ret));
       return bus_ret;
     }
@@ -1017,7 +1131,7 @@ esp_err_t sd_card_init(void) {
     if (!is_shared_display_sd_spi()) {
       host_id = choose_free_s3_sd_spi_host(&bus_config, dmabus);
       if (host_id < 0) {
-        shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active);
+        shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active, false);
         printf("Failed to find a free SPI host for SD on ESP32-S3\n");
         return ESP_ERR_INVALID_STATE;
       }
@@ -1031,7 +1145,7 @@ esp_err_t sd_card_init(void) {
       } else if (bus_ret == ESP_ERR_INVALID_STATE) {
         sd_spi_bus_track(host_id, false);
       } else if (bus_ret != ESP_ERR_INVALID_STATE) {
-        shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active);
+        shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active, false);
         printf("Failed to initialize SPI bus: %s\n", esp_err_to_name(bus_ret));
         return bus_ret;
       }
@@ -1050,7 +1164,7 @@ esp_err_t sd_card_init(void) {
       bus_init_success = true;
       sd_spi_bus_track(SPI2_HOST, true);
     } else if (bus_ret != ESP_ERR_INVALID_STATE) {
-      shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active);
+      shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active, false);
       printf("Failed to initialize SPI bus: %s\n", esp_err_to_name(bus_ret));
       return bus_ret;
     }
@@ -1078,7 +1192,7 @@ esp_err_t sd_card_init(void) {
   ret = sd_card_mount_spi_with_retry(&host, &slot_config, &mount_config);
   ESP_LOGD(TAG, "SD mount result: %s, shared_spi_guard_active=%d, display_was_suspended=%d",
            esp_err_to_name(ret), shared_spi_guard_active, display_was_suspended);
-  shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active);
+  shared_spi_guard_resume_lvgl_if_needed(shared_spi_guard_active, ret == ESP_OK);
   if (ret != ESP_OK) {
     ESP_LOGD(TAG, "Mount failed, bus_init_success=%d", bus_init_success);
     printf("Failed to mount filesystem: %s\n", esp_err_to_name(ret));
@@ -1318,12 +1432,18 @@ void sd_card_jit_end(bool display_was_suspended) {
 }
 
 void sd_card_unmount_with_context(sd_unmount_context_t context) {
-#ifdef CONFIG_IS_S3TWATCH
+#if defined(CONFIG_IS_S3TWATCH) || defined(CONFIG_IS_ATOMS3R)
   if (s_virtual_storage_mounted) {
     unmount_virtual_storage();
     sd_card_manager.is_initialized = false;
     sd_card_manager.card = NULL;
     s_mount_type = MOUNT_NONE;
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4)
+    if (s_crowpanel_sd_power) {
+      sd_pwr_ctrl_del_on_chip_ldo(s_crowpanel_sd_power);
+      s_crowpanel_sd_power = NULL;
+    }
+#endif
     
     // Show appropriate status based on context
     switch (context) {
@@ -1360,6 +1480,12 @@ void sd_card_unmount_with_context(sd_unmount_context_t context) {
     sd_card_manager.is_initialized = false;
     sd_card_manager.card = NULL;
     s_mount_type = MOUNT_NONE;
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4)
+    if (s_crowpanel_sd_power) {
+      sd_pwr_ctrl_del_on_chip_ldo(s_crowpanel_sd_power);
+      s_crowpanel_sd_power = NULL;
+    }
+#endif
     s_sd_jit_mount_depth = 0;
     s_sd_jit_display_suspended = false;
     
@@ -1581,6 +1707,7 @@ esp_err_t sd_card_setup_directory_structure() {
   const char *scripts_dir = SD_DIR_SCRIPTS;
   const char *scriptdata_dir = SD_DIR_SCRIPTDATA;
   const char *downloads_dir = SD_DIR_DOWNLOADS;
+  const char *comics_dir = SD_DIR_COMICS;
   const char *themes_dir = SD_DIR_THEMES;
   const char *active_theme_dir = SD_DIR_THEMES "/active";
   const char *evil_portal_dir = SD_GHOSTESP_ROOT "/evil_portal";
@@ -1612,6 +1739,9 @@ esp_err_t sd_card_setup_directory_structure() {
   if (ret != ESP_OK) return ret;
 
   ret = ensure_sd_dir_exists(downloads_dir);
+  if (ret != ESP_OK) return ret;
+
+  ret = ensure_sd_dir_exists(comics_dir);
   if (ret != ESP_OK) return ret;
 
   ret = ensure_sd_dir_exists(themes_dir);
@@ -1791,6 +1921,15 @@ nvs_write_error:
 }
 
 esp_err_t sd_card_load_config() {
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4)
+  // CrowPanel wiring is fixed on the PCB. Do not let generic saved pin values
+  // obscure or override the board profile selected at build time.
+  sd_card_manager.clkpin = CONFIG_SD_MMC_CLK;
+  sd_card_manager.cmdpin = CONFIG_SD_MMC_CMD;
+  sd_card_manager.d0pin = CONFIG_SD_MMC_D0;
+  printf("CrowPanel SD wiring loaded from board profile.\n");
+  return ESP_OK;
+#endif
   nvs_handle_t nvs_handle;
   esp_err_t err;
 
@@ -1864,11 +2003,11 @@ read_error:
 }
 
 void sd_card_print_config() {
-#ifdef CONFIG_IS_S3TWATCH
+#if defined(CONFIG_IS_S3TWATCH) || defined(CONFIG_IS_ATOMS3R)
   if (s_virtual_storage_mounted) {
-    printf("Storage Configuration: Virtual Flash Storage (S3TWatch)\n");
+    printf("Storage Configuration: Virtual Flash Storage\n");
     printf("Mount Point: /mnt\n");
-    printf("Storage Type: Internal Flash Partition (4MB)\n");
+    printf("Storage Type: Internal Flash Partition\n");
     
     const esp_partition_t* storage_partition = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_FAT, "storage");
     if (storage_partition) {
@@ -1877,6 +2016,12 @@ void sd_card_print_config() {
     }
     return;
   }
+#endif
+
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4)
+  printf("SD pins: SDMMC slot 0, 1-bit (CLK %d, CMD %d, D0 %d), max 10 MHz\n",
+         CONFIG_SD_MMC_CLK, CONFIG_SD_MMC_CMD, CONFIG_SD_MMC_D0);
+  return;
 #endif
 
   printf("SD pins: MMC(CLK %d, CMD %d, D0 %d, D1 %d, D2 %d, D3 %d) "
@@ -1889,7 +2034,7 @@ void sd_card_print_config() {
 }
 
 bool sd_card_is_virtual_storage() {
-#ifdef CONFIG_IS_S3TWATCH
+#if defined(CONFIG_IS_S3TWATCH) || defined(CONFIG_IS_ATOMS3R)
   return s_virtual_storage_mounted;
 #else
   return false;

@@ -12,4 +12,4 @@ def dist_app(
 ) -> pathlib.Path:
     app_path = pathlib.Path(app_dir).resolve()
     build_app(app_dir=str(app_path), target=target, skip_set_target=False)
-    return package_app(app_dir=str(app_path), out=out, make_gapp=make_gapp)
+    return package_app(app_dir=str(app_path), out=out, make_gapp=make_gapp, target=target)

@@ -16,9 +16,9 @@ Enable the system via `CONFIG_ENABLE_NATIVE_SD_APPS=y` in `menuconfig` (on by de
 Scaffold, build, and deploy an app in three steps:
 
 ```powershell
-python plugins/tools/new_app.py my_tool --name "My Tool"
-python plugins/tools/build_app.py plugins/examples/my_tool --target esp32s3
-python plugins/tools/package_app.py plugins/examples/my_tool --gapp
+gbt setup --target esp32s3
+gbt create my_tool --name "My Tool"
+gbt dist my_tool --target esp32s3 --gapp
 ```
 
 Copy the resulting `.gapp` file to `/mnt/ghostesp/apps/` on your SD card, then reboot the device. GhostESP discovers and extracts the app during startup.

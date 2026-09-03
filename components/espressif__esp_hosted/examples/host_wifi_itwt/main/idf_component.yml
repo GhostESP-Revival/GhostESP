@@ -1,0 +1,14 @@
+dependencies:
+  cmd_nvs:
+    path: ${IDF_PATH}/examples/system/console/advanced/components/cmd_nvs
+  cmd_system:
+    path: ${IDF_PATH}/examples/system/console/advanced/components/cmd_system
+  espressif/esp_hosted:
+    rules:
+    - if: target in [esp32p4, esp32h2]
+    version: '*'
+  espressif/esp_wifi_remote:
+    rules:
+    - if: target in [esp32p4, esp32h2]
+    - if: idf_version <6.1
+    version: '>=1.3.1'

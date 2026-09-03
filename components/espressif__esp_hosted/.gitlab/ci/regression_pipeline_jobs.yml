@@ -1,0 +1,354 @@
+# Holds jobs that run before promoting to main branch
+
+### Notes:
+# IDF v5.3 and v5.3.1 do not build for P4
+# - fix only merged for v5.3.2 and above
+# - https://github.com/espressif/esp-idf/commit/1aec9e7df38bb7ccc9ec2fb846288910c329d77a
+
+### IDF master and v6.x don't build mqtt example with wifi-remote and ESP-Hosted
+### so we only verify mqtt example against earlier IDF
+regression_build_idf_v5.3_mqtt_h2:
+  variables:
+    EXAMPLE_CI_FILE: "sdkconfig.ci.p4_wifi"
+  tags:
+    - build
+  rules:
+    - !reference [.staging_branch_rules, rules]
+  extends: .build_template_example_mqtt
+  image: espressif/idf:${IDF_VER}
+  parallel:
+    matrix:
+      - IDF_VER: ["v5.3", "v5.3.1", "v5.3.2", "v5.3.3", "v5.3.4", "v5.3.5", "release-v5.3"]
+        IDF_TARGET: ["esp32h2"]
+        IDF_SLAVE_TARGET: ["esp32c6"]
+
+regression_build_idf_v5.3_mqtt_p4:
+  variables:
+    EXAMPLE_CI_FILE: "sdkconfig.ci.p4_wifi"
+  tags:
+    - build
+  rules:
+    - !reference [.staging_branch_rules, rules]
+  extends: .build_template_example_mqtt
+  image: espressif/idf:${IDF_VER}
+  parallel:
+    matrix:
+      - IDF_VER: ["v5.3.2", "v5.3.3", "v5.3.4", "v5.3.5", "release-v5.3"]
+        IDF_TARGET: ["esp32p4"]
+        IDF_SLAVE_TARGET: ["esp32c6"]
+
+regression_build_idf_v5.4_mqtt:
+  variables:
+    EXAMPLE_CI_FILE: "sdkconfig.ci.p4_wifi"
+  tags:
+    - build
+  rules:
+    - !reference [.staging_branch_rules, rules]
+  extends: .build_template_example_mqtt
+  image: espressif/idf:${IDF_VER}
+  parallel:
+    matrix:
+      - IDF_VER: ["v5.4", "v5.4.1", "v5.4.2", "v5.4.3", "v5.4.4", "release-v5.4"]
+        IDF_TARGET: ["esp32p4", "esp32h2"]
+        IDF_SLAVE_TARGET: ["esp32c6"]
+
+regression_build_idf_v5.5_iperf:
+  tags:
+    - build
+  rules:
+    - !reference [.staging_branch_rules, rules]
+  extends: .build_template
+  image: espressif/idf:${IDF_VER}
+  parallel:
+    matrix:
+      - IDF_VER: ["v5.5", "v5.5.1", "v5.5.2", "v5.5.3", "release-v5.5"]
+        IDF_TARGET: ["esp32p4", "esp32h2"]
+        IDF_SLAVE_TARGET: ["esp32", "esp32c2", "esp32c3", "esp32s3" ]
+        IDF_EXAMPLE_PATH: ["examples/wifi/iperf"]
+
+regression_build_idf_master_iperf:
+  tags:
+    - build
+  rules:
+    - !reference [.staging_branch_rules, rules]
+  extends: .build_template
+  image: espressif/idf:latest
+  parallel:
+    matrix:
+      - IDF_TARGET: ["esp32p4", "esp32h2"]
+        IDF_SLAVE_TARGET: ["esp32", "esp32c2", "esp32c3", "esp32s3" ]
+        IDF_EXAMPLE_PATH: ["examples/wifi/iperf"]
+
+regression_build_coprocessor_idf_v5.3_pt1:
+  tags:
+    - build
+  rules:
+    - !reference [.staging_branch_rules, rules]
+  extends: .build_template_coprocessor
+  image: espressif/idf:${IDF_VER}
+  parallel:
+    matrix:
+      - IDF_TARGET: ["esp32c6"]
+        IDF_VER: ["v5.3", "v5.3.1", "v5.3.2", "v5.3.3", "v5.3.4", "v5.3.5", "release-v5.3"]
+        SLAVE_CI_FILE: ["sdio", "spi", "spi_hd", "uart", "dpp"]
+        # override performance optimization to prevent build errors
+        CONFIG_OVERRIDE: "CONFIG_COMPILER_OPTIMIZATION_DEBUG=y"
+
+regression_build_coprocessor_idf_v5.3_pt2:
+  tags:
+    - build
+  rules:
+    - !reference [.staging_branch_rules, rules]
+  extends: .build_template_coprocessor
+  image: espressif/idf:${IDF_VER}
+  parallel:
+    matrix:
+      - IDF_TARGET: ["esp32c2", "esp32c3", "esp32s3"]
+        IDF_VER: ["v5.3", "v5.3.1", "v5.3.2", "v5.3.3", "v5.3.4", "v5.3.5", "release-v5.3"]
+        SLAVE_CI_FILE: ["spi", "spi_hd", "uart"]
+        # override performance optimization to prevent build errors
+        CONFIG_OVERRIDE: "CONFIG_COMPILER_OPTIMIZATION_DEBUG=y"
+
+regression_build_coprocessor_idf_v5.3_esp32:
+  tags:
+    - build
+  rules:
+    - !reference [.staging_branch_rules, rules]
+  extends: .build_template_coprocessor
+  image: espressif/idf:${IDF_VER}
+  parallel:
+    matrix:
+      - IDF_TARGET: ["esp32"]
+        IDF_VER: ["v5.3", "v5.3.1", "v5.3.2", "v5.3.3", "v5.3.4", "v5.3.5", "release-v5.3"]
+        SLAVE_CI_FILE: ["sdio", "spi", "uart"]
+        # override performance optimization to prevent build errors
+        CONFIG_OVERRIDE: "CONFIG_COMPILER_OPTIMIZATION_DEBUG=y"
+
+regression_build_coprocessor_idf_v5.4_pt1:
+  tags:
+    - build
+  rules:
+    - !reference [.staging_branch_rules, rules]
+  extends: .build_template_coprocessor
+  image: espressif/idf:${IDF_VER}
+  parallel:
+    matrix:
+      - IDF_TARGET: ["esp32c6"]
+        IDF_VER: ["v5.4", "v5.4.1", "v5.4.2", "v5.4.3", "v5.4.4", "release-v5.4"]
+        SLAVE_CI_FILE: ["sdio", "spi", "spi_hd", "uart", "dpp"]
+
+regression_build_coprocessor_idf_v5.4_pt2:
+  tags:
+    - build
+  rules:
+    - !reference [.staging_branch_rules, rules]
+  extends: .build_template_coprocessor
+  image: espressif/idf:${IDF_VER}
+  parallel:
+    matrix:
+      - IDF_TARGET: ["esp32c2", "esp32c3", "esp32s3"]
+        IDF_VER: ["v5.4", "v5.4.1", "v5.4.2", "v5.4.3", "v5.4.4", "release-v5.4"]
+        SLAVE_CI_FILE: ["spi", "spi_hd", "uart"]
+
+regression_build_coprocessor_idf_v5.4_esp32:
+  tags:
+    - build
+  rules:
+    - !reference [.staging_branch_rules, rules]
+  extends: .build_template_coprocessor
+  image: espressif/idf:${IDF_VER}
+  parallel:
+    matrix:
+      - IDF_TARGET: ["esp32"]
+        IDF_VER: ["v5.4", "v5.4.1", "v5.4.2", "v5.4.3", "v5.4.4", "release-v5.4"]
+        SLAVE_CI_FILE: ["sdio", "spi", "uart"]
+
+regression_build_coprocessor_idf_v5.5:
+  tags:
+    - build
+  rules:
+    - !reference [.staging_branch_rules, rules]
+  extends: .build_template_coprocessor
+  image: espressif/idf:${IDF_VER}
+  parallel:
+    matrix:
+      - IDF_TARGET: ["esp32c2", "esp32c3", "esp32s3"]
+        IDF_VER: ["v5.5", "v5.5.1", "v5.5.2", "v5.5.3", "release-v5.5"]
+        SLAVE_CI_FILE: ["spi", "spi_hd", "uart"]
+
+regression_build_coprocessor_idf_v5.5_esp32:
+  tags:
+    - build
+  rules:
+    - !reference [.staging_branch_rules, rules]
+  extends: .build_template_coprocessor
+  image: espressif/idf:${IDF_VER}
+  parallel:
+    matrix:
+      - IDF_TARGET: ["esp32"]
+        IDF_VER: ["v5.5", "v5.5.1", "v5.5.2", "v5.5.3", "release-v5.5"]
+        SLAVE_CI_FILE: ["sdio", "spi", "uart"]
+
+regression_build_coprocessor_idf_master_all_features_enabled:
+  tags:
+    - build
+  rules:
+    - !reference [.staging_branch_rules, rules]
+  extends: .build_template_coprocessor
+  image: espressif/idf:latest
+  parallel:
+    matrix:
+      - IDF_TARGET: ["esp32c6"]
+        SLAVE_CI_FILE: ["all_features"]
+
+regression_build_nimble_examples_h2:
+  tags:
+    - build
+  rules:
+    - !reference [.staging_branch_rules, rules]
+  extends: .build_template_example
+  image: espressif/idf:${IDF_VER}
+  parallel:
+    matrix:
+      - IDF_TARGET: ["esp32h2"]
+        IDF_VER: ["v5.4", "v5.4.1", "v5.4.2", "v5.4.3", "release-v5.4",
+        "v5.3", "v5.3.1", "v5.3.2", "v5.3.3", "v5.3.4", "v5.3.5", "release-v5.3"]
+        IDF_SLAVE_TARGET: ["esp32c6"]
+        EXAMPLE_TO_BUILD: ["host_nimble_bleprph_host_only_vhci",
+        "host_nimble_bleprph_host_only_uart_hci"]
+
+regression_build_nimble_examples_p4:
+  tags:
+    - build
+  rules:
+    - !reference [.staging_branch_rules, rules]
+  extends: .build_template_example
+  image: espressif/idf:${IDF_VER}
+  parallel:
+    matrix:
+      - IDF_TARGET: ["esp32p4"]
+        IDF_VER: ["v5.4", "v5.4.1", "v5.4.2", "v5.4.3", "release-v5.4",
+        "v5.3.2", "v5.3.3", "v5.3.4", "v5.3.5", "release-v5.3"]
+        IDF_SLAVE_TARGET: ["esp32c6"]
+        EXAMPLE_TO_BUILD: ["host_nimble_bleprph_host_only_vhci",
+        "host_nimble_bleprph_host_only_uart_hci"]
+
+regression_build_bluedroid_examples_h2:
+  tags:
+    - build
+  rules:
+    - !reference [.staging_branch_rules, rules]
+  extends: .build_template_example
+  image: espressif/idf:${IDF_VER}
+  parallel:
+    matrix:
+      - IDF_TARGET: ["esp32h2"]
+        IDF_VER: ["v5.4", "v5.4.1", "v5.4.2", "v5.4.3", "release-v5.4",
+        "v5.3", "v5.3.1", "v5.3.2", "v5.3.3", "v5.3.4", "v5.3.5", "release-v5.3"]
+        IDF_SLAVE_TARGET: ["esp32"]
+        EXAMPLE_TO_BUILD: ["host_bluedroid_ble_compatibility_test",
+        "host_bluedroid_bt_hid_mouse_device",
+        "host_bluedroid_host_only",
+        "host_bt_controller_mac_addr"]
+
+regression_build_bluedroid_examples_p4:
+  tags:
+    - build
+  rules:
+    - !reference [.staging_branch_rules, rules]
+  extends: .build_template_example
+  image: espressif/idf:${IDF_VER}
+  parallel:
+    matrix:
+      - IDF_TARGET: ["esp32p4"]
+        IDF_VER: ["v5.4", "v5.4.1", "v5.4.2", "v5.4.3", "release-v5.4",
+        "v5.3.2", "v5.3.3", "v5.3.4", "v5.3.5", "release-v5.3"]
+        IDF_SLAVE_TARGET: ["esp32"]
+        EXAMPLE_TO_BUILD: ["host_bluedroid_ble_compatibility_test",
+        "host_bluedroid_bt_hid_mouse_device",
+        "host_bluedroid_host_only",
+        "host_bt_controller_mac_addr"]
+
+regression_build_wifi_examples_h2:
+  tags:
+    - build
+  rules:
+    - !reference [.staging_branch_rules, rules]
+  extends: .build_template_example
+  image: espressif/idf:${IDF_VER}
+  parallel:
+    matrix:
+      - IDF_TARGET: ["esp32h2"]
+        IDF_VER: ["v5.4", "v5.4.1", "v5.4.2", "v5.4.3", "release-v5.4",
+        "v5.3", "v5.3.1", "v5.3.2", "v5.3.3", "v5.3.4", "v5.3.5", "release-v5.3"]
+        IDF_SLAVE_TARGET: ["esp32c6"]
+        EXAMPLE_TO_BUILD: ["host_wifi_easy_connect_dpp_enrollee",
+        "host_wifi_itwt",
+        "host_transport_config",
+        "host_network_split__power_save"]
+
+regression_build_wifi_examples_p4:
+  tags:
+    - build
+  rules:
+    - !reference [.staging_branch_rules, rules]
+  extends: .build_template_example
+  image: espressif/idf:${IDF_VER}
+  parallel:
+    matrix:
+      - IDF_TARGET: ["esp32p4"]
+        IDF_VER: ["v5.4", "v5.4.1", "v5.4.2", "v5.4.3", "release-v5.4",
+        "v5.3.2", "v5.3.3", "v5.3.4", "v5.3.5", "release-v5.3"]
+        IDF_SLAVE_TARGET: ["esp32c6"]
+        EXAMPLE_TO_BUILD: ["host_wifi_easy_connect_dpp_enrollee",
+        "host_wifi_itwt",
+        "host_transport_config",
+        "host_network_split__power_save"]
+
+# build an example using the various transports
+# this is to verify transport builds as expected on the host
+# for h2, build only for ESP-IDF v5.3 and v5.3.1
+# for p4, build for other ESP-IDFs
+regression_build_transport_examples_h2:
+  rules:
+    - !reference [.staging_branch_rules, rules]
+  extends: .build_template_example
+  image: espressif/idf:${IDF_VER}
+  parallel:
+    matrix:
+      - IDF_TARGET: ["esp32h2"]
+        IDF_VER: ["v5.3", "v5.3.1"]
+        IDF_SLAVE_TARGET: ["esp32c6"]
+        EXAMPLE_TO_BUILD: ["host_network_split__power_save"]
+        EXAMPLE_CI_FILE: ["spi", "spi_hd", "uart"]
+
+regression_build_transport_examples_p4:
+  rules:
+    - !reference [.staging_branch_rules, rules]
+  extends: .build_template_example
+  image: espressif/idf:${IDF_VER}
+  parallel:
+    matrix:
+      - IDF_TARGET: ["esp32p4"]
+        IDF_VER: ["v5.4", "v5.4.1", "v5.4.2", "v5.4.3", "release-v5.4",
+        "v5.3.2", "v5.3.3", "v5.3.4", "v5.3.5", "release-v5.3"]
+        IDF_SLAVE_TARGET: ["esp32c6"]
+        EXAMPLE_TO_BUILD: ["host_network_split__power_save"]
+        EXAMPLE_CI_FILE: ["sdio", "spi", "spi_hd", "uart"]
+
+regression_build_misc_examples:
+  tags:
+    - build
+  rules:
+    - !reference [.staging_branch_rules, rules]
+  extends: .build_template_example
+  image: espressif/idf:${IDF_VER}
+  parallel:
+    matrix:
+      - IDF_TARGET: ["esp32p4", "esp32h2"]
+        IDF_VER: ["v5.4", "v5.4.1", "v5.4.2", "v5.4.3", "release-v5.4",
+        "v5.3.2", "v5.3.3", "v5.3.4", "v5.3.5", "release-v5.3"]
+        IDF_SLAVE_TARGET: ["esp32c6"]
+        EXAMPLE_TO_BUILD: ["host_gpio_expander",
+        "host_peer_data_transfer",
+        "host_performs_slave_ota"]

@@ -11,6 +11,7 @@ typedef struct gui_select_overlay_t gui_select_overlay_t;
 
 typedef void (*gui_select_overlay_select_cb_t)(int option_index, void *user_data);
 typedef void (*gui_select_overlay_dismiss_cb_t)(void *user_data);
+typedef void (*gui_select_overlay_decorate_cb_t)(lv_obj_t *row, int option_index, void *user_data);
 
 typedef struct {
     lv_obj_t *parent;
@@ -31,6 +32,7 @@ typedef struct {
     const lv_font_t *font;
     gui_select_overlay_select_cb_t on_select;
     gui_select_overlay_dismiss_cb_t on_dismiss;
+    gui_select_overlay_decorate_cb_t decorate_row;
     void *user_data;
 } gui_select_overlay_config_t;
 

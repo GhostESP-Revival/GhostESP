@@ -22,6 +22,7 @@ typedef struct {
 
 void ble_device_detect_start(void);
 void ble_device_detect_stop(void);
+void ble_device_detect_clear_results(void);
 bool ble_device_detect_is_active(void);
 
 int ble_device_detect_get_count(void);
@@ -31,6 +32,14 @@ bool ble_device_detect_start_tracking(int index);
 bool ble_device_detect_start_airtag_spoof(int index);
 void ble_device_detect_stop_tracking(void);
 bool ble_device_detect_is_tracking(void);
+
+/*
+ * Live RSSI status for the tracked detect device, mirroring
+ * wifi_manager_get_track_status(): returns false when no device is being
+ * tracked. *out_rssi receives the last seen RSSI and *out_fresh is true when a
+ * matching advertisement arrived recently (so the meter can dim when stale).
+ */
+bool ble_device_detect_get_track_status(int8_t *out_rssi, bool *out_fresh);
 
 const char *ble_device_detect_type_to_string(BLEDetectDeviceType type);
 

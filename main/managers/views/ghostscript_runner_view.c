@@ -6,7 +6,9 @@
 #include "gui/screen_layout.h"
 #include "gui/toast.h"
 #include "gui/asset_pack.h"
+#include "gui/theme_palette_api.h"
 #include "managers/display_manager.h"
+#include "managers/settings_manager.h"
 #include "managers/ghostscript_manager.h"
 #include "managers/ghostscript_runtime.h"
 #include "managers/views/ghostscript_browser_view.h"
@@ -577,7 +579,12 @@ void ghostscript_runner_view_create(void) {
     s_touch_started = false;
     s_touch_scrolling = false;
     s_follow_output = true;
-    s_root = gui_screen_create_root_no_bg(NULL, "GhostScript", lv_color_hex(0x101014), LV_OPA_COVER);
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    lv_color_t background = lv_color_hex(theme_palette_get_background(theme));
+    lv_color_t surface_alt = lv_color_hex(theme_palette_get_surface_alt(theme));
+    lv_color_t text = lv_color_hex(theme_palette_get_text(theme));
+    lv_color_t muted = lv_color_hex(theme_palette_get_text_muted(theme));
+    s_root = gui_screen_create_root(NULL, "GhostScript", background, LV_OPA_COVER);
     ghostscript_runner_view.root = s_root;
     display_manager_add_status_bar("GhostScript");
     lv_obj_t *content = gui_screen_create_content(s_root, GUI_STATUS_BAR_HEIGHT);
@@ -591,12 +598,12 @@ void ghostscript_runner_view_create(void) {
     s_title = lv_label_create(content);
     snprintf(s_title_buf, GS_RUNNER_TITLE_BUF_SIZE, "Loading script...");
     lv_label_set_text(s_title, s_title_buf);
-    lv_obj_set_style_text_color(s_title, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_color(s_title, text, 0);
     lv_obj_set_style_text_font(s_title, &lv_font_montserrat_16, 0);
     s_status = lv_label_create(content);
     snprintf(s_status_buf, GS_RUNNER_STATUS_BUF_SIZE, "Loading | autoscroll on");
     lv_label_set_text(s_status, s_status_buf);
-    lv_obj_set_style_text_color(s_status, lv_color_hex(0xAAB0C0), 0);
+    lv_obj_set_style_text_color(s_status, muted, 0);
     lv_obj_set_style_text_font(s_status, &lv_font_montserrat_12, 0);
     s_output_scroll = lv_obj_create(content);
     lv_obj_set_width(s_output_scroll, LV_PCT(100));
@@ -611,19 +618,20 @@ void ghostscript_runner_view_create(void) {
     lv_label_set_text(s_output, "");
     lv_label_set_long_mode(s_output, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(s_output, LV_PCT(100));
-    lv_obj_set_style_text_color(s_output, lv_color_hex(0xD8D8DE), 0);
+    lv_obj_set_style_text_color(s_output, text, 0);
     lv_obj_set_style_text_font(s_output, &lv_font_montserrat_12, 0);
 #ifdef CONFIG_USE_TOUCHSCREEN
+#if GUI_LEGACY_TOUCH_BAR
     s_touch_bar = lv_obj_create(s_root);
     lv_obj_remove_style_all(s_touch_bar);
     lv_obj_set_size(s_touch_bar, LV_HOR_RES, GS_RUNNER_TOUCH_BAR_HEIGHT);
     lv_obj_align(s_touch_bar, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_set_style_bg_color(s_touch_bar, lv_color_hex(0x101014), 0);
+    lv_obj_set_style_bg_color(s_touch_bar, background, 0);
     lv_obj_set_style_bg_opa(s_touch_bar, LV_OPA_COVER, 0);
     lv_obj_clear_flag(s_touch_bar, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
 
-    lv_color_t ctrl_color = lv_color_hex(0x2A2A34);
-    lv_color_t ctrl_text = lv_color_hex(0xFFFFFF);
+    lv_color_t ctrl_color = surface_alt;
+    lv_color_t ctrl_text = text;
     lv_obj_t *up_btn = lv_btn_create(s_touch_bar);
     gui_apply_pressed_style(up_btn);
     lv_obj_set_size(up_btn, GS_RUNNER_TOUCH_BTN_SIZE, GS_RUNNER_TOUCH_BTN_SIZE);
@@ -657,7 +665,7 @@ void ghostscript_runner_view_create(void) {
     gui_apply_pressed_style(stop_btn);
     lv_obj_set_size(stop_btn, GS_RUNNER_TOUCH_BTN_SIZE + 24, GS_RUNNER_TOUCH_BTN_SIZE);
     lv_obj_align(stop_btn, LV_ALIGN_CENTER, 34, 0);
-    lv_obj_set_style_bg_color(stop_btn, lv_color_hex(0x5A2630), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(stop_btn, lv_color_hex(theme_palette_get_danger(theme)), LV_PART_MAIN);
     lv_obj_set_style_radius(stop_btn, 5, LV_PART_MAIN);
     lv_obj_set_style_pad_hor(stop_btn, 8, LV_PART_MAIN);
     lv_obj_set_style_border_width(stop_btn, 0, LV_PART_MAIN);
@@ -665,7 +673,8 @@ void ghostscript_runner_view_create(void) {
     lv_obj_add_event_cb(stop_btn, touch_stop_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *stop_label = lv_label_create(stop_btn);
     lv_label_set_text(stop_label, "Stop");
-    lv_obj_set_style_text_color(stop_label, ctrl_text, 0);
+    lv_obj_set_style_text_color(stop_label,
+                                lv_color_hex(theme_palette_get_contrast_text(theme_palette_get_danger(theme))), 0);
     lv_obj_center(stop_label);
 
     lv_obj_t *down_btn = lv_btn_create(s_touch_bar);
@@ -681,6 +690,7 @@ void ghostscript_runner_view_create(void) {
     lv_label_set_text(down_label, LV_SYMBOL_DOWN);
     lv_obj_set_style_text_color(down_label, ctrl_text, 0);
     lv_obj_center(down_label);
+#endif /* GUI_LEGACY_TOUCH_BAR */
 #endif
     toast_show_duration("Running GhostScript...", TOAST_INFO, 1000);
     s_launch_timer = lv_timer_create(launch_cb, 50, NULL);

@@ -6,6 +6,7 @@
 #include <nvs_flash.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include "gui/menu_config.h"
 
 // Enum for RGB Modes
 typedef enum {
@@ -175,7 +176,20 @@ typedef enum {
     SETTING_OTA_UPDATE_PEER,
     SETTING_OTA_INSTALL_FROM_SD,
     SETTING_SUN_MODE,
+    SETTING_LOG_LEVEL,
+    SETTING_FAVORITES,
+    SETTING_FAVORITES_BYPASS,
+    SETTING_MANAGE_FAVORITES,
+    SETTING_THEME_BACKGROUND_EFFECTS,
+    SETTING_MENU_CONFIG,
+    SETTING_MAIN_MENU_ITEMS,
+    SETTING_APPS_MENU_ITEMS,
 } SettingsType;
+
+/* 16 slots x 64B names. The NVS blob is [count][FAVORITES_MAX x 64]; older
+ * 8-slot layouts are migrated on load (see settings_manager.c). */
+#define FAVORITES_MAX 16
+#define FAVORITE_NAME_LEN 64
 
 #define GPS_BAUD_AUTO 1U
 
@@ -272,7 +286,7 @@ typedef struct {
   
   // Navigation buttons setting
   bool nav_buttons_enabled; // Toggle for main menu navigation buttons
-  uint8_t menu_layout; // Menu layout type (0=Carousel, 1=Grid Cards, 2=List, 3=Compact)
+  uint8_t menu_layout; // Menu layout type (0=Carousel, 1=Grid Cards, 2=List, 3=Compact, 4=Hero)
   bool carousel_invert_direction; // Invert main menu carousel slide direction
   
   // Neopixel settings
@@ -316,7 +330,8 @@ typedef struct {
     uint8_t mic_contrast;           // 1-5 (square iterations)
     bool mic_mirror_mode;           // Mirror visualizer center-out
     bool ghostlink_split_view;      // Split GhostLink terminal into two columns
-    uint8_t menu_bg_shade;          // 0=Darkest, 1=Darker, 2=Dark, 3=Medium
+    uint8_t menu_bg_shade;          // 0=Darker, 1=Palette, 2=Lighter, 3=Lightest
+    bool theme_background_effects;  // Show the selected palette's subtle background treatment
     bool menu_rounded;              // Rounded corners on menu items
     bool epilepsy_warning_enabled;  // Show warning before flashing LED effects
     uint8_t font_size;              // 0=Small, 1=Normal, 2=Large
@@ -328,6 +343,11 @@ typedef struct {
     bool touch_drag_scroll;          // Drag-to-scroll on the options screen
     bool sun_mode;                   // Outdoor visibility: forces max brightness + high contrast
     uint8_t sun_mode_saved_brightness; // Brightness to restore when Sun Mode is turned off
+    uint8_t log_level;                 // ESP-IDF global log level (esp_log_level_t)
+    uint8_t favorites_count;
+    char favorites[FAVORITES_MAX][FAVORITE_NAME_LEN];
+    bool favorites_bypass_pin;
+    menu_config_t menu_config;
 
     // Lockscreen settings
     bool lockscreen_enabled;
@@ -591,6 +611,10 @@ bool settings_get_ghostlink_split_view(const FSettings *settings);
 
 void settings_set_menu_bg_shade(FSettings *settings, uint8_t shade);
 uint8_t settings_get_menu_bg_shade(const FSettings *settings);
+void settings_set_theme_background_effects(FSettings *settings, bool enabled);
+bool settings_get_theme_background_effects(const FSettings *settings);
+/* Enforce mutual exclusivity of accessibility display modes in-place. */
+void settings_normalize_modes(FSettings *settings);
 void settings_set_menu_rounded(FSettings *settings, bool enabled);
 bool settings_get_menu_rounded(const FSettings *settings);
 void settings_set_epilepsy_warning_enabled(FSettings *settings, bool enabled);
@@ -606,6 +630,16 @@ void settings_set_high_contrast(FSettings *settings, bool enabled);
 bool settings_get_high_contrast(const FSettings *settings);
 void settings_set_sun_mode(FSettings *settings, bool enabled);
 bool settings_get_sun_mode(const FSettings *settings);
+void settings_set_log_level(FSettings *settings, uint8_t level);
+uint8_t settings_get_log_level(const FSettings *settings);
+bool settings_is_favorite(const FSettings *settings, const char *name);
+bool settings_add_favorite(FSettings *settings, const char *name);
+bool settings_remove_favorite(FSettings *settings, const char *name);
+bool settings_toggle_favorite(FSettings *settings, const char *name);
+uint8_t settings_get_favorites_count(const FSettings *settings);
+const char *settings_get_favorite(const FSettings *settings, uint8_t idx);
+void settings_set_favorites_bypass(FSettings *settings, bool bypass);
+bool settings_get_favorites_bypass(const FSettings *settings);
 void settings_set_menu_item_borders(FSettings *settings, bool enabled);
 bool settings_get_menu_item_borders(const FSettings *settings);
 void settings_set_menu_card_bg(FSettings *settings, bool enabled);
