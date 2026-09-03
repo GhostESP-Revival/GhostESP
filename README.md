@@ -3,11 +3,11 @@
 > **The ESP-IDF-native wireless security platform for ESP32.**
 > Deep Wi-Fi and BLE assessment, research-grade capture and export, and a real app ecosystem. Built directly on Espressif's ESP-IDF rather than through the Arduino core, so new silicon and radio features land first and there is no abstraction layer between GhostESP and the hardware.
 
-[![Version](https://img.shields.io/badge/version-2.1-7c5cff?style=flat-square)](https://github.com/GhostESP-Revival/GhostESP)
+[![Version](https://img.shields.io/badge/version-2.1.2-7c5cff?style=flat-square)](https://github.com/GhostESP-Revival/GhostESP)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square)](LICENSE)
-[![ESP-IDF](https://img.shields.io/badge/ESP--IDF-v6.0-orange?style=flat-square)](https://docs.espressif.com/projects/esp-idf/)
+[![ESP-IDF](https://img.shields.io/badge/ESP--IDF-v6.1-orange?style=flat-square)](https://docs.espressif.com/projects/esp-idf/)
 [![Discord](https://img.shields.io/discord/5cyNmUMgwh?style=flat-square&label=Discord&color=5865F2)](https://discord.gg/5cyNmUMgwh)
-[![Boards](https://img.shields.io/badge/board%20targets-46-2ea043?style=flat-square)](#supported-boards)
+[![Boards](https://img.shields.io/badge/board%20targets-61-2ea043?style=flat-square)](#supported-boards)
 
 **⭐️ Enjoying GhostESP? Please give the repo a star. It helps a lot.**
 
@@ -169,7 +169,7 @@ GhostESP is a platform, not a bag of tools. Five things set it apart:
 
 - Full LVGL graphical UI with carousel, grid, and list layouts
 - Custom asset packs loaded from SD (icons, colors, backgrounds, themes)
-- 17+ color themes
+- 21 color themes
 - On-screen splash/boot animation with progress bar
 - Toast notification system
 - Persistent status bar with level badge
@@ -238,15 +238,15 @@ GhostESP is a platform, not a bag of tools. Five things set it apart:
 
 ## Supported ESP32 Variants
 
-- ESP32-Wroom · ESP32-S2 · ESP32-C3 · ESP32-S3 · ESP32-C5 · ESP32-C6
+- ESP32-Wroom · ESP32-S2 · ESP32-C3 · ESP32-S3 · ESP32-C5 · ESP32-C6 · ESP32-P4
 
-> **Note:** Feature availability varies by chip. S2 lacks Bluetooth hardware. C5 has 5 GHz and 802.15.4 or Zigbee support.
+> **Note:** Feature availability varies by chip. S2 lacks Bluetooth hardware. C5 has 5 GHz and 802.15.4 or Zigbee support. P4 uses an external ESP32-C6 for Wi-Fi and Bluetooth via ESP-Hosted.
 
 ---
 
 ## Supported Boards
 
-46 board targets build in CI ([`.github/workflows/compile_all.yml`](.github/workflows/compile_all.yml)) from 45 configs in [`configs/`](configs/). Awok V5 shares the generic ESP32-S2 config.
+61 board targets build in CI ([`.github/workflows/compile_all.yml`](.github/workflows/compile_all.yml)) from 60 configs in [`configs/`](configs/). Awok V5 shares the generic ESP32-S2 config.
 
 <details>
 <summary><strong>Board feature matrix (click to expand)</strong></summary>
@@ -273,15 +273,28 @@ GhostESP is a platform, not a bag of tools. Five things set it apart:
 | CYD2 USB 2.4" (C variant) | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✗ | ✗ |
 | CYD 2432S028R | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✗ | ✗ |
 | Waveshare 7" Touch | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
-| Crowtech 7" | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✗ | ✗ | ✓ |
-| Sunton 7" | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✗ | ✓ | ✓ |
+| Crowtech 7" | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✗ | ✓ |
+| CrowPanel Advance 7" (S3, TFCard mode) | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
+| CrowPanel 4.2" E-paper (400×300) | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | E-paper | ✓ | ✗ | ✗ |
+| CrowPanel 5.79" E-paper (792×272) | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | E-paper | ✓ | ✗ | ✗ |
+| CrowPanel Advance 2.4" (S3, 320×240) | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
+| CrowPanel Advance 2.8" (S3, 320×240) | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
+| CrowPanel Advance 3.5" (S3, 480×320) | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
+| CrowPanel Advance 4.3" (S3, 800×480) | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
+| CrowPanel Advance 5" (S3, 800×480) | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
+| CrowPanel Advanced P4 7/9/10.1" (v1.2+) | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✗ | ✓ |
+| CrowPanel Advanced P4 7/9/10.1" (v1.1) | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✗ | ✓ |
+| CrowPanel Advanced P4 5" RGB | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✗ | ✓ |
+| Sunton 7" | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
 | JC3248W535EN | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
 | Flipper JCMK GPS | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | — | ✓ | ✗ | ✗ |
 | T-Deck | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✓ | Full | ✓ | ✗ | ✓ |
 | T-Embed CC1101 | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
+| GhostLink P1 Core | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✗ | ✓ |
+| GhostLink P1 Peer | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ |
 | T-Dongle-S3 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✗ |
 | T-Dongle-C5 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
-| S3TWatch | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ | ✗ | Full | ✗ | ✓ | ✗ |
+| S3TWatch | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ | ✗ | Full | has 4MB vfs partition | ✓ | ✗ |
 | T-Display S3 Touch | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | Full | ✓ | ✗ | ✗ |
 | JCMK Devboard Pro | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | — | ✓ | ✗ | ✗ |
 | Minion | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ |
@@ -299,8 +312,12 @@ GhostESP is a platform, not a bag of tools. Five things set it apart:
 | Seeed XIAO ESP32-C5 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ |
 | Marauder v8 | ✓ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | Full | ✓ | ✗ | ✓ |
 | Pancake C5 | ✓ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | Full | ✓ | ✗ | ✓ |
+| M5Stack CoreS3-SE | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | Full | ✓ | ✗ | ✓ |
+| M5Stack AtomS3R | ✓ | ✗ | ✓ | ✓ | ✗ | ✓ | ✗ | Full | has 1MB vfs partition | ✗ | ✗ |
 
 `*` — the checked-in config for this board predates a Kconfig option (`NFC_CHAMELEON`) that defaults on for BLE-capable boards; no board-specific override is present, so this reflects the Kconfig default rather than an explicit setting in the file. Most unstarred BLE-capable boards set the symbol explicitly, but some generic configs may also rely on the Kconfig default.
+
+**M5Stack Grove ports:** the M5Stack CoreS3-SE and AtomS3R configs expose their HY2.0-4P Grove connectors on I2C port 1 (`PORT.A`: SDA=G2, SCL=G1; the CoreS3-SE also has `PORT.B` G8/G9 and `PORT.C` G17/G18). Plug an ST25R3916 NFC module (I2C, 0x50) and/or an M5Stack ENV III unit (SHT30 0x44 + QMP6988 0x70) into Grove `PORT.A` and open the NFC or ENV III app — both devices share the same bus.
 
 **Display:** `Full` = LVGL graphical UI. `Status` = secondary small status display only (shares the IO-expander I2C bus), no full UI. `—` = headless, no display.
 
@@ -308,7 +325,7 @@ GhostESP is a platform, not a bag of tools. Five things set it apart:
 
 **NFC (Chameleon):** Chameleon Ultra support rides over BLE, so it's on by default for any BLE-capable board and off where BLE is unavailable (ESP32-S2 boards) or explicitly disabled (Marauder v8, Pancake C5).
 
-**Native SD Apps:** at compile time the feature depends only on `CONFIG_SPIRAM` (`main/Kconfig.projbuild:1410`). At runtime the app gallery checks `MALLOC_CAP_SPIRAM` and renders into the full LVGL screen, so a display is required for the UI to be usable. That leaves it enabled on: AWOK Mini, Waveshare/Crowtech/Sunton 7″, JC3248W535EN, T-Deck, T-Embed CC1101, T-Dongle-C5, NM-CYD-C5, Banshee (C5), and Marauder v8/Pancake C5. Boards with a screen but no PSRAM (Cardputer, Cardputer ADV, the CYD2 family, S3TWatch, T-Dongle-S3, etc.) don't get it.
+**Native SD Apps:** at compile time the feature depends only on `CONFIG_SPIRAM` (`main/Kconfig.projbuild:1410`). At runtime the app gallery checks `MALLOC_CAP_SPIRAM` and renders into the full LVGL screen, so a display is required for the UI to be usable. That leaves it enabled on: AWOK Mini, Waveshare/Crowtech/Sunton 7″, CrowPanel Advance 2.4/2.8/3.5/4.3/5″, CrowPanel Advanced P4 5″/7/9/10.1″ (v1.1/v1.2+), JC3248W535EN, T-Deck, T-Embed CC1101, GhostLink P1 Core, T-Dongle-C5, NM-CYD-C5, M5Stack CoreS3-SE, Banshee (C5), and Marauder v8/Pancake C5. Boards with a screen but no PSRAM (Cardputer, Cardputer ADV, the CYD2 family, S3TWatch, T-Dongle-S3, M5Stack AtomS3R, etc.) don't get it.
 
 **Banshee** ships as two configs: the S3 main board (headless) and the C5 module that drives its display and status LED, paired over GhostLink.
 
@@ -330,7 +347,7 @@ The table below compares GhostESP against other broad-scope firmware. It is base
 | Current source available for audit | [x] | [x] | Limited / older public source | Limited / older public source |
 | ESP-IDF-native architecture | [x] |  |  |  |
 | Arduino / PlatformIO architecture |  | [x] | [x] | [x] |
-| Supported board targets | 46 CI targets | 42+ | 4 | 1 |
+| Supported board targets | 61 CI targets | 42+ | 4 | 1 |
 | Full LVGL graphical UI | [x] |  |  |  |
 | Web dashboard / REST control | [x] | [x] |  |  |
 | Captive portal web server | [x] | [x] | [x] | [x] |

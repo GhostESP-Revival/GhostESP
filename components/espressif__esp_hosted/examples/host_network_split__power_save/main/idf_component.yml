@@ -1,0 +1,30 @@
+dependencies:
+  cmd_system:
+    path: ${IDF_PATH}/examples/system/console/advanced/components/cmd_system
+  esp-qa/ping-cmd:
+    version: ~1.0.0
+  esp-qa/wifi-cmd:
+    matches:
+    - if: idf_version >=6.0
+      version: ~0.2.0
+    - if: idf_version >=5.5,<6.0
+      version: ~0.2.2
+    - if: idf_version >=5.4,<5.5
+      version: ~0.1.8
+    - if: idf_version >=5.3,<5.4
+      version: ~0.1.0
+  espressif/esp_hosted:
+    rules:
+    - if: target in [esp32p4, esp32h2]
+    version: '*'
+  espressif/esp_wifi_remote:
+    rules:
+    - if: target in [esp32p4, esp32h2]
+    - if: idf_version <6.1
+    version: '>=1.3.1'
+  espressif/iperf-cmd:
+    matches:
+    - if: idf_version >=6.0
+      version: ~0.1.3
+    - if: idf_version <6.0
+      version: ~0.1.1

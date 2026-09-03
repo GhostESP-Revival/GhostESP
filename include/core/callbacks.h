@@ -66,7 +66,7 @@ typedef void (*wifi_raw_observer_t)(const wifi_promiscuous_pkt_t *pkt,
 void wifi_raw_set_observer(wifi_raw_observer_t observer);
 void wifi_eapol_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type);
 void wardriving_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type);
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 #include "host/ble_gap.h"
 void ble_wardriving_callback(struct ble_gap_event *event, void *arg);
 void ble_skimmer_scan_callback(struct ble_gap_event *event, void *arg);
@@ -92,7 +92,6 @@ typedef struct {
 } wps_network_t;
 
 extern gps_t *gps;
-extern wps_network_t detected_wps_networks[MAX_WPS_NETWORKS];
 extern int detected_network_count;
 extern esp_timer_handle_t stop_timer;
 extern int should_store_wps;
@@ -107,5 +106,7 @@ void cleanup_pcap_queue(void);
 uint32_t wifi_callbacks_get_handshake_count(void);
 void wifi_callbacks_reset_handshake_tracking(void);
 void wifi_callbacks_set_pcap_enabled(bool enabled);
+void wifi_callbacks_monitor_tables_ensure(void);
+void wifi_callbacks_monitor_tables_release(void);
 
 #endif

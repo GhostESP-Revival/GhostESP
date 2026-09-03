@@ -49,7 +49,7 @@ void gui_router_navigate_immediate(const gui_route_t *route) {
         s_depth = GUI_ROUTE_STACK_MAX - 1u;
     }
     s_routes[s_depth++] = *route;
-    ESP_LOGI(TAG, "NAV PUSH %s depth=%u", route_name(route), (unsigned)s_depth);
+    ESP_LOGD(TAG, "NAV PUSH %s depth=%u", route_name(route), (unsigned)s_depth);
     render_current();
 }
 
@@ -61,7 +61,7 @@ void gui_router_replace_immediate(const gui_route_t *route) {
     } else {
         s_routes[s_depth - 1] = *route;
     }
-    ESP_LOGI(TAG, "NAV REPLACE %s depth=%u", route_name(route), (unsigned)s_depth);
+    ESP_LOGD(TAG, "NAV REPLACE %s depth=%u", route_name(route), (unsigned)s_depth);
     render_current();
 }
 
@@ -75,7 +75,7 @@ void gui_router_back_immediate(void) {
         s_routes[0] = root;
         s_depth = 1;
     }
-    ESP_LOGI(TAG, "NAV BACK %s -> %s depth=%u", from,
+    ESP_LOGD(TAG, "NAV BACK %s -> %s depth=%u", from,
              route_name(&s_routes[s_depth - 1]), (unsigned)s_depth);
     render_current();
 }
@@ -85,7 +85,7 @@ void gui_router_reset_immediate(const gui_route_t *route) {
     s_previous_view = s_depth > 0 ? s_routes[s_depth - 1].view : NULL;
     s_routes[0] = *route;
     s_depth = 1;
-    ESP_LOGI(TAG, "NAV RESET %s depth=1", route_name(route));
+    ESP_LOGD(TAG, "NAV RESET %s depth=1", route_name(route));
     render_current();
 }
 

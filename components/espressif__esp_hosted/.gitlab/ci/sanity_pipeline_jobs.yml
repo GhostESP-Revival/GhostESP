@@ -1,0 +1,228 @@
+# Holds jobs that run from a merge request
+
+###
+### Check project pre-requisites have been fulfilled
+###
+
+premerge_check:
+  rules:
+    - !reference [.default_rules, rules]
+  extends: .premerge_check_template
+  image: espressif/idf:latest
+
+###
+### Build host using ESP-IDF examples
+###
+
+### protocols/mqtt example
+### IDF master and v6.x don't build mqtt example with wifi-remote and ESP-Hosted
+### so we only verify mqtt example against earlier IDF
+sanity_build_idf_release_mqtt:
+  variables:
+    EXAMPLE_CI_FILE: "sdkconfig.ci.p4_wifi"
+  rules:
+    - !reference [.default_rules, rules]
+  extends: .build_template_example_mqtt
+  image: espressif/idf:${IDF_VER}
+  parallel:
+    matrix:
+      - IDF_VER: ["release-v5.5"]
+        IDF_TARGET: ["esp32p4"]
+        IDF_SLAVE_TARGET: ["esp32c6", "esp32c5"]
+
+### wifi/iperf example
+sanity_build_idf_v5.5_iperf:
+  rules:
+    - !reference [.default_rules, rules]
+  extends: .build_template
+  image: espressif/idf:${IDF_VER}
+  parallel:
+    matrix:
+      - IDF_VER: ["v5.5.4", "release-v5.5"]
+        IDF_TARGET: ["esp32p4"]
+        IDF_SLAVE_TARGET: ["esp32c6", "esp32c5"]
+        IDF_EXAMPLE_PATH: ["examples/wifi/iperf"]
+
+sanity_build_idf_master_iperf:
+  rules:
+    - !reference [.default_rules, rules]
+  extends: .build_template
+  image: espressif/idf:latest
+  parallel:
+    matrix:
+      - IDF_TARGET: ["esp32p4"]
+        IDF_SLAVE_TARGET: ["esp32c6", "esp32c5", "esp32c61"]
+        IDF_EXAMPLE_PATH: ["examples/wifi/iperf"]
+
+###
+### Build coprocessor
+###
+
+sanity_build_coprocessor_idf_v5.5:
+  rules:
+    - !reference [.default_rules, rules]
+  extends: .build_template_coprocessor
+  image: espressif/idf:${IDF_VER}
+  parallel:
+    matrix:
+      - IDF_TARGET: ["esp32c6", "esp32c5"]
+        IDF_VER: ["v5.5.4", "release-v5.5"]
+        SLAVE_CI_FILE: ["sdio", "spi", "spi_hd", "uart", "dpp"]
+
+# verify co-processor targets with Wi-Fi + BT
+sanity_build_coprocessor_idf_master:
+  rules:
+    - !reference [.default_rules, rules]
+  extends: .build_template_coprocessor
+  image: espressif/idf:latest
+  parallel:
+    matrix:
+      - IDF_TARGET: ["esp32c6", "esp32c5", "esp32c61"]
+        SLAVE_CI_FILE: ["sdio", "spi", "spi_hd", "uart", "dpp"]
+
+# verify co-processor targets with BT only
+sanity_build_coprocessor_idf_master_2:
+  rules:
+    - !reference [.default_rules, rules]
+  extends: .build_template_coprocessor
+  image: espressif/idf:latest
+  parallel:
+    matrix:
+      - IDF_TARGET: ["esp32h2"]
+        SLAVE_CI_FILE: ["spi", "spi_hd", "uart"]
+
+# verify co-processor targets with OpenThread RCP
+# v5.5.4 is for Zigbee SDK release
+sanity_build_coprocessor_rcp:
+  rules:
+    - !reference [.default_rules, rules]
+  extends: .build_template_coprocessor
+  image: espressif/idf:${IDF_VER}
+  parallel:
+    matrix:
+      - IDF_TARGET: ["esp32c6", "esp32c5", "esp32h2"]
+        IDF_VER: ["latest", "v5.5.4"]
+        SLAVE_CI_FILE: ["openthread_rcp"]
+
+###
+### build ESP-Hosted examples
+###
+
+sanity_build_nimble_examples:
+  rules:
+    - !reference [.default_rules, rules]
+  extends: .build_template_example
+  image: espressif/idf:${IDF_VER}
+  parallel:
+    matrix:
+      - IDF_TARGET: ["esp32p4"]
+        IDF_VER: ["latest",
+        "v5.5.4", "release-v5.5"]
+        IDF_SLAVE_TARGET: ["esp32c6", "esp32h2"]
+        EXAMPLE_TO_BUILD: ["host_nimble_bleprph_host_only_vhci",
+        "host_nimble_bleprph_host_only_uart_hci"]
+
+# verify host builds with co-processor target with BT only
+sanity_build_nimble_examples_2:
+  rules:
+    - !reference [.default_rules, rules]
+  extends: .build_template_example
+  image: espressif/idf:${IDF_VER}
+  parallel:
+    matrix:
+      - IDF_TARGET: ["esp32p4"]
+        IDF_VER: ["latest"]
+        IDF_SLAVE_TARGET: ["esp32h2"]
+        EXAMPLE_TO_BUILD: ["host_nimble_bleprph_host_only_vhci",
+        "host_nimble_bleprph_host_only_uart_hci"]
+
+sanity_build_bluedroid_examples:
+  rules:
+    - !reference [.default_rules, rules]
+  extends: .build_template_example
+  image: espressif/idf:${IDF_VER}
+  parallel:
+    matrix:
+      - IDF_TARGET: ["esp32p4"]
+        IDF_VER: ["latest",
+        "v5.5.4", "release-v5.5"]
+        IDF_SLAVE_TARGET: ["esp32"]
+        EXAMPLE_TO_BUILD: ["host_bluedroid_ble_compatibility_test",
+        "host_bluedroid_bt_hid_mouse_device",
+        "host_bluedroid_host_only",
+        "host_bt_controller_mac_addr"]
+
+sanity_build_wifi_examples:
+  rules:
+    - !reference [.default_rules, rules]
+  extends: .build_template_example
+  image: espressif/idf:${IDF_VER}
+  parallel:
+    matrix:
+      - IDF_TARGET: ["esp32p4"]
+        IDF_VER: ["latest",
+        "v5.5.4", "release-v5.5"]
+        IDF_SLAVE_TARGET: ["esp32c6", "esp32c5"]
+        EXAMPLE_TO_BUILD: ["host_wifi_easy_connect_dpp_enrollee",
+        "host_wifi_itwt",
+        "host_transport_config",
+        "host_network_split__power_save",
+        "host_performs_slave_ota"]
+
+# build an example using the various transports
+# this is to verify transport builds as expected on the host
+sanity_build_transport_examples:
+  rules:
+    - !reference [.default_rules, rules]
+  extends: .build_template_example
+  image: espressif/idf:${IDF_VER}
+  parallel:
+    matrix:
+      - IDF_TARGET: ["esp32p4"]
+        IDF_VER: ["latest",
+        "v5.5.4", "release-v5.5"]
+        IDF_SLAVE_TARGET: ["esp32c6"]
+        EXAMPLE_TO_BUILD: ["host_network_split__power_save"]
+        EXAMPLE_CI_FILE: ["sdio", "spi", "spi_hd", "uart"]
+
+# build OpenThread Host examples
+sanity_build_openthread_examples:
+  rules:
+    - !reference [.default_rules, rules]
+  extends: .build_template_example
+  image: espressif/idf:${IDF_VER}
+  parallel:
+    matrix:
+      - IDF_TARGET: ["esp32p4"]
+        IDF_VER: ["latest"]
+        IDF_SLAVE_TARGET: ["esp32c6", "esp32c5"]
+        EXAMPLE_TO_BUILD: ["host_openthread_border_router",
+        "host_openthread_cli"]
+
+# build Zigbee Host examples
+sanity_build_zigbee_examples:
+  rules:
+    - !reference [.default_rules, rules]
+  extends: .build_template_example
+  image: espressif/idf:${IDF_VER}
+  parallel:
+    matrix:
+      - IDF_TARGET: ["esp32p4"]
+        IDF_VER: ["v5.5.4"]
+        IDF_SLAVE_TARGET: ["esp32c6", "esp32c5"]
+        EXAMPLE_TO_BUILD: ["host_zigbee_thermostat"]
+
+###
+### Promote staging to main after successful regression testing
+###
+
+promote_staging_to_main:
+  stage: deploy
+  dependencies: []
+  rules:
+    - if: $CI_COMMIT_BRANCH == "staging" && $CI_PIPELINE_SOURCE == "push"
+  script:
+    - git remote set-url origin https://oauth2:${GITLAB_TOKEN_STAGING_TO_MAIN}@gitlab.espressif.cn:6688/app-frameworks/esp_hosted_mcu.git
+    - git push origin $CI_COMMIT_SHA:main
+  tags:
+    - build

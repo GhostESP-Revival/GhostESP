@@ -1,13 +1,26 @@
 import json
+import os
 import pathlib
+import shutil
 
 
 REPO_MARKERS = ["plugins", "main", "components"]
 SDK_RELATIVE = pathlib.Path("plugins") / "sdk"
+HELPERS_FILENAME = "ghostesp_helpers.h"
 TEMPLATES_RELATIVE = pathlib.Path("plugins") / "templates"
 
 
+def _data_root() -> pathlib.Path:
+    here = pathlib.Path(__file__).resolve().parent
+    return here / "data"
+
+
 def find_repo_root(start: pathlib.Path = None) -> pathlib.Path:
+    env = os.environ.get("GHOSTBT_ROOT")
+    if env:
+        p = pathlib.Path(env)
+        if all((p / m).is_dir() for m in REPO_MARKERS):
+            return p
     cur = (start or pathlib.Path.cwd()).resolve()
     for _ in range(20):
         if all((cur / m).is_dir() for m in REPO_MARKERS):
@@ -22,25 +35,53 @@ def find_repo_root(start: pathlib.Path = None) -> pathlib.Path:
 
 
 def resolve_sdk_path(start: pathlib.Path = None) -> pathlib.Path:
-    import os
     env = os.environ.get("GHOSTBT_SDK")
     if env:
         p = pathlib.Path(env)
         if p.is_file():
             return p
-    root = find_repo_root(start)
-    sdk = root / SDK_RELATIVE / "ghostesp_plugin_api.h"
-    if not sdk.is_file():
-        raise FileNotFoundError(f"SDK header not found: {sdk}")
-    return sdk
+    try:
+        root = find_repo_root(start)
+        sdk = root / SDK_RELATIVE / "ghostesp_plugin_api.h"
+        if sdk.is_file():
+            return sdk
+    except FileNotFoundError:
+        pass
+    bundled = _data_root() / "sdk" / "ghostesp_plugin_api.h"
+    if bundled.is_file():
+        return bundled
+    raise FileNotFoundError(
+        "SDK header not found. Set GHOSTBT_SDK environment variable, run from a GhostESP repo, or reinstall ghostbt."
+    )
 
 
 def resolve_template(name: str, start: pathlib.Path = None) -> pathlib.Path:
-    root = find_repo_root(start)
-    tpl = root / TEMPLATES_RELATIVE / name
-    if not tpl.is_dir():
-        raise FileNotFoundError(f"Template not found: {tpl}")
-    return tpl
+    try:
+        repo = find_repo_root(start)
+        tpl = repo / TEMPLATES_RELATIVE / name
+        if tpl.is_dir():
+            return tpl
+    except FileNotFoundError:
+        pass
+    bundled = _data_root() / "templates" / name
+    if bundled.is_dir():
+        return bundled
+    raise FileNotFoundError(f"Template not found: {name}")
+
+
+def copy_bundled_sdk(dst_dir: pathlib.Path) -> pathlib.Path:
+    dst = dst_dir / "sdk" / "ghostesp_plugin_api.h"
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    src = resolve_sdk_path()
+    if not dst.exists() or src.stat().st_mtime > dst.stat().st_mtime:
+        shutil.copy2(src, dst)
+    # Also copy helpers header if present alongside the SDK header
+    helpers_src = src.parent / HELPERS_FILENAME
+    if helpers_src.is_file():
+        helpers_dst = dst_dir / "sdk" / HELPERS_FILENAME
+        if not helpers_dst.exists() or helpers_src.stat().st_mtime > helpers_dst.stat().st_mtime:
+            shutil.copy2(helpers_src, helpers_dst)
+    return dst
 
 
 def load_manifest(app_dir: pathlib.Path) -> dict:
@@ -55,4 +96,7 @@ def load_manifest(app_dir: pathlib.Path) -> dict:
 
 
 def detect_target(manifest: dict) -> str:
+    targets = manifest.get("targets")
+    if isinstance(targets, list) and targets:
+        return str(targets[0])
     return manifest.get("target", "esp32s3")

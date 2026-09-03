@@ -1,2 +1,2 @@
 dependencies:
-  espressif/elf_loader: "*"
+  espressif/elf_loader: "1.3.1"

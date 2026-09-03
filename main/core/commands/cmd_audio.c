@@ -7,7 +7,7 @@
 #ifdef CONFIG_HAS_AUDIO_PLAYER
 #include "managers/audio_stream_manager.h"
 #endif
-#ifdef CONFIG_HAS_TLV320DAC_I2S
+#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER)
 #include "managers/audio_receiver_manager.h"
 #endif
 #ifdef CONFIG_HAS_MIC
@@ -21,7 +21,7 @@
 
 void handle_audio_cmd(int argc, char **argv) {
     if (argc < 2) {
-        glog("Usage: audio <start|stop|pause|flush|state>\n");
+        glog("Usage: audio <start|stop|pause|resume|flush|state>\n");
         return;
     }
 
@@ -39,7 +39,7 @@ void handle_audio_cmd(int argc, char **argv) {
     }
 #endif
 
-#ifdef CONFIG_HAS_TLV320DAC_I2S
+#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER)
     if (strcmp(sub, "start") == 0) {
         if (!audio_receiver_manager_is_initialized()) {
             esp_err_t ret = audio_receiver_manager_init();
@@ -56,6 +56,9 @@ void handle_audio_cmd(int argc, char **argv) {
     } else if (strcmp(sub, "pause") == 0) {
         audio_receiver_manager_pause();
         glog("Audio receiver paused\n");
+    } else if (strcmp(sub, "resume") == 0) {
+        audio_receiver_manager_resume();
+        glog("Audio receiver resumed\n");
     } else if (strcmp(sub, "flush") == 0) {
         audio_receiver_manager_flush();
         glog("Audio receiver flushed\n");

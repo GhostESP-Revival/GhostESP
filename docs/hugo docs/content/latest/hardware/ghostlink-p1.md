@@ -1,9 +1,9 @@
 ---
 title: "GhostLink P1"
-description: "Owner's guide for the GhostLink P1 handheld: battery safety, charging, ports, flashing and maintenance."
+description: "Owner's guide for the GhostLink P1 handheld: battery safety, charging, ports, wiring, pinouts, flashing and maintenance."
 weight: 10
 toc: true
-keywords: ["GhostLink P1", "CYD", "18650", "IP5306", "battery", "charging", "hardware"]
+keywords: ["GhostLink P1", "CYD", "18650", "IP5306", "battery", "charging", "hardware", "pinout", "wiring"]
 ---
 
 ## Overview
@@ -74,6 +74,54 @@ The P1 is a two-radio GhostLink setup; each radio runs its own build:
 ## SD card
 
 The microSD module sits on the right of the mid band under a screwed retainer: insert the card pins-first until it clicks. GhostESP uses it for storage, scripts, asset packs and data logging; see [SD Card]({{< relref "../getting-started/sd-card.md" >}}) and [Storage Layout]({{< relref "../getting-started/storage-layout.md" >}}).
+
+## Wiring & pinouts
+
+Every module in the shell wires straight to the ESP32-1732S019 (S3) board's GPIO rows — there's no glue logic in between, so the tables below are the full wiring map for the user-serviceable parts. Pin numbers come from the P1 Core firmware config (`configs/sdkconfig.ghostlink_p1_core`).
+
+![GhostLink P1 full wiring diagram](/images/ghostlink-p1-wiring.svg)
+
+### 5-way nav pad
+
+The nav pad is a simple button matrix: pressing a direction shorts that pad to COM. The direction pins are active-low with internal pull-ups, and **COM connects directly to the second GND pin on the CYD**. **Wire by firmware function, not by the pad's label** — the pad silkscreen is crossed against the firmware (see the note below).
+
+| ESP32-S3 GPIO (firmware function) | Connect to joystick pad |
+|---|---|
+| **GPIO45** (firmware Left) | **RIGHT** pad |
+| **GPIO42** (firmware Right) | **LEFT** pad |
+| **GPIO47** (firmware Up) | **DOWN** pad |
+| **GPIO48** (firmware Down) | **UP** pad |
+| **GPIO39** (firmware Set / Select) | **SET** pad |
+| **CYD GND** (second GND pin) | **COM** pad |
+
+> **Crossed by design — don't match labels:** the joystick's pad labels are hooked up reversed against the firmware's function names, so that pressing the physical left button lands on the firmware's Left pin: the pad printed **LEFT** goes to GPIO42 (firmware Right), **RIGHT** goes to GPIO45 (firmware Left), **UP** goes to GPIO48 (firmware Down) and **DOWN** goes to GPIO47 (firmware Up). The firmware's own pin assignments (`L_BTN=45`, `R_BTN=42`, `U_BTN=47`, `D_BTN=48`) stay exactly as configured — only the physical wiring crosses them. Reading the GPIO column for the direction you want and hooking up the *opposite* pad label is the correct build.
+
+### microSD slot (SPI mode)
+
+The P1 uses the microSD board in **SPI mode** (`CONFIG_USING_SPI`, not SDMMC). The module's standard 6-pin header maps like this:
+
+| SD module pin | ESP32-S3 GPIO | Notes |
+|---|---|---|
+| **CS** | GPIO16 | chip select |
+| **CLK / SCK** | GPIO18 | SPI clock |
+| **MOSI / DI** | GPIO17 | SPI data out (board → card) |
+| **MISO / DO** | GPIO19 | SPI data in (card → board) |
+| **VCC** | 3.3V | power to the module |
+| **GND** | IP5306 OUT- / GND | direct ground wire from the IP5306 |
+
+The SD bus shares the display board's SPI bus, so these pins are fixed on the P1 — don't reuse GPIO 16-19 for anything else. If you build your own board variant, the pins can be changed at runtime with `sd_pins_spi <cs> <clk> <miso> <mosi>` (see [SD Card]({{< relref "../getting-started/sd-card.md" >}})).
+
+### GhostLink aux radio (optional)
+
+The aux radio (ESP32-C3 SuperMini by default) talks to the core over the GhostLink UART. On both chips the firmware defaults are TX on GPIO6 and RX on GPIO7, **crossed** between the two boards, at 115200 baud:
+
+| Core (S3) | Aux radio (C3) |
+|---|---|
+| **GPIO6 (TX)** | **GPIO7 (RX)** |
+| **GPIO7 (RX)** | **GPIO6 (TX)** |
+| **IP5306 OUT- / GND** | **C3 GND** |
+
+These are the firmware defaults and can be changed at runtime with `commsetpins <TX> <RX>`; see [Dual Communication (GhostLink)]({{< relref "../getting-started/dual-communication.md" >}}).
 
 ## Maintenance & upgrades
 

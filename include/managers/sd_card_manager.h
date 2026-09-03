@@ -33,6 +33,7 @@
 #define SD_DIR_SCRIPTDATA SD_GHOSTESP_ROOT "/scriptdata"
 #define SD_DIR_THEMES SD_GHOSTESP_ROOT "/themes"
 #define SD_DIR_DOWNLOADS SD_GHOSTESP_ROOT "/downloads"
+#define SD_DIR_COMICS SD_GHOSTESP_ROOT "/comics"
 
 // SD card unmount context types
 typedef enum {
@@ -85,9 +86,8 @@ void sd_card_unmount_after_flush(bool display_was_suspended);
 
 /*
  * Returns true when the active build keeps the SD card unmounted after
- * init and individual callers need to mount on demand (currently the
- * `somethingsomething` template). Returns false when the SD is mounted
- * once at boot and stays accessible.
+ * init and individual callers need to mount on demand. Returns false when
+ * the SD is mounted once at boot and stays accessible.
  */
 bool sd_card_needs_jit_mount(void);
 

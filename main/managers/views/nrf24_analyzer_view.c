@@ -1317,7 +1317,7 @@ static void nrf24_input_handler(InputEvent *event) {
         return;
     }
 
-#ifdef CONFIG_USE_ENCODER
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_IS_ATOMS3R)
     if (event->type == INPUT_TYPE_EXIT_BUTTON) {
         nrf24_return_to_menu();
         return;
@@ -1375,7 +1375,7 @@ void nrf24_analyzer_create(void) {
 
     int button_h = (LV_VER_RES <= 170) ? 28 : 34;
     int graph_top = 44;
-    int graph_bottom_margin = button_h + 34;
+    int graph_bottom_margin = GUI_HOME_SAFE_H + button_h + 34;
     int graph_h = LV_VER_RES - GUI_STATUS_BAR_HEIGHT - graph_top - graph_bottom_margin;
     if (graph_h < 70) {
         graph_h = 70;
@@ -1395,7 +1395,7 @@ void nrf24_analyzer_create(void) {
     s_toggle_btn = lv_btn_create(s_content);
     gui_apply_pressed_style(s_toggle_btn);
     lv_obj_set_size(s_toggle_btn, 92, button_h);
-    lv_obj_align(s_toggle_btn, LV_ALIGN_BOTTOM_LEFT, 8, -8);
+    lv_obj_align(s_toggle_btn, LV_ALIGN_BOTTOM_LEFT, 8, -(GUI_HOME_SAFE_H + 8));
     lv_obj_set_style_radius(s_toggle_btn, 6, LV_PART_MAIN);
     lv_obj_set_style_bg_color(s_toggle_btn, lv_color_hex(theme_palette_get_surface_alt(theme)), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(s_toggle_btn, LV_OPA_COVER, LV_PART_MAIN);
@@ -1411,7 +1411,7 @@ void nrf24_analyzer_create(void) {
     s_back_btn = lv_btn_create(s_content);
     gui_apply_pressed_style(s_back_btn);
     lv_obj_set_size(s_back_btn, 92, button_h);
-    lv_obj_align(s_back_btn, LV_ALIGN_BOTTOM_RIGHT, -8, -8);
+    lv_obj_align(s_back_btn, LV_ALIGN_BOTTOM_RIGHT, -8, -(GUI_HOME_SAFE_H + 8));
     lv_obj_set_style_radius(s_back_btn, 6, LV_PART_MAIN);
     lv_obj_set_style_bg_color(s_back_btn, lv_color_hex(theme_palette_get_surface_alt(theme)), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(s_back_btn, LV_OPA_COVER, LV_PART_MAIN);

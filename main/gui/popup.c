@@ -279,7 +279,14 @@ lv_obj_t *popup_add_button(popup_t *p, const char *label, lv_event_cb_t event_cb
 	lv_obj_t *btn = lv_btn_create(p->btn_container);
 	gui_apply_pressed_style(btn);
 	int btn_w = (p->width - (DEFAULT_MARGIN * 2) - 8) / 2; // default width for up to 2 buttons
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+	/* P4 dialogs are viewed and operated at touch distance. Keep actions
+	 * comfortably above the minimum touch size and align them with the rest
+	 * of the large-screen control language. */
+	lv_obj_set_size(btn, btn_w, 52);
+#else
 	lv_obj_set_size(btn, btn_w, 32);
+#endif
 	lv_obj_set_style_bg_color(btn, popup_get_surface_alt_color(), 0);
 	lv_obj_set_style_border_width(btn, 0, 0);
 	lv_obj_set_style_radius(btn, GUI_RADIUS_SM, 0);
@@ -370,8 +377,14 @@ popup_confirm_t *popup_confirm_show(popup_confirm_t **handle, lv_obj_t *parent, 
     lv_coord_t screen_w = 0;
     lv_coord_t content_h = 0;
     popup_calc_fullscreen_area(parent, &root_x, &root_y, &screen_w, &content_h);
+    lv_coord_t screen_h = popup_runtime_height();
 
     bool small = (screen_w <= 240);
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    bool large_p4 = screen_h >= 480;
+#else
+    bool large_p4 = false;
+#endif
 
     p->owner = handle;
     p->on_confirm = on_confirm;
@@ -409,7 +422,7 @@ popup_confirm_t *popup_confirm_show(popup_confirm_t **handle, lv_obj_t *parent, 
     // Pull the whole text block up and tighten the gap so it clears them.
     lv_coord_t title_y = small ? 6 : 12;
     lv_coord_t body_y = title_y + (small ? 18 : 32);
-    lv_coord_t button_h = small ? 30 : 32;
+    lv_coord_t button_h = small ? 30 : (large_p4 ? 44 : 32);
     lv_coord_t body_w = screen_w - (GUI_SAFEAREA_HOR * 2) - 10;
 
     popup_create_title_label(p->root, title ? title : "Confirm", title_font, title_y);
@@ -418,7 +431,7 @@ popup_confirm_t *popup_confirm_show(popup_confirm_t **handle, lv_obj_t *parent, 
         lv_obj_set_style_text_align(body_label, LV_TEXT_ALIGN_CENTER, 0);
     }
 
-    lv_coord_t btn_w = small ? 80 : 84;
+    lv_coord_t btn_w = small ? 80 : (large_p4 ? 120 : 84);
     if (has_cancel) {
         p->cancel_btn = popup_add_styled_button(p->root, cancel_label, btn_w, button_h,
                                                LV_ALIGN_BOTTOM_LEFT, 0, -10, body_font, popup_confirm_cancel_event_cb, p);
@@ -429,7 +442,7 @@ popup_confirm_t *popup_confirm_show(popup_confirm_t **handle, lv_obj_t *parent, 
     lv_obj_t *btns[2] = { p->cancel_btn, p->confirm_btn };
     PopupButtonLayoutConfig cfg = {
         .min_w = small ? 58 : 76,
-        .max_w = small ? 96 : 132,
+        .max_w = small ? 96 : (large_p4 ? 200 : 132),
         .min_threshold = small ? 48 : 62,
         .gap = small ? 8 : 14,
     };
@@ -608,9 +621,19 @@ void popup_calc_size_ex(popup_calc_size_t *out, lv_coord_t min_h) {
         out->height = (screen_h < 200) ? (screen_h - 30) : 160;
         if (out->height < min_h) out->height = min_h;
         out->y_offset = 10;
-    } else {
+    } else if (screen_h <= 320) {
         out->height = (screen_h <= 240) ? 140 : 160;
         out->y_offset = 10;
+    } else {
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+        out->height = (lv_coord_t)(screen_h * 0.42f);
+        if (out->height < 180) out->height = 180;
+        if (out->height > 280) out->height = 280;
+        out->y_offset = 10;
+#else
+        out->height = 160;
+        out->y_offset = 10;
+#endif
     }
 }
 

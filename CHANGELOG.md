@@ -1,7 +1,74 @@
 # Ghost ESP Changelog
 
 ## Attribution
-Untagged entries are authored by the core maintainer ([@jaylikesbunda](https://github.com/jaylikesbunda)). A trailing `@handle` credits a guest contributor for that specific line. "Ported from / adapted from" credits the upstream source a feature was based on, not GhostESP authorship.
+Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A trailing `@handle` credits a guest contributor for that specific line. "Ported from / adapted from" credits the upstream source a feature was based on, not GhostESP authorship.
+
+## Revival v2.1.2
+
+### Added
+- Added support for more devices including ESP32-P4 boards with ESP32-C6 ESP-Hosted Wi-Fi and Bluetooth  (huge thank you to M5Stack and Elecrow for providing hardware to work on)
+  - M5Stack AtomS3R
+  - M5CoreS3SE
+  - Elecrow CrowPanel 4.2-inch E-paper
+  - Elecrow CrowPanel 5.79-inch E-paper
+  - Elecrow CrowPanel Advance 2.4-inch
+  - Elecrow CrowPanel Advance 2.8-inch
+  - Elecrow CrowPanel Advance 3.5-inch
+  - Elecrow CrowPanel Advance 4.3-inch
+  - Elecrow CrowPanel Advance 5-inch
+  - Elecrow CrowPanel Advance 7-inch
+  - Elecrow CrowPanel Advanced P4 5-inch
+  - Elecrow CrowPanel Advanced P4 7/9/10.1-inch (v1.2+)
+  - Elecrow CrowPanel Advanced P4 7/9/10.1-inch (v1.1)
+
+- P4 and large S3 improvements including but not limited to:
+  - Added left hand side swipe gestures for back and iOS-style home bar on the bottom of the screen for swipe up home 
+  - Added new native camera app
+  - Tweaked menu and view spacing and layouts
+  - Added a control center for quick controls when swiping down from the status bar
+
+- E-Paper support exclusive:
+  - NEW Native 'Reader' app placed at the start of the main menu which can read .epub, .cbz, .jpg and more
+
+- Added favorites menu where you can pin menu items, IR remotes, NFC tags, SubGHz captures and apps
+- Replaced the accent-only menu themes with 21 full color palettes
+- Added BadBLE native Bluetooth HID keyboard that runs DuckyScript payloads over BLE with on-device UI and CLI support
+- Added the Hero main menu layout
+
+### Changed
+- Migrated to ESP-IDF v6.1 from v6.0.2
+- Reduced screen mirroring overhead
+- Standardized main menu and App Gallery icons
+- Main Menu and App Gallery contents can be customized and reordered independently on all device targets
+- BLE Detect Devices "Track" action now uses the live RSSI ring overlay (matching Track AP/STA/Adv/GATT) instead of switching to the terminal
+- Added runtime global log-level control through the `loglevel` command and system settings
+- SD card not inserted now logs a single clear line instead of repeating driver errors
+- LVGL frame pacing is now a fixed 16 ms instead of rendering as fast as possible
+- Carousel cards no longer draw a software shadow, cutting frame render cost while swiping
+- Carousel side previews now swap their icon in place instead of destroying and recreating the widget on every nav step
+- Neighbour icons are pre-fetched into the asset cache after each carousel/Hero transition
+- Demoted hot-path navigation and input logs to verbose so UART output no longer stalls input handling
+- Raised the persistent shared-SPI SD clock to 20 MHz on the Banshee C5 (was 10 MHz) so SD reads finish faster and free the display bus sooner
+- Massively improved Banshee C5 display responsiveness by driving the screen over the PARLIO peripheral, freeing SPI for a permanent 20MHz SD mount - @Billi-Green
+- Audio player shows exact track length parsed from Xing/VBRI headers (CBR fallback excludes ID3 tags)
+- Audio progress now follows the audible playback clock: no jump at track start, and pause/resume continues from the same point
+- 320 kbps MP3s now play on the local speaker; the bitrate cap only applies to GhostLink streaming
+- Both audio player screens gained a touch Back bar matching other views
+
+### Fixed
+- Fixed the AP never coming back after scans or deauth attacks - resolves #382
+- Fixed deauth attacks logging "Failed to set channel" while a client was connected to the GhostNet AP - resolves #368, #327
+- Fixed GhostLink-relayed Ethernet fingerprint/port/ping scans and ARP poison silently failing; display now flags a peer that doesn't acknowledge
+- Fixed the on-screen terminal keyboard's Done button not submitting commands
+- Fixed crash on CYD devices by bumping LV_MEM_POOL to 24KB
+- Fixed T-Dongle-C5 display colors (pink toast/noise) by enabling RGB565 byte-swap and dropping the SPI clock to 20 MHz to match the factory ST7735 driver
+- Fixed T-Dongle-C5 backlight polarity so the display turns on at boot (active-low GPIO0)
+- Fixed WebUI GhostLink pin changes not persisting across reboots
+- Extended `setcountry` to all targets via the ESP-IDF country-code API so it works on 2.4 GHz-only boards and the C5 alike
+
+### Removed
+- Disabled self-OTA on the Banshee C5 (the updater partition and embedded updater image were bad UX and repeatedly pushed the build over flash. OTA is still available over GhostLink to the S3)
+
 
 ## Revival v2.1.1
 

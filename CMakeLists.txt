@@ -10,7 +10,9 @@ endif()
 add_link_options("-Wl,-z,muldefs")
 add_compile_options(-Wno-error=unused-label)
 
-set(SDKCONFIG_DEFAULTS "sdkconfig.defaults")
+if(NOT DEFINED SDKCONFIG_DEFAULTS)
+    set(SDKCONFIG_DEFAULTS "sdkconfig.defaults")
+endif()
 add_compile_definitions(HOLD_LIMIT=1000) # For joystick hold duration
 add_compile_definitions(LED_ORDER=0)     # 2 for RGB, 0 for GRB
 add_compile_definitions(DNS_SERVER_MAX_ITEMS=1)
@@ -79,3 +81,4 @@ add_compile_definitions(GHOSTESP_BUILD_NUMBER=${GHOSTESP_BUILD_NUMBER})
 # Include project settings
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(Ghost_ESP_IDF)
+include(cmake/crowpanel_rgb_factory.cmake)

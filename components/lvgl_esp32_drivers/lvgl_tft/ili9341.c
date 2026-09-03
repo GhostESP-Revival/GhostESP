@@ -7,8 +7,14 @@
  *      INCLUDES
  *********************/
 #include "ili9341.h"
+#ifdef CONFIG_USE_C5_PARLIO_DISPLAY
+#include "banshee_c5_parlio.h"
+#else
 #include "disp_spi.h"
+#endif
+#include <string.h>
 #include "driver/gpio.h"
+#include "esp_err.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -40,7 +46,8 @@ static void ili9341_set_orientation(uint8_t orientation);
 
 static void ili9341_send_cmd(uint8_t cmd);
 static void ili9341_send_data(void * data, uint16_t length);
-static void ili9341_send_color(void * data, uint16_t length);
+static esp_err_t ili9341_send_color(void * data, uint16_t length,
+                                    lv_disp_drv_t * drv);
 
 /**********************
  *  STATIC VARIABLES
@@ -184,7 +191,9 @@ void ili9341_flush(lv_disp_drv_t * drv, const lv_area_t * area, lv_color_t * col
 	/*Memory write*/
 	ili9341_send_cmd(0x2C);
 	uint32_t size = lv_area_get_width(area) * lv_area_get_height(area);
-	ili9341_send_color((void*)color_map, size * 2);
+	if (ili9341_send_color((void*)color_map, size * 2, drv) != ESP_OK) {
+		lv_disp_flush_ready(drv);
+	}
 }
 
 void ili9341_sleep_in()
@@ -208,23 +217,44 @@ void ili9341_sleep_out()
 
 static void ili9341_send_cmd(uint8_t cmd)
 {
+#ifdef CONFIG_USE_C5_PARLIO_DISPLAY
+    esp_err_t ret = banshee_c5_parlio_send_cmd(cmd);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to send command 0x%02X: %s", cmd, esp_err_to_name(ret));
+    }
+#else
     disp_wait_for_pending_transactions();
     gpio_set_level(ILI9341_DC, 0);	 /*Command mode*/
     disp_spi_send_data(&cmd, 1);
+#endif
 }
 
 static void ili9341_send_data(void * data, uint16_t length)
 {
+#ifdef CONFIG_USE_C5_PARLIO_DISPLAY
+    esp_err_t ret = banshee_c5_parlio_send_data(data, length);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to send data (%u bytes): %s", length, esp_err_to_name(ret));
+    }
+#else
     disp_wait_for_pending_transactions();
     gpio_set_level(ILI9341_DC, 1);	 /*Data mode*/
     disp_spi_send_data(data, length);
+#endif
 }
 
-static void ili9341_send_color(void * data, uint16_t length)
+static esp_err_t ili9341_send_color(void * data, uint16_t length,
+                                    lv_disp_drv_t * drv)
 {
+#ifdef CONFIG_USE_C5_PARLIO_DISPLAY
+    return banshee_c5_parlio_send_color(data, length, drv);
+#else
+    (void)drv;
     disp_wait_for_pending_transactions();
     gpio_set_level(ILI9341_DC, 1);   /*Data mode*/
     disp_spi_send_colors(data, length);
+    return ESP_OK;
+#endif
 }
 
 static void ili9341_set_orientation(uint8_t orientation)
@@ -236,6 +266,27 @@ static void ili9341_set_orientation(uint8_t orientation)
     };
 
     ESP_LOGI(TAG, "Display orientation: %s", orientation_str[orientation]);
+
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    /* M5Stack CoreS3 / CoreS3-SE drive an ILI9342C panel (invert=true, BGR
+       order per M5GFX Panel_M5StackCoreS3). Unlike a generic ILI9341 (native
+       portrait, needs MV set for landscape), the ILI9342C is NATIVE 320x240
+       landscape - MV must stay CLEAR. Setting MV addresses the GRAM as
+       240-wide while LVGL still pushes 320-wide rows, which produces diagonal
+       noise lines and a 90-degrees-rotated image. So the landscape entries
+       (index 2/3, the ones this board uses) are MV-clear; portrait (0/1)
+       keep MV set. Landscape byte 0x08 = BGR only (no mirror); if the image
+       comes up mirrored left-right use 0x48 (MX), upside-down use 0x88 (MY),
+       both use 0xC8. */
+    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "m5cores3se") == 0) {
+        static const uint8_t cores3_madctl[] = {0x68, 0xA8, 0x08, 0xC8};
+        ESP_LOGI(TAG, "0x36 command value (CoreS3): 0x%02X",
+                 cores3_madctl[orientation]);
+        ili9341_send_cmd(0x36);
+        ili9341_send_data((void *) &cores3_madctl[orientation], 1);
+        return;
+    }
+#endif
 
 #if defined CONFIG_LV_PREDEFINED_DISPLAY_M5STACK
     uint8_t data[] = {0x68, 0x68, 0x08, 0x08};

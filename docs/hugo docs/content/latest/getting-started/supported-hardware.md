@@ -64,6 +64,17 @@ GhostESP runs on a variety of ESP32 boards with varying feature support. This co
       <tr><th scope="row">CYD 2.4″ variants</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>Manual</td><td>✗</td></tr>
       <tr><th scope="row">Waveshare 7″</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
       <tr><th scope="row">Crowtech 7″</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>Manual</td><td>✗</td></tr>
+      <tr><th scope="row">CrowPanel 4.2″ E-paper</th><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>E-paper 400×300</td><td>✓</td><td>Manual</td><td>✗</td></tr>
+      <tr><th scope="row">CrowPanel 5.79″ E-paper</th><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>E-paper 792×272</td><td>✓</td><td>Manual</td><td>✗</td></tr>
+      <tr><th scope="row">CrowPanel Advance 2.4″</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
+      <tr><th scope="row">CrowPanel Advance 2.8″</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
+      <tr><th scope="row">CrowPanel Advance 3.5″</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
+      <tr><th scope="row">CrowPanel Advance 4.3″</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
+      <tr><th scope="row">CrowPanel Advance 5″</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
+      <tr><th scope="row">CrowPanel Advance 7″</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
+      <tr><th scope="row">CrowPanel Advanced P4 5″ RGB</th><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
+      <tr><th scope="row">CrowPanel Advanced P4 7/9/10.1″ (v1.2+)</th><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
+      <tr><th scope="row">CrowPanel Advanced P4 7/9/10.1″ (v1.1)</th><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
       <tr><th scope="row">Sunton 7″</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✗</td></tr>
       <tr><th scope="row">Cardputer</th><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✗</td></tr>
       <tr><th scope="row">Cardputer ADV</th><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✗</td></tr>
@@ -78,7 +89,7 @@ GhostESP runs on a variety of ESP32 boards with varying feature support. This co
       <tr><th scope="row">T-Display S3 Touch</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>Manual</td><td>✗</td></tr>
       <tr><th scope="row">S3TWatch</th><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>has 4MB vfs partition</td><td>✓</td><td>✗</td></tr>
       <tr><th scope="row">TEmbed C1101</th><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
-      <tr><th scope="row">Banshee</th><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>Updater + peer</td><td>✓</td></tr>
+      <tr><th scope="row">Banshee</th><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>Manual</td><td>✓</td></tr>
       <tr><th scope="row">GhostBoard</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>Manual</td><td>✗</td></tr>
       <tr><th scope="row">Poltergeist</th><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✗</td><td>✗</td><td>Status Display</td><td>✓</td><td>Manual</td><td>✗</td></tr>
       <tr><th scope="row">T-Deck</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>Manual</td><td>✓</td></tr>
@@ -95,15 +106,19 @@ GhostESP runs on a variety of ESP32 boards with varying feature support. This co
       <tr><th scope="row">ESP32-C5 (generic)</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>Manual</td><td>✗</td></tr>
       <tr><th scope="row">ESP32-C6 (generic)</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>Manual</td><td>✗</td></tr>
       <tr><th scope="row">Heltec V3</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✗</td><td>Status Display</td><td>✓</td><td>Manual</td><td>✗</td></tr>
+      <tr><th scope="row">M5Stack CoreS3-SE</th><td>✓</td><td>✗</td><td>✓</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
+      <tr><th scope="row">M5Stack AtomS3R</th><td>✓</td><td>✗</td><td>✓</td><td>✓</td><td>✗</td><td>✗</td><td>✓</td><td>✓</td><td>has 1MB vfs partition</td><td>Manual</td><td>✗</td></tr>
     </tbody>
   </table>
 </div>
 
-**OTA:** `✓` means the release build uses a dual-partition OTA layout. `Updater + peer` means Banshee uses the C5 updater app for its display MCU and GhostLink peer update for the S3. `Manual` means USB/manual flashing is required for that release build.
+**OTA:** `✓` means the release build uses a dual-partition OTA layout. `Manual` means USB/manual flashing is required for that release build. Banshee C5 self-OTA (previously `Updater + peer`) is disabled in v2.1.2 due to bad UX and flash overflow; use USB/manual flashing - OTA will return in a future leaner layout.
 
 **Native SD Apps:** `✓` means the release build supports loading native `.gapp` apps from SD.
 
 **GPS Default / SD Default:** these columns describe the release build's default or known board wiring. GPS and SD card pins can be configured at runtime on most builds, so `✗` does not mean the feature is impossible on custom wiring.
+
+**M5Stack Grove ports:** the M5Stack CoreS3-SE and AtomS3R configs expose their HY2.0-4P Grove connectors on I2C port 1 (`PORT.A`: SDA=G2, SCL=G1; the CoreS3-SE also has `PORT.B` G8/G9 and `PORT.C` G17/G18). Plug an ST25R3916 NFC module (I2C, 0x50) and/or an M5Stack ENV III unit (SHT30 0x44 + QMP6988 0x70) into Grove `PORT.A` and open the NFC or ENV III app — both devices share the same bus.
 
 ## Camera Support
 
@@ -118,6 +133,17 @@ The following table lists the vendor-specific boards supported by GhostESP with 
 | Board Name | Build Name | Image |
 |---|---|---|
 | CYDMicroUSB | `CYDMicroUSB.zip` | |
+| Elecrow CrowPanel 4.2″ E-paper | `CrowPanel_4.2_Epaper.zip` | |
+| Elecrow CrowPanel 5.79″ E-paper | `CrowPanel_5.79_Epaper.zip` | |
+| Elecrow CrowPanel Advance 2.4″ | `CrowPanel_Advance_24.zip` | |
+| Elecrow CrowPanel Advance 2.8″ | `CrowPanel_Advance_28.zip` | |
+| Elecrow CrowPanel Advance 3.5″ | `CrowPanel_Advance_35.zip` | |
+| Elecrow CrowPanel Advance 4.3″ | `CrowPanel_Advance_43.zip` | |
+| Elecrow CrowPanel Advance 5″ | `CrowPanel_Advance_5.zip` | |
+| Elecrow CrowPanel Advance 7″ | `CrowPanel_Advance_7inch.zip` | |
+| Elecrow CrowPanel Advanced P4 5″ RGB | `CrowPanel_Advanced_P4_5inch.zip` | |
+| Elecrow CrowPanel Advanced P4 7/9/10.1″ (v1.2+) | `CrowPanel_Advanced_P4_7_9_10.1inch.zip` | |
+| Elecrow CrowPanel Advanced P4 7/9/10.1″ (v1.1) | `CrowPanel_Advanced_P4_7_9_10.1inch_v1.1.zip` | |
 | CYDDualUSB | `CYDDualUSB.zip` | |
 | CYD2432S028R | `CYD2432S028R.zip` | <img src="../images/CYD2432S028R.jpg" alt="CYD2432S028R"> |
 | Waveshare 7″ | `Waveshare_LCD.zip` | |
@@ -152,5 +178,7 @@ The following table lists the vendor-specific boards supported by GhostESP with 
 | Heltec V3 | `HeltecV3.zip` | |
 | Wired Hatters Banshee C5 | `Banshee_C5.zip` | |
 | Wired Hatters Banshee S3 | `Banshee_S3.zip` | |
+| M5Stack CoreS3-SE | `M5Stack_CoreS3-SE.zip` | |
+| M5Stack AtomS3R | `M5Stack_AtomS3R.zip` | |
 
 > **Note:** Images are being added as they become available.

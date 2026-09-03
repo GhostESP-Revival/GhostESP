@@ -1,7 +1,9 @@
 #include "gui/screen_layout.h"
 #include "gui/asset_pack.h"
 #include "gui/design_tokens.h"
+#include "gui/theme_palette_api.h"
 #include "managers/display_manager.h"
+#include "managers/settings_manager.h"
 
 /* Tracks the last asset-pack version for which we built a bg widget on a
  * given root, so gui_screen_apply_background() can early-out when called
@@ -11,6 +13,144 @@ static lv_obj_t *s_last_applied_bg_root = NULL;
 static const lv_img_dsc_t *s_last_applied_bg_src = NULL;
 static lv_obj_t *s_last_applied_bg_widget = NULL;
 static const lv_img_dsc_t *s_indexed_scaled_bg_src = NULL;
+
+static void theme_pattern_draw_cb(lv_event_t *e) {
+    if (lv_event_get_code(e) != LV_EVENT_DRAW_MAIN) return;
+    lv_obj_t *obj = lv_event_get_target(e);
+    lv_draw_ctx_t *draw_ctx = lv_event_get_draw_ctx(e);
+    if (!obj || !draw_ctx || !draw_ctx->clip_area) return;
+
+    /* Pattern identity travels with the widget so previews can decorate
+     * with a theme other than the persisted one. */
+    uint8_t theme = theme_palette_clamp_id((uint8_t)(intptr_t)lv_obj_get_user_data(obj));
+    if (!settings_get_theme_background_effects(&G_Settings)) return;
+    const theme_descriptor_t *descriptor = theme_palette_get_descriptor(theme);
+    theme_pattern_t pattern = descriptor->pattern;
+    if (pattern == THEME_PATTERN_NONE) return;
+    if (settings_get_sun_mode(&G_Settings) || settings_get_high_contrast(&G_Settings)) return;
+
+    lv_area_t area;
+    if (!_lv_area_intersect(&area, &obj->coords, draw_ctx->clip_area)) return;
+
+    lv_draw_rect_dsc_t mark;
+    lv_draw_rect_dsc_init(&mark);
+    /* Dither reads as a genuine two-tone texture when the marks use the
+     * palette's own alt background; other patterns use their overlay tint. */
+    uint32_t mark_color = pattern == THEME_PATTERN_DITHER
+                              ? theme_palette_get_background_alt(theme)
+                              : descriptor->pattern_color;
+    mark.bg_color = lv_color_hex(mark_color);
+    mark.bg_opa = LV_OPA_10;
+    mark.border_width = 0;
+    mark.radius = 0;
+
+    int spacing;
+    if (LV_HOR_RES <= 160) spacing = 12;
+#if GUI_LARGE_SCREEN
+    else if (LV_HOR_RES >= 800) spacing = 24;
+#endif
+    else spacing = 16;
+    if (pattern == THEME_PATTERN_GRID) spacing *= 2;
+
+    if (pattern == THEME_PATTERN_DIAGONAL || pattern == THEME_PATTERN_WAVES) {
+        lv_draw_line_dsc_t line;
+        lv_draw_line_dsc_init(&line);
+        line.color = mark.bg_color;
+        line.opa = LV_OPA_10;
+        line.width = 1;
+        for (int y = -LV_HOR_RES; y < LV_VER_RES + LV_HOR_RES; y += spacing) {
+            lv_point_t p1 = {0, (lv_coord_t)y};
+            lv_point_t p2 = {LV_HOR_RES, (lv_coord_t)(pattern == THEME_PATTERN_WAVES ? y : y + LV_HOR_RES)};
+            if (pattern == THEME_PATTERN_WAVES) {
+                for (int x = 0; x < LV_HOR_RES; x += spacing) {
+                    lv_point_t w1 = {(lv_coord_t)x, (lv_coord_t)(y + ((x / spacing) & 1 ? 2 : 0))};
+                    lv_point_t w2 = {(lv_coord_t)(x + spacing), (lv_coord_t)(y + ((x / spacing) & 1 ? 0 : 2))};
+                    lv_draw_line(draw_ctx, &line, &w1, &w2);
+                }
+            } else {
+                lv_draw_line(draw_ctx, &line, &p1, &p2);
+            }
+        }
+        return;
+    }
+
+    if (pattern == THEME_PATTERN_GRID) {
+        for (int x = 0; x < LV_HOR_RES; x += spacing) {
+            lv_area_t stripe = {(lv_coord_t)x, area.y1, (lv_coord_t)x, area.y2};
+            lv_draw_rect(draw_ctx, &mark, &stripe);
+        }
+        for (int y = 0; y < LV_VER_RES; y += spacing) {
+            lv_area_t stripe = {area.x1, (lv_coord_t)y, area.x2, (lv_coord_t)y};
+            lv_draw_rect(draw_ctx, &mark, &stripe);
+        }
+        return;
+    }
+
+    int dot_size = pattern == THEME_PATTERN_DITHER ? 2 : 1;
+    int step = pattern == THEME_PATTERN_GRAIN ? spacing + 5 : spacing;
+    for (int y = 0; y < LV_VER_RES; y += step) {
+        int offset = ((y / step) & 1) ? step / 2 : 0;
+        for (int x = offset; x < LV_HOR_RES; x += step) {
+            lv_area_t dot = {(lv_coord_t)x, (lv_coord_t)y,
+                             (lv_coord_t)(x + dot_size - 1), (lv_coord_t)(y + dot_size - 1)};
+            lv_draw_rect(draw_ctx, &mark, &dot);
+        }
+    }
+}
+
+static void remove_theme_pattern(lv_obj_t *root) {
+    if (!root || !lv_obj_is_valid(root)) return;
+    for (int i = 0; i < (int)lv_obj_get_child_cnt(root); i++) {
+        lv_obj_t *child = lv_obj_get_child(root, i);
+        if (child && lv_obj_has_flag(child, LV_OBJ_FLAG_USER_2)) {
+            lv_obj_del(child);
+            i--;
+        }
+    }
+}
+
+/* Re-applies the background treatment for an explicit theme, bypassing the
+ * opt-in guard so settings screens can refresh after live changes. */
+void gui_screen_apply_theme_background_for(lv_obj_t *root, uint8_t theme) {
+    if (!root || !lv_obj_is_valid(root)) return;
+    theme = theme_palette_clamp_id(theme);
+    remove_theme_pattern(root);
+    /* Flat palette fill only: RGB565 without LV_DITHER_GRADIENT renders
+     * subtle gradients as hard bands, so textures come from the pattern
+     * layer instead of bg_grad. */
+    lv_obj_set_style_bg_color(root, lv_color_hex(theme_palette_get_background(theme)), LV_PART_MAIN);
+
+    bool decorate = settings_get_theme_background_effects(&G_Settings) &&
+                    theme_palette_get_pattern(theme) != THEME_PATTERN_NONE;
+    if (!decorate) return;
+
+    lv_obj_t *pattern = lv_obj_create(root);
+    if (!pattern) return;
+    lv_obj_set_size(pattern, LV_HOR_RES, LV_VER_RES);
+    lv_obj_set_pos(pattern, 0, 0);
+    lv_obj_set_style_bg_opa(pattern, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(pattern, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(pattern, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(pattern, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(pattern, LV_OBJ_FLAG_FLOATING | LV_OBJ_FLAG_USER_2);
+    lv_obj_set_user_data(pattern, (void *)(intptr_t)theme);
+    lv_obj_add_event_cb(pattern, theme_pattern_draw_cb, LV_EVENT_DRAW_MAIN, NULL);
+    lv_obj_move_to_index(pattern, 0);
+}
+
+void gui_screen_apply_theme_background(lv_obj_t *root) {
+    if (!root || !lv_obj_is_valid(root)) return;
+    gui_screen_apply_theme_background_for(root, settings_get_menu_theme(&G_Settings));
+}
+
+static void apply_theme_background(lv_obj_t *root, lv_color_t requested_bg) {
+    /* Only decorate roots whose fill matches the palette background, so
+     * canvases that deliberately requested a fixed color stay untouched. */
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    lv_color_t theme_bg = lv_color_hex(theme_palette_get_background(theme));
+    if ((lv_color_to32(requested_bg) & 0xFFFFFFu) != (lv_color_to32(theme_bg) & 0xFFFFFFu)) return;
+    gui_screen_apply_theme_background_for(root, theme);
+}
 
 /* Drop the short-circuit cache (e.g. after lv_obj_clean on the root). */
 static void invalidate_bg_shortcut(void) {
@@ -91,6 +231,8 @@ static void indexed_scaled_bg_draw_cb(lv_event_t *e) {
 
 static void apply_bg_widget(lv_obj_t *root, const lv_img_dsc_t *src) {
     lv_obj_set_style_bg_opa(root, LV_OPA_TRANSP, LV_PART_MAIN);
+    /* Asset artwork replaces any theme texture so it is never overdrawn. */
+    remove_theme_pattern(root);
     bool custom_indexed_scale = asset_pack_background_should_scale() &&
                                 (src->header.cf == LV_IMG_CF_INDEXED_4BIT ||
                                  src->header.cf == LV_IMG_CF_INDEXED_1BIT);
@@ -201,6 +343,8 @@ static lv_obj_t *create_root_internal(lv_obj_t *parent, const char *title,
             s_last_applied_bg_root = root;
             s_last_applied_bg_src = bg_src;
             s_last_applied_bg_version = asset_pack_get_version();
+        } else {
+            apply_theme_background(root, bg_color);
         }
     }
 
@@ -246,14 +390,17 @@ void gui_screen_apply_background(lv_obj_t *root) {
     const lv_img_dsc_t *bg_src = asset_pack_get_background_fullscreen();
     if (!bg_src) bg_src = asset_pack_get_background_tile();
     if (!bg_src) {
-        /* No background available - drop any existing bg widget. */
+        /* No background available - drop any existing bg widget, then fall
+         * back to the theme's gradient/pattern treatment. */
         for (int i = 0; i < (int)lv_obj_get_child_cnt(root); i++) {
             lv_obj_t *child = lv_obj_get_child(root, i);
             if (child && lv_obj_has_flag(child, LV_OBJ_FLAG_USER_1)) {
                 lv_obj_del(child);
-                break;
+                i--;
             }
         }
+        uint8_t theme = settings_get_menu_theme(&G_Settings);
+        apply_theme_background(root, lv_color_hex(theme_palette_get_background(theme)));
         s_last_applied_bg_root = NULL;
         s_last_applied_bg_src = NULL;
         s_last_applied_bg_version = cur_ver;

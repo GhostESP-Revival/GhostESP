@@ -2,7 +2,7 @@ import pathlib
 import shutil
 import sys
 
-from .config import resolve_template, resolve_sdk_path
+from .config import resolve_template, copy_bundled_sdk
 
 
 def _render_file(path: pathlib.Path, values: dict) -> None:
@@ -30,18 +30,10 @@ def create_app(
         raise SystemExit(2)
 
     shutil.copytree(src, dst)
+    copy_bundled_sdk(dst)
 
     symbol = app_id.replace("-", "_")
     display_name = name or app_id.replace("_", " ").replace("-", " ").title()
-
-    try:
-        sdk_path = resolve_sdk_path(start=dst)
-        sdk_rel = pathlib.Path("..").joinpath(*pathlib.PurePosixPath(
-            pathlib.Path(dst).relative_to(dst.anchor)
-        ).parts[:0])
-        count = len(dst.relative_to(dst.anchor).parts) - len(out_parent.relative_to(out_parent.anchor).parts)
-    except FileNotFoundError:
-        sdk_rel = pathlib.Path("../../../sdk")
 
     values = {
         "APP_ID": app_id,

@@ -54,15 +54,11 @@ static int capture_list_dir(const char *dir_path) {
 static void handle_capture_list(void) {
     bool jit_mounted = false;
     bool display_suspended = false;
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
-        if (!sd_card_manager.is_initialized) {
-            if (sd_card_mount_for_flush(&display_suspended) == ESP_OK) {
-                jit_mounted = true;
-            }
+    if (sd_card_needs_jit_mount() && !sd_card_manager.is_initialized) {
+        if (sd_card_mount_for_flush(&display_suspended) == ESP_OK) {
+            jit_mounted = true;
         }
     }
-#endif
     glog("On-device captures:\n");
     int count = capture_list_dir("/mnt/ghostesp/pcaps");
     count += capture_list_dir("/mnt/ghostesp/ghostchi/pcaps");
@@ -78,15 +74,11 @@ static void handle_capture_export(const char *arg) {
 
     bool jit_mounted = false;
     bool display_suspended = false;
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
-        if (!sd_card_manager.is_initialized) {
-            if (sd_card_mount_for_flush(&display_suspended) == ESP_OK) {
-                jit_mounted = true;
-            }
+    if (sd_card_needs_jit_mount() && !sd_card_manager.is_initialized) {
+        if (sd_card_mount_for_flush(&display_suspended) == ESP_OK) {
+            jit_mounted = true;
         }
     }
-#endif
 
     capture_resolve_pcap_path(arg, in_path, sizeof(in_path));
     esp_err_t err = pcap_export_hc22000(in_path, out_path, sizeof(out_path), &pmkid, &handshakes);
@@ -380,7 +372,7 @@ void handle_capture_scan(int argc, char **argv) {
         }
     }
 
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     if (strcmp(capturetype, "-wiresharkble") == 0) {
         status_display_show_status("Wireshark BLE");
         int err = pcap_wireshark_start(PCAP_CAPTURE_BLUETOOTH);
@@ -396,7 +388,7 @@ void handle_capture_scan(int argc, char **argv) {
         glog("Stopping packet capture...\n");
         wifi_manager_stop_wireshark_channel_hop();
         wifi_manager_stop_monitor_mode();
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
         ble_stop();
 #endif
 #if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
@@ -412,7 +404,7 @@ void handle_capture_scan(int argc, char **argv) {
              (unsigned long)stats.packets_dropped);
         status_display_show_status("Capture Stop");
     }
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     if (strcmp(capturetype, "-ble") == 0) {
         printf("Starting BLE packet capture...\n");
         TERMINAL_VIEW_ADD_TEXT("Starting BLE packet capture...\n");
@@ -450,7 +442,7 @@ void handle_capture_scan(int argc, char **argv) {
         strcmp(capturetype, "-export") != 0 &&
         strcmp(capturetype, "-wireshark") != 0 &&
         strcmp(capturetype, "-stop") != 0
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
         && strcmp(capturetype, "-wiresharkble") != 0
         && strcmp(capturetype, "-ble") != 0
         && strcmp(capturetype, "-skimmer") != 0
@@ -476,7 +468,7 @@ void handle_capture(int argc, char **argv) {
         status_display_show_status("Capture Usage");
         return;
     }
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     if (strcmp(argv[1], "-ble") == 0) {
         glog("Starting BLE packet capture...\n");
         ble_start_capture();

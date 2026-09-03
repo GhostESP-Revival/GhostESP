@@ -121,7 +121,7 @@ static bool nfc_cli_init_st25r(nfc_cli_ctx_t *ctx) {
         (gpio_num_t)CONFIG_NFC_SCL_PIN,
         (gpio_num_t)CONFIG_NFC_RST_PIN,
         (gpio_num_t)CONFIG_NFC_IRQ_PIN,
-        I2C_NUM_0,
+        CONFIG_NFC_ST25R3916_I2C_PORT,
         CONFIG_NFC_ST25R3916_I2C_ADDR,
         ctx->nfc);
 #endif

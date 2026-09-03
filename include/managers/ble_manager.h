@@ -15,11 +15,14 @@
   20 // Length of the payload to compare for similarity
 #define TIME_WINDOW_MS 3000
 
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 
 struct ble_gap_event;
 
 typedef void (*ble_data_handler_t)(struct ble_gap_event *event, size_t len);
+
+typedef esp_err_t (*ble_pre_host_init_fn)(void *arg);
+typedef void (*ble_pre_host_cleanup_fn)(void *arg);
 
 typedef struct {
   uint16_t uuid16[MAX_UUID16];
@@ -35,6 +38,9 @@ typedef struct {
 esp_err_t ble_register_handler(ble_data_handler_t handler);
 esp_err_t ble_unregister_handler(ble_data_handler_t handler);
 void ble_init(void);
+bool ble_init_with_pre_host(ble_pre_host_init_fn init_fn,
+                            ble_pre_host_cleanup_fn cleanup_fn,
+                            void *arg);
 void ble_deinit(void);
 void ble_stop(void);
 void stop_ble_stack(void);

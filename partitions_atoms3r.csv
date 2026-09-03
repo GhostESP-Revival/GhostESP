@@ -1,0 +1,14 @@
+# Non-OTA (factory) partition table for M5Stack AtomS3R (8MB).
+#
+# Release build: OTA is disabled for this board, so a single factory app slot
+# is used (mirrors partitions_s3twatch.csv scaled to 8MB with 1MB storage).
+# The app slot stays at 0x3D0000 - the same size the previous OTA table used -
+# and the 1MB 'storage' FAT partition sits at the same 0x400000 offset the
+# S3TWatch builds use, giving the on-device VFS (/mnt) for IR captures and
+# asset packs without an SD card.
+#
+# Name,     Type, SubType, Offset,  Size,    Flags
+nvs,        data, nvs,     0x9000,  0x7000,
+app0,       app,  factory, 0x10000, 0x3D0000,
+coredump,   data, coredump,0x3E0000,0x20000,
+storage,    data, fat,     0x400000,0x100000,

@@ -15,7 +15,7 @@ set(ALLOWED_IMPORTS
     __bswapsi2 __divdi3 __divsf3 __errno __extendsfdf2 __ltdf2 __truncdfsf2 __getreent _ctype_
     atof atoi calloc exit fclose ferror fflush fopen fprintf fputc fputs fread free
     fseek ftell fwrite malloc memcpy memset mkdir printf putchar puts realloc remove
-    rename snprintf sscanf strcasecmp strchr strcmp strdup strlen strncasecmp strncmp
+    rename snprintf sscanf strcasecmp strchr strcmp strdup strlen memmove strncasecmp strncmp
     strncpy strrchr strstr vfprintf vsnprintf
 )
 

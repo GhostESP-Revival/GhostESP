@@ -1,0 +1,11 @@
+# CrowPanel Advanced P4 onboard ESP32-C6 ESP-Hosted slave configuration.
+# Board revisions change the P4 host pins, not the C6-side SDIO pins; the
+# ESP-Hosted slave project's target defaults select the C6 pin mapping.
+CONFIG_ESP_HOSTED_COPROCESSOR=y
+CONFIG_ESP_HOSTED_CP_BT=y
+CONFIG_ESP_HOSTED_CP_WIFI=y
+CONFIG_ESP_HOSTED_COPROCESSOR_APP_MAIN=y
+CONFIG_ESP_SDIO_HOST_INTERFACE=y
+CONFIG_ESP_SDIO_GPIO_RESET=-1
+CONFIG_ESP_HOSTED_ENABLE_PEER_DATA_TRANSFER=y
+CONFIG_ESP_HOSTED_MAX_CUSTOM_MSG_HANDLERS=5

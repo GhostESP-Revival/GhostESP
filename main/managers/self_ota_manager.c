@@ -77,11 +77,8 @@ static void self_ota_restore_last_updater_error(void) {
 }
 
 bool self_ota_manager_is_supported(void) {
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    return strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0;
-#else
+    // Disabled for v2.1.2 on Banshee C5 - OTA was bad UX and caused flash overflow
     return false;
-#endif
 }
 
 esp_err_t self_ota_manager_init(void) {
@@ -95,19 +92,8 @@ esp_err_t self_ota_manager_init(void) {
     s_status.state = SELF_OTA_STATE_IDLE;
     self_ota_restore_last_updater_error();
 
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
-        esp_err_t err = self_ota_migrate_banshee_c5_partition_table_if_needed();
-        if (err != ESP_OK) {
-            glog("Self-OTA: updater partition layout unavailable: %s\n", esp_err_to_name(err));
-            return err;
-        }
-        err = self_ota_provision_banshee_c5_updater();
-        if (err != ESP_OK) {
-            glog("Self-OTA: updater provisioning unavailable: %s\n", esp_err_to_name(err));
-        }
-    }
-#endif
+    (void)self_ota_migrate_banshee_c5_partition_table_if_needed;
+    (void)self_ota_provision_banshee_c5_updater;
     return ESP_OK;
 }
 

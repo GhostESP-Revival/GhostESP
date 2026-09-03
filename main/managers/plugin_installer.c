@@ -5,6 +5,8 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "lgfx/utility/lgfx_miniz.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
@@ -288,6 +290,7 @@ static esp_err_t extract_gapp_to_dir(const char *gapp_path, const char *dst_dir)
                since asset_storage_read_at/size answer from the index first. */
             write_bytes_to_file(out_path, NULL, 0);
             if (fseek(f, (long)comp_size, SEEK_CUR) != 0) { free(direct_entries); fclose(f); return ESP_FAIL; }
+            vTaskDelay(1);
             continue;
         }
 
@@ -362,6 +365,7 @@ static esp_err_t extract_gapp_to_dir(const char *gapp_path, const char *dst_dir)
         free(comp);
         if (!ok) { free(direct_entries); fclose(f); return ESP_FAIL; }
         extracted_count++;
+        vTaskDelay(1);
     }
 
     fclose(f);

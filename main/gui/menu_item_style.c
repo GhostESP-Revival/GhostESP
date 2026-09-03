@@ -1,4 +1,24 @@
 #include "gui/menu_item_style.h"
+#include "gui/ui_capabilities.h"
+
+#if GUI_LARGE_TOUCH_UI && defined(CONFIG_USE_TOUCHSCREEN)
+static bool s_touch_input = true;
+#else
+static bool s_touch_input = false;
+#endif
+
+bool gui_menu_set_touch_input(bool touch) {
+#if GUI_LARGE_TOUCH_UI
+    bool changed = s_touch_input != touch;
+    s_touch_input = touch;
+    return changed;
+#else
+    (void)touch;
+    return false;
+#endif
+}
+
+bool gui_menu_focus_visible(void) { return !s_touch_input; }
 
 void gui_menu_card_apply(lv_obj_t *obj, bool background_enabled,
                          lv_color_t surface, lv_color_t border,
@@ -23,7 +43,7 @@ void gui_menu_card_apply(lv_obj_t *obj, bool background_enabled,
 
 void gui_menu_card_apply_selected(lv_obj_t *obj, bool background_enabled,
                                   lv_color_t accent) {
-    if (!obj) return;
+    if (!obj || !gui_menu_focus_visible()) return;
 
     // Focus remains visible even when users disable card backgrounds.
     lv_obj_set_style_border_width(obj, 2, LV_PART_MAIN);
@@ -52,7 +72,7 @@ void gui_menu_launcher_tile_apply(lv_obj_t *obj, bool background_enabled,
 
 void gui_menu_launcher_tile_apply_selected(lv_obj_t *obj, bool background_enabled,
                                            lv_color_t accent) {
-    if (!obj) return;
+    if (!obj || !gui_menu_focus_visible()) return;
     (void)accent;
 
     // Selection is a neutral focus plate; color remains on the icon and page dot.
@@ -68,6 +88,7 @@ void gui_menu_compact_tile_apply(lv_obj_t *obj, lv_obj_t *label, bool selected,
                                  lv_color_t accent_text) {
     if (!obj) return;
 
+    selected = selected && gui_menu_focus_visible();
     lv_obj_set_style_bg_color(obj, selected ? accent : surface, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(obj, selected ? LV_OPA_COVER :
                             (background_enabled ? LV_OPA_COVER : LV_OPA_TRANSP), LV_PART_MAIN);
@@ -85,11 +106,19 @@ void gui_menu_page_indicator_update(lv_obj_t *indicator, int current_page, int p
     if (current_page >= page_count) current_page = page_count - 1;
 
     lv_obj_clean(indicator);
+#if GUI_LARGE_SCREEN
+    lv_obj_set_size(indicator, LV_SIZE_CONTENT, 16);
+#else
     lv_obj_set_size(indicator, LV_SIZE_CONTENT, 10);
+#endif
     lv_obj_set_flex_flow(indicator, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(indicator, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_all(indicator, 0, LV_PART_MAIN);
+#if GUI_LARGE_SCREEN
+    lv_obj_set_style_pad_column(indicator, 8, LV_PART_MAIN);
+#else
     lv_obj_set_style_pad_column(indicator, 4, LV_PART_MAIN);
+#endif
     lv_obj_set_style_bg_opa(indicator, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_width(indicator, 0, LV_PART_MAIN);
     lv_obj_clear_flag(indicator, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
@@ -97,7 +126,16 @@ void gui_menu_page_indicator_update(lv_obj_t *indicator, int current_page, int p
     for (int page = 0; page < page_count; ++page) {
         bool selected = page == current_page;
         lv_obj_t *dot = lv_obj_create(indicator);
-        lv_obj_set_size(dot, selected ? 6 : 4, selected ? 6 : 4);
+#if GUI_LARGE_SCREEN
+        /* The active page becomes a short pill. It reads more clearly at
+         * arm's length than a slightly larger dot on a 800px+ display. */
+        int dot_w = selected ? 26 : 8;
+        int dot_h = selected ? 10 : 8;
+#else
+        int dot_w = selected ? 6 : 4;
+        int dot_h = selected ? 6 : 4;
+#endif
+        lv_obj_set_size(dot, dot_w, dot_h);
         lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, LV_PART_MAIN);
         lv_obj_set_style_bg_color(dot, selected ? active : inactive, LV_PART_MAIN);
         lv_obj_set_style_bg_opa(dot, selected ? LV_OPA_COVER : LV_OPA_40, LV_PART_MAIN);

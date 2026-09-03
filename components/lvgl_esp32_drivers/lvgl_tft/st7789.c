@@ -61,6 +61,7 @@ void st7789_init(void)
         {ST7789_NORON, {0}, 0},
         {ST7789_MADCTL, {0x00}, 1},
         {ST7789_COLMOD, {0x55}, 1},
+        {ST7789_RAMCTRL, {0x00, 0xF0}, 2},
         {ST7789_PORCTRL, {0x0c, 0x0c, 0x00, 0x33, 0x33}, 5},
         {ST7789_GCTRL, {0x75}, 1},
         {ST7789_VCOMS, {0x1a}, 1},
@@ -114,6 +115,10 @@ void st7789_init(void)
     bool use_clean_st7789_init = false;
     bool nm_cyd_c5_panel = false;
 #ifdef CONFIG_USE_TDECK
+    use_clean_st7789_init = true;
+#elif defined(CONFIG_CROWPANEL_ADVANCE_SMALL_SPI_LCD)
+    /* Elecrow's factory driver uses the normal ST7789 command set, inverted
+     * colors and no hardware reset line on both the 2.4 and 2.8-inch boards. */
     use_clean_st7789_init = true;
 #elif defined(CONFIG_BUILD_CONFIG_TEMPLATE)
     nm_cyd_c5_panel = strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "NM-CYD-C5") == 0;
@@ -291,7 +296,12 @@ static void st7789_set_orientation(uint8_t orientation)
 
     uint8_t data[] =
     {
-#if CONFIG_LV_PREDEFINED_DISPLAY_TTGO
+#if defined(CONFIG_CROWPANEL_ADVANCE_SMALL_SPI_LCD)
+    /* Match Elecrow's ESP-IDF LVGL port: swap_xy=true, mirror_x=false,
+     * mirror_y=true, RGB element order.  The previous 0xB8 also enabled
+     * BGR and ML, which produced incorrect colors and panel orientation. */
+    0x00, 0xC0, 0xA0, 0x60
+#elif CONFIG_LV_PREDEFINED_DISPLAY_TTGO
 	0x60, 0xA0, 0x00, 0xC0
 #else
 	0xC0, 0x00, 0x60, 0xA0

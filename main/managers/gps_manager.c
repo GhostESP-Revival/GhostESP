@@ -22,6 +22,7 @@
 #include "managers/rgb_manager.h"
 #include "vendor/GPS/minmea_soft.h"
 #include "driver/gpio.h"
+#include "i2c_shared.h"
 #include <esp_heap_caps.h>
 #include "esp_pm.h"
 #include "freertos/FreeRTOS.h"
@@ -45,6 +46,41 @@ static bool gps_soft_mode_active = false;
 static bool gps_soft_released_rgb_rmt = false;
 static bool gps_disabled_comm_for_conflict = false;
 static bool gps_released_serial_for_conflict = false;
+
+#ifdef CONFIG_IS_ATOMS3R
+static bool gps_released_grove_i2c = false;
+
+static void gps_restore_grove_i2c(void)
+{
+    if (!gps_released_grove_i2c) return;
+    i2c_master_bus_handle_t bus = NULL;
+    bool created = false;
+    esp_err_t ret = i2c_shared_get_or_create_bus(I2C_NUM_1, GPIO_NUM_2,
+                                                  GPIO_NUM_1, true,
+                                                  &bus, &created);
+    if (ret == ESP_OK) {
+        ESP_LOGI(GPS_TAG, "Restored Grove I2C bus 1 (SDA=2, SCL=1)%s",
+                 created ? " [created]" : "");
+        gps_released_grove_i2c = false;
+    } else {
+        ESP_LOGE(GPS_TAG, "Failed to restore Grove I2C: %s",
+                 esp_err_to_name(ret));
+    }
+}
+
+static void gps_release_grove_i2c_if_needed(uint8_t rx_pin)
+{
+    if (rx_pin != GPIO_NUM_2 || gps_released_grove_i2c) return;
+    esp_err_t ret = i2c_shared_release_bus(I2C_NUM_1);
+    if (ret == ESP_OK || ret == ESP_ERR_NOT_FOUND) {
+        gps_released_grove_i2c = true;
+        ESP_LOGI(GPS_TAG, "Released Grove I2C for GPS UART RX on GPIO2");
+    } else {
+        ESP_LOGE(GPS_TAG, "Could not release Grove I2C for GPS: %s",
+                 esp_err_to_name(ret));
+    }
+}
+#endif
 
 // Give the shared UART port back to the serial command interface if GPS took it
 // over (see the release in gps start). GPS owns the port via uart_share, so it
@@ -760,6 +796,11 @@ void gps_manager_init(GPSManager *manager) {
         return;
     }
 
+#ifdef CONFIG_IS_ATOMS3R
+    /* GPIO2 is Grove SDA. GPS temporarily owns it as UART RX. */
+    gps_release_grove_i2c_if_needed(current_rx_pin);
+#endif
+
     glog("GPS RX: IO%d\n", current_rx_pin);
 
     bool preserve_dualcomm = gps_should_preserve_dualcomm();
@@ -904,6 +945,9 @@ void gps_manager_init(GPSManager *manager) {
             esp_comm_manager_init_with_defaults();
             gps_disabled_comm_for_conflict = false;
         }
+#ifdef CONFIG_IS_ATOMS3R
+        gps_restore_grove_i2c();
+#endif
         gps_lifecycle_end();
         return;
     }
@@ -1191,6 +1235,9 @@ void gps_manager_deinit(GPSManager *manager) {
     } else {
         status_display_show_status("GPS Not Init");
     }
+#ifdef CONFIG_IS_ATOMS3R
+    gps_restore_grove_i2c();
+#endif
     gps_lifecycle_end();
 }
 

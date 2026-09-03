@@ -4,6 +4,8 @@
 #include "core/esp_comm_manager.h"
 #include "managers/sd_card_manager.h"
 #include "managers/microphone/mic_visualizer.h"
+#include "managers/audio_receiver_manager.h"
+#include "managers/audio_i2s_output.h"
 #ifdef CONFIG_HAS_TLV320DAC_I2C
 #include "tlv320dac3100.h"
 #endif
@@ -40,6 +42,10 @@ static const char *TAG = "AudioStream";
 #define STREAM_RX_PAUSE_DELAY_MS 20
 #define STREAM_RX_MAX_PAUSE_MS 750
 #define STREAM_MAX_ACCEPTED_BITRATE_KBPS 264
+/* Local playback feeds the on-board ring buffer + decoder, which handle the
+ * full MP3 range (MPEG1 Layer III tops out at 320 kbps), so the GhostLink
+ * link cap above must NOT apply when no peer is connected. */
+#define STREAM_MAX_LOCAL_BITRATE_KBPS 320
 
 typedef struct {
     char (*filenames)[MAX_FILENAME_LEN];
@@ -56,11 +62,13 @@ typedef struct {
     const uint8_t *embedded_data;
     size_t embedded_len;
     uint16_t detected_bitrate_kbps;
+    uint32_t duration_ms;
     bool mic_visualizer_was_running;
     size_t receiver_fill_bytes;
     size_t receiver_capacity_bytes;
     uint32_t receiver_played_ms;
     TickType_t receiver_status_tick;
+    esp_err_t last_play_error;
 } audio_stream_ctx_t;
 
 static audio_stream_ctx_t s_ctx = {0};
@@ -93,16 +101,30 @@ static bool audio_sd_begin(bool *display_was_suspended, bool *did_mount, bool en
 static void audio_sd_end(bool display_was_suspended, bool did_mount);
 static void audio_stream_play_precheck_task(void *arg);
 static void audio_stream_play_embedded_precheck_task(void *arg);
-static esp_err_t audio_stream_start_after_precheck(int index, uint16_t bitrate, size_t total_size);
+static esp_err_t audio_stream_start_after_precheck(int index, uint16_t bitrate, size_t total_size,
+                                                   uint32_t duration_ms);
 static esp_err_t audio_stream_start_embedded_after_precheck(const uint8_t *data,
                                                             size_t len,
-                                                            uint16_t bitrate);
+                                                            uint16_t bitrate,
+                                                            uint32_t duration_ms);
 
 static bool audio_sd_should_jit(void)
 {
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
     return strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0 ||
            strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething2") == 0;
+#else
+    return false;
+#endif
+}
+
+/* Whether this board has an audio receiver (decoder + I2S speaker output) of
+ * its own. When no GhostLink peer is connected, the stream task feeds the
+ * local receiver instead of waiting for a peer. */
+static bool audio_stream_local_output_available(void)
+{
+#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER) || defined(CONFIG_HAS_CROWPANEL_NS4168)
+    return true;
 #else
     return false;
 #endif
@@ -125,10 +147,30 @@ static void audio_pause_competing_streams(void)
         ESP_LOGI(TAG, "Pausing MIC visualizer during audio stream");
         (void)mic_visualizer_stop();
     }
+
+#ifdef CONFIG_HAS_AW88298_SPEAKER
+    /* CoreS3 shares the I2S BCLK/WS lines between the ES7210 mic (RX) and the
+     * AW88298 speaker (TX); only one master can drive those pins at a time.
+     * The speaker channel created at boot could not bind BCLK/WS while the mic
+     * held them, so rebind it now that the mic has released the pins - without
+     * this the amp gets no bit clock and playback is silent. */
+    if (audio_i2s_output_is_initialized()) {
+        audio_i2s_output_deinit();
+    }
+    esp_err_t spk_ret = audio_i2s_output_init();
+    if (spk_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Speaker I2S rebind failed: %s", esp_err_to_name(spk_ret));
+    }
+#endif
 }
 
 static void audio_resume_competing_streams(void)
 {
+#ifdef CONFIG_HAS_AW88298_SPEAKER
+    /* Release the shared BCLK/WS pins so the mic can reclaim them below. */
+    audio_i2s_output_deinit();
+#endif
+
     if (s_ctx.mic_visualizer_was_running) {
         s_ctx.mic_visualizer_was_running = false;
         ESP_LOGI(TAG, "Resuming MIC visualizer after audio stream");
@@ -165,6 +207,136 @@ static void audio_sd_end(bool display_was_suspended, bool did_mount)
     if (did_mount) {
         sd_card_unmount_after_flush(display_was_suspended);
     }
+}
+
+/* MPEG1 Layer 3 bitrate table (kbps) indexed by the 4-bit bitrate field */
+static const uint16_t mp3_bitrates_mpeg1_l3[16] = {
+    0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0
+};
+
+/* MPEG2/2.5 Layer 3 bitrate table (kbps) */
+static const uint16_t mp3_bitrates_mpeg2_l3[16] = {
+    0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0
+};
+
+/* Size in bytes of an ID3v2 tag at the start of the buffer (0 if none). */
+static size_t mp3_id3v2_tag_end(const uint8_t *data, size_t len)
+{
+    if (len >= 10 && memcmp(data, "ID3", 3) == 0) {
+        uint32_t tag_size = ((uint32_t)(data[6] & 0x7F) << 21) |
+                            ((uint32_t)(data[7] & 0x7F) << 14) |
+                            ((uint32_t)(data[8] & 0x7F) << 7)  |
+                            ((uint32_t)(data[9] & 0x7F));
+        size_t end = 10 + tag_size;
+        if (end > len) end = len;
+        return end;
+    }
+    return 0;
+}
+
+/**
+ * @brief Parse the first MP3 frame to determine bitrate and, when the file
+ *        carries a Xing/Info or VBRI VBR header, the exact track duration.
+ *
+ * @param data         Buffer containing the start of the MP3 stream
+ *                     (ID3v2 tag may be skipped by the caller or not present)
+ * @param len          Buffer length
+ * @param bitrate_kbps Output: bitrate of the first frame in kbps (0 if none)
+ * @param duration_ms  Output: exact duration in ms (0 if no VBR header found)
+ */
+static void mp3_parse_track_info(const uint8_t *data, size_t len,
+                                 uint16_t *bitrate_kbps, uint32_t *duration_ms)
+{
+    if (bitrate_kbps) *bitrate_kbps = 0;
+    if (duration_ms) *duration_ms = 0;
+    if (!data || len < 4) return;
+
+    static const uint32_t mpeg1_rates[3] = {44100, 48000, 32000};
+    static const uint32_t mpeg2_rates[3] = {22050, 24000, 16000};
+    static const uint32_t mpeg25_rates[3] = {11025, 12000, 8000};
+
+    size_t scan_limit = len < 4096 ? len : 4096;
+    for (size_t i = 0; i + 4 <= scan_limit; i++) {
+        if (data[i] != 0xFF) continue;
+        uint8_t b1 = data[i + 1];
+        if ((b1 & 0xE0) != 0xE0) continue;
+
+        uint8_t version = (b1 >> 3) & 0x03; /* 3 = MPEG1, 2 = MPEG2, 0 = MPEG2.5 */
+        uint8_t layer = (b1 >> 1) & 0x03;   /* 1 = Layer III */
+        if (layer != 1) continue;
+
+        uint8_t br_idx = (data[i + 2] >> 4) & 0x0F;
+        if (br_idx == 0 || br_idx == 0x0F) continue;
+
+        uint8_t sr_idx = (data[i + 2] >> 2) & 0x03;
+        if (sr_idx == 3) continue;
+
+        uint32_t bitrate = (version == 3) ? mp3_bitrates_mpeg1_l3[br_idx]
+                                          : mp3_bitrates_mpeg2_l3[br_idx];
+        uint32_t sample_rate = (version == 3) ? mpeg1_rates[sr_idx]
+                             : (version == 2) ? mpeg2_rates[sr_idx]
+                                              : mpeg25_rates[sr_idx];
+        uint32_t samples_per_frame = (version == 3) ? 1152 : 576;
+        bool mono = ((data[i + 3] >> 6) & 0x03) == 3;
+
+        if (bitrate_kbps) *bitrate_kbps = (uint16_t)bitrate;
+
+        /* Xing/Info header sits right after the frame side info. It contains
+         * the real frame count, which is exact even for VBR files. */
+        size_t side_info = (version == 3) ? (mono ? 17 : 32) : (mono ? 9 : 17);
+        size_t xing_off = i + 4 + side_info;
+        if (xing_off + 16 <= len &&
+            (memcmp(data + xing_off, "Xing", 4) == 0 ||
+             memcmp(data + xing_off, "Info", 4) == 0)) {
+            uint32_t flags = ((uint32_t)data[xing_off + 4] << 24) |
+                             ((uint32_t)data[xing_off + 5] << 16) |
+                             ((uint32_t)data[xing_off + 6] << 8) |
+                             (uint32_t)data[xing_off + 7];
+            if (flags & 0x01u) { /* frames field present */
+                uint32_t frames = ((uint32_t)data[xing_off + 8] << 24) |
+                                  ((uint32_t)data[xing_off + 9] << 16) |
+                                  ((uint32_t)data[xing_off + 10] << 8) |
+                                  (uint32_t)data[xing_off + 11];
+                if (frames > 0 && sample_rate > 0) {
+                    if (duration_ms) {
+                        *duration_ms = (uint32_t)(((uint64_t)frames * samples_per_frame * 1000) /
+                                                  sample_rate);
+                    }
+                }
+            }
+            return;
+        }
+
+        /* Fraunhofer VBRI header: fixed 36 bytes into the first frame. */
+        size_t vbri_off = i + 36;
+        if (vbri_off + 14 <= len && memcmp(data + vbri_off, "VBRI", 4) == 0) {
+            /* "VBRI"(4) version(2) delay(2) quality(2) bytes(4) frames(4) */
+            uint32_t frames = ((uint32_t)data[vbri_off + 14] << 24) |
+                              ((uint32_t)data[vbri_off + 15] << 16) |
+                              ((uint32_t)data[vbri_off + 16] << 8) |
+                              (uint32_t)data[vbri_off + 17];
+            if (frames > 0 && sample_rate > 0 && duration_ms) {
+                *duration_ms = (uint32_t)(((uint64_t)frames * samples_per_frame * 1000) /
+                                          sample_rate);
+            }
+            return;
+        }
+        return; /* first valid frame found; nothing else to scan for */
+    }
+}
+
+/**
+ * @brief Parse the first MP3 frame header to determine bitrate (kbps).
+ *
+ * Scans the first ~4KB for a valid frame sync and returns the bitrate.
+ * Returns 0 on failure (free-format, unknown, or not MP3).
+ */
+static uint16_t parse_mp3_bitrate(const uint8_t *data, size_t len)
+{
+    uint16_t br = 0;
+    uint32_t dur = 0;
+    mp3_parse_track_info(data, len, &br, &dur);
+    return br;
 }
 
 static bool is_mp3_file(const char *filename)
@@ -384,10 +556,12 @@ esp_err_t audio_stream_manager_play(int index)
     s_ctx.stream_id++;
     uint32_t stream_id = s_ctx.stream_id;
     s_ctx.detected_bitrate_kbps = 0;
+    s_ctx.duration_ms = 0;
     s_ctx.receiver_fill_bytes = 0;
     s_ctx.receiver_capacity_bytes = 0;
     s_ctx.receiver_played_ms = 0;
     s_ctx.receiver_status_tick = 0;
+    s_ctx.last_play_error = ESP_OK;
 
     xSemaphoreGive(s_ctx.mutex);
 
@@ -462,6 +636,9 @@ static void audio_stream_play_precheck_task(void *arg)
     uint16_t max_bitrate = 0;
     bool found_frame = false;
     size_t total_size = 0;
+    uint32_t duration_ms = 0;
+    size_t id3v2_size = 0;
+    bool has_id3v1 = false;
 
     if (!audio_sd_begin(&display_was_suspended, &did_mount, false)) {
         free(header_buf);
@@ -475,25 +652,30 @@ static void audio_stream_play_precheck_task(void *arg)
         size_t header_len = fread(header_buf, 1, scan_size, f);
 
         /* Skip ID3v2 header if present so we land on the first real MP3 frame. */
-        size_t scan_start = 0;
-        if (header_len >= 10 && memcmp(header_buf, "ID3", 3) == 0) {
-            uint32_t tag_size = ((uint32_t)(header_buf[6] & 0x7F) << 21) |
-                                ((uint32_t)(header_buf[7] & 0x7F) << 14) |
-                                ((uint32_t)(header_buf[8] & 0x7F) << 7)  |
-                                ((uint32_t)(header_buf[9] & 0x7F));
-            size_t tag_end = 10 + tag_size;
-            if (tag_end > header_len) tag_end = header_len;
-            scan_start = tag_end;
-        }
+        id3v2_size = mp3_id3v2_tag_end(header_buf, header_len);
+        size_t scan_start = (id3v2_size <= header_len) ? id3v2_size : header_len;
 
-        bitrate = parse_mp3_bitrate(header_buf + scan_start, header_len - scan_start);
-        if (bitrate > 0) {
-            found_frame = true;
-            max_bitrate = bitrate;
+        if (scan_start < header_len) {
+            mp3_parse_track_info(header_buf + scan_start, header_len - scan_start,
+                                 &bitrate, &duration_ms);
+            if (bitrate > 0) {
+                found_frame = true;
+                max_bitrate = bitrate;
+            }
         }
 
         fseek(f, 0, SEEK_END);
         total_size = (size_t)ftell(f);
+
+        /* Check for an ID3v1 tag at the very end of the file. */
+        if (total_size > 128) {
+            char tail[3];
+            if (fseek(f, (long)(total_size - 128), SEEK_SET) == 0 &&
+                fread(tail, 1, sizeof(tail), f) == sizeof(tail) &&
+                memcmp(tail, "TAG", 3) == 0) {
+                has_id3v1 = true;
+            }
+        }
         fclose(f);
     } else {
         ESP_LOGE(TAG, "Precheck failed: cannot open '%s'", path);
@@ -510,16 +692,29 @@ static void audio_stream_play_precheck_task(void *arg)
         return;
     }
 
-    if (found_frame && max_bitrate > STREAM_MAX_ACCEPTED_BITRATE_KBPS) {
-        ESP_LOGW(TAG, "Refusing %u kbps MP3; bitrate must be at most %u kbps",
-                 (unsigned)max_bitrate, (unsigned)STREAM_MAX_ACCEPTED_BITRATE_KBPS);
+    /* The GhostLink peer path must deliver audio in real time over the comm
+     * link, so refuse tracks above the link's sustainable bitrate when a
+     * peer is connected. Local playback has no such limit: the on-board ring
+     * buffer + decoder handle the full MP3 range (up to 320 kbps). */
+    if (found_frame &&
+        ((esp_comm_manager_is_connected() && max_bitrate > STREAM_MAX_ACCEPTED_BITRATE_KBPS) ||
+         max_bitrate > STREAM_MAX_LOCAL_BITRATE_KBPS)) {
+        ESP_LOGW(TAG, "Refusing %u kbps MP3; %s",
+                 (unsigned)max_bitrate,
+                 esp_comm_manager_is_connected()
+                     ? "GhostLink supports at most 264 kbps"
+                     : "unsupported bitrate");
         free(header_buf);
         xSemaphoreTake(s_ctx.mutex, portMAX_DELAY);
         s_ctx.state = AUDIO_STREAM_STATE_IDLE;
+        s_ctx.last_play_error = ESP_ERR_NOT_SUPPORTED;
         xSemaphoreGive(s_ctx.mutex);
         s_play_precheck_task = NULL;
         vTaskDelete(NULL);
         return;
+    }
+    if (found_frame && max_bitrate > STREAM_MAX_ACCEPTED_BITRATE_KBPS) {
+        ESP_LOGI(TAG, "Allowing %u kbps MP3 for local playback", (unsigned)max_bitrate);
     }
 
     if (!found_frame) {
@@ -532,13 +727,28 @@ static void audio_stream_play_precheck_task(void *arg)
         bitrate = 0;
     }
 
-    audio_stream_start_after_precheck(index, bitrate, total_size);
+    /* No Xing/VBRI header: estimate the length from the CBR bitrate and the
+     * file size minus ID3 tags, which is far closer than including the tags
+     * in the byte count. */
+    if (duration_ms == 0 && max_bitrate > 0 && total_size > id3v2_size) {
+        size_t audio_bytes = total_size - id3v2_size - (has_id3v1 ? 128 : 0);
+        if (audio_bytes > 0) {
+            duration_ms = (uint32_t)(((uint64_t)audio_bytes * 8000ULL) /
+                                     ((uint64_t)max_bitrate * 1000ULL));
+            ESP_LOGI(TAG, "Estimated %lu ms for '%s' (%u kbps CBR, %u audio bytes)",
+                     (unsigned long)duration_ms, s_ctx.filenames[index],
+                     (unsigned)max_bitrate, (unsigned)audio_bytes);
+        }
+    }
+
+    audio_stream_start_after_precheck(index, bitrate, total_size, duration_ms);
     free(header_buf);
     s_play_precheck_task = NULL;
     vTaskDelete(NULL);
 }
 
-static esp_err_t audio_stream_start_after_precheck(int index, uint16_t bitrate, size_t total_size)
+static esp_err_t audio_stream_start_after_precheck(int index, uint16_t bitrate,
+                                                   size_t total_size, uint32_t duration_ms)
 {
     /* Wait for any previous stream task to fully exit before reusing the
      * PSRAM stack. The wait must happen BEFORE taking the mutex, because
@@ -560,6 +770,7 @@ static esp_err_t audio_stream_start_after_precheck(int index, uint16_t bitrate, 
     s_ctx.embedded_data = NULL;
     s_ctx.embedded_len = total_size;
     s_ctx.detected_bitrate_kbps = bitrate;
+    s_ctx.duration_ms = duration_ms;
 
     s_ctx.state = AUDIO_STREAM_STATE_STOPPED;
     s_ctx.stream_id++;
@@ -571,7 +782,9 @@ static esp_err_t audio_stream_start_after_precheck(int index, uint16_t bitrate, 
 
     audio_pause_competing_streams();
     audio_apply_one_shot_headphone_route();
-    (void)esp_comm_manager_send_command("audio", "start");
+    if (esp_comm_manager_is_connected()) {
+        (void)esp_comm_manager_send_command("audio", "start");
+    }
 
     xSemaphoreTake(s_ctx.mutex, portMAX_DELAY);
     s_ctx.state = AUDIO_STREAM_STATE_PLAYING;
@@ -590,7 +803,11 @@ esp_err_t audio_stream_manager_pause(void)
     xSemaphoreTake(s_ctx.mutex, portMAX_DELAY);
     if (s_ctx.state == AUDIO_STREAM_STATE_PLAYING) {
         s_ctx.state = AUDIO_STREAM_STATE_PAUSED;
-        (void)esp_comm_manager_send_command("audio", "pause");
+        if (esp_comm_manager_is_connected()) {
+            (void)esp_comm_manager_send_command("audio", "pause");
+        } else {
+            audio_receiver_manager_pause();
+        }
         ESP_LOGI(TAG, "Paused");
     }
     xSemaphoreGive(s_ctx.mutex);
@@ -602,7 +819,14 @@ esp_err_t audio_stream_manager_resume(void)
     if (!s_ctx.initialized) return ESP_ERR_INVALID_STATE;
     xSemaphoreTake(s_ctx.mutex, portMAX_DELAY);
     if (s_ctx.state == AUDIO_STREAM_STATE_PAUSED) {
-        (void)esp_comm_manager_send_command("audio", "start");
+        if (esp_comm_manager_is_connected()) {
+            /* Dedicated resume command: the peer preserves its ring buffer
+             * and decoder state, so playback continues at the same point
+             * instead of flushing (start) and skipping the buffered tail. */
+            (void)esp_comm_manager_send_command("audio", "resume");
+        } else {
+            audio_receiver_manager_resume();
+        }
         s_ctx.state = AUDIO_STREAM_STATE_PLAYING;
         ESP_LOGI(TAG, "Resumed");
     }
@@ -618,7 +842,11 @@ esp_err_t audio_stream_manager_stop(void)
     s_ctx.state = AUDIO_STREAM_STATE_STOPPED;
     s_ctx.stream_id++;
 
-    (void)esp_comm_manager_send_command("audio", "stop");
+    if (esp_comm_manager_is_connected()) {
+        (void)esp_comm_manager_send_command("audio", "stop");
+    } else {
+        audio_receiver_manager_stop();
+    }
     audio_resume_competing_streams();
 
     xSemaphoreGive(s_ctx.mutex);
@@ -678,10 +906,12 @@ esp_err_t audio_stream_manager_play_embedded(const uint8_t *data, size_t len)
     s_ctx.stream_id++;
     uint32_t stream_id = s_ctx.stream_id;
     s_ctx.detected_bitrate_kbps = 0;
+    s_ctx.duration_ms = 0;
     s_ctx.receiver_fill_bytes = 0;
     s_ctx.receiver_capacity_bytes = 0;
     s_ctx.receiver_played_ms = 0;
     s_ctx.receiver_status_tick = 0;
+    s_ctx.last_play_error = ESP_OK;
     xSemaphoreGive(s_ctx.mutex);
 
     if (s_play_precheck_task) {
@@ -730,13 +960,37 @@ esp_err_t audio_stream_manager_play_embedded(const uint8_t *data, size_t len)
 static void audio_stream_play_embedded_precheck_task(void *arg)
 {
     play_embedded_precheck_job_t *job = (play_embedded_precheck_job_t *)arg;
-    uint16_t bitrate = parse_mp3_bitrate(job->data, job->len);
-    if (bitrate > STREAM_MAX_ACCEPTED_BITRATE_KBPS && bitrate > 0) {
-        ESP_LOGW(TAG, "Refusing %u kbps MP3; bitrate must be at most %u kbps",
-                 (unsigned)bitrate, (unsigned)STREAM_MAX_ACCEPTED_BITRATE_KBPS);
+    uint16_t bitrate = 0;
+    uint32_t duration_ms = 0;
+
+    /* Parse from the full in-RAM buffer; embedded data usually carries a
+     * Xing/LAME header so the exact duration comes straight out. */
+    size_t id3v2_size = mp3_id3v2_tag_end(job->data, job->len);
+    size_t scan_start = (id3v2_size <= job->len) ? id3v2_size : job->len;
+    if (scan_start < job->len) {
+        mp3_parse_track_info(job->data + scan_start, job->len - scan_start,
+                             &bitrate, &duration_ms);
+        if (duration_ms == 0 && bitrate > 0 && job->len > id3v2_size) {
+            size_t audio_bytes = job->len - id3v2_size;
+            duration_ms = (uint32_t)(((uint64_t)audio_bytes * 8000ULL) /
+                                     ((uint64_t)bitrate * 1000ULL));
+        }
+    }
+
+        /* Same transport rule as the file precheck: the 264 kbps cap protects
+     * the GhostLink link, not the local speaker path. */
+    if (bitrate > 0 &&
+        ((esp_comm_manager_is_connected() && bitrate > STREAM_MAX_ACCEPTED_BITRATE_KBPS) ||
+         bitrate > STREAM_MAX_LOCAL_BITRATE_KBPS)) {
+        ESP_LOGW(TAG, "Refusing %u kbps embedded MP3; %s",
+                 (unsigned)bitrate,
+                 esp_comm_manager_is_connected()
+                     ? "GhostLink supports at most 264 kbps"
+                     : "unsupported bitrate");
         free(job);
         xSemaphoreTake(s_ctx.mutex, portMAX_DELAY);
         s_ctx.state = AUDIO_STREAM_STATE_IDLE;
+        s_ctx.last_play_error = ESP_ERR_NOT_SUPPORTED;
         xSemaphoreGive(s_ctx.mutex);
         s_play_precheck_task = NULL;
         vTaskDelete(NULL);
@@ -747,14 +1001,15 @@ static void audio_stream_play_embedded_precheck_task(void *arg)
     size_t len = job->len;
     free(job);
 
-    audio_stream_start_embedded_after_precheck(data, len, bitrate);
+    audio_stream_start_embedded_after_precheck(data, len, bitrate, duration_ms);
     s_play_precheck_task = NULL;
     vTaskDelete(NULL);
 }
 
 static esp_err_t audio_stream_start_embedded_after_precheck(const uint8_t *data,
                                                              size_t len,
-                                                             uint16_t bitrate)
+                                                             uint16_t bitrate,
+                                                             uint32_t duration_ms)
 {
     const TickType_t wait_start = xTaskGetTickCount();
     while (!s_stream_task_exited) {
@@ -772,6 +1027,7 @@ static esp_err_t audio_stream_start_embedded_after_precheck(const uint8_t *data,
     s_ctx.current_index = -1;
     s_ctx.stream_offset = 0;
     s_ctx.detected_bitrate_kbps = bitrate;
+    s_ctx.duration_ms = duration_ms;
     s_ctx.receiver_fill_bytes = 0;
     s_ctx.receiver_capacity_bytes = 0;
     s_ctx.receiver_played_ms = 0;
@@ -784,7 +1040,9 @@ static esp_err_t audio_stream_start_embedded_after_precheck(const uint8_t *data,
     ESP_LOGI(TAG, "Playing embedded audio (%u bytes)", (unsigned)len);
     audio_pause_competing_streams();
     audio_apply_one_shot_headphone_route();
-    (void)esp_comm_manager_send_command("audio", "start");
+    if (esp_comm_manager_is_connected()) {
+        (void)esp_comm_manager_send_command("audio", "start");
+    }
 
     xSemaphoreTake(s_ctx.mutex, portMAX_DELAY);
     s_ctx.state = AUDIO_STREAM_STATE_PLAYING;
@@ -858,14 +1116,51 @@ uint32_t audio_stream_manager_get_playback_ms(void)
 
 uint32_t audio_stream_manager_get_duration_ms(void)
 {
-    size_t total = audio_stream_manager_get_total_size();
-    uint16_t bitrate = audio_stream_manager_get_bitrate();
-    if (total == 0) return 0;
-    if (bitrate == 0) bitrate = 128;
+    uint32_t duration_ms = 0;
+    size_t total = 0;
+    uint16_t bitrate = 0;
+
+    xSemaphoreTake(s_ctx.mutex, portMAX_DELAY);
+    /* Prefer the exact duration parsed from a Xing/VBRI header (or the
+     * tag-corrected CBR estimate computed at precheck). */
+    duration_ms = s_ctx.duration_ms;
+    if (s_ctx.embedded_source && s_ctx.embedded_data) {
+        total = s_ctx.embedded_len;
+    } else if (!s_ctx.embedded_source && s_ctx.current_index >= 0) {
+        total = s_ctx.embedded_len;
+    }
+    bitrate = s_ctx.detected_bitrate_kbps;
+    xSemaphoreGive(s_ctx.mutex);
+
+    if (duration_ms > 0) return duration_ms;
+
+    /* Fallback estimate for streams that were never prechecked. Never
+     * fabricate a bitrate: an assumed 128 kbps makes a 320 kbps track look
+     * 2.5x longer than it is. Unknown bitrate = unknown length. */
+    if (total == 0 || bitrate == 0) return 0;
 
     uint32_t bytes_per_sec = (uint32_t)bitrate * 125;
     if (bytes_per_sec == 0) return 0;
     return (uint32_t)(((uint64_t)total * 1000) / bytes_per_sec);
+}
+
+bool audio_stream_manager_has_receiver_feedback(void)
+{
+    bool feedback = false;
+    xSemaphoreTake(s_ctx.mutex, portMAX_DELAY);
+    feedback = (s_ctx.receiver_status_tick != 0);
+    xSemaphoreGive(s_ctx.mutex);
+    return feedback;
+}
+
+esp_err_t audio_stream_manager_consume_last_error(void)
+{
+    esp_err_t err = ESP_OK;
+    xSemaphoreTake(s_ctx.mutex, portMAX_DELAY);
+    err = s_ctx.last_play_error;
+    s_ctx.last_play_error = ESP_OK;
+    xSemaphoreGive(s_ctx.mutex);
+    return err;
 }
 
 uint8_t audio_stream_manager_get_receiver_buffer_percent(void)
@@ -951,40 +1246,6 @@ static bool audio_stream_receiver_needs_refill(bool *urgent)
     return fill < target;
 }
 
-/* MPEG1 Layer 3 bitrate table (kbps) indexed by the 4-bit bitrate field */
-static const uint16_t mp3_bitrates_mpeg1_l3[16] = {
-    0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0
-};
-
-/* MPEG2/2.5 Layer 3 bitrate table (kbps) */
-static const uint16_t mp3_bitrates_mpeg2_l3[16] = {
-    0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0
-};
-
-/**
- * @brief Parse the first MP3 frame header to determine bitrate (kbps).
- *
- * Scans the first ~4KB for a valid frame sync and returns the bitrate.
- * Returns 0 on failure (free-format, unknown, or not MP3).
- */
-static uint16_t parse_mp3_bitrate(const uint8_t *data, size_t len)
-{
-    if (!data || len < 4) return 0;
-    size_t scan_limit = len < 4096 ? len : 4096;
-    for (size_t i = 0; i + 4 <= scan_limit; i++) {
-        if (data[i] != 0xFF) continue;
-        uint8_t b1 = data[i + 1];
-        if ((b1 & 0xE0) != 0xE0) continue;
-        uint8_t version = (b1 >> 3) & 0x03;
-        uint8_t layer = (b1 >> 1) & 0x03;
-        if (layer != 1) continue;
-        uint8_t br_idx = (data[i + 2] >> 4) & 0x0F;
-        if (br_idx == 0 || br_idx == 0x0F) continue;
-        return (version == 3) ? mp3_bitrates_mpeg1_l3[br_idx] : mp3_bitrates_mpeg2_l3[br_idx];
-    }
-    return 0;
-}
-
 static void audio_stream_task(void *arg)
 {
     s_stream_task_exited = false;
@@ -1012,6 +1273,16 @@ static void audio_stream_task(void *arg)
     bool first_chunk_logged = false;
     bool pacing_started = false;
     TickType_t pacing_start_tick = 0;
+    size_t pacing_base_offset = STREAM_PREFILL_BYTES;
+    bool mode_peer = esp_comm_manager_is_connected();
+    if (!mode_peer && audio_stream_local_output_available()) {
+        esp_err_t local_ret = audio_receiver_manager_start();
+        if (local_ret == ESP_OK) {
+            ESP_LOGI(TAG, "No GhostLink peer connected - playing through local audio output");
+        } else {
+            ESP_LOGW(TAG, "Local audio receiver start failed: %s", esp_err_to_name(local_ret));
+        }
+    }
 
     while (1) {
         xSemaphoreTake(s_ctx.mutex, portMAX_DELAY);
@@ -1027,12 +1298,10 @@ static void audio_stream_task(void *arg)
             continue;
         }
 
-        if (!esp_comm_manager_is_connected()) {
+        if (!esp_comm_manager_is_connected() && !audio_stream_local_output_available()) {
             if (!waiting_logged) {
                 ESP_LOGW(TAG, "Waiting for GhostLink connection before streaming audio");
                 waiting_logged = true;
-                /* Flush receiver to prevent playing stale data after reconnect */
-                (void)esp_comm_manager_send_command("audio", "flush");
             }
             xSemaphoreGive(s_ctx.mutex);
             vTaskDelay(pdMS_TO_TICKS(100));
@@ -1133,7 +1402,11 @@ static void audio_stream_task(void *arg)
             }
             xSemaphoreGive(s_ctx.mutex);
 
-            (void)esp_comm_manager_send_command("audio", "stop");
+            if (esp_comm_manager_is_connected()) {
+                (void)esp_comm_manager_send_command("audio", "stop");
+            }
+            /* In local-output mode the receiver is left active so it can drain
+             * its ring buffer; the next play() restarts it cleanly. */
             audio_resume_competing_streams();
 
             free(stream_buf);
@@ -1148,8 +1421,51 @@ static void audio_stream_task(void *arg)
         if (bytes_read > 0) {
             size_t sent_total = 0;
             bool paused_mid_chunk = false;
+            bool transport_failed = false;
             xSemaphoreGive(s_ctx.mutex);
 
+            /* Transport selection: prefer the GhostLink peer when connected
+             * (existing Banshee behavior); fall back to the local receiver
+             * when this board has its own speaker output. Handles mid-track
+             * connect/disconnect by restarting the target side cleanly. */
+            bool use_peer = esp_comm_manager_is_connected();
+            if (use_peer != mode_peer) {
+                if (use_peer) {
+                    /* A peer connected mid-track: hand the stream over only
+                     * if the link can sustain its bitrate. High-bitrate
+                     * tracks (e.g. 320 kbps) would underrun the peer, so
+                     * keep them on the local output instead. */
+                    uint16_t br = 0;
+                    xSemaphoreTake(s_ctx.mutex, portMAX_DELAY);
+                    if (s_ctx.current_index == index) {
+                        br = s_ctx.detected_bitrate_kbps;
+                    }
+                    xSemaphoreGive(s_ctx.mutex);
+                    if (br > STREAM_MAX_ACCEPTED_BITRATE_KBPS) {
+                        ESP_LOGW(TAG, "Track is %u kbps > GhostLink limit %u kbps; staying on local output",
+                                 (unsigned)br, (unsigned)STREAM_MAX_ACCEPTED_BITRATE_KBPS);
+                        (void)esp_comm_manager_send_command("audio", "stop");
+                        use_peer = false;
+                        mode_peer = false;
+                    } else {
+                        ESP_LOGI(TAG, "GhostLink connected - switching to peer audio stream");
+                        /* Stop the local receiver so its buffered tail doesn't
+                         * keep playing while the peer stream starts. */
+                        audio_receiver_manager_stop();
+                        (void)esp_comm_manager_send_command("audio", "flush");
+                        (void)esp_comm_manager_send_command("audio", "start");
+                        pacing_base_offset = offset;
+                        pacing_started = false;
+                        pacing_start_tick = 0;
+                    }
+                } else {
+                    ESP_LOGI(TAG, "GhostLink lost - switching to local audio output");
+                    (void)audio_receiver_manager_start();
+                }
+                mode_peer = use_peer;
+            }
+
+            if (use_peer) {
             while (sent_total < bytes_read) {
                 xSemaphoreTake(s_ctx.mutex, portMAX_DELAY);
                 if (s_ctx.state == AUDIO_STREAM_STATE_PAUSED && s_ctx.stream_id == stream_id &&
@@ -1183,11 +1499,20 @@ static void audio_stream_task(void *arg)
                 }
                 if (!sent) {
                     ESP_LOGW(TAG, "GhostLink stream send failed");
-                    /* Tell the receiver to flush its decoder to avoid playing garbage */
-                    (void)esp_comm_manager_send_command("audio", "flush");
-                    xSemaphoreTake(s_ctx.mutex, portMAX_DELAY);
-                    s_ctx.state = AUDIO_STREAM_STATE_STOPPED;
-                    xSemaphoreGive(s_ctx.mutex);
+                    transport_failed = true;
+                    if (audio_stream_local_output_available()) {
+                        /* Keep the position so the next burst can continue via
+                         * the local output at the saved offset. */
+                        xSemaphoreTake(s_ctx.mutex, portMAX_DELAY);
+                        s_ctx.stream_offset = offset + sent_total;
+                        xSemaphoreGive(s_ctx.mutex);
+                    } else {
+                        /* Tell the receiver to flush its decoder to avoid playing garbage */
+                        (void)esp_comm_manager_send_command("audio", "flush");
+                        xSemaphoreTake(s_ctx.mutex, portMAX_DELAY);
+                        s_ctx.state = AUDIO_STREAM_STATE_STOPPED;
+                        xSemaphoreGive(s_ctx.mutex);
+                    }
                     break;
                 }
 
@@ -1205,7 +1530,7 @@ static void audio_stream_task(void *arg)
                  * transmitted bytes aligned to elapsed playback time. This avoids
                  * burst-overflow while adapting to the detected MP3 bitrate. */
                 size_t absolute_sent = offset + sent_total;
-                if (absolute_sent <= STREAM_PREFILL_BYTES) {
+                if (absolute_sent <= pacing_base_offset) {
                     vTaskDelay(pdMS_TO_TICKS(STREAM_INTER_PACKET_DELAY_MS));
                     continue;
                 }
@@ -1226,7 +1551,7 @@ static void audio_stream_task(void *arg)
                     pacing_start_tick = xTaskGetTickCount();
                 }
 
-                size_t paced_bytes = absolute_sent - STREAM_PREFILL_BYTES;
+                size_t paced_bytes = absolute_sent - pacing_base_offset;
                 uint32_t target_ms = (uint32_t)(((uint64_t)paced_bytes * 1000) / bps);
                 uint32_t elapsed_ms = (uint32_t)((xTaskGetTickCount() - pacing_start_tick) * portTICK_PERIOD_MS);
                 if (target_ms > elapsed_ms) {
@@ -1239,9 +1564,63 @@ static void audio_stream_task(void *arg)
                     vTaskDelay(pdMS_TO_TICKS(STREAM_INTER_PACKET_DELAY_MS));
                 }
             }
+            } else {
+            /* Local playback: feed the on-board receiver. Backpressure is
+             * natural - write_stream accepts only what the ring buffer has
+             * room for, so this loop paces itself to the decode/play rate. */
+            while (sent_total < bytes_read) {
+                xSemaphoreTake(s_ctx.mutex, portMAX_DELAY);
+                if (s_ctx.state == AUDIO_STREAM_STATE_PAUSED && s_ctx.stream_id == stream_id &&
+                    s_ctx.current_index == index && s_ctx.stream_offset == offset) {
+                    s_ctx.stream_offset = offset + sent_total;
+                    xSemaphoreGive(s_ctx.mutex);
+                    paused_mid_chunk = true;
+                    break;
+                }
+                bool should_stop = s_ctx.state == AUDIO_STREAM_STATE_STOPPED ||
+                                   s_ctx.stream_id != stream_id ||
+                                   s_ctx.current_index != index ||
+                                   s_ctx.stream_offset != offset;
+                xSemaphoreGive(s_ctx.mutex);
+                if (should_stop) {
+                    break;
+                }
+
+                size_t send_len = bytes_read - sent_total;
+                if (send_len > STREAM_CHUNK_SIZE) {
+                    send_len = STREAM_CHUNK_SIZE;
+                }
+                size_t accepted = audio_receiver_manager_write_stream(stream_buf + sent_total, send_len);
+                if (accepted == 0) {
+                    if (!audio_receiver_manager_is_initialized()) {
+                        ESP_LOGE(TAG, "Local audio output unavailable; stopping");
+                        xSemaphoreTake(s_ctx.mutex, portMAX_DELAY);
+                        s_ctx.state = AUDIO_STREAM_STATE_STOPPED;
+                        xSemaphoreGive(s_ctx.mutex);
+                        break;
+                    }
+                    vTaskDelay(pdMS_TO_TICKS(5));
+                    continue;
+                }
+                sent_total += accepted;
+                if (!first_chunk_logged) {
+                    ESP_LOGI(TAG, "Audio stream started (%dKB bursts, local output)",
+                             (int)(STREAM_READ_BURST_SIZE / 1024));
+                    first_chunk_logged = true;
+                }
+            }
+            }
 
             xSemaphoreTake(s_ctx.mutex, portMAX_DELAY);
             if (paused_mid_chunk) {
+                xSemaphoreGive(s_ctx.mutex);
+                continue;
+            }
+            if (transport_failed && audio_stream_local_output_available() &&
+                s_ctx.state != AUDIO_STREAM_STATE_STOPPED &&
+                s_ctx.stream_id == stream_id && s_ctx.current_index == index) {
+                /* Peer link died mid-chunk; continue so the next burst can fall
+                 * back to the local audio output at the saved offset. */
                 xSemaphoreGive(s_ctx.mutex);
                 continue;
             }
@@ -1291,6 +1670,8 @@ size_t audio_stream_manager_get_total_size(void) { return 0; }
 uint16_t audio_stream_manager_get_bitrate(void) { return 0; }
 void audio_stream_manager_update_receiver_status(size_t fill_bytes, size_t capacity_bytes, uint32_t played_ms) { (void)fill_bytes; (void)capacity_bytes; (void)played_ms; }
 uint32_t audio_stream_manager_get_playback_ms(void) { return 0; }
+bool audio_stream_manager_has_receiver_feedback(void) { return false; }
+esp_err_t audio_stream_manager_consume_last_error(void) { return ESP_OK; }
 uint32_t audio_stream_manager_get_duration_ms(void) { return 0; }
 uint8_t audio_stream_manager_get_receiver_buffer_percent(void) { return 0; }
 

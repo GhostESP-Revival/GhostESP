@@ -29,12 +29,16 @@ def main(argv=None) -> int:
     p_package.add_argument("app_dir", nargs="?", default=".", help="App project directory (default: .)")
     p_package.add_argument("--out", default=None, help="Output dist directory")
     p_package.add_argument("--gapp", action="store_true", help="Also create a .gapp archive")
+    p_package.add_argument("--manifest", default="manifest.json",
+                           help="Manifest filename under app_dir (default: manifest.json)")
 
     p_dist = sub.add_parser("dist", help="Build and package in one step")
     p_dist.add_argument("app_dir", nargs="?", default=".", help="App project directory (default: .)")
     p_dist.add_argument("--target", default=None, help="ESP-IDF target (default: from manifest or esp32s3)")
     p_dist.add_argument("--out", default=None, help="Output dist directory")
     p_dist.add_argument("--gapp", action="store_true", help="Also create a .gapp archive")
+    p_dist.add_argument("--manifest", default="manifest.json",
+                        help="Manifest filename under app_dir (default: manifest.json)")
 
     p_setup = sub.add_parser("setup", help="Install or configure ESP-IDF toolchain")
     p_setup.add_argument("--target", nargs="+", default=["esp32s3"], help="ESP-IDF targets to install (default: esp32s3)")
@@ -124,6 +128,7 @@ def main(argv=None) -> int:
             app_dir=args.app_dir,
             out=args.out,
             make_gapp=args.gapp,
+            manifest_name=args.manifest,
         )
     elif args.command == "dist":
         from .dist import dist_app
@@ -132,6 +137,7 @@ def main(argv=None) -> int:
             target=args.target,
             out=args.out,
             make_gapp=args.gapp,
+            manifest_name=args.manifest,
         )
     elif args.command == "setup":
         from .esp_idf import setup_idf

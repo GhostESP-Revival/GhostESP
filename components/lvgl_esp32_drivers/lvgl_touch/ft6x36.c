@@ -25,6 +25,9 @@
 #include <lvgl/lvgl.h>
 #endif
 #include "ft6x36.h"
+#include "driver/gpio.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "lvgl_i2c/i2c_manager.h"
 
 #define TAG "FT6X36"
@@ -65,15 +68,45 @@ uint8_t ft6x36_get_gesture_id() {
   * @retval None
   */
 void ft6x06_init(uint16_t dev_addr) {
+#if defined(CONFIG_CROWPANEL_ADVANCE_24_LCD) || defined(CONFIG_CROWPANEL_ADVANCE_28_LCD)
+    /* Elecrow's V1.1/V1.2 ESP-IDF example identifies the controller as an
+     * FT6336U/FT5x06 with RESET on GPIO48 and INT on GPIO47. */
+    const gpio_config_t int_cfg = {
+        .pin_bit_mask = 1ULL << GPIO_NUM_47,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    const gpio_config_t reset_cfg = {
+        .pin_bit_mask = 1ULL << GPIO_NUM_48,
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    ESP_ERROR_CHECK(gpio_config(&int_cfg));
+    ESP_ERROR_CHECK(gpio_config(&reset_cfg));
+    gpio_set_level(GPIO_NUM_48, 0);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    gpio_set_level(GPIO_NUM_48, 1);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    ESP_LOGI(TAG, "Applied CrowPanel 2.4/2.8 FT6336U reset sequence");
+#endif
 
-    ft6x36_status.inited = true;
+    ft6x36_status.inited = false;
     current_dev_addr = dev_addr;
     uint8_t data_buf;
     esp_err_t ret;
-    ESP_LOGI(TAG, "Found touch panel controller");
-    if ((ret = ft6x06_i2c_read8(dev_addr, FT6X36_PANEL_ID_REG, &data_buf) != ESP_OK))
-        ESP_LOGE(TAG, "Error reading from device: %s",
-                 esp_err_to_name(ret));    // Only show error the first time
+    ESP_LOGI(TAG, "Probing FT6336U/FT5x06 touch controller at 0x%02x",
+             (unsigned)dev_addr);
+    ret = ft6x06_i2c_read8(dev_addr, FT6X36_PANEL_ID_REG, &data_buf);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "FT6336U/FT5x06 probe failed: %s", esp_err_to_name(ret));
+        return;
+    }
+    ft6x36_status.inited = true;
+    ESP_LOGI(TAG, "Found FT6336U/FT5x06 touch controller");
     ESP_LOGI(TAG, "\tDevice ID: 0x%02x", data_buf);
 
     ft6x06_i2c_read8(dev_addr, FT6X36_CHIPSELECT_REG, &data_buf);
@@ -107,8 +140,8 @@ void ft6x06_init(uint16_t dev_addr) {
   */
 bool ft6x36_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
     if (!ft6x36_status.inited) {
-        ESP_LOGE(TAG, "Init first!");
-        return 0x00;
+        data->state = LV_INDEV_STATE_REL;
+        return false;
     }
     uint8_t data_buf[5];        // 1 byte status, 2 bytes X, 2 bytes Y
 
@@ -136,16 +169,18 @@ bool ft6x36_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
     touch_inputs.last_x = ((data_buf[1] & FT6X36_MSB_MASK) << 8) | (data_buf[2] & FT6X36_LSB_MASK);
     touch_inputs.last_y = ((data_buf[3] & FT6X36_MSB_MASK) << 8) | (data_buf[4] & FT6X36_LSB_MASK);
 
+    /* Elecrow's factory FT5x06 config mirrors Y before swapping axes.  This
+     * legacy driver swaps first, so the equivalent mirror is applied on X. */
 #if CONFIG_LV_FT6X36_SWAPXY
     int16_t swap_buf = touch_inputs.last_x;
     touch_inputs.last_x = touch_inputs.last_y;
     touch_inputs.last_y = swap_buf;
 #endif
 #if CONFIG_LV_FT6X36_INVERT_X
-    touch_inputs.last_x =  LV_HOR_RES - touch_inputs.last_x;
+    touch_inputs.last_x = (LV_HOR_RES - 1) - touch_inputs.last_x;
 #endif
 #if CONFIG_LV_FT6X36_INVERT_Y
-    touch_inputs.last_y = LV_VER_RES - touch_inputs.last_y;
+    touch_inputs.last_y = (LV_VER_RES - 1) - touch_inputs.last_y;
 #endif
     data->point.x = touch_inputs.last_x;
     data->point.y = touch_inputs.last_y;

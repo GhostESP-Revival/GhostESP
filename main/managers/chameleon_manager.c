@@ -151,7 +151,7 @@ static void chameleon_resume_ap(void) {
         esp_err_t err_init = ap_manager_init();
         if (err_init == ESP_OK) {
             wifi_manager_configure_sta_from_settings();
-            (void)ap_manager_start_services();
+            (void)ap_manager_restore_after_attack("chameleon resume");
         }
         if (err_init != ESP_OK) {
             ESP_LOGE(TAG, "Failed to restore GhostNet AP services: 0x%X", (unsigned int)err_init);
@@ -163,8 +163,7 @@ static void chameleon_resume_ap(void) {
         vTaskDelay(pdMS_TO_TICKS(50));
         
         // Re-init just the Wi-Fi driver (netif/event loop already exist)
-        wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-        esp_err_t err = esp_wifi_init(&cfg);
+        esp_err_t err = ap_manager_ensure_wifi_init();
         if (err == ESP_OK) {
             wifi_mode_t m = (g_prev_wifi_mode == WIFI_MODE_NULL) ? WIFI_MODE_STA : g_prev_wifi_mode;
             esp_wifi_set_mode(m);
@@ -478,8 +477,7 @@ static void cu_record_working_key(const uint8_t key[6], bool use_key_b) {
     const char *path = "/mnt/ghostesp/nfc/mfc_user_dict.nfc";
     bool mounted_here = false;
     bool display_was_suspended = false;
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0 && !sd_card_manager.is_initialized) {
+    if (sd_card_needs_jit_mount() && !sd_card_manager.is_initialized) {
         if (sd_card_mount_for_flush(&display_was_suspended) == ESP_OK) {
             mounted_here = true;
         } else {
@@ -487,7 +485,6 @@ static void cu_record_working_key(const uint8_t key[6], bool use_key_b) {
             return;
         }
     }
-#endif
     if (sd_card_manager.is_initialized && !g_cu_nfc_dir_ready) {
         if (sd_card_create_directory("/mnt/ghostesp/nfc") == ESP_OK) {
             g_cu_nfc_dir_ready = true;
@@ -2702,33 +2699,21 @@ bool chameleon_manager_save_last_hf_scan(const char* filename) {
     // remount only on specific template; otherwise require SD already mounted
     bool display_was_suspended = false;
     bool did_mount = false;
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
-        esp_err_t mret = sd_card_mount_for_flush(&display_was_suspended);
-        did_mount = (mret == ESP_OK);
-        if (!did_mount) {
-            if (display_was_suspended) sd_card_unmount_after_flush(display_was_suspended);
-            glog("Save failed: SD mount_for_flush error\n");
-            return false;
-        }
-    } else {
+    const bool require_jit = sd_card_needs_jit_mount();
+    if (require_jit) {
         if (!sd_card_manager.is_initialized) {
-            glog("Save failed: SD not mounted\n");
-            return false;
+            esp_err_t mret = sd_card_mount_for_flush(&display_was_suspended);
+            did_mount = (mret == ESP_OK);
+            if (!did_mount) {
+                if (display_was_suspended) sd_card_unmount_after_flush(display_was_suspended);
+                glog("Save failed: SD mount_for_flush error\n");
+                return false;
+            }
         }
-    }
-#else
-    if (!sd_card_manager.is_initialized) {
+    } else if (!sd_card_manager.is_initialized) {
         glog("Save failed: SD not mounted\n");
         return false;
     }
-#endif
-    bool require_jit = false;
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
-        require_jit = true;
-    }
-#endif
     bool mounted_now = did_mount; // true only when we JIT-mounted above
 
     // Stream header incrementally
@@ -2806,11 +2791,17 @@ bool chameleon_manager_save_last_lf_scan(const char* filename) {
     
     // Ensure directory exists (handled at boot; avoid per-save checks)
     bool display_was_suspended = false; bool did_mount = false;
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
-        did_mount = (sd_card_mount_for_flush(&display_was_suspended) == ESP_OK);
+    if (sd_card_needs_jit_mount()) {
+        if (!sd_card_manager.is_initialized) {
+            did_mount = (sd_card_mount_for_flush(&display_was_suspended) == ESP_OK);
+            if (!did_mount) {
+                if (display_was_suspended) sd_card_unmount_after_flush(display_was_suspended);
+                return false;
+            }
+        }
+    } else if (!sd_card_manager.is_initialized) {
+        return false;
     }
-#endif
     
     // Create scan report content
     char content[1024];
@@ -3140,23 +3131,17 @@ bool chameleon_manager_save_ntag_dump(const char* filename) {
 
     // JIT mount when required by specific template; otherwise require SD pre-mounted (same policy as HF save)
     bool display_was_suspended = false; bool did_mount = false;
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
-        did_mount = (sd_card_mount_for_flush(&display_was_suspended) == ESP_OK);
-        if (!did_mount) {
-            if (display_was_suspended) sd_card_unmount_after_flush(display_was_suspended);
-            return false;
-        }
-    } else {
+    if (sd_card_needs_jit_mount()) {
         if (!sd_card_manager.is_initialized) {
-            return false;
+            did_mount = (sd_card_mount_for_flush(&display_was_suspended) == ESP_OK);
+            if (!did_mount) {
+                if (display_was_suspended) sd_card_unmount_after_flush(display_was_suspended);
+                return false;
+            }
         }
-    }
-#else
-    if (!sd_card_manager.is_initialized) {
+    } else if (!sd_card_manager.is_initialized) {
         return false;
     }
-#endif
 
     char header[512]; int pos = 0;
     pos += snprintf(header + pos, sizeof(header) - pos, "Filetype: Flipper NFC device\n");
@@ -3489,14 +3474,17 @@ bool chameleon_manager_mf1_save_flipper_dump(const char* filename){
 
     // ensure sd present (same policy as NTAG save)
     bool display_was_suspended = false; bool did_mount = false;
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
-        did_mount = (sd_card_mount_for_flush(&display_was_suspended) == ESP_OK);
-        if (!did_mount) { if (display_was_suspended) sd_card_unmount_after_flush(display_was_suspended); return false; }
-    } else { if (!sd_card_manager.is_initialized) { return false; } }
-#else
-    if (!sd_card_manager.is_initialized) { return false; }
-#endif
+    if (sd_card_needs_jit_mount()) {
+        if (!sd_card_manager.is_initialized) {
+            did_mount = (sd_card_mount_for_flush(&display_was_suspended) == ESP_OK);
+            if (!did_mount) {
+                if (display_was_suspended) sd_card_unmount_after_flush(display_was_suspended);
+                return false;
+            }
+        }
+    } else if (!sd_card_manager.is_initialized) {
+        return false;
+    }
 
     char buf[256]; int pos = 0;
     pos += snprintf(buf + pos, sizeof(buf) - pos, "Filetype: Flipper NFC device\n");

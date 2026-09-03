@@ -50,6 +50,23 @@ endif()
 
 target_compile_definitions(${COMPONENT_LIB} PUBLIC "-DLV_CONF_INCLUDE_SIMPLE")
 
+if(CONFIG_LV_TICK_CUSTOM)
+  target_compile_definitions(${COMPONENT_LIB} PUBLIC
+    "LV_TICK_CUSTOM_INCLUDE=\"esp_timer.h\""
+    "LV_TICK_CUSTOM_SYS_TIME_EXPR=((uint32_t)(esp_timer_get_time()/1000ULL))")
+endif()
+
+if(CONFIG_CROWPANEL_ADVANCE_S3_LCD)
+  if(NOT CONFIG_IDF_TARGET_ESP32S3)
+    message(FATAL_ERROR "CrowPanel SIMD requires ESP32-S3")
+  endif()
+  if(CONFIG_LV_COLOR_DEPTH_16 AND NOT CONFIG_LV_COLOR_16_SWAP)
+    target_sources(${COMPONENT_LIB} PRIVATE
+      "${LVGL_ROOT_DIR}/src/draw/sw/lv_draw_sw_s3_simd.S")
+    target_compile_definitions(${COMPONENT_LIB} PUBLIC GHOST_LVGL_S3_SIMD=1)
+  endif()
+endif()
+
 if(CONFIG_LV_ATTRIBUTE_FAST_MEM_USE_IRAM)
   target_compile_definitions(${COMPONENT_LIB}
                              PUBLIC "-DLV_ATTRIBUTE_FAST_MEM=IRAM_ATTR")

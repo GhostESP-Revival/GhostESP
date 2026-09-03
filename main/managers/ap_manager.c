@@ -744,6 +744,111 @@ static esp_err_t api_sd_card_upload_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
+esp_err_t ap_manager_ensure_wifi_init(void) {
+    wifi_mode_t mode;
+    esp_err_t err = esp_wifi_get_mode(&mode);
+    if (err == ESP_OK) {
+        return ESP_OK; // driver already initialized
+    }
+    if (err != ESP_ERR_WIFI_NOT_INIT) {
+        return err;
+    }
+
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    err = esp_wifi_init(&cfg);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_wifi_init failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    // Runtime radio config must never persist across reboots. Attacks switch
+    // mode/protocols for raw TX; with the default WIFI_STORAGE_FLASH a reboot
+    // mid-attack would reload that broken state from NVS and leave AP beacons
+    // invisible. RAM-only storage keeps NVS out of the picture entirely.
+    err = esp_wifi_set_storage(WIFI_STORAGE_RAM);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to force RAM wifi storage: %s", esp_err_to_name(err));
+    }
+    return ESP_OK;
+}
+
+esp_err_t ap_manager_apply_attack_radio(void) {
+    // Attack profile = STA-only radio. Switching out of AP mode drops any
+    // WebUI/GhostNet client immediately AND removes the beacon, so nothing can
+    // re-associate mid-attack and lock the radio to one channel (#368).
+    // Raw injection still works from the STA interface while unassociated.
+    esp_err_t ret = esp_wifi_set_mode(WIFI_MODE_STA);
+    if (ret != ESP_OK) {
+        glog("WiFi mode set failed\n");
+        return ret;
+    }
+
+#if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
+    wifi_protocols_t p = {
+        .ghz_2g = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_LR,
+#if defined(CONFIG_IDF_TARGET_ESP32C5) /* C6 is 2.4GHz-only; no 5G protocols */
+        .ghz_5g = WIFI_PROTOCOL_11A | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_11AC | WIFI_PROTOCOL_11AX,
+#endif
+    };
+    ret = esp_wifi_set_protocols(WIFI_IF_STA, &p);
+    if (ret != ESP_OK) {
+        printf("Warning: Failed to set attack protocols: %s\n", esp_err_to_name(ret));
+    }
+#else
+    (void)esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
+#endif
+
+    ret = esp_wifi_start();
+    if (ret != ESP_OK) {
+        glog("WiFi start failed\n");
+    } else {
+        printf("GhostNet AP off for attack (clients kicked)\n");
+    }
+    return ret;
+}
+
+wifi_interface_t ap_manager_get_tx_iface(void) {
+    wifi_mode_t mode = WIFI_MODE_NULL;
+    if (esp_wifi_get_mode(&mode) == ESP_OK && mode == WIFI_MODE_STA) {
+        return WIFI_IF_STA;
+    }
+    return WIFI_IF_AP;
+}
+
+esp_err_t ap_manager_apply_normal_ap_profile(void) {
+    // be conservative for client compatibility (2.4GHz only, HT20)
+    (void)esp_wifi_set_bandwidth(WIFI_IF_AP, WIFI_BW20);
+
+#if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
+    // No LR anywhere in the normal profile; a persisted LR config makes AP
+    // beacons invisible to regular clients.
+    wifi_protocols_t p = {
+        .ghz_2g = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N,
+#if defined(CONFIG_IDF_TARGET_ESP32C5) /* C6 is 2.4GHz-only; no 5G protocols */
+        .ghz_5g = WIFI_PROTOCOL_11A | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_11AC | WIFI_PROTOCOL_11AX,
+#endif
+    };
+    return esp_wifi_set_protocols(WIFI_IF_AP, &p);
+#else
+    return esp_wifi_set_protocol(WIFI_IF_AP, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
+#endif
+}
+
+bool ap_manager_restore_after_attack(const char *who) {
+    esp_err_t err = ap_manager_start_services();
+    if (err == ESP_OK) {
+        return true;
+    }
+    if (err == ESP_ERR_NOT_SUPPORTED) {
+        glog("%s: AP services not restored (disabled or power saving on)\n",
+             who ? who : "restore");
+    } else {
+        glog("%s: failed to restore AP services: %s\n", who ? who : "restore",
+             esp_err_to_name(err));
+    }
+    return false;
+}
+
 esp_err_t ap_manager_init(void) {
     esp_err_t ret;
     wifi_mode_t mode;
@@ -785,8 +890,7 @@ esp_err_t ap_manager_init(void) {
     if (ret == ESP_ERR_WIFI_NOT_INIT) {
         glog("Wi-Fi not initialized, initializing as Access Point...\n");
 
-        wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-        ret = esp_wifi_init(&cfg);
+        ret = ap_manager_ensure_wifi_init();
         if (ret != ESP_OK) {
             glog("esp_wifi_init failed: %s\n", esp_err_to_name(ret));
             return ret;
@@ -822,6 +926,14 @@ esp_err_t ap_manager_init(void) {
     if (ret != ESP_OK) {
         glog("esp_wifi_set_mode failed: %s\n", esp_err_to_name(ret));
         return ret;
+    }
+
+    // Re-assert the normal radio profile every boot. This heals devices that
+    // carry an attack-time config (plain AP mode, LR/11AX protocols) persisted
+    // by older builds, which made beacons invisible after reboot.
+    ret = ap_manager_apply_normal_ap_profile();
+    if (ret != ESP_OK) {
+        glog("Failed to apply normal AP profile: %s\n", esp_err_to_name(ret));
     }
 
     const char *ssid = strlen(settings_get_ap_ssid(&G_Settings)) > 0
@@ -980,7 +1092,8 @@ esp_err_t ap_manager_start_services() {
         status_display_show_status("AP Disabled");
         // make sure services are stopped if they somehow started and conditions changed
         ap_manager_stop_services();
-        return ESP_OK;
+        // Report the skip so callers don't mistake it for a successful restore.
+        return ESP_ERR_NOT_SUPPORTED;
     }
 
     // Set Wi-Fi mode to AP
@@ -988,6 +1101,13 @@ esp_err_t ap_manager_start_services() {
     if (ret != ESP_OK) {
         glog("WiFi mode set failed\n");
         return ret;
+    }
+
+    // Undo any attack-time radio config (LR protocols etc.) so beacons are
+    // visible to regular clients again, then start Wi-Fi.
+    ret = ap_manager_apply_normal_ap_profile();
+    if (ret != ESP_OK) {
+        glog("Failed to apply normal AP profile: %s\n", esp_err_to_name(ret));
     }
 
     // Start Wi-Fi
@@ -1579,6 +1699,25 @@ static esp_err_t api_settings_handler(httpd_req_t *req) {
     if (display_timeout) {
         settings_set_display_timeout(settings, display_timeout->valueint);
         ESP_LOGI(TAG, "Setting display timeout to: %d ms", display_timeout->valueint);
+    }
+
+    // GhostLink (ESP comm) TX/RX pins. Persist them so they survive reboots.
+    // -1 is the "not used / disabled" sentinel (boards whose shared pins are
+    // otherwise claimed); a live re-pin while connected/scanning is disruptive,
+    // so these are staged and applied on the next comm manager init.
+    cJSON *esp_comm_tx_pin = cJSON_GetObjectItem(root, "esp_comm_tx_pin");
+    cJSON *esp_comm_rx_pin = cJSON_GetObjectItem(root, "esp_comm_rx_pin");
+    if (esp_comm_tx_pin && esp_comm_rx_pin) {
+        int32_t comm_tx = esp_comm_tx_pin->valueint;
+        int32_t comm_rx = esp_comm_rx_pin->valueint;
+        if ((comm_tx < -1 || comm_tx > 48) || (comm_rx < -1 || comm_rx > 48)) {
+            cJSON_Delete(root);
+            httpd_resp_set_status(req, "400 Bad Request");
+            httpd_resp_set_type(req, "application/json");
+            httpd_resp_sendstr(req, "{\"error\": \"esp_comm pins must be -1 or 0-48.\"}");
+            return ESP_FAIL;
+        }
+        settings_set_esp_comm_pins(settings, comm_tx, comm_rx);
     }
     glog("About to Save Settings\n");
 

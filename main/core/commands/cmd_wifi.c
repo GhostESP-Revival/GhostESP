@@ -8,7 +8,7 @@
 #include "managers/settings_manager.h"
 #include "managers/status_display_manager.h"
 #include "managers/wifi_manager.h"
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 #include "managers/ble_manager.h"
 #endif
 #include "vendor/pcap.h"
@@ -76,7 +76,7 @@ void cmd_wifi_scan_stop(int argc, char **argv) {
     // entry, so this function is the only thing that brings the AP back for
     // those flows. Always restore AP services before returning, regardless
     // of whether the Wi-Fi driver restart succeeded.
-    ap_manager_start_services();
+    (void)ap_manager_restore_after_attack("scan stop");
 
     if (stop_err != ESP_OK || start_err != ESP_OK) {
         glog("WiFi scan stop completed with recovery errors (stop=%s, start=%s).\n",
@@ -106,7 +106,7 @@ void handle_list(int argc, char **argv) {
         glog("Listed Stations...\n");
         return;
     }
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     else if (argc > 1 && strcmp(argv[1], "-airtags") == 0) {
         ble_list_airtags();
         return;
@@ -332,7 +332,7 @@ void handle_select_cmd(int argc, char **argv) {
         } else {
             glog("Error: '%s' is not a valid number.\n", argv[2]);
         }
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     } else if (strcmp(argv[1], "-airtag") == 0) {
         char *endptr;
         int num = (int)strtol(argv[2], &endptr, 10);

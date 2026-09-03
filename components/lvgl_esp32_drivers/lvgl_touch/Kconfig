@@ -474,10 +474,25 @@ menu "LVGL Touch controller"
     menu "Touchpanel Configuration (GT911)"
         depends on LV_TOUCH_CONTROLLER_GT911
 
-    config LV_GT911_SWAPXY
-        bool
-        prompt "Swap X with Y coordinate."
-        default y
+        config LV_GT911_I2C_ADDRESS
+            hex "I2C address"
+            range 0x08 0x77
+            default 0x5d
+
+        config LV_GT911_RESET_PIN
+            int "Reset GPIO (-1 if not connected)"
+            range -1 48
+            default -1
+
+        config LV_GT911_INT_PIN
+            int "Interrupt/address-select GPIO (-1 if not connected)"
+            range -1 48
+            default -1
+
+        config LV_GT911_SWAPXY
+            bool
+            prompt "Swap X with Y coordinate."
+            default y
 
         config LV_GT911_INVERT_X
             bool

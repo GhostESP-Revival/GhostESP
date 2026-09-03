@@ -18,6 +18,9 @@
 #include "attacks/wifi/dhcp_starvation.h"
 #include "core/dns_server.h"
 #include "managers/aerial_detector_manager.h"
+#ifdef CONFIG_HAS_BADBLE
+#include "managers/badble_manager.h"
+#endif
 #include "managers/ble_manager.h"
 #include "managers/dial_manager.h"
 #include "managers/display_manager.h"
@@ -158,13 +161,20 @@ void handle_stop_flipper(int argc, char **argv) {
     wifi_manager_stop_auth_flood();
     wifi_manager_cancel_connect();
 
-#ifndef CONFIG_IDF_TARGET_ESP32S2
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     if (ble_spam_is_running()) {
         glog("Stopped BLE spam.\n");
         stopped_any = true;
     }
     ble_spam_stop();
     ble_stop_gatt_scan();
+#ifdef CONFIG_HAS_BADBLE
+    if (badble_manager_is_running()) {
+        glog("Stopped BadBLE keyboard.\n");
+        stopped_any = true;
+        (void)badble_manager_stop();
+    }
+#endif
     ble_stop();
 #endif
 

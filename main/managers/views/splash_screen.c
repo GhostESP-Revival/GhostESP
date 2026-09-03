@@ -7,6 +7,7 @@
 #include "core/ghostesp_version.h"
 #include "gui/screen_layout.h"
 #include "gui/lvgl_safe.h"
+#include "gui/design_tokens.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -121,6 +122,14 @@ void splash_create(void) {
     lv_img_set_zoom(img, 192);
     lv_obj_align(img, LV_ALIGN_CENTER, 0, -30);
   }
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+  else if (LV_HOR_RES >= 800) {
+    lv_img_set_src(img, &ghostesplogo);
+    lv_img_set_size_mode(img, LV_IMG_SIZE_MODE_REAL);
+    lv_img_set_zoom(img, 512);
+    lv_obj_align(img, LV_ALIGN_CENTER, 0, -40);
+  }
+#endif
   else {
     lv_img_set_src(img, &ghostesplogo);
     lv_obj_align(img, LV_ALIGN_CENTER, 0, -20);
@@ -137,6 +146,22 @@ void splash_create(void) {
     build_name = "The Banshee";
   } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "ghostlink_p1_core") == 0) {
     build_name = "GhostLink P1 Core";
+  } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "m5cores3se") == 0) {
+    build_name = "M5Stack CoreS3-SE";
+  } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "atoms3r") == 0) {
+    build_name = "M5Stack AtomS3R";
+  } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "crowpanel_advance24") == 0) {
+    build_name = "CrowPanel Advance 2.4-inch";
+  } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "crowpanel_advance28") == 0) {
+    build_name = "CrowPanel Advance 2.8-inch";
+  } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "crowpanel_advance35") == 0) {
+    build_name = "CrowPanel Advance 3.5-inch";
+  } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "crowpanel_advance43") == 0) {
+    build_name = "CrowPanel Advance 4.3-inch";
+  } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "crowpanel_advance5") == 0) {
+    build_name = "CrowPanel Advance 5-inch";
+  } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "crowpanel_advance7") == 0) {
+    build_name = "CrowPanel Advance 7-inch";
   }
   lv_label_set_text_fmt(label2, "%s", build_name);
   lv_obj_set_style_text_color(label2, lv_color_hex(0xFFFFFF), 0);
@@ -153,7 +178,7 @@ void splash_create(void) {
   s_status_label = lv_label_create(splash_screen);
   lv_obj_set_style_text_color(s_status_label, lv_color_hex(0xCCCCCC), 0);
   lv_label_set_text(s_status_label, "Initializing...");
-  lv_obj_align(s_status_label, LV_ALIGN_BOTTOM_MID, 0, -28);
+  lv_obj_align(s_status_label, LV_ALIGN_BOTTOM_MID, 0, -(GUI_HOME_SAFE_H + 28));
 
   s_progress_bar_width = splash_progress_bar_width();
   s_progress_bar = lv_obj_create(splash_screen);
@@ -164,7 +189,7 @@ void splash_create(void) {
   lv_obj_set_style_radius(s_progress_bar, 4, LV_PART_MAIN);
   lv_obj_set_style_border_width(s_progress_bar, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_all(s_progress_bar, 0, LV_PART_MAIN);
-  lv_obj_align(s_progress_bar, LV_ALIGN_BOTTOM_MID, 0, -16);
+  lv_obj_align(s_progress_bar, LV_ALIGN_BOTTOM_MID, 0, -(GUI_HOME_SAFE_H + 16));
 
   s_progress_fill = lv_obj_create(s_progress_bar);
   lv_obj_set_size(s_progress_fill, 0, SPLASH_PROGRESS_BAR_HEIGHT);

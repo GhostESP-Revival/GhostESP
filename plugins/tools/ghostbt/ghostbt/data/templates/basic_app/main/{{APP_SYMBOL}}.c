@@ -1,5 +1,5 @@
-#include "sdk/ghostesp_plugin_api.h"
-#include "sdk/ghostesp_helpers.h"
+#include "../sdk/ghostesp_plugin_api.h"
+#include "../sdk/ghostesp_helpers.h"
 
 static const ghostesp_api_t *api;
 static ghostesp_theme_t theme;

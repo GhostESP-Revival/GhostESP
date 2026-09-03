@@ -39,9 +39,21 @@ esp_err_t audio_receiver_manager_start(void);
 void audio_receiver_manager_stop(void);
 
 /**
- * @brief Pause receiver output immediately and discard buffered stream data.
+ * @brief Pause receiver output immediately without discarding buffered data.
+ *
+ * Decoding stops and the I2S tail is flushed, but the ring buffer, decoder
+ * state and playback position are preserved so a later resume() continues
+ * from exactly the same audible point.
  */
 void audio_receiver_manager_pause(void);
+
+/**
+ * @brief Resume receiver output from the exact point it was paused.
+ *
+ * Continues decoding the preserved ring buffer/decoder state; no flush,
+ * no prebuffer wait. Only a fresh stream should use start() instead.
+ */
+void audio_receiver_manager_resume(void);
 
 /**
  * @brief Flush the decoder state and ring buffer without stopping.
@@ -50,6 +62,20 @@ void audio_receiver_manager_pause(void);
  * corruption or large jumps. The receiver remains active.
  */
 void audio_receiver_manager_flush(void);
+
+/**
+ * @brief Feed MP3 stream data into the local receiver pipeline.
+ *
+ * Used when this board plays back through its own speaker instead of
+ * streaming to a GhostLink peer. Writes as much data as the ring buffer
+ * accepts and returns the accepted byte count (0 = full or inactive;
+ * callers should retry after a short delay).
+ *
+ * @param data Pointer to MP3 stream bytes
+ * @param len  Number of bytes to write
+ * @return Number of bytes accepted
+ */
+size_t audio_receiver_manager_write_stream(const uint8_t *data, size_t len);
 
 /**
  * @brief Set the DAC sample rate based on decoded MP3 info.

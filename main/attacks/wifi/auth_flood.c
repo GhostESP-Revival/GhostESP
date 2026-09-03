@@ -152,7 +152,7 @@ static void auth_flood_task(void *param) {
                 int burst = AUTH_FLOOD_MIN_BURST + (int)(esp_random() % (AUTH_FLOOD_MAX_BURST - AUTH_FLOOD_MIN_BURST + 1));
                 for (int n = 0; n < burst && auth_flood_running; n++) {
                     if (!check_packet_rate()) break;
-                    if (esp_wifi_80211_tx(WIFI_IF_AP, frame, len, false) == ESP_OK) {
+                    if (esp_wifi_80211_tx(ap_manager_get_tx_iface(), frame, len, false) == ESP_OK) {
                         auth_flood_packets_sent++;
                     }
                 }
@@ -166,7 +166,7 @@ static void auth_flood_task(void *param) {
             int burst = AUTH_FLOOD_MIN_BURST + (int)(esp_random() % (AUTH_FLOOD_MAX_BURST - AUTH_FLOOD_MIN_BURST + 1));
             for (int n = 0; n < burst && auth_flood_running; n++) {
                 if (!check_packet_rate()) break;
-                if (esp_wifi_80211_tx(WIFI_IF_AP, frame, len, false) == ESP_OK) {
+                if (esp_wifi_80211_tx(ap_manager_get_tx_iface(), frame, len, false) == ESP_OK) {
                     auth_flood_packets_sent++;
                 }
             }
@@ -222,24 +222,14 @@ void auth_flood_start(void) {
         glog("Starting auth flood on: %s (ch %d)\n", sanitized_ssid, selected_ap.primary);
     }
 
-    // Injecting on WIFI_IF_AP requires the AP interface to be active.
+    // Attack radio profile tears down the GhostNet AP (kicking any WebUI
+    // client) and injects from the STA interface, keeping the radio free for
+    // channel hopping.
     ap_manager_stop_services();
     esp_wifi_stop();
     vTaskDelay(pdMS_TO_TICKS(50));
 
-#if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-    wifi_protocols_t p = {
-        .ghz_2g = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_LR,
-        .ghz_5g = WIFI_PROTOCOL_11A | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_11AC | WIFI_PROTOCOL_11AX,
-    };
-    esp_wifi_set_protocols(WIFI_IF_AP, &p);
-    ESP_ERROR_CHECK(esp_wifi_start());
-#else
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-    ESP_ERROR_CHECK(esp_wifi_start());
-    (void)esp_wifi_set_protocol(WIFI_IF_AP, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
-#endif
+    ESP_ERROR_CHECK(ap_manager_apply_attack_radio());
 
     auth_flood_running = true;
     auth_flood_packets_sent = 0;
@@ -256,7 +246,7 @@ void auth_flood_start(void) {
             auth_flood_task_handle = NULL;
         }
         esp_wifi_stop();
-        ap_manager_start_services();
+        (void)ap_manager_restore_after_attack("auth flood start");
 #ifdef CONFIG_WITH_STATUS_DISPLAY
         status_display_show_status("Auth Flood failed");
 #endif
@@ -286,7 +276,7 @@ void auth_flood_stop(void) {
     }
 
     esp_wifi_stop();
-    ap_manager_start_services();
+    (void)ap_manager_restore_after_attack("auth flood stop");
 
     glog("Auth Flood stopped. Total: %lu packets\n", (unsigned long)auth_flood_packets_sent);
 #ifdef CONFIG_WITH_STATUS_DISPLAY

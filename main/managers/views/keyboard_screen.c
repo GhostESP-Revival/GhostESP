@@ -16,7 +16,33 @@
 #include <string.h>
 #include <ctype.h>
 
+#if defined(CONFIG_IS_ATOMS3R) && !defined(CONFIG_USE_JOYSTICK)
+// AtomS3R's single button drives the encoder-style keyboard (a horizontal glyph
+// strip), which fits the 128px display far better than the full key matrix.
+// The button's tap scheme maps onto encoder actions in the input handler:
+// tap = next glyph, double tap = previous, hold = type, triple tap = close.
+// This define is local to this translation unit (it is set after all includes),
+// so it only reroutes this file's gating, not the rest of the firmware.
+#define CONFIG_USE_ENCODER 1
+#endif
+
 #define KEYBOARD_COLUMNS 10
+
+static inline int keyboard_layout_padding(void) {
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    return 10;
+#else
+    return 5;
+#endif
+}
+
+static inline int keyboard_display_height(void) {
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    return 64;
+#else
+    return 40;
+#endif
+}
 
 static const char *TAG = "keyboard_screen";
 
@@ -340,7 +366,9 @@ static void submit_text() {
         memset(input_buffer, 0, sizeof(input_buffer));
         input_len = 0;
         update_input_label();
-        display_manager_go_back();
+        /* Submit callbacks own the destination view.  Queuing a Back here
+         * races callbacks such as the terminal callback, which must restore
+         * and refresh its view before executing the command. */
         callback(submitted_text);
     } else if (input_len > 0) {
         terminal_set_return_view(&options_menu_view);
@@ -489,11 +517,14 @@ static void recreate_keyboard_buttons() {
     lv_obj_add_flag(root, LV_OBJ_FLAG_HIDDEN);
     int screen_height = LV_VER_RES;
     int status_bar_height = GUI_STATUS_BAR_HEIGHT;
-    int display_height = 40;
-    int padding = 5;
+    int display_height = keyboard_display_height();
+    int padding = keyboard_layout_padding();
     int keys_start_y = status_bar_height + display_height + padding * 2;
     int keys_area_height = screen_height - keys_start_y;
     int key_height = (keys_area_height / num_rows) - 4;
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    if (key_height > GUI_CONTROL_H) key_height = GUI_CONTROL_H;
+#endif
     int key_y = keys_start_y;
 
     int max_keys = 0;
@@ -581,11 +612,14 @@ static void keyboard_build_step(lv_timer_t *t) {
 
     int screen_height = LV_VER_RES;
     int status_bar_height = GUI_STATUS_BAR_HEIGHT;
-    int display_height = 40;
-    int padding = 5;
+    int display_height = keyboard_display_height();
+    int padding = keyboard_layout_padding();
     int keys_start_y = status_bar_height + display_height + padding * 2;
     int keys_area_height = screen_height - keys_start_y;
     int key_height = (keys_area_height / num_rows) - 4;
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+    if (key_height > GUI_CONTROL_H) key_height = GUI_CONTROL_H;
+#endif
     int built = 0;
     const int batch = 4;
     // timing for profiling heavy steps
@@ -784,8 +818,8 @@ static void keyboard_create() {
     lv_obj_set_style_bg_color(root, kb_bg(), 0);
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
 
-    int padding = 5;
-    int display_height = 40;
+    int padding = keyboard_layout_padding();
+    int display_height = keyboard_display_height();
     lv_color_t text = kb_text();
     lv_color_t surface = kb_surface();
     lv_coord_t radius = kb_radius();
@@ -957,12 +991,12 @@ static void keyboard_hold_invert_cb(lv_timer_t *t) {
     joy_focused_btn_id = id;
 }
 
-static void handle_hardware_button_press_keyboard(InputEvent *event) {
-
 #if defined(CONFIG_USE_ENCODER) && !defined(CONFIG_USE_JOYSTICK)
-    if (event->type == INPUT_TYPE_ENCODER) {
+// Move the encoder selection by `dir` and, when `activate` is set, apply the
+// selected glyph/action. Shared by the rotary encoder and the AtomS3R single
+// button (tap = move, hold = activate).
+static void encoder_apply(int dir, bool activate) {
         if (!encoder_cont) return;
-        int dir = event->data.encoder.direction;
         int prev = encoder_sel_idx;
         encoder_sel_idx = (encoder_sel_idx + dir + encoder_item_count) % encoder_item_count;
         lv_obj_scroll_to_x(encoder_cont, encoder_scroll_x_for_index(encoder_sel_idx), LV_ANIM_OFF);
@@ -976,7 +1010,7 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
         encoder_set_item_style(encoder_sel_idx);
         encoder_position_item(encoder_sel_idx);
         encoder_position_selector();
-        if (event->data.encoder.button) {
+        if (activate) {
             const char *sel = encoder_items[encoder_sel_idx];
             if(strcmp(sel, "Aa") == 0) {
                 // toggle case
@@ -1042,8 +1076,30 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
                 add_char_to_buffer_raw(c);
             }
         }
+}
+#endif
+
+static void handle_hardware_button_press_keyboard(InputEvent *event) {
+#if defined(CONFIG_USE_ENCODER) && !defined(CONFIG_USE_JOYSTICK)
+    if (event->type == INPUT_TYPE_ENCODER) {
+        encoder_apply(event->data.encoder.direction, event->data.encoder.button);
         return;
     }
+#ifdef CONFIG_IS_ATOMS3R
+    // AtomS3R single button -> encoder actions. The button state machine emits
+    // joystick events: single tap = Down(4), double tap = Up(2), hold = Select(1).
+    // Triple tap arrives separately as INPUT_TYPE_EXIT_BUTTON (handled below).
+    if (event->type == INPUT_TYPE_JOYSTICK) {
+        if (!encoder_cont || !event->data.joystick_pressed) return;
+        switch (event->data.joystick_index) {
+            case 4: encoder_apply(+1, false); break; // tap: next glyph
+            case 2: encoder_apply(-1, false); break; // double tap: previous glyph
+            case 1: encoder_apply(0, true);   break; // hold: type selected glyph
+            default: break;
+        }
+        return;
+    }
+#endif
 #endif
     if (event->type == INPUT_TYPE_JOYSTICK) {
         int button = event->data.joystick_index;
@@ -1060,8 +1116,19 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
                 cursor_row = (cursor_row > 0) ? cursor_row - 1 : num_rows - 1;
                 if (cursor_col >= row_lens[cursor_row]) cursor_col = row_lens[cursor_row] - 1;
             } else if (button == 4) { // down
+#ifdef CONFIG_IS_ATOMS3R
+                // With one button, make each short press advance linearly
+                // through every key instead of requiring Right navigation.
+                if (cursor_col + 1 < row_lens[cursor_row]) {
+                    cursor_col++;
+                } else {
+                    cursor_row = (cursor_row + 1) % num_rows;
+                    cursor_col = 0;
+                }
+#else
                 cursor_row = (cursor_row < num_rows - 1) ? cursor_row + 1 : 0;
                 if (cursor_col >= row_lens[cursor_row]) cursor_col = row_lens[cursor_row] - 1;
+#endif
             }
         }
 
@@ -1218,8 +1285,8 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
         int screen_width = LV_HOR_RES;
         int screen_height = LV_VER_RES;
         int status_bar_height = GUI_STATUS_BAR_H;
-        int display_height = 40;
-        int padding = 5;
+        int display_height = keyboard_display_height();
+        int padding = keyboard_layout_padding();
         int keys_start_y = status_bar_height + display_height + padding * 2;
 
         int row = -1;
@@ -1374,7 +1441,7 @@ static void handle_hardware_button_press_keyboard(InputEvent *event) {
         } else if (c >= ' ' && c <= '~') {
             add_char_to_buffer_raw(c);
         }
-#ifdef CONFIG_USE_ENCODER
+#if defined(CONFIG_USE_ENCODER) || defined(CONFIG_IS_ATOMS3R)
     } else if (event->type == INPUT_TYPE_EXIT_BUTTON) {
         ESP_LOGI(TAG, "IO6 exit button pressed, returning to previous view");
         display_manager_go_back();
@@ -1500,8 +1567,8 @@ static void build_key_matrix(void) {
     int screen_width = LV_HOR_RES;
     int screen_height = LV_VER_RES;
     int status_bar_height = GUI_STATUS_BAR_H;
-    int padding = 5;
-    int display_height = 40;
+    int padding = keyboard_layout_padding();
+    int display_height = keyboard_display_height();
     int keys_start_y = status_bar_height + display_height + padding * 2;
     int keys_area_height = screen_height - keys_start_y - padding;
     int matrix_width = screen_width - 2 * padding;
@@ -1584,7 +1651,11 @@ static void build_key_matrix(void) {
     }
 
     lv_obj_set_style_text_font(key_matrix,
+#ifdef CONFIG_CROWPANEL_ADVANCED_P4
+                               accessibility_get_font_body(),
+#else
                                key_target <= 22 ? &lv_font_montserrat_12 : &lv_font_montserrat_14,
+#endif
                                LV_PART_ITEMS);
 
     lv_btnmatrix_set_map(key_matrix, btn_map);
@@ -1637,7 +1708,7 @@ static void build_key_matrix(void) {
 
 static void get_key_position(int row, int col, int *x, int *width, bool symbols_mode) {
     int screen_width = LV_HOR_RES;
-    int padding = 5;
+    int padding = keyboard_layout_padding();
     const int *row_lens = symbols_mode ? symbols_row_lengths : row_lengths;
     int actual_len = row_lens[row];
     int special_count = 0;

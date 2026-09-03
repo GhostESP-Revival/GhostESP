@@ -1,9 +1,10 @@
 #include "managers/audio_receiver_manager.h"
 
-#ifdef CONFIG_HAS_TLV320DAC_I2S
+#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER) || defined(CONFIG_HAS_CROWPANEL_NS4168)
 
 #include "managers/audio_i2s_output.h"
 #include "core/esp_comm_manager.h"
+#include "managers/audio_stream_manager.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
@@ -165,17 +166,28 @@ void audio_receiver_manager_stop(void)
 void audio_receiver_manager_pause(void)
 {
     if (!s_recv.initialized) return;
+    /* Stop the decode task, but DO NOT clear the ring buffer or the decoder
+     * state: the sender freezes its stream offset at the exact byte count it
+     * wrote into this buffer, so everything still buffered here is what a
+     * resume must continue from. Clearing it was causing resume to skip ahead
+     * by up to a prebuffer's worth of audio. */
     s_recv.active = false;
-    s_recv.flush_requested = true;
-    taskENTER_CRITICAL(&s_rx_ringbuf_mux);
-    s_recv.rx_ringbuf.head = 0;
-    s_recv.rx_ringbuf.tail = 0;
-    taskEXIT_CRITICAL(&s_rx_ringbuf_mux);
-    s_recv.waiting_for_buffer = true;
-    s_recv.played_ms = 0;
-    s_recv.played_pcm_bytes = 0;
+    /* Silence the I2S DMA tail so no audio leaks after pause. */
     audio_i2s_output_flush();
     ESP_LOGI(TAG, "Audio receiver paused");
+}
+
+void audio_receiver_manager_resume(void)
+{
+    if (!s_recv.initialized) return;
+    /* Continue decoding exactly where pause left off: keep the ring buffer
+     * contents and decoder state, and skip the prebuffer wait because the
+     * decoder either still has data or is about to be refilled by the sender
+     * continuing from its preserved stream offset. */
+    s_recv.active = true;
+    s_recv.flush_requested = false;
+    s_recv.waiting_for_buffer = false;
+    ESP_LOGI(TAG, "Audio receiver resumed");
 }
 
 void audio_receiver_manager_flush(void)
@@ -218,6 +230,23 @@ static void audio_receiver_send_status(bool force)
     if (esp_comm_manager_send_command("audio", status)) {
         s_recv.last_status_tick = now;
     }
+}
+
+size_t audio_receiver_manager_write_stream(const uint8_t *data, size_t len)
+{
+    if (!s_recv.initialized || !s_recv.active || !data || len == 0) {
+        return 0;
+    }
+
+    size_t written = ringbuf_write(&s_recv.rx_ringbuf, data, len);
+    if (written > 0) {
+        /* Mirror the same feedback the peer status command would send, so
+         * local playback progress/buffer UI keeps working without GhostLink. */
+        audio_stream_manager_update_receiver_status(ringbuf_count(&s_recv.rx_ringbuf),
+                                                    AUDIO_RX_RINGBUF_SIZE,
+                                                    audio_receiver_get_played_ms());
+    }
+    return written;
 }
 
 esp_err_t audio_receiver_manager_init(void)
@@ -517,14 +546,38 @@ static void audio_decode_task(void *arg)
                 }
             }
             if (aerr == ESP_AUDIO_ERR_OK && out.decoded_size > 0) {
+                /* Query the decoder format before the first PCM write. The
+                 * output driver retains the previous track's source rate
+                 * between sessions; writing one block before updating it can
+                 * make a 48 kHz track start at the wrong pitch (and can leave
+                 * it wrong if decoder info is only reported once). */
+                if (s_recv.detected_sample_rate == 0) {
+                    esp_audio_simple_dec_info_t info = {0};
+                    if (esp_audio_simple_dec_get_info(s_recv.simple_dec, &info) == ESP_AUDIO_ERR_OK) {
+                        if (info.sample_rate > 0) {
+                            audio_receiver_manager_set_sample_rate(info.sample_rate);
+                        }
+                        if (info.channel > 0) {
+                            s_recv.output_channels = info.channel;
+                        }
+                    }
+                }
+
+#ifndef CONFIG_HAS_AW88298_SPEAKER
                 /* Light PCM attenuation (-6 dB) applied in-place in the
                  * heap-allocated decode buffer. This avoids clipping on a
                  * tiny speaker/headphone while keeping the I2S write path
-                 * allocation-free. */
+                 * allocation-free.
+                 *
+                 * Skipped on the AW88298, where the amp mixes (L+R)/2 in
+                 * hardware - that halving already supplies the headroom, so
+                 * doing it here as well just discarded a bit of resolution
+                 * and 6 dB of level that a 1 W speaker cannot spare. */
                 size_t pcm_samples = out.decoded_size / sizeof(int16_t);
                 for (size_t i = 0; i < pcm_samples; ++i) {
                     pcm_buf[i] = (int16_t)(pcm_buf[i] >> 1);
                 }
+#endif
 
                 /* Write decoded PCM to I2S */
                 esp_err_t write_ret = audio_i2s_output_write(pcm_buf, out.decoded_size);
@@ -539,18 +592,6 @@ static void audio_decode_task(void *arg)
                     }
                 }
 
-                /* Auto-detect sample rate on first successful decode */
-                if (s_recv.detected_sample_rate == 0) {
-                    esp_audio_simple_dec_info_t info = {0};
-                    if (esp_audio_simple_dec_get_info(s_recv.simple_dec, &info) == ESP_AUDIO_ERR_OK) {
-                        if (info.sample_rate > 0) {
-                            audio_receiver_manager_set_sample_rate(info.sample_rate);
-                        }
-                        if (info.channel > 0) {
-                            s_recv.output_channels = info.channel;
-                        }
-                    }
-                }
             } else if (aerr != ESP_AUDIO_ERR_OK && aerr != ESP_AUDIO_ERR_BUFF_NOT_ENOUGH) {
                 ESP_LOGW(TAG, "Decode error: %d", (int)aerr);
             }
@@ -607,7 +648,9 @@ bool audio_receiver_manager_is_initialized(void) { return false; }
 esp_err_t audio_receiver_manager_start(void) { return ESP_ERR_NOT_SUPPORTED; }
 void audio_receiver_manager_stop(void) {}
 void audio_receiver_manager_pause(void) {}
+void audio_receiver_manager_resume(void) {}
 void audio_receiver_manager_flush(void) {}
+size_t audio_receiver_manager_write_stream(const uint8_t *data, size_t len) { (void)data; (void)len; return 0; }
 esp_err_t audio_receiver_manager_set_sample_rate(uint32_t sample_rate) { (void)sample_rate; return ESP_ERR_NOT_SUPPORTED; }
 
 #endif /* CONFIG_HAS_TLV320DAC_I2S */

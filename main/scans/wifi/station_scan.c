@@ -612,7 +612,7 @@ void station_scan_stop(void) {
     // If station_scan_start ran the initial-AP-scan path, it called
     // ap_manager_stop_services() and never restored the AP. Restore it now
     // so the WebUI comes back regardless of which caller invoked stop.
-    ap_manager_start_services();
+    (void)ap_manager_restore_after_attack("station scan stop");
     wifi_manager_configure_sta_from_settings();
     wifi_manager_set_reconnect_hold(false);
 

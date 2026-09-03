@@ -61,6 +61,20 @@ esp_err_t audio_i2s_output_flush(void);
  */
 bool audio_i2s_output_is_initialized(void);
 
+/**
+ * @brief Set software playback volume (0-100%).
+ *
+ * Scales PCM samples in the write path. Used for speaker codecs without a
+ * hardware volume control (e.g. the CoreS3 AW88298), matching how M5Unified
+ * applies volume in software. 100 = unity (no scaling).
+ */
+void audio_i2s_output_set_volume(uint8_t percent);
+
+/**
+ * @brief Get the current software playback volume (0-100%).
+ */
+uint8_t audio_i2s_output_get_volume(void);
+
 #ifdef __cplusplus
 }
 #endif

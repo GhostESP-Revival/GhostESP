@@ -11,6 +11,8 @@ typedef struct {
     gpio_num_t bclk_pin;
     gpio_num_t ws_pin;
     gpio_num_t din_pin;
+    gpio_num_t mclk_pin;
+    int i2s_port;
     uint32_t sample_rate;
     size_t buffer_samples;
 } mic_config_t;

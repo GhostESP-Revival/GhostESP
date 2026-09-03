@@ -156,6 +156,13 @@ static eth_disp_iface_t  s_iface       = {0};
 static eth_workspace_t   s_workspace   = {0};
 static bool              s_scan_running = false;
 
+// Remote-mode acknowledgement tracking: records are only meaningful once the
+// peer echoes "S|scanning". If no echo arrives within a few seconds, the peer
+// likely never received/recognized the command (e.g. outdated peer firmware)
+// -- surface that instead of showing a fake scanning screen forever.
+static bool     s_peer_ack      = false;
+static uint32_t s_no_ack_ticks  = 0;
+
 // ============================================================
 // Static UI state
 // ============================================================
@@ -510,6 +517,9 @@ static void eth_stream_rx_cb(uint8_t channel, const uint8_t *data, size_t length
         if (strcmp(payload, "scanning") == 0) {
             s_scan_running = true;
             s_scan.done    = false;
+            // Peer acknowledged the scan command; live records are flowing.
+            s_peer_ack     = true;
+            s_no_ack_ticks = 0;
         } else if (strcmp(payload, "done") == 0) {
             s_scan_running = false;
             s_scan.done    = true;
@@ -858,6 +868,14 @@ static void scan_poll_cb(lv_timer_t *t) {
     done = s_scan.done;
     if (!done) {
         if (s_scan_status) {
+            // If the peer never echoed "S|scanning", it did not receive or
+            // recognize the command (outdated peer firmware). After ~3 s,
+            // stop showing fake live progress and say so instead.
+            if (!s_peer_ack && ++s_no_ack_ticks > 15) {
+                scan_status_set_subtext(s_scan_status,
+                    "Peer not responding - check peer firmware/link");
+                return;
+            }
             scan_status_set_progress(s_scan_status, s_scan.progress_current, s_scan.progress_total);
             char sub[48];
             if (s_scan.type == 1)
@@ -865,6 +883,8 @@ static void scan_poll_cb(lv_timer_t *t) {
             else if (s_scan.type == 2 || s_scan.type == 3)
                 snprintf(sub, sizeof(sub), "Port %d/%d, %d open",
                          s_scan.progress_current, s_scan.progress_total, s_scan.port_count);
+            else if (s_scan.type == 0)
+                snprintf(sub, sizeof(sub), "Discovering services...");
             else
                 snprintf(sub, sizeof(sub), "Sweeping...");
             scan_status_set_subtext(s_scan_status, sub);
@@ -1005,6 +1025,8 @@ static void build_dashboard(void) {
 // ============================================================
 
 static void build_scanning(void) {
+    s_peer_ack     = false;
+    s_no_ack_ticks = 0;
     s_scan_status = scan_status_create("Scanning...");
     scan_status_set_subtext(s_scan_status, "Initializing...");
     s_poll_timer = lv_timer_create(scan_poll_cb, 200, NULL);

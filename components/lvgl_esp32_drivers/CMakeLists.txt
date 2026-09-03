@@ -60,6 +60,10 @@ if(CONFIG_LV_TFT_DISPLAY_PROTOCOL_SPI AND NOT CONFIG_USE_TDISPLAY_S3)
     list(APPEND SOURCES "lvgl_tft/disp_spi.c")
 endif()
 
+if(CONFIG_USE_C5_PARLIO_DISPLAY)
+    list(APPEND SOURCES "lvgl_tft/banshee_c5_parlio.c")
+endif()
+
 # Add touch driver to compilation only if it is selected in menuconfig
 # Add touch driver to compilation only if it is selected in menuconfig or for specific templates
 if(CONFIG_LV_TOUCH_CONTROLLER OR CONFIG_BUILD_CONFIG_TEMPLATE MATCHES "somethingsomething")
@@ -99,7 +103,7 @@ endif()
 
 idf_component_register(SRCS ${SOURCES}
                        INCLUDE_DIRS ${LVGL_INCLUDE_DIRS}
-                       REQUIRES lvgl driver io_manager esp_driver_i2c esp_driver_spi esp_driver_ledc)
+                       REQUIRES lvgl driver esp_lcd io_manager esp_driver_i2c esp_driver_spi esp_driver_ledc)
 
 target_compile_definitions(${COMPONENT_LIB} PUBLIC "-DLV_LVGL_H_INCLUDE_SIMPLE")
 

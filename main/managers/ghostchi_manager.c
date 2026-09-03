@@ -198,11 +198,7 @@ static void ssid_to_text(const uint8_t *ssid, char *out, size_t out_len) {
 }
 
 static bool ghostchi_needs_jit_mount(void) {
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    return strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0;
-#else
-    return false;
-#endif
+    return sd_card_needs_jit_mount();
 }
 
 static bool ghostchi_sd_begin(bool *display_was_suspended, bool *mounted_here) {

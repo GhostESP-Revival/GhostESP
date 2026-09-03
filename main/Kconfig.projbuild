@@ -84,11 +84,38 @@ menu "Ghost ESP Options"
         help
             Set the height of the TFT display.
 
+    config CROWPANEL_EPAPER_42
+        bool "Use Elecrow CrowPanel 4.2-inch e-paper"
+        default n
+        depends on IDF_TARGET_ESP32S3 && WITH_SCREEN
+        help
+            Enable the Elecrow CrowPanel 4.2-inch 400x300 SSD1683 e-paper
+            display. The panel is driven from the factory firmware's SPI pin
+            map and uses five active-low GPIO buttons for navigation.
+
+    config CROWPANEL_EPAPER_579
+        bool "Use Elecrow CrowPanel 5.79-inch e-paper"
+        default n
+        select CROWPANEL_EPAPER_42
+        depends on IDF_TARGET_ESP32S3 && WITH_SCREEN
+        help
+            Enable the Elecrow CrowPanel 5.79-inch 792x272 dual-SSD1683
+            e-paper display. This selects the shared CrowPanel e-paper
+            support and uses the board's GPIO11/12 and GPIO45-48 EPD pins.
+
     config USE_TOUCHSCREEN
         bool "Enable Touchscreen"
         default n
         help
             Enable touchscreen input.
+
+    config GHOSTESP_P4_PPA_RENDER
+        bool "Use ESP32-P4 PPA for LVGL rendering"
+        depends on IDF_TARGET_ESP32P4 && WITH_SCREEN
+        default y
+        help
+            Accelerate eligible RGB565 fills and image blends with the P4 PPA.
+            Unsupported operations automatically use LVGL software rendering.
 
     config USE_7_INCHER
         bool "Use 7-inch Display"
@@ -108,6 +135,58 @@ menu "Ghost ESP Options"
         help
             Enable support for Crowtech LCD.
 
+    config CROWPANEL_ADVANCE_7_LCD
+        bool "Enable Elecrow CrowPanel Advance 7-inch LCD"
+        default n
+        depends on USE_7_INCHER
+        help
+            Enable the Elecrow CrowPanel Advance 7-inch HMI RGB display.
+            This board uses a dedicated RGB pin map and GT911 touch on I2C0.
+
+    config CROWPANEL_ADVANCE_5_LCD
+        bool "Enable Elecrow CrowPanel Advance 5-inch LCD"
+        default n
+        depends on USE_7_INCHER
+        help
+            Enable the 800x480 ST7262 RGB panel and GT911 touch controller.
+
+    config CROWPANEL_ADVANCE_43_LCD
+        bool "Enable Elecrow CrowPanel Advance 4.3-inch LCD"
+        default n
+        depends on USE_7_INCHER
+        help
+            Enable the 800x480 ST7265 RGB panel and GT911 touch controller.
+
+    config CROWPANEL_ADVANCE_35_LCD
+        bool "Enable Elecrow CrowPanel Advance 3.5-inch LCD"
+        default n
+        help
+            Enable the 480x320 ILI9488 SPI panel and GT911 touch controller.
+
+    config CROWPANEL_ADVANCE_28_LCD
+        bool "Enable Elecrow CrowPanel Advance 2.8-inch LCD"
+        default n
+        help
+            Enable the 320x240 ST7789 SPI panel and FT6336U/FT5x06 touch controller.
+
+    config CROWPANEL_ADVANCE_24_LCD
+        bool "Enable Elecrow CrowPanel Advance 2.4-inch LCD"
+        default n
+        help
+            Enable the 320x240 ST7789 SPI panel and FT6336U/FT5x06 touch controller.
+
+    config CROWPANEL_ADVANCE_RGB_LCD
+        bool
+        default y if CROWPANEL_ADVANCE_7_LCD || CROWPANEL_ADVANCE_5_LCD || CROWPANEL_ADVANCE_43_LCD
+
+    config CROWPANEL_ADVANCE_SMALL_SPI_LCD
+        bool
+        default y if CROWPANEL_ADVANCE_28_LCD || CROWPANEL_ADVANCE_24_LCD
+
+    config CROWPANEL_ADVANCE_S3_LCD
+        bool
+        default y if CROWPANEL_ADVANCE_RGB_LCD || CROWPANEL_ADVANCE_35_LCD || CROWPANEL_ADVANCE_SMALL_SPI_LCD
+
     config Sunton_LCD
         bool "Enable Sunton LCD"
         default n
@@ -120,11 +199,76 @@ menu "Ghost ESP Options"
         help
             Enable support for JC3248W535EN LCD.
 
+    config CROWPANEL_ADVANCED_P4
+        bool "Enable Elecrow CrowPanel Advanced P4 HMI"
+        default n
+        depends on IDF_TARGET_ESP32P4
+        help
+            Enable the Elecrow CrowPanel Advanced P4 display family. Select
+             the panel transport below for the physical display variant.
+
+    config CROWPANEL_P4_REV_V12_PLUS
+        bool "CrowPanel Advanced P4 board revision v1.2 or newer"
+        default y
+        depends on CROWPANEL_ADVANCED_P4
+        help
+            Select the v1.2+ board power and ESP-Hosted wiring. Disable this
+            only for boards marked v1.1.
+
+    choice CROWPANEL_P4_PANEL
+        bool "CrowPanel Advanced P4 panel variant"
+        default CROWPANEL_P4_PANEL_MIPI_1024X600
+        depends on CROWPANEL_ADVANCED_P4
+        help
+            Select the display bus and geometry used by the attached panel.
+
+        config CROWPANEL_P4_PANEL_MIPI_1024X600
+            bool "7-inch / 9-inch / 10.1-inch (1024x600 MIPI-DSI)"
+            help
+                Use the EK79007 two-lane MIPI-DSI panel used by the
+                CrowPanel Advanced 7-inch, 9-inch, and 10.1-inch variants.
+
+        config CROWPANEL_P4_PANEL_RGB_800X480
+            bool "5-inch (800x480 RGB)"
+            help
+                Use the 16-bit RGB panel used by the CrowPanel Advanced
+                5-inch variant. Its backlight is controlled by the onboard
+                STC8 controller over I2C.
+
+    endchoice
+
+    config CROWPANEL_P4_CAMERA
+        bool "Enable CrowPanel P4 native camera"
+        default y
+        depends on CROWPANEL_ADVANCED_P4
+        help
+            Enable the native MIPI-CSI camera app for the Elecrow CrowPanel
+            Advanced P4 boards with the factory camera connector. The camera
+            uses the SC2336 sensor wiring documented by Elecrow and is
+            independent of whether the display uses MIPI or RGB transport.
+
     config USE_ILI9341_2
         bool "Use ILI9341 2nd Display Driver"
         default n
         help
             Enable support for ILI9341 display module.
+
+    config USE_C5_PARLIO_DISPLAY
+        bool "Use ESP32-C5 PARLIO display transport"
+        default n
+        depends on IDF_TARGET_ESP32C5 && WITH_SCREEN && LV_TFT_DISPLAY_PROTOCOL_SPI
+        help
+            Drive the display through the ESP32-C5 PARLIO peripheral in
+            single-data-line SPI mode. This leaves SPI2 available for an
+            independent SD card bus.
+
+    config C5_PARLIO_CLOCK_HZ
+        int "ESP32-C5 PARLIO pixel clock (Hz)"
+        default 80000000
+        range 1 80000000
+        depends on USE_C5_PARLIO_DISPLAY
+        help
+            Pixel clock used by the ESP32-C5 PARLIO display transport.
 
     config WITH_STATUS_DISPLAY
         bool "Enable Status Display"
@@ -194,6 +338,20 @@ menu "Ghost ESP Options"
             default n
             help
                 Enable joystick input.
+
+        config USE_ATOMS3R_BUTTON
+            bool "Enable AtomS3R single-button navigation"
+            default n
+            depends on WITH_SCREEN
+            help
+                Enable the AtomS3R single-button navigation input.
+
+        config ATOMS3R_BUTTON_PIN
+            int "AtomS3R button GPIO"
+            default 41
+            depends on USE_ATOMS3R_BUTTON
+            help
+                GPIO connected to the AtomS3R user button.
                 
         config USE_IO_EXPANDER
             bool "Enable IO Expander (TCA9535)"
@@ -323,6 +481,22 @@ menu "Ghost ESP Options"
                 Enable BadUSB support. Uses TinyUSB device mode to emulate a USB HID
                 keyboard and execute DuckyScript v1.0 payloads from the SD card.
                 Only available on ESP32-S3 which has USB OTG support.
+
+        config HAS_BADBLE
+            bool "Enable BadBLE (Bluetooth HID Script Injection)"
+            default y if IDF_TARGET_ESP32 || IDF_TARGET_ESP32C3 || IDF_TARGET_ESP32C5 || IDF_TARGET_ESP32C6 || IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32P4
+            depends on !IDF_TARGET_ESP32S2
+            depends on SOC_BT_SUPPORTED || ESP_HOSTED_ENABLE_BT_NIMBLE
+            depends on BT_ENABLED
+            depends on BT_NIMBLE_ENABLED
+            depends on BT_CONTROLLER_ENABLED || ESP_HOSTED_ENABLE_BT_NIMBLE
+            depends on BT_NIMBLE_ROLE_PERIPHERAL
+            depends on BT_NIMBLE_GATT_SERVER
+            select BT_NIMBLE_HID_SERVICE
+            help
+                Enable native BLE HID keyboard support for DuckyScript payloads.
+                Uses the NimBLE HID service and is available on Bluetooth-capable
+                targets with a NimBLE GATT server.
 
         config BADUSB_VSENSE_PIN
             int "BadUSB VBUS Sense Pin (use -1 to disable)"
@@ -555,6 +729,14 @@ menu "Ghost ESP Options"
             default n
             help
                 Enable configuration for S3TWatch with virtual flash storage.
+
+        config IS_ATOMS3R
+            bool "Enable M5Stack AtomS3R Configuration"
+            default n
+            help
+                Enable configuration for the M5Stack AtomS3R. Like the
+                S3TWatch, it has no SD card slot, so the build carves out a
+                flash 'storage' partition mounted as virtual storage at /mnt.
 
         config HAS_DRV2605_HAPTICS
             bool "Enable DRV2605 Haptics"
@@ -949,6 +1131,16 @@ menu "Ghost ESP Options"
                 help
                     7-bit ST25R3916 I2C address. The chip uses 0x50..0x53 depending on A0/A1 straps.
 
+            config NFC_ST25R3916_I2C_PORT
+                int "ST25R3916 I2C port"
+                default 0
+                range 0 1
+                depends on NFC_ST25R3916 && NFC_ST25R3916_I2C
+                help
+                    I2C controller port used for the ST25R3916. Boards with the
+                    internal peripherals on port 0 (e.g. M5Stack CoreS3-SE, AtomS3R)
+                    should use port 1 for a Grove-port reader.
+
             config NFC_ST25R3916_SPI_HOST
                 int "ST25R3916 SPI host"
                 default 1
@@ -1173,6 +1365,21 @@ menu "Ghost ESP Options"
             help
                 DIN pin for I2S microphone (INMP441)
 
+        config MIC_I2S_MCLK_PIN
+            int "I2S MCLK pin"
+            depends on HAS_MIC
+            default -1
+            help
+                MCLK pin for codecs that require a master clock.
+
+        config MIC_I2S_PORT
+            int "I2S port"
+            range 0 1
+            depends on HAS_MIC
+            default 0
+            help
+                I2S controller used by the microphone.
+
         config MIC_SAMPLE_RATE
             int "Sample Rate"
             depends on HAS_MIC
@@ -1318,6 +1525,21 @@ menu "Ghost ESP Options"
         help
             I2C address of the QMC6309 magnetometer.
 
+    config COMPASS_USE_BMM150
+        bool "Use BMM150 magnetometer"
+        default n
+        depends on HAS_COMPASS
+        help
+            Use a BMM150 on the native I2C bus instead of the QMC6309.
+            The existing QMC6309 compass path remains the default.
+
+    config BMM150_I2C_ADDR
+        hex "BMM150 I2C Address"
+        default 0x10
+        depends on COMPASS_USE_BMM150
+        help
+            I2C address of the BMM150 magnetometer (0x10 or 0x11).
+
     config COMPASS_ON_EXPANDER
         bool "Compass connected to IO Expander"
         default y
@@ -1403,6 +1625,14 @@ menu "Ghost ESP Options"
         help
             Enable Accelerometer application using ADXL345.
 
+    config ACCEL_USE_BMI270
+        bool "Use BMI270 accelerometer"
+        default n
+        depends on HAS_ACCELEROMETER
+        help
+            Use the official BMI270 firmware upload and register map instead
+            of the default ADXL345 driver.
+
     config ACCEL_I2C_ADDR
         hex "ADXL345 I2C Address"
         default 0x53
@@ -1424,6 +1654,7 @@ menu "Ghost ESP Options"
 
     config ENABLE_NATIVE_SD_APPS
         bool "Enable native apps loaded from SD"
+        default n if IS_ATOMS3R
         default y
         depends on SPIRAM
         depends on IDF_TARGET_ESP32 || IDF_TARGET_ESP32S2 || IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32C6 || IDF_TARGET_ESP32C61 || IDF_TARGET_ESP32P4 || IDF_TARGET_ESP32C5
@@ -1519,17 +1750,6 @@ menu "Ghost ESP Options"
             Enable extra TFT/SD SPI bus coordination for boards that share
             MOSI/MISO/CLK between display and SD card.
 
-    config EXPERIMENTAL_C5_PARALLEL_TFT_SD_SPI
-        bool "Experimental ESP32-C5 persistent TFT/SD SPI bus"
-        default n
-        depends on IDF_TARGET_ESP32C5 && USING_SPI && WITH_SCREEN && LV_TFT_DISPLAY_PROTOCOL_SPI
-        help
-            Keep the TFT and SD card attached to SPI2 simultaneously by routing
-            SPI2 clock and MOSI to both sets of GPIOs. Transactions still share
-            one controller and are serialized by the SPI driver. This currently
-            applies only to the somethingsomething board template. Disable this
-            option to restore the existing JIT mount and display handoff path.
-
     config SD_MMC_D0 
         int "SD Card D0 Pin"
         default 13
@@ -1555,13 +1775,44 @@ menu "Ghost ESP Options"
     
     menu "Audio & DAC Configuration"
 
+        config HAS_ES7210_MIC
+            bool "Enable ES7210 microphone codec"
+            default n
+            depends on HAS_MIC
+            help
+                Initialize the M5Stack CoreS3 ES7210 microphone codec.
+
+        config ES7210_I2C_ADDR
+            hex "ES7210 I2C Address"
+            default 0x40
+            depends on HAS_ES7210_MIC
+
+        config HAS_AW88298_SPEAKER
+            bool "Enable AW88298 speaker codec"
+            default n
+            help
+                Initialize the M5Stack CoreS3 AW88298 speaker codec.
+
+        config AW88298_I2C_ADDR
+            hex "AW88298 I2C Address"
+            default 0x36
+            depends on HAS_AW88298_SPEAKER
+
+        config CORES3_AUDIO_I2C_PORT
+            int "CoreS3 audio I2C port"
+            range 0 1
+            default 0
+            depends on HAS_ES7210_MIC || HAS_AW88298_SPEAKER
+
         menu "Audio Player (C5 Display)"
             config HAS_AUDIO_PLAYER
                 bool "Enable Audio Player App"
                 default n
-                depends on WITH_SCREEN && USING_SPI && HAS_TLV320DAC_I2C
+                depends on WITH_SCREEN && (USING_SPI || USING_MMC_1_BIT) && (HAS_TLV320DAC_I2C || HAS_AW88298_SPEAKER || HAS_CROWPANEL_NS4168)
                 help
-                    Enable MP3 audio player UI and SD card streaming over GhostLink.
+                    Enable MP3 audio player UI and SD card playback. Streams to a
+                    GhostLink peer when one is connected, or plays through the
+                    on-board speaker when the device has its own audio output.
 
             config AUDIO_FILES_PATH
                 string "Audio Files Directory"
@@ -1607,6 +1858,19 @@ menu "Ghost ESP Options"
                 help
                     Bit index on IO expander port 1 for DAC RESET line.
                     P13 on the TCA9539RTWR corresponds to bit 3 of port 1.
+        endmenu
+
+        menu "CrowPanel P4 NS4168 Audio"
+            config HAS_CROWPANEL_NS4168
+                bool "Enable CrowPanel P4 NS4168 I2S Audio (BCLK22/WCLK21/DIN23)"
+                default n
+                depends on IDF_TARGET_ESP32P4 && CROWPANEL_ADVANCED_P4
+                help
+                    Enable I2S TX to the CrowPanel Advanced P4 dual NS4168 amplifiers.
+                    Uses I2S_NUM_1 master: BCLK=GPIO22, WCLK=GPIO21, DIN=GPIO23,
+                    amplifier enable (active-low) via STC8 I2C on the 5-inch RGB
+                    board or GPIO30 on MIPI boards. Audio sourced from SD.
+
         endmenu
 
         menu "TLV320DAC3100 DAC (I2S Audio - S3)"

@@ -212,6 +212,7 @@ void screen_mirror_send_info(void) {
 static uint32_t estimate_rle16(const lv_color_t *pixels, uint32_t pixel_count) {
     uint32_t size = 0;
     uint32_t i = 0;
+    const uint32_t raw_size = pixel_count * 2;
 
     while (i < pixel_count) {
         uint16_t val = mirror_color_to_rgb565(pixels[i]);
@@ -220,6 +221,8 @@ static uint32_t estimate_rle16(const lv_color_t *pixels, uint32_t pixel_count) {
             count++;
         }
         size += 3;
+        // The caller selects raw at equality; further runs cannot make RLE smaller.
+        if (size >= raw_size) return raw_size;
         i += count;
     }
 
@@ -237,6 +240,8 @@ static uint32_t estimate_rle8(const lv_color_t *pixels, uint32_t pixel_count) {
             count++;
         }
         size += 2; // count + value
+        // No need to scan the remaining pixels once raw is guaranteed to win.
+        if (size >= pixel_count) return pixel_count;
         i += count;
     }
 

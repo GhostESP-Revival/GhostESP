@@ -1,5 +1,6 @@
 #include "managers/settings_sd_backup.h"
 #include "managers/settings_manager.h"
+#include "gui/theme_palette_api.h"
 #include "managers/sd_card_manager.h"
 #include "managers/display_manager.h"
 #include "managers/wifi_manager.h"
@@ -151,6 +152,17 @@ static cJSON *settings_to_json_object(const FSettings *s) {
   cJSON_AddBoolToObject(o, "infrared_easy_mode", s->infrared_easy_mode);
   cJSON_AddBoolToObject(o, "nav_buttons_enabled", s->nav_buttons_enabled);
   cJSON_AddNumberToObject(o, "menu_layout", (double)s->menu_layout);
+  cJSON *menu_items = cJSON_AddArrayToObject(o, "menu_items");
+  for (int i = 0; menu_items && i < s->menu_config.count && i < MENU_CONFIG_MAX; ++i) {
+    const menu_config_entry_t *entry = &s->menu_config.entries[i];
+    cJSON *item = cJSON_CreateObject();
+    if (!item) break;
+    cJSON_AddStringToObject(item, "id", entry->id);
+    cJSON_AddNumberToObject(item, "placement", entry->placement);
+    cJSON_AddNumberToObject(item, "main_order", entry->order[0]);
+    cJSON_AddNumberToObject(item, "apps_order", entry->order[1]);
+    cJSON_AddItemToArray(menu_items, item);
+  }
   cJSON_AddBoolToObject(o, "carousel_invert_direction", s->carousel_invert_direction);
   cJSON_AddNumberToObject(o, "neopixel_max_brightness", (double)s->neopixel_max_brightness);
   cJSON_AddBoolToObject(o, "encoder_invert_direction", s->encoder_invert_direction);
@@ -175,6 +187,10 @@ static cJSON *settings_to_json_object(const FSettings *s) {
   cJSON_AddBoolToObject(o, "mic_mirror_mode", s->mic_mirror_mode);
   cJSON_AddBoolToObject(o, "ghostlink_split_view", s->ghostlink_split_view);
   cJSON_AddNumberToObject(o, "menu_bg_shade", (double)s->menu_bg_shade);
+  cJSON_AddNumberToObject(o, "theme_schema", 1);
+  cJSON_AddBoolToObject(o, "theme_background_effects", s->theme_background_effects);
+  cJSON_AddBoolToObject(o, "high_contrast", s->high_contrast);
+  cJSON_AddBoolToObject(o, "sun_mode", s->sun_mode);
   cJSON_AddBoolToObject(o, "menu_rounded", s->menu_rounded);
   cJSON_AddBoolToObject(o, "menu_item_borders", s->menu_item_borders);
   cJSON_AddBoolToObject(o, "menu_card_bg", s->menu_card_bg);
@@ -251,7 +267,8 @@ static void json_apply_to_settings(FSettings *s, const cJSON *root) {
   if (cJSON_GetObjectItemCaseSensitive(root, "third_control_enabled")) {
     s->third_control_enabled = jget_bool(root, "third_control_enabled", s->third_control_enabled);
   }
-  s->menu_theme = (uint8_t)jget_int_clamp(root, "menu_theme", s->menu_theme, 0, 64);
+  s->menu_theme =
+      (uint8_t)jget_int_clamp(root, "menu_theme", s->menu_theme, 0, THEME_PALETTE_THEME_COUNT - 1);
   s->terminal_text_color =
       jget_u32_clamp(root, "terminal_text_color", s->terminal_text_color, 0, 0xFFFFFFu);
   s->terminal_font_size =
@@ -286,7 +303,23 @@ static void json_apply_to_settings(FSettings *s, const cJSON *root) {
   if (cJSON_GetObjectItemCaseSensitive(root, "nav_buttons_enabled")) {
     s->nav_buttons_enabled = jget_bool(root, "nav_buttons_enabled", s->nav_buttons_enabled);
   }
-  s->menu_layout = (uint8_t)jget_int_clamp(root, "menu_layout", s->menu_layout, 0, 3);
+  s->menu_layout = (uint8_t)jget_int_clamp(root, "menu_layout", s->menu_layout, 0, 4);
+  const cJSON *menu_items = cJSON_GetObjectItemCaseSensitive(root, "menu_items");
+  if (cJSON_IsArray(menu_items)) {
+    menu_config_reset(&s->menu_config);
+    const cJSON *item;
+    cJSON_ArrayForEach(item, menu_items) {
+      const cJSON *id = cJSON_GetObjectItemCaseSensitive(item, "id");
+      if (!cJSON_IsString(id) || !id->valuestring || strlen(id->valuestring) >= MENU_CONFIG_ID_LEN) continue;
+      int placement = jget_int_clamp(item, "placement", MENU_PLACE_APPS, 1, 3);
+      if (!menu_config_set(&s->menu_config, id->valuestring, placement)) continue;
+      menu_config_order(&s->menu_config, id->valuestring, placement, MENU_PLACE_MAIN,
+                        jget_int_clamp(item, "main_order", MENU_ORDER_DEFAULT, 0, 255));
+      menu_config_order(&s->menu_config, id->valuestring, placement, MENU_PLACE_APPS,
+                        jget_int_clamp(item, "apps_order", MENU_ORDER_DEFAULT, 0, 255));
+    }
+    menu_config_validate(&s->menu_config);
+  }
   if (cJSON_GetObjectItemCaseSensitive(root, "carousel_invert_direction")) {
     s->carousel_invert_direction =
         jget_bool(root, "carousel_invert_direction", s->carousel_invert_direction);
@@ -335,6 +368,20 @@ static void json_apply_to_settings(FSettings *s, const cJSON *root) {
     s->ghostlink_split_view = jget_bool(root, "ghostlink_split_view", s->ghostlink_split_view);
   }
   s->menu_bg_shade = (uint8_t)jget_int_clamp(root, "menu_bg_shade", s->menu_bg_shade, 0, 3);
+  if (!cJSON_GetObjectItemCaseSensitive(root, "theme_schema")) {
+    /* Backup predates palette descriptors: remap legacy accent IDs. */
+    s->menu_theme = theme_palette_migrate_legacy(s->menu_theme);
+  }
+  if (cJSON_GetObjectItemCaseSensitive(root, "theme_background_effects")) {
+    s->theme_background_effects = jget_bool(root, "theme_background_effects", s->theme_background_effects);
+  }
+  if (cJSON_GetObjectItemCaseSensitive(root, "high_contrast")) {
+    s->high_contrast = jget_bool(root, "high_contrast", s->high_contrast);
+  }
+  if (cJSON_GetObjectItemCaseSensitive(root, "sun_mode")) {
+    s->sun_mode = jget_bool(root, "sun_mode", s->sun_mode);
+  }
+  settings_normalize_modes(s);
   if (cJSON_GetObjectItemCaseSensitive(root, "menu_rounded")) {
     s->menu_rounded = jget_bool(root, "menu_rounded", s->menu_rounded);
   }

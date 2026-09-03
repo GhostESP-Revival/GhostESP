@@ -42,6 +42,7 @@ typedef enum {
 } detail_nav_region_t;
 
 struct detail_view_t {
+    lv_obj_t *backdrop;
     lv_obj_t *container;
     lv_obj_t *info_panel;
     lv_obj_t *info_canvas;
@@ -570,7 +571,7 @@ detail_view_t *detail_view_create(lv_obj_t *parent, const char *title) {
     int STATUS_BAR_HEIGHT = GUI_STATUS_BAR_H;
     bool small = (w <= 240 || h <= 240);
     dv->compact_layout = detail_view_should_use_compact_layout(w, h);
-    dv->btn_h = dv->compact_layout ? 20 : (small ? 28 : 34);
+    dv->btn_h = dv->compact_layout ? 20 : (small ? 28 : GUI_CONTROL_H);
     bool rounded = get_menu_rounded();
     dv->item_radius = (!dv->compact_layout && rounded) ? GUI_RADIUS_SM : 0;
     dv->selected = -1;
@@ -583,12 +584,27 @@ detail_view_t *detail_view_create(lv_obj_t *parent, const char *title) {
     
     lv_color_t bg, surface, surface_alt, text, accent;
     get_theme_colors(&bg, &surface, &surface_alt, &text, &accent);
+
+    /* P4 detail content is intentionally capped, but the view must still
+     * cover the complete display so the parent view cannot show at the sides. */
+    lv_coord_t content_w = LV_MIN(w, GUI_CONTENT_MAX_W);
+    if (content_w < w) {
+        dv->backdrop = lv_obj_create(parent);
+        if (dv->backdrop) {
+            lv_obj_remove_style_all(dv->backdrop);
+            lv_obj_set_size(dv->backdrop, w, h);
+            lv_obj_set_pos(dv->backdrop, 0, 0);
+            lv_obj_set_style_bg_color(dv->backdrop, bg, 0);
+            lv_obj_set_style_bg_opa(dv->backdrop, LV_OPA_COVER, 0);
+            lv_obj_clear_flag(dv->backdrop, LV_OBJ_FLAG_SCROLLABLE);
+        }
+    }
     
     dv->container = lv_obj_create(parent);
     lv_coord_t content_h = h - STATUS_BAR_HEIGHT;
     if (content_h < 60) content_h = 60;
     dv->content_h = content_h;
-    lv_obj_set_size(dv->container, w, content_h);
+    lv_obj_set_size(dv->container, content_w, content_h);
     lv_obj_align(dv->container, LV_ALIGN_TOP_MID, 0, STATUS_BAR_HEIGHT);
     lv_obj_set_style_bg_color(dv->container, bg, 0);
     lv_obj_set_style_pad_all(dv->container, 0, 0);
@@ -640,7 +656,7 @@ detail_view_t *detail_view_create(lv_obj_t *parent, const char *title) {
     lv_obj_set_flex_grow(dv->action_list, 1);
     lv_obj_set_style_bg_color(dv->action_list, bg, 0);
     lv_obj_set_style_pad_top(dv->action_list, action_pad_v, 0);
-    lv_obj_set_style_pad_bottom(dv->action_list, action_pad_v, 0);
+    lv_obj_set_style_pad_bottom(dv->action_list, action_pad_v + GUI_HOME_SAFE_H, 0);
     lv_obj_set_style_pad_left(dv->action_list, action_pad_h, 0);
     lv_obj_set_style_pad_right(dv->action_list, action_pad_h, 0);
     lv_obj_set_style_pad_row(dv->action_list, action_row_gap, 0);
@@ -691,6 +707,7 @@ void detail_view_destroy(detail_view_t *dv) {
     detail_view_free_info_items(dv);
     free(dv->info_items);
     if (dv->container && lv_obj_is_valid(dv->container)) lv_obj_del(dv->container);
+    if (dv->backdrop && lv_obj_is_valid(dv->backdrop)) lv_obj_del(dv->backdrop);
     free(dv->rows);
     free(dv);
 }
@@ -758,6 +775,11 @@ lv_obj_t *detail_view_add_action(detail_view_t *dv, const char *label, lv_event_
     }
     
     lv_obj_t *lbl = lv_label_create(btn);
+    if (!lbl) {
+        ESP_LOGW(DV_TAG, "add_action: label alloc failed ('%s')", label ? label : "");
+        lv_obj_del(btn);
+        return NULL;
+    }
     lv_label_set_text(lbl, label ? label : "");
     lv_obj_set_style_text_font(lbl, get_item_font(dv), 0);
     lv_color_t text;
@@ -767,15 +789,25 @@ lv_obj_t *detail_view_add_action(detail_view_t *dv, const char *label, lv_event_
     lv_obj_set_flex_grow(lbl, 1);
     lv_label_set_long_mode(lbl, LV_LABEL_LONG_DOT);
     
+#ifdef CONFIG_USE_TOUCHSCREEN
+    /* Touch UIs show a trailing chevron per action row. */
     lv_obj_t *arrow = lv_label_create(btn);
-    lv_label_set_text(arrow, LV_SYMBOL_RIGHT);
-    lv_obj_set_style_text_font(arrow, get_item_font(dv), 0);
-    get_theme_colors(NULL, NULL, NULL, &text, NULL);
-    lv_obj_set_style_text_color(arrow, text, 0);
-    lv_obj_set_user_data(arrow, (void *)2);
-    lv_obj_set_style_text_align(arrow, LV_TEXT_ALIGN_RIGHT, 0);
-#ifndef CONFIG_USE_TOUCHSCREEN
-    lv_obj_add_flag(arrow, LV_OBJ_FLAG_HIDDEN);
+    if (arrow) {
+        lv_label_set_text(arrow, LV_SYMBOL_RIGHT);
+        lv_obj_set_style_text_font(arrow, get_item_font(dv), 0);
+        lv_color_t text2;
+        get_theme_colors(NULL, NULL, NULL, &text2, NULL);
+        lv_obj_set_style_text_color(arrow, text2, 0);
+        lv_obj_set_user_data(arrow, (void *)2);
+        lv_obj_set_style_text_align(arrow, LV_TEXT_ALIGN_RIGHT, 0);
+    } else {
+        /* LVGL pool exhausted: keep the row usable without its arrow. */
+        ESP_LOGW(DV_TAG, "add_action: arrow label alloc failed ('%s')", label ? label : "");
+    }
+#else
+    /* Non-touch (joystick/encoder) builds never show the arrow; it was created
+     * only to be flagged LV_OBJ_FLAG_HIDDEN every row. Skip it entirely. */
+    lv_obj_t *arrow = NULL;
 #endif
     
     dv->rows[dv->count].obj = btn;
@@ -1100,6 +1132,9 @@ void detail_view_refresh_styles(detail_view_t *dv) {
     dv->item_radius = (!dv->compact_layout && rounded) ? GUI_RADIUS_SM : 0;
     
     lv_obj_set_style_bg_color(dv->container, bg, 0);
+    if (dv->backdrop && lv_obj_is_valid(dv->backdrop)) {
+        lv_obj_set_style_bg_color(dv->backdrop, bg, 0);
+    }
     lv_obj_set_style_bg_color(dv->info_panel, bg, 0);
     lv_obj_set_style_bg_color(dv->action_list, bg, 0);
     

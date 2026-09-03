@@ -19,7 +19,8 @@ typedef enum {
     INPUT_TYPE_JOYSTICK,
     INPUT_TYPE_KEYBOARD,
     INPUT_TYPE_ENCODER,         // --- new
-    INPUT_TYPE_EXIT_BUTTON      // --- new for IO6 exit button
+    INPUT_TYPE_EXIT_BUTTON,     // --- new for IO6 exit button
+    INPUT_TYPE_HOME_BUTTON      // Board-level Home action
 } InputType;
 
 typedef struct {
@@ -35,6 +36,7 @@ typedef struct {
     uint8_t key_value;          // Used for keyboard inputs
     struct { int8_t direction; bool button; } encoder; // Added for encoder input
     bool exit_pressed;          // Used for IO6 exit button
+    bool home_pressed;          // Used for a board-level Home button
   } data;
 } InputEvent;
 
@@ -200,6 +202,10 @@ lv_color_t hex_to_lv_color(const char *hex_str);
 void update_status_bar(bool wifi_enabled, bool bt_enabled, bool sd_card_mounted, int batteryPercentage, bool power_save_enabled, bool is_ap_active, bool is_charging);
 
 void display_manager_add_status_bar(const char *CurrentMenuName);
+
+/* Current status-bar title text ("" if none). Valid until the next
+ * add_status_bar call - copy if you need to keep it. */
+const char *display_manager_get_status_title(void);
 void display_manager_raise_status_bar(void);
 void display_manager_restore_status_bar(void);
 
@@ -213,7 +219,9 @@ void display_manager_resume_lvgl_task(void);
 void display_manager_suspend_input_task(void);
 void display_manager_resume_input_task(void);
 
-void display_manager_run_on_lvgl(void (*fn)(void *), void *arg);
+bool display_manager_run_on_lvgl(void (*fn)(void *), void *arg);
+/* Non-blocking variant for high-rate producers that can drop stale frames. */
+bool display_manager_run_on_lvgl_nowait(void (*fn)(void *), void *arg);
 bool display_manager_is_lvgl_task(void);
 
 /* Thread-safe replacement for lv_async_call(). LVGL's timer list and internal
@@ -224,6 +232,7 @@ bool display_manager_is_lvgl_task(void);
  * Every call site outside display_manager.c must go through this instead of
  * calling lv_async_call() directly. */
 lv_res_t display_manager_lvgl_async_call(lv_async_cb_t cb, void *user_data);
+lv_res_t display_manager_lvgl_async_call_nowait(lv_async_cb_t cb, void *user_data);
 
 /* Coalesce scroll deltas: queue a scroll_by_bounded into a small accumulator
  * instead of running it on every touch sample. The accumulator is flushed
@@ -266,6 +275,7 @@ LV_IMG_DECLARE(wifi);
 LV_IMG_DECLARE(rave);
 LV_IMG_DECLARE(ghost);
 LV_IMG_DECLARE(GESPAppGallery);
+LV_IMG_DECLARE(camera_icon);
 LV_IMG_DECLARE(clock_icon);
 LV_IMG_DECLARE(settings_icon);
 LV_IMG_DECLARE(infrared);

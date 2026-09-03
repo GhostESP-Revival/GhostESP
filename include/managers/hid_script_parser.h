@@ -10,12 +10,14 @@ typedef bool (*hid_send_key_fn)(uint8_t modifiers, uint8_t keycode, void *ctx);
 typedef bool (*hid_send_string_fn)(const char *text, size_t len, void *ctx);
 typedef void (*hid_delay_fn)(uint32_t ms, void *ctx);
 typedef bool (*hid_release_keys_fn)(void *ctx);
+typedef bool (*hid_cancelled_fn)(void *ctx);
 
 typedef struct {
     hid_send_key_fn     send_key;
     hid_send_string_fn  send_string;
     hid_delay_fn        delay;
     hid_release_keys_fn release_keys;
+    hid_cancelled_fn    is_cancelled;
     void               *ctx;
 } hid_transport_t;
 

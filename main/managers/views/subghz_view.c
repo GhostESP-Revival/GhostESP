@@ -655,29 +655,21 @@ static bool subghz_sd_begin(bool *display_was_suspended) {
         *display_was_suspended = false;
     }
 
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0 ||
-        strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething2") == 0) {
+    if (sd_card_needs_jit_mount()) {
         esp_err_t mount_err = sd_card_mount_for_flush(display_was_suspended);
         if (mount_err != ESP_OK) {
             return false;
         }
         (void)sd_card_setup_directory_structure();
     }
-#endif
 
     return true;
 }
 
 static void subghz_sd_end(bool display_was_suspended) {
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0 ||
-        strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething2") == 0) {
+    if (sd_card_needs_jit_mount()) {
         sd_card_unmount_after_flush(display_was_suspended);
     }
-#else
-    (void)display_was_suspended;
-#endif
 }
 
 static bool subghz_local_save_snapshot(const char *name_hint,
@@ -4581,6 +4573,40 @@ static void subghz_input_handler(InputEvent *event) {
     }
 }
 
+// Deep-link support for favorites: open a specific saved capture. Safe to
+// call before the view exists - consumed by subghz_view_create(). Heap-backed
+// so it does not burn 256 B of internal RAM on boards without PSRAM.
+static char *s_pending_capture_open = NULL;
+static void subghz_view_apply_pending_open(void);
+
+void subghz_view_open_capture(const char *path) {
+    if (!path || !path[0]) return;
+    free(s_pending_capture_open);
+    s_pending_capture_open = strdup(path);
+    // View already live (e.g. lockscreen overlay on top of it): apply now.
+    if (s_ov && lv_obj_is_valid(s_ov)) {
+        subghz_view_apply_pending_open();
+    }
+}
+
+static void subghz_view_apply_pending_open(void) {
+    if (!s_pending_capture_open) return;
+    char path[256];
+    strncpy(path, s_pending_capture_open, sizeof(path) - 1);
+    path[sizeof(path) - 1] = '\0';
+    free(s_pending_capture_open);
+    s_pending_capture_open = NULL;
+    s_saved_page = 0;
+    subghz_saved_list_reload();
+    for (int i = 0; i < s_saved_file_count; i++) {
+        if (s_saved_file_paths[i] && strcmp(s_saved_file_paths[i], path) == 0) {
+            s_saved_index = i;
+            break;
+        }
+    }
+    subghz_open_saved_popup();
+}
+
 void subghz_view_create(void) {
     uint8_t theme = settings_get_menu_theme(&G_Settings);
     lv_color_t bg = lv_color_hex(theme_palette_get_background(theme));
@@ -4595,10 +4621,14 @@ void subghz_view_create(void) {
 
 #ifdef CONFIG_USE_TOUCHSCREEN
     const int STATUS_BAR_HEIGHT = GUI_STATUS_BAR_HEIGHT;
+#if GUI_LEGACY_TOUCH_BAR
     const int TOUCH_BAR_HEIGHT = SUBGHZ_SCROLL_BTN_SIZE + SUBGHZ_SCROLL_BTN_PADDING * 2;
+#else
+    const int TOUCH_BAR_HEIGHT = 0;
+#endif
     int list_h = LV_VER_RES - STATUS_BAR_HEIGHT - TOUCH_BAR_HEIGHT;
-    lv_obj_set_size(list, LV_HOR_RES, list_h);
-    lv_obj_align(list, LV_ALIGN_TOP_LEFT, 0, STATUS_BAR_HEIGHT);
+    lv_obj_set_size(list, GUI_OPTIONS_LIST_WIDTH, list_h);
+    lv_obj_align(list, LV_ALIGN_TOP_MID, 0, STATUS_BAR_HEIGHT);
 #endif
 
     s_scan_row = options_view_add_item(s_ov, "Capture", subghz_scan_row_cb, NULL);
@@ -4617,6 +4647,7 @@ void subghz_view_create(void) {
     options_view_set_selected(s_ov, s_root_selected_index);
 
 #ifdef CONFIG_USE_TOUCHSCREEN
+#if GUI_LEGACY_TOUCH_BAR
     lv_color_t ctrl_color = lv_color_hex(theme_palette_get_surface_alt(theme));
     lv_color_t ctrl_text_color = lv_color_hex(theme_palette_get_text(theme));
 
@@ -4672,6 +4703,7 @@ void subghz_view_create(void) {
     lv_obj_set_style_text_color(down_label, ctrl_text_color, 0);
     lv_obj_center(down_label);
     lv_obj_add_flag(s_scroll_down_btn, LV_OBJ_FLAG_HIDDEN);
+#endif /* GUI_LEGACY_TOUCH_BAR */
 #endif
 
     s_remote_mode = subghz_is_remote_mode();
@@ -4685,6 +4717,9 @@ void subghz_view_create(void) {
     memset(s_peaks, 0, sizeof(s_peaks));
 
     s_timer = lv_timer_create(subghz_timer_cb, 33, NULL);
+
+    // Consume any pending favorite deep-link (subghz_view_open_capture).
+    subghz_view_apply_pending_open();
 }
 
 void subghz_view_destroy(void) {

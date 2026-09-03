@@ -22,7 +22,7 @@ This installs `gbt` (and `ghostbt`) as a command on your PATH. Both names invoke
 
 ### Requirements
 
-- Python 3.10+ (the current package uses syntax unavailable in Python 3.8 and 3.9)
+- Python 3.10+
 - Git (for `gbt setup`)
 - ESP-IDF or `gbt setup` to install it automatically
 
@@ -72,13 +72,14 @@ Creates a new app project from a basic app template. Placeholders `{{APP_ID}}`, 
 
 The `app_id` may only contain letters, numbers, `_` and `-`.
 
-> **Current limitation:** `gbt create` is not yet a location-independent scaffold. For a reliable first project, run `python plugins/tools/new_app.py my_scanner --name "WiFi Scanner"` from the repository root; it creates `plugins/examples/my_scanner/` with the SDK layout expected by the standalone build scripts. Use `gbt create` only when you have verified the generated CMake SDK paths for your project location.
-
-The template includes:
-- `CMakeLists.txt` — references the GhostESP `elf_loader` component
+The generated directory is a standalone app repository and can live outside the GhostESP firmware tree. It includes:
+- `CMakeLists.txt` — builds the shared object with the ESP-IDF ELF loader component
 - `main/{{APP_SYMBOL}}.c` — minimal app with `GHOSTESP_APP_DEFINE`
-- `manifest.json` — filled with placeholder values
+- `manifest.json` — runtime app metadata
+- `sdk/` — the SDK headers used for reproducible catalog builds
 - `sdkconfig.defaults` — enables ELF loader support
+- `.github/workflows/build.yml` — verifies the default ESP32-S3 build on GitHub
+- `.gitignore` and `README.md` — source repository defaults
 
 ---
 
@@ -304,14 +305,14 @@ python plugins/tools/package_app.py plugins/examples/my_tool --gapp
 # 1. One-time setup for the target you will build
 gbt setup --target esp32s3
 
-# 2. Create an app from the repository root
-python plugins/tools/new_app.py wifi_scanner --name "WiFi Scanner"
+# 2. Create a standalone app repository
+gbt create wifi_scanner --name "WiFi Scanner"
 
 # 3. Build, package, and create .gapp
-gbt dist plugins/examples/wifi_scanner --target esp32s3 --gapp
+gbt dist wifi_scanner --target esp32s3 --gapp
 
 # 4. Copy .gapp to SD card
-#    plugins/examples/wifi_scanner/dist/wifi_scanner-1.0.0-esp32s3.gapp → /mnt/ghostesp/apps/
+#    wifi_scanner/dist/wifi_scanner-0.1.0-esp32s3.gapp → /mnt/ghostesp/apps/
 #    Then reboot the device.
 
 # 5. Optional: build and flash firmware for your board

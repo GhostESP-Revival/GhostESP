@@ -1,9 +1,14 @@
 #include "managers/plugin_api_internal.h"
 #include "gui/gui_anim.h"
+#include "sdkconfig.h"
 #include "esp_heap_caps.h"
+#include "sdkconfig.h"
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+#include "gui/native_canvas_scale.h"
+#endif
 
 typedef struct {
     ghostesp_ui_obj_t parent;
@@ -98,6 +103,7 @@ typedef struct {
     const lv_img_dsc_t *source;
 } builtin_image_t;
 
+#ifdef CONFIG_WITH_SCREEN
 LV_IMG_DECLARE(angry_50x50);
 LV_IMG_DECLARE(banshee_50x50);
 LV_IMG_DECLARE(cake_50x50);
@@ -125,6 +131,7 @@ static const builtin_image_t s_builtin_images[] = {
     { "ghostchi/tired", &tired_50x50 },
     { "ghostchi/what", &what2_50x50 },
 };
+#endif
 
 typedef struct timer_bridge_s {
     ghostesp_ui_timer_cb_t cb;
@@ -527,10 +534,28 @@ static void plugin_api_ui_canvas_blit_rgb565_now(void *arg) {
     if (left >= right || top >= bottom) return;
 
     uint16_t *destination = (uint16_t *)image->data;
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+    native_canvas_scale_rgb565(destination, canvas_width, ctx->pixels,
+        ctx->src_width, ctx->src_height, ctx->src_stride,
+        ctx->dst_x, ctx->dst_y, ctx->dst_width, ctx->dst_height,
+        left, top, right, bottom, LV_COLOR_16_SWAP);
+#else
     const bool copy_rows = left == ctx->dst_x && right == dst_right &&
                            ctx->dst_width == ctx->src_width;
+#if defined(CONFIG_USE_C5_PARLIO_DISPLAY)
+    const bool same_height = ctx->src_height == ctx->dst_height;
+    const bool fast_320_to_240 = ctx->src_width == 320 && ctx->src_height == 200 &&
+                                 ctx->src_stride >= 320 && ctx->dst_x == 0 &&
+                                 ctx->dst_width == 240 && same_height;
+#endif
     for (int32_t y = top; y < bottom; y++) {
+#if defined(CONFIG_USE_C5_PARLIO_DISPLAY)
+        int32_t source_y = same_height
+                               ? y - ctx->dst_y
+                               : (int32_t)(((int64_t)y - ctx->dst_y) * ctx->src_height / ctx->dst_height);
+#else
         int32_t source_y = (int32_t)(((int64_t)y - ctx->dst_y) * ctx->src_height / ctx->dst_height);
+#endif
         const uint16_t *source_row = ctx->pixels + (size_t)source_y * (size_t)ctx->src_stride;
         uint16_t *destination_row = destination + (size_t)y * (size_t)canvas_width;
         if (copy_rows) {
@@ -551,6 +576,35 @@ static void plugin_api_ui_canvas_blit_rgb565_now(void *arg) {
 #endif
             continue;
         }
+#if defined(CONFIG_USE_C5_PARLIO_DISPLAY)
+        if (fast_320_to_240) {
+            int32_t source_x = 0;
+            int32_t x = left;
+            for (; x + 2 < right; x += 3, source_x += 4) {
+                uint16_t pixel0 = source_row[source_x];
+                uint16_t pixel1 = source_row[source_x + 1];
+                uint16_t pixel2 = source_row[source_x + 2];
+#if LV_COLOR_16_SWAP
+                destination_row[x] = (uint16_t)(pixel0 << 8 | pixel0 >> 8);
+                destination_row[x + 1] = (uint16_t)(pixel1 << 8 | pixel1 >> 8);
+                destination_row[x + 2] = (uint16_t)(pixel2 << 8 | pixel2 >> 8);
+#else
+                destination_row[x] = pixel0;
+                destination_row[x + 1] = pixel1;
+                destination_row[x + 2] = pixel2;
+#endif
+            }
+            for (; x < right; ++x, ++source_x) {
+                uint16_t pixel = source_row[source_x];
+#if LV_COLOR_16_SWAP
+                destination_row[x] = (uint16_t)(pixel << 8 | pixel >> 8);
+#else
+                destination_row[x] = pixel;
+#endif
+            }
+            continue;
+        }
+#endif
         for (int32_t x = left; x < right; x++) {
             int32_t source_x = (int32_t)(((int64_t)x - ctx->dst_x) * ctx->src_width / ctx->dst_width);
 #if LV_COLOR_16_SWAP
@@ -561,6 +615,7 @@ static void plugin_api_ui_canvas_blit_rgb565_now(void *arg) {
 #endif
         }
     }
+#endif
     lv_area_t area;
     lv_obj_get_coords(canvas, &area);
     area.x1 += left;
@@ -629,9 +684,21 @@ bool plugin_api_ui_canvas_blit_rgb565_async(ghostesp_ui_obj_t canvas, const uint
     if (width > SIZE_MAX / height || width * height > max_pixels ||
         width * height > SIZE_MAX / sizeof(uint16_t) ||
         (size_t)(src_height - 1) > (SIZE_MAX - width) / (size_t)src_stride) return false;
+#if !defined(CONFIG_USE_C5_PARLIO_DISPLAY)
     const size_t pixel_count = width * height;
+#endif
     canvas_blit_ctx_t *ctx = calloc(1, sizeof(*ctx));
     if (!ctx) return false;
+#if defined(CONFIG_USE_C5_PARLIO_DISPLAY)
+    /* Banshee native apps can provide a PSRAM frame buffer that remains
+       untouched until the queued UI callback completes. Avoiding the extra
+       frame copy keeps Doom's render task from competing with the UI task. */
+    *ctx = (canvas_blit_ctx_t){
+        .canvas = canvas, .pixels = pixels, .src_width = src_width, .src_height = src_height,
+        .src_stride = src_stride, .dst_x = dst_x, .dst_y = dst_y,
+        .dst_width = dst_width, .dst_height = dst_height,
+    };
+#else
     ctx->owned_pixels = malloc(pixel_count * sizeof(uint16_t));
     if (!ctx->owned_pixels) {
         free(ctx);
@@ -648,11 +715,17 @@ bool plugin_api_ui_canvas_blit_rgb565_async(ghostesp_ui_obj_t canvas, const uint
         .dst_width = dst_width, .dst_height = dst_height,
         .owned_pixels = ctx->owned_pixels,
     };
+#endif
     while (xSemaphoreTake(s_async_blit_done, 0) == pdTRUE) { /* drain stale signal */ }
     s_async_blit_pending = true;
     /* Runs inline if we're already on the UI task, which clears pending
        before this returns — that's fine, it just degrades to synchronous. */
-    plugin_api_internal_run_async(plugin_api_ui_canvas_blit_async_cb, ctx);
+    if (!plugin_api_internal_run_async_nowait(plugin_api_ui_canvas_blit_async_cb, ctx)) {
+        s_async_blit_pending = false;
+        free(ctx->owned_pixels);
+        free(ctx);
+        return false;
+    }
     return true;
 }
 
@@ -667,6 +740,7 @@ bool plugin_api_ui_canvas_is_rgb565_native_byte_order(void) {
 #endif
 }
 
+#ifdef CONFIG_WITH_SCREEN
 static void plugin_api_ui_image_set_builtin_now(void *arg) {
     builtin_image_src_ctx_t *ctx = (builtin_image_src_ctx_t *)arg;
     lv_obj_t *img = (lv_obj_t *)ctx->obj;
@@ -674,15 +748,18 @@ static void plugin_api_ui_image_set_builtin_now(void *arg) {
     lv_img_set_src(img, ctx->source);
     ctx->result = true;
 }
+#endif
 
 bool plugin_api_ui_image_set_builtin(ghostesp_ui_obj_t img, const char *image_name) {
     if (!plugin_api_internal_has_ui_permission() || !img || !image_name) return false;
+#ifdef CONFIG_WITH_SCREEN
     for (size_t i = 0; i < sizeof(s_builtin_images) / sizeof(s_builtin_images[0]); ++i) {
         if (strcmp(image_name, s_builtin_images[i].name) != 0) continue;
         builtin_image_src_ctx_t ctx = { .obj = img, .source = s_builtin_images[i].source, .result = false };
         plugin_api_internal_run_sync(plugin_api_ui_image_set_builtin_now, &ctx);
         return ctx.result;
     }
+#endif
     return false;
 }
 

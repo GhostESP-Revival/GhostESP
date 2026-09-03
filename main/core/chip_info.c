@@ -229,6 +229,9 @@ int chip_info_collect_enabled_features(chip_info_line_t *out, int max) {
 #ifdef CONFIG_IS_S3TWATCH
     EMIT_FEATURE("S3TWatch");
 #endif
+#ifdef CONFIG_IS_ATOMS3R
+    EMIT_FEATURE("AtomS3R");
+#endif
 #ifdef CONFIG_USING_SPI
     EMIT_FEATURE("SD Card (SPI)");
 #endif
@@ -375,6 +378,9 @@ int chip_info_collect_cards(chip_info_card_t *out, int max) {
 #endif
 #ifdef CONFIG_IS_S3TWATCH
         APPEND_CARD_FEATURE("S3TWatch");
+#endif
+#ifdef CONFIG_IS_ATOMS3R
+        APPEND_CARD_FEATURE("AtomS3R");
 #endif
 #ifdef CONFIG_USING_SPI
         APPEND_CARD_FEATURE("SD Card (SPI)");

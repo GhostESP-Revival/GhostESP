@@ -379,6 +379,10 @@ static void pong_input(const ghostesp_input_event_t *event) {
         touch_target = ((event->x - view_left) * GAME_W) / view_width;
         if (touch_target < 0) touch_target = 0;
         if (touch_target >= GAME_W) touch_target = GAME_W - 1;
+        if (event->pressed) {
+            /* Absolute positioning keeps the paddle under the finger. */
+            player_x = clamp_paddle(touch_target - PADDLE_W / 2);
+        }
         return;
     }
     if (event->type == GHOSTESP_INPUT_KEY) {
