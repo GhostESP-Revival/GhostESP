@@ -2359,6 +2359,10 @@ void wifi_manager_start_monitor_mode(wifi_promiscuous_cb_t_t callback) {
     ESP_ERROR_CHECK(esp_wifi_set_promiscuous_filter(&filter));
     ESP_LOGI("WIFI_MANAGER", "Set hardware filter mask: 0x%02" PRIx32, filter.filter_mask);
 
+    // Backing store for handshake/probe/beacon/WPS/wardrive tables (~5KB).
+    // Allocated here so RX callbacks never observe a half-built session.
+    wifi_callbacks_monitor_tables_ensure();
+
     ESP_ERROR_CHECK(esp_wifi_set_promiscuous(true));
 
     // Verify current channel for capture callbacks that use selected AP channel plans.
@@ -2417,6 +2421,8 @@ void wifi_manager_stop_monitor_mode() {
     if (wifi_status == ESP_ERR_WIFI_NOT_INIT || mode == WIFI_MODE_NULL) {
         ESP_LOGW("WIFI_MANAGER", "Monitor stop called while Wi-Fi driver inactive (status=%s, mode=%d)",
                  esp_err_to_name(wifi_status), mode);
+        // Driver is down so no RX can flow: still release session tables.
+        wifi_callbacks_monitor_tables_release();
         return;
     } else if (wifi_status != ESP_OK) {
         ESP_LOGE("WIFI_MANAGER", "Failed to query Wi-Fi driver state: %s", esp_err_to_name(wifi_status));
@@ -2442,6 +2448,10 @@ void wifi_manager_stop_monitor_mode() {
     }
 
     // NOTE: Stopping the PineAP timer (channel_hop_timer) is handled by stop_pineap_detection() in callbacks.c
+
+    // Promiscuous delivery is off and hoppers are stopped above: safe to
+    // release the heap-on-demand monitor tables (recreated next session).
+    wifi_callbacks_monitor_tables_release();
 }
 
 void wifi_manager_init(void) {

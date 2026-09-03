@@ -30,7 +30,7 @@
 #include "lvgl_spi_conf.h"
 
 #ifndef CONFIG_CUSTOM_DISPLAY_BUFFER_BYTES
-#define CONFIG_CUSTOM_DISPLAY_BUFFER_BYTES (CONFIG_TFT_WIDTH * 10 * sizeof(uint16_t))
+#define CONFIG_CUSTOM_DISPLAY_BUFFER_BYTES (CONFIG_TFT_WIDTH * 8 * sizeof(uint16_t))
 #endif
 
 #define TAG "banshee_c5_parl"

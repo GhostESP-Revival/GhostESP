@@ -1876,14 +1876,14 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
      behind the transfer. Other C5 boards stay single-buffered to save
      internal RAM. */
 #ifdef CONFIG_USE_C5_PARLIO_DISPLAY
-  buf1_pixels = (size_t)width * 10;
+  buf1_pixels = (size_t)width * 8;
 #else
   buf1_pixels = (size_t)width * 5;
 #endif
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
   if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
 #ifdef CONFIG_USE_C5_PARLIO_DISPLAY
-    buf2_pixels = (size_t)width * 10;
+    buf2_pixels = (size_t)width * 8;
 #else
     buf2_pixels = (size_t)width * 5;
 #endif
