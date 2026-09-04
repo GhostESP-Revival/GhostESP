@@ -15,8 +15,13 @@
 #include "freertos/task.h"
 #include "managers/ap_manager.h"
 #include "managers/gps_manager.h"
+#include "managers/infrared_manager.h"
 #include "managers/plugin_loader.h"
+#include "managers/rgb_manager.h"
+#include "managers/sd_card_manager.h"
 #include "managers/settings_manager.h"
+#include "managers/subghz_remote_manager.h"
+#include "managers/nrf24_remote_manager.h"
 #ifdef CONFIG_WITH_SCREEN
 #include "managers/views/plugin_runner_view.h"
 #endif
@@ -723,4 +728,58 @@ void handle_apps_cmd(int argc, char **argv) {
     }
 
     glog("unknown apps command: %s\n", argv[1]);
+}
+
+void handle_devices_cmd(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    glog("Enabled devices:\n");
+
+#ifdef CONFIG_HAS_INFRARED
+    {
+        int32_t tx_override = settings_get_ir_tx_pin(&G_Settings);
+        glog("  Infrared TX: GPIO%d (%s)\n", (int)infrared_get_tx_pin(),
+             tx_override >= 0 ? "override" : "default");
+    }
+#endif
+#ifdef CONFIG_HAS_INFRARED_RX
+    {
+        int32_t rx_override = settings_get_ir_rx_pin(&G_Settings);
+        glog("  Infrared RX: GPIO%d (%s) [%s]\n", (int)infrared_get_rx_pin(),
+             rx_override >= 0 ? "override" : "default",
+             infrared_manager_rx_is_initialized() ? "listening" : "idle");
+    }
+#endif
+    {
+        int32_t gps_pin = settings_get_gps_rx_pin(&G_Settings);
+        if (gps_pin > 0) {
+            glog("  GPS: RX GPIO%ld [%s]\n", (long)gps_pin,
+                 g_gpsManager.isinitilized ? "running" : "idle");
+        } else {
+            glog("  GPS: default pin [%s]\n",
+                 g_gpsManager.isinitilized ? "running" : "idle");
+        }
+    }
+    {
+        if (rgb_manager.is_separate_pins) {
+            glog("  RGB: R GPIO%d G GPIO%d B GPIO%d\n",
+                 (int)rgb_manager.red_pin, (int)rgb_manager.green_pin, (int)rgb_manager.blue_pin);
+        } else {
+            glog("  RGB: data GPIO%d, %d LEDs\n", (int)rgb_manager.pin, rgb_manager.num_leds);
+        }
+    }
+    {
+        const char *state = sd_card_manager.is_initialized ? "mounted" : "not mounted";
+        if (sd_card_manager.spi_cs_pin > 0) {
+            glog("  SD Card: SPI (CS GPIO%d) [%s]\n", sd_card_manager.spi_cs_pin, state);
+        } else {
+            glog("  SD Card: MMC [%s]\n", state);
+        }
+    }
+#ifdef CONFIG_HAS_SUBGHZ
+    glog("  SubGHz: [%s]\n", subghz_remote_manager_is_ready() ? "ready" : "idle");
+#endif
+#ifdef CONFIG_HAS_NRF24
+    glog("  NRF24: [%s]\n", nrf24_remote_manager_is_running() ? "running" : "idle");
+#endif
 }

@@ -671,6 +671,11 @@ static void ble_adv_set_subtext(int found_count) {
 #include "core/wpa_crypto.h"
 #include "attacks/wifi/gtk_abuse.h"
 #include "managers/settings_manager.h"
+#include "managers/infrared_manager.h"
+#include "managers/gps_manager.h"
+#include "managers/rgb_manager.h"
+#include "managers/subghz_remote_manager.h"
+#include "managers/nrf24_remote_manager.h"
 #include "esp_log.h"
 #include "core/glog.h"
 #include <stdio.h>
@@ -1091,6 +1096,7 @@ typedef enum {
 #if GHOSTESP_OTA_SUPPORTED
     SETTINGS_CAT_FIRMWARE_UPDATE,
 #endif
+    SETTINGS_CAT_DEVICES,
     SETTINGS_CAT_COUNT
 } SettingsCategoryId;
 
@@ -1157,6 +1163,7 @@ static SettingsCategory settings_categories[] = {
     {"Date & Time", SETTINGS_CAT_DATE_TIME, SETTINGS_ROOT_SYSTEM, false, NULL},
     {"Power", SETTINGS_CAT_POWER, SETTINGS_ROOT_SYSTEM, false, NULL},
     {"Setup", SETTINGS_CAT_SYSTEM_TOOLS, SETTINGS_ROOT_SYSTEM, false, NULL},
+    {"Devices", SETTINGS_CAT_DEVICES, SETTINGS_ROOT_SYSTEM, false, NULL},
     {"Logging", SETTINGS_CAT_LOGGING, SETTINGS_ROOT_SYSTEM, false, NULL},
     {"Transfer or Reset", SETTINGS_CAT_BACKUP_RESET, SETTINGS_ROOT_SYSTEM, false, NULL},
 #if GHOSTESP_OTA_SUPPORTED
@@ -1924,6 +1931,23 @@ static SettingsItem settings_items[] = {
     {"Helper Hop", SETTING_WD_HOP_HELPER, wd_hop_options, wd_hop_count, 2, SETTINGS_CAT_WARDRIVING, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"Weighted 5GHz", SETTING_WD_WEIGHTED_5G, bool_options, 2, 1, SETTINGS_CAT_WARDRIVING, false, NULL, SETTING_WIDGET_TOGGLE},
     {"Baud Rate", SETTING_GPS_BAUD_RATE, gps_baud_options, gps_baud_count, 0, SETTINGS_CAT_GPS, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+
+#ifdef CONFIG_HAS_INFRARED
+    {"IR TX Pin", SETTING_IR_TX_PIN, action_options, 1, 0, SETTINGS_CAT_DEVICES, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+#endif
+#ifdef CONFIG_HAS_INFRARED_RX
+    {"IR RX Pin", SETTING_IR_RX_PIN, action_options, 1, 0, SETTINGS_CAT_DEVICES, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+#endif
+    {"Infrared", SETTING_DEVICE_IR, action_options, 1, 0, SETTINGS_CAT_DEVICES, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"GPS", SETTING_DEVICE_GPS, action_options, 1, 0, SETTINGS_CAT_DEVICES, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+#ifdef CONFIG_HAS_SUBGHZ
+    {"SubGHz", SETTING_DEVICE_SUBGHZ, action_options, 1, 0, SETTINGS_CAT_DEVICES, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+#endif
+#ifdef CONFIG_HAS_NRF24
+    {"NRF24", SETTING_DEVICE_NRF24, action_options, 1, 0, SETTINGS_CAT_DEVICES, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+#endif
+    {"SD Card", SETTING_DEVICE_SD, action_options, 1, 0, SETTINGS_CAT_DEVICES, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"RGB LED", SETTING_DEVICE_RGB, action_options, 1, 0, SETTINGS_CAT_DEVICES, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
 };
 
 static const int settings_items_count = sizeof(settings_items) / sizeof(settings_items[0]);
@@ -1941,6 +1965,48 @@ static const char *settings_item_value_text(SettingsItem *item) {
     if (!item) return "";
     // For text-input settings, show the current value (masked for passwords)
     switch ((SettingsType)item->setting_type) {
+        case SETTING_IR_TX_PIN: {
+            static char ir_tx_buf[24];
+            int32_t pin = settings_get_ir_tx_pin(&G_Settings);
+            if (pin >= 0) {
+                snprintf(ir_tx_buf, sizeof(ir_tx_buf), "GPIO%d", (int)pin);
+            } else {
+                snprintf(ir_tx_buf, sizeof(ir_tx_buf), "Auto (GPIO%d)", (int)infrared_get_tx_pin());
+            }
+            return ir_tx_buf;
+        }
+        case SETTING_IR_RX_PIN: {
+            static char ir_rx_buf[24];
+            int32_t pin = settings_get_ir_rx_pin(&G_Settings);
+            if (pin >= 0) {
+                snprintf(ir_rx_buf, sizeof(ir_rx_buf), "GPIO%d", (int)pin);
+            } else {
+                snprintf(ir_rx_buf, sizeof(ir_rx_buf), "Auto (GPIO%d)", (int)infrared_get_rx_pin());
+            }
+            return ir_rx_buf;
+        }
+        case SETTING_DEVICE_IR: {
+#if defined(CONFIG_HAS_INFRARED) || defined(CONFIG_HAS_INFRARED_RX)
+            bool ir_active = infrared_manager_rx_is_initialized() || infrared_manager_dazzler_is_active();
+            return ir_active ? "Active" : "Idle";
+#else
+            return "Not built";
+#endif
+        }
+        case SETTING_DEVICE_GPS:
+            return g_gpsManager.isinitilized ? "Active" : "Idle";
+#ifdef CONFIG_HAS_SUBGHZ
+        case SETTING_DEVICE_SUBGHZ:
+            return subghz_remote_manager_is_ready() ? "Active" : "Idle";
+#endif
+#ifdef CONFIG_HAS_NRF24
+        case SETTING_DEVICE_NRF24:
+            return nrf24_remote_manager_is_running() ? "Active" : "Idle";
+#endif
+        case SETTING_DEVICE_SD:
+            return sd_card_manager.is_initialized ? "Mounted" : "Idle";
+        case SETTING_DEVICE_RGB:
+            return (rgb_manager.strip != NULL || rgb_manager.is_separate_pins) ? "Active" : "Idle";
         case SETTING_AP_SSID: {
             const char *cur = settings_get_ap_ssid(&G_Settings);
             return (cur && cur[0]) ? cur : "<set>";
@@ -2394,6 +2460,9 @@ static lv_obj_t *opt_detail_scroll_target(detail_view_t *dv, lv_coord_t start_x,
 static void menu_builder_cb(lv_timer_t *t);
 static void change_setting_value(int setting_index, bool increment); // Forward Declaration
 static void apply_setting_change(int setting_index, int new_value);
+static void settings_refresh_row_label(int setting_index);
+static void ir_tx_pin_kb_cb(const char *text);
+static void ir_rx_pin_kb_cb(const char *text);
 static bool settings_select_overlay_is_open(void);
 static void settings_select_open(int setting_index);
 static void settings_select_close(void);
@@ -4559,6 +4628,17 @@ case SETTING_GPS_BAUD_RATE: {
                 // action items; current_value index unused
                 settings_items[i].current_value = 0;
                 break;
+            case SETTING_IR_TX_PIN:
+            case SETTING_IR_RX_PIN:
+            case SETTING_DEVICE_IR:
+            case SETTING_DEVICE_GPS:
+            case SETTING_DEVICE_SUBGHZ:
+            case SETTING_DEVICE_NRF24:
+            case SETTING_DEVICE_SD:
+            case SETTING_DEVICE_RGB:
+                // action items; live state is rendered via settings_item_value_text
+                settings_items[i].current_value = 0;
+                break;
             case SETTING_COUNTRY: {
                 uint8_t country = settings_get_wifi_country(&G_Settings);
                 settings_items[i].current_value =
@@ -5214,6 +5294,37 @@ case SETTING_GPS_BAUD_RATE:
             display_manager_switch_view(&keyboard_view);
             return;
         }
+        case SETTING_IR_TX_PIN: {
+            char initial[16];
+            snprintf(initial, sizeof(initial), "%d", (int)settings_get_ir_tx_pin(&G_Settings));
+            keyboard_view_set_return_view(&options_menu_view);
+            keyboard_view_set_placeholder("IR TX pin (-1 = board default)");
+            keyboard_view_set_initial_text(initial);
+            keyboard_view_set_start_caps(false);
+            keyboard_view_set_submit_callback(ir_tx_pin_kb_cb);
+            display_manager_switch_view(&keyboard_view);
+            return;
+        }
+        case SETTING_IR_RX_PIN: {
+            char initial[16];
+            snprintf(initial, sizeof(initial), "%d", (int)settings_get_ir_rx_pin(&G_Settings));
+            keyboard_view_set_return_view(&options_menu_view);
+            keyboard_view_set_placeholder("IR RX pin (-1 = board default)");
+            keyboard_view_set_initial_text(initial);
+            keyboard_view_set_start_caps(false);
+            keyboard_view_set_submit_callback(ir_rx_pin_kb_cb);
+            display_manager_switch_view(&keyboard_view);
+            return;
+        }
+        case SETTING_DEVICE_IR:
+        case SETTING_DEVICE_GPS:
+        case SETTING_DEVICE_SUBGHZ:
+        case SETTING_DEVICE_NRF24:
+        case SETTING_DEVICE_SD:
+        case SETTING_DEVICE_RGB:
+            // Read-only status rows: refresh the live state and do not persist.
+            settings_refresh_row_label(setting_index);
+            return;
         case SETTING_AP_PASSWORD: {
             keyboard_view_set_return_view(&options_menu_view);
             keyboard_view_set_placeholder("AP Password (8-63 chars, empty=open)");
@@ -13869,6 +13980,44 @@ static void iobtn_p12_kb_cb(const char *text) {
     display_manager_switch_view(&options_menu_view);
 }
 #endif
+
+// IR pin override keyboard callbacks (Devices page)
+static void ir_pin_kb_apply(const char *text, bool is_tx) {
+    bool ok = false;
+    if (!text || !text[0] || strcmp(text, "-1") == 0) {
+        ok = is_tx ? settings_set_ir_tx_pin(&G_Settings, -1)
+                   : settings_set_ir_rx_pin(&G_Settings, -1);
+    } else {
+        char *end = NULL;
+        long pin = strtol(text, &end, 10);
+        if (end && *end == '\0') {
+            ok = is_tx ? settings_set_ir_tx_pin(&G_Settings, (int32_t)pin)
+                       : settings_set_ir_rx_pin(&G_Settings, (int32_t)pin);
+        }
+    }
+    if (ok) {
+        settings_persist_setting(is_tx ? SETTING_IR_TX_PIN : SETTING_IR_RX_PIN);
+    } else {
+        error_popup_create(is_tx ? "Invalid IR TX pin (use -1 or a valid GPIO)"
+                                 : "Invalid IR RX pin (use -1 or a valid GPIO)");
+    }
+    keyboard_view_set_submit_callback(NULL);
+    current_settings_root = SETTINGS_ROOT_SYSTEM;
+    current_settings_category = settings_category_index_for_id(SETTINGS_CAT_DEVICES);
+    settings_submenu_depth = 2;
+    SelectedMenuType = OT_Settings;
+    is_settings_mode = true;
+    load_current_settings_values();
+    display_manager_switch_view(&options_menu_view);
+}
+
+static void ir_tx_pin_kb_cb(const char *text) {
+    ir_pin_kb_apply(text, true);
+}
+
+static void ir_rx_pin_kb_cb(const char *text) {
+    ir_pin_kb_apply(text, false);
+}
 
 // AP/STA credentials keyboard callbacks
 static void ap_ssid_kb_cb(const char *text) {

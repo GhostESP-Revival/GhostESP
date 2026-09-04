@@ -186,6 +186,16 @@ typedef enum {
     SETTING_MENU_CONFIG,
     SETTING_MAIN_MENU_ITEMS,
     SETTING_APPS_MENU_ITEMS,
+    // Runtime-configurable hardware pins (-1 = use compiled CONFIG_* default)
+    SETTING_IR_TX_PIN,
+    SETTING_IR_RX_PIN,
+    // Read-only "enabled devices" status rows (not NVS-backed)
+    SETTING_DEVICE_IR,
+    SETTING_DEVICE_GPS,
+    SETTING_DEVICE_SUBGHZ,
+    SETTING_DEVICE_NRF24,
+    SETTING_DEVICE_SD,
+    SETTING_DEVICE_RGB,
 } SettingsType;
 
 /* 16 slots x 64B names. The NVS blob is [count][FAVORITES_MAX x 64]; older
@@ -287,6 +297,8 @@ typedef struct {
 
   // Infrared settings
   bool infrared_easy_mode; // Easy learn mode toggle
+  int32_t ir_tx_pin;       // IR transmit pin override, -1 = use CONFIG_INFRARED_LED_PIN
+  int32_t ir_rx_pin;       // IR receive pin override, -1 = use CONFIG_INFRARED_RX_PIN
   
   // Navigation buttons setting
   bool nav_buttons_enabled; // Toggle for main menu navigation buttons
@@ -426,6 +438,12 @@ const char *settings_get_portal_ssid(const FSettings *settings);
 
 void settings_set_gps_rx_pin(FSettings *settings, uint8_t RxPin);
 uint8_t settings_get_gps_rx_pin(const FSettings *settings);
+
+// IR pin overrides (validated: -1 = use compiled default)
+bool settings_set_ir_tx_pin(FSettings *settings, int32_t pin);
+int32_t settings_get_ir_tx_pin(const FSettings *settings);
+bool settings_set_ir_rx_pin(FSettings *settings, int32_t pin);
+int32_t settings_get_ir_rx_pin(const FSettings *settings);
 
 void settings_set_gps_baud_rate(FSettings *settings, uint32_t baud);
 uint32_t settings_get_gps_baud_rate(const FSettings *settings);

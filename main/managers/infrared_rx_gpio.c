@@ -114,18 +114,22 @@ bool infrared_manager_rx_init(void) {
         return true;
     }
 
+    // Resolve the effective RX pin (settings override or compiled default) once
+    // so config, ISR registration and logging always agree.
+    gpio_num_t rx_pin = infrared_get_rx_pin();
+
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
     if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "poltergeist") == 0) {
-        gpio_reset_pin(CONFIG_INFRARED_LED_PIN);
-        gpio_set_direction(CONFIG_INFRARED_LED_PIN, GPIO_MODE_OUTPUT);
-        gpio_set_level(CONFIG_INFRARED_LED_PIN, 0);
-        ESP_LOGI(TAG, "IO%d configured for poltergeist template", CONFIG_INFRARED_LED_PIN);
+        gpio_reset_pin(infrared_get_tx_pin());
+        gpio_set_direction(infrared_get_tx_pin(), GPIO_MODE_OUTPUT);
+        gpio_set_level(infrared_get_tx_pin(), 0);
+        ESP_LOGI(TAG, "IO%d configured for poltergeist template", infrared_get_tx_pin());
     }
 #endif
 
     // Configure GPIO for IR RX pin
     gpio_config_t io_conf = {
-        .pin_bit_mask = (1ULL << CONFIG_INFRARED_RX_PIN),
+        .pin_bit_mask = (1ULL << rx_pin),
         .mode = GPIO_MODE_INPUT,
         .pull_up_en = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
@@ -133,7 +137,7 @@ bool infrared_manager_rx_init(void) {
     };
 
     if (gpio_config(&io_conf) != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to configure GPIO %d", CONFIG_INFRARED_RX_PIN);
+        ESP_LOGE(TAG, "Failed to configure GPIO %d", rx_pin);
         return false;
     }
 
@@ -161,7 +165,7 @@ bool infrared_manager_rx_init(void) {
 
     // Initialize state
     memset((void *)&ir_params, 0, sizeof(ir_params));
-    ir_params.pin = CONFIG_INFRARED_RX_PIN;
+    ir_params.pin = rx_pin;
     ir_params.state = IR_RX_STATE_IDLE;
 
     // Install ISR service (only if not already installed)
@@ -177,7 +181,7 @@ bool infrared_manager_rx_init(void) {
     }
 
     // Add handler for this specific pin
-    if (gpio_isr_handler_add(CONFIG_INFRARED_RX_PIN, ir_gpio_isr_handler, NULL) != ESP_OK) {
+    if (gpio_isr_handler_add(rx_pin, ir_gpio_isr_handler, NULL) != ESP_OK) {
         ESP_LOGE(TAG, "Failed to add GPIO ISR handler");
         infrared_decoder_free(ir_decoder);
         ir_decoder = NULL;
@@ -189,7 +193,7 @@ bool infrared_manager_rx_init(void) {
     ir_rx_initialized = true;
     ir_rx_cancel_flag = false;
 
-    ESP_LOGI(TAG, "IR RX initialized on GPIO %d (GPIO interrupt mode)", CONFIG_INFRARED_RX_PIN);
+    ESP_LOGI(TAG, "IR RX initialized on GPIO %d (GPIO interrupt mode)", rx_pin);
     return true;
 }
 

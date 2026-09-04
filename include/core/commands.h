@@ -166,6 +166,8 @@ void handle_wpa3_compliance(int argc, char **argv);
 void handle_pineap_detection(int argc, char **argv);
 void handle_ap_enable_cmd(int argc, char **argv);
 void handle_chip_info_cmd(int argc, char **argv);
+void handle_devices_cmd(int argc, char **argv);
+void handle_ir_pin_cmd(int argc, char **argv);
 void handle_mirror_cmd(int argc, char **argv);
 void handle_apps_cmd(int argc, char **argv);
 void handle_log_level_cmd(int argc, char **argv);

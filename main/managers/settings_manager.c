@@ -12,6 +12,7 @@
 #include <time.h>
 #include <nvs.h>
 #include "sdkconfig.h"
+#include "driver/gpio.h"
 
 #define S_TAG "SETTINGS"
 
@@ -70,6 +71,8 @@ static const char *NVS_TERMINAL_TEXT_COLOR_KEY = "term_color";
 static const char *NVS_TERMINAL_FONT_SIZE_KEY = "term_font";
 static const char *NVS_INVERT_COLORS_KEY = "invert_colors";
 static const char *NVS_INFRARED_EASY_MODE_KEY = "ir_easy_mode";
+static const char *NVS_IR_TX_PIN_KEY = "ir_tx_pin";
+static const char *NVS_IR_RX_PIN_KEY = "ir_rx_pin";
 static const char *NVS_WEB_AUTH_KEY = "web_auth";
 static const char *NVS_WEBUI_AP_ONLY_KEY = "webui_ap";
 static const char *NVS_ESP_COMM_TX_PIN_KEY = "esp_comm_tx";
@@ -251,6 +254,8 @@ void settings_set_defaults(FSettings *settings) {
   settings->zebra_menus_enabled = false; // or true if you want it enabled by default
   settings->max_screen_brightness = 100; // Default to 100% brightness
   settings->infrared_easy_mode = false; // Default to disabled
+  settings->ir_tx_pin = -1;             // -1 = use CONFIG_INFRARED_LED_PIN
+  settings->ir_rx_pin = -1;             // -1 = use CONFIG_INFRARED_RX_PIN
   settings->nav_buttons_enabled = true; // Default to enabled
   settings->menu_layout = 1; // Default to adaptive paginated grid
   settings->carousel_invert_direction = false; // Default to non-inverted carousel slide direction
@@ -729,6 +734,20 @@ void settings_load(FSettings *settings) {
     settings->infrared_easy_mode = (bool)value_u8;
   } else {
     settings->infrared_easy_mode = false; // Default to disabled if not found
+  }
+
+  // Load IR pin overrides (-1 = use compiled default)
+  err = nvs_get_i32(nvsHandle, NVS_IR_TX_PIN_KEY, &tmp);
+  if (err == ESP_OK) {
+    settings->ir_tx_pin = tmp;
+  } else {
+    settings->ir_tx_pin = -1;
+  }
+  err = nvs_get_i32(nvsHandle, NVS_IR_RX_PIN_KEY, &tmp);
+  if (err == ESP_OK) {
+    settings->ir_rx_pin = tmp;
+  } else {
+    settings->ir_rx_pin = -1;
   }
 
   // Load Navigation Buttons Enabled
@@ -1453,6 +1472,14 @@ void settings_persist_setting(SettingsType setting) {
             err = nvs_set_u32(nvsHandle, NVS_GPS_BAUD_KEY, G_Settings.gps_baud_rate);
             key = NVS_GPS_BAUD_KEY;
             break;
+        case SETTING_IR_TX_PIN:
+            err = nvs_set_i32(nvsHandle, NVS_IR_TX_PIN_KEY, G_Settings.ir_tx_pin);
+            key = NVS_IR_TX_PIN_KEY;
+            break;
+        case SETTING_IR_RX_PIN:
+            err = nvs_set_i32(nvsHandle, NVS_IR_RX_PIN_KEY, G_Settings.ir_rx_pin);
+            key = NVS_IR_RX_PIN_KEY;
+            break;
         case SETTING_AP_SSID:
             err = nvs_set_str(nvsHandle, NVS_AP_SSID_KEY, G_Settings.ap_ssid);
             key = NVS_AP_SSID_KEY;
@@ -1637,6 +1664,8 @@ esp_err_t settings_save(const FSettings *settings) {
     NVS_SET(nvs_set_u8(nvsHandle, NVS_ZEBRA_MENUS_KEY, settings->zebra_menus_enabled ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_MAX_SCREEN_BRIGHTNESS_KEY, settings->max_screen_brightness));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_INFRARED_EASY_MODE_KEY, settings->infrared_easy_mode ? 1 : 0));
+    NVS_SET(nvs_set_i32(nvsHandle, NVS_IR_TX_PIN_KEY, settings->ir_tx_pin));
+    NVS_SET(nvs_set_i32(nvsHandle, NVS_IR_RX_PIN_KEY, settings->ir_rx_pin));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_NAV_BUTTONS_KEY, settings->nav_buttons_enabled ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_AUTO_SAVE_SCANS_KEY, settings->auto_save_scans ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_MENU_LAYOUT_KEY, (uint8_t)settings->menu_layout));
@@ -2036,6 +2065,59 @@ void settings_set_infrared_easy_mode(FSettings *settings, bool enabled) {
 
 bool settings_get_infrared_easy_mode(const FSettings *settings) {
   return settings->infrared_easy_mode;
+}
+
+// IR pin overrides — single point of validation for both CLI and UI.
+// -1 = use compiled default; 0 is rejected (treated as "unset" elsewhere);
+// TX additionally requires an output-capable GPIO.
+static bool settings_pin_valid(int32_t pin, bool needs_output) {
+  if (pin == -1) return true; // Use compiled CONFIG_* default
+  if (pin <= 0 || pin >= GPIO_NUM_MAX) return false;
+  if (needs_output && !GPIO_IS_VALID_OUTPUT_GPIO((gpio_num_t)pin)) return false;
+  if (!needs_output && !GPIO_IS_VALID_GPIO((gpio_num_t)pin)) return false;
+  return true;
+}
+
+static bool settings_pin_is_strapping(int32_t pin) {
+#if CONFIG_IDF_TARGET_ESP32
+  return pin == 2 || pin == 12 || pin == 15;
+#else
+  return pin == 12 || pin == 15;
+#endif
+}
+
+static void settings_ir_pin_warn_strapping(int32_t pin, const char *which) {
+  if (pin > 0 && settings_pin_is_strapping(pin)) {
+    ESP_LOGW(TAG, "IR %s pin %ld is a strapping pin - device may not boot with it held", which, (long)pin);
+  }
+}
+
+bool settings_set_ir_tx_pin(FSettings *settings, int32_t pin) {
+  if (!settings_pin_valid(pin, true)) {
+    ESP_LOGE(TAG, "Invalid IR TX pin %ld (must be an output-capable GPIO or -1)", (long)pin);
+    return false;
+  }
+  settings_ir_pin_warn_strapping(pin, "TX");
+  settings->ir_tx_pin = pin;
+  return true;
+}
+
+int32_t settings_get_ir_tx_pin(const FSettings *settings) {
+  return settings->ir_tx_pin;
+}
+
+bool settings_set_ir_rx_pin(FSettings *settings, int32_t pin) {
+  if (!settings_pin_valid(pin, false)) {
+    ESP_LOGE(TAG, "Invalid IR RX pin %ld (must be a valid GPIO or -1)", (long)pin);
+    return false;
+  }
+  settings_ir_pin_warn_strapping(pin, "RX");
+  settings->ir_rx_pin = pin;
+  return true;
+}
+
+int32_t settings_get_ir_rx_pin(const FSettings *settings) {
+  return settings->ir_rx_pin;
 }
 
 void settings_get_nvs_stats(nvs_stats_t *stats) {

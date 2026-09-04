@@ -1419,7 +1419,7 @@ void infrared_view_create(void) {
     gpio_config_t io_conf = {
         .intr_type = GPIO_INTR_DISABLE,
         .mode = GPIO_MODE_INPUT,
-        .pin_bit_mask = (1ULL << CONFIG_INFRARED_RX_PIN),
+        .pin_bit_mask = (1ULL << infrared_get_rx_pin()),
         .pull_down_en = 0,
         .pull_up_en = 1,
     };

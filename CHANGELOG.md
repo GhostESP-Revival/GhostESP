@@ -8,6 +8,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 ### Added
 - Added custom channel hopping setting that applies to deauth, beacon spam, AP and station scans, airspace monitor, and packet visualizer/capture hopping.
 - Added a Country selector to Settings > Wi-Fi for display UI
+- Added support for setting IR TX/RX pins at runtime through the CLI or display UI settings menu
 
 ## Revival v2.1.2
 

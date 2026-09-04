@@ -94,6 +94,8 @@ static const SettingDescriptor k_settings_desc[] = {
     {"hop_custom", ST_STRING, OFF(hop_custom_channels), "System", 129, 0, 0},
     {"gps_rx_pin", ST_I32, OFF(gps_rx_pin), "System", 0, 0, 0},
     {"gps_baud_rate", ST_U32, OFF(gps_baud_rate), "System", 0, 0, 0},
+    {"ir_tx_pin", ST_I32, OFF(ir_tx_pin), "System", 0, -1, 127},
+    {"ir_rx_pin", ST_I32, OFF(ir_rx_pin), "System", 0, -1, 127},
     {"power_save", ST_BOOL, OFF(power_save_enabled), "System", 0, 0, 0},
     {"zebra_menus", ST_BOOL, OFF(zebra_menus_enabled), "System", 0, 0, 0},
     {"nav_buttons", ST_BOOL, OFF(nav_buttons_enabled), "System", 0, 0, 0},
@@ -527,6 +529,8 @@ void handle_settings_cmd(int argc, char **argv) {
         glog("    broadcast_speed   - Broadcast speed\n");
         glog("    gps_rx_pin        - GPS RX pin\n");
         glog("    gps_baud_rate     - GPS UART baud rate (0 = Kconfig default)\n");
+        glog("    ir_tx_pin         - IR TX pin (-1 = board default)\n");
+        glog("    ir_rx_pin         - IR RX pin (-1 = board default)\n");
         glog("    power_save        - Power save mode (true/false)\n");
         glog("    zebra_menus       - Zebra menus (true/false)\n");
         glog("    nav_buttons       - Navigation buttons (true/false)\n");
@@ -572,6 +576,13 @@ void handle_settings_cmd(int argc, char **argv) {
             return;
         }
         FSettings *settings = &G_Settings;
+        // GPIO validity for pin overrides: capture the old value, run the raw
+        // write, then re-validate through the validated setter and revert.
+        int32_t ir_pin_backup = 0;
+        bool ir_pin_desc = strcmp(d->name, "ir_tx_pin") == 0 || strcmp(d->name, "ir_rx_pin") == 0;
+        if (ir_pin_desc) {
+            ir_pin_backup = *(const int32_t *)((const uint8_t *)settings + d->offset);
+        }
         if (!set_setting_value(d, settings, value)) {
             if (d->type == ST_BOOL) {
                 glog("Invalid %s. Use true or false\n", d->name);
@@ -584,6 +595,16 @@ void handle_settings_cmd(int argc, char **argv) {
                 glog("Invalid %s value\n", d->name);
             }
             return;
+        }
+        if (ir_pin_desc) {
+            bool ok = strcmp(d->name, "ir_tx_pin") == 0
+                          ? settings_set_ir_tx_pin(settings, settings->ir_tx_pin)
+                          : settings_set_ir_rx_pin(settings, settings->ir_rx_pin);
+            if (!ok) {
+                *(int32_t *)((uint8_t *)settings + d->offset) = ir_pin_backup;
+                glog("Invalid %s. Use -1 or a valid GPIO number\n", d->name);
+                return;
+            }
         }
         settings_normalize_modes(settings);
         settings_save(settings);

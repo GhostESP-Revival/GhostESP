@@ -496,6 +496,8 @@ void register_commands() {
     register_command("apcred", handle_apcred);
     register_command("apenable", handle_ap_enable_cmd);
     register_command("chipinfo", handle_chip_info_cmd);
+    register_command("devices", handle_devices_cmd);
+    register_command("irpin", handle_ir_pin_cmd);
     register_command("rgbmode", handle_rgb_mode);
     register_command("setrgbpins", handle_setrgb);
     register_command("setrgbcount", handle_setrgbcount);

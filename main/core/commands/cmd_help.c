@@ -328,6 +328,13 @@ void handle_help(int argc, char **argv) {
         glog("        - CPU cores and features\n");
         glog("        - Flash size and memory info\n");
         glog("        - ESP-IDF version\n\n");
+        glog("devices\n");
+        glog("    Description: List enabled hardware devices with their active pins and state\n");
+        glog("    Usage: devices\n\n");
+        glog("irpin\n");
+        glog("    Description: Show or override the IR TX/RX pins (persisted in settings)\n");
+        glog("    Usage: irpin | irpin tx|rx <pin|-1>\n");
+        glog("    TX changes apply after reboot; RX changes apply at the next IR learn\n\n");
         glog("crash\n");
         glog("    Description: Intentionally trigger a crash (for coredump testing).\n");
         glog("    Usage: crash\n");
