@@ -16,6 +16,7 @@
 #include "nimble/ble.h"
 #endif
 #include "scans/wifi/wifi_channels.h"
+#include "scans/wifi/hop_profile.h"
 #include "sdkconfig.h"
 #include <ctype.h>
 #include <stdbool.h>
@@ -161,6 +162,13 @@ static bool wdstream_channel_supported(uint8_t channel) {
 
 static void wdstream_set_default_channels(wdstream_config_t *cfg) {
     cfg->channel_count = 0;
+    // User hop profile takes priority over the country list for "auto".
+    size_t profile_count = 0;
+    hop_profile_resolve(cfg->channels, WDSTREAM_MAX_CHANNELS, &profile_count);
+    if (profile_count > 0) {
+        cfg->channel_count = (uint8_t)profile_count;
+        return;
+    }
     uint8_t count = wifi_channels_build_country_list(cfg->channels, WDSTREAM_MAX_CHANNELS);
     if (count == 0) {
         cfg->channels[cfg->channel_count++] = 1;

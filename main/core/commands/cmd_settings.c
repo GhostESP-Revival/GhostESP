@@ -6,6 +6,7 @@
 #include "gui/theme_palette_api.h"
 #include "managers/config_manager.h"
 #include "managers/settings_manager.h"
+#include "scans/wifi/hop_profile.h"
 #include "managers/settings_sd_backup.h"
 #include "managers/status_display_manager.h"
 #include "managers/wifi_manager.h"
@@ -89,6 +90,8 @@ static const SettingDescriptor k_settings_desc[] = {
     {"theme_bg_fx", ST_BOOL, OFF(theme_background_effects), "Display", 0, 0, 0},
     {"channel_delay", ST_FLOAT, OFF(channel_delay), "System", 0, 0, 0},
     {"broadcast_speed", ST_U16, OFF(broadcast_speed), "System", 0, 0, 65535},
+    {"hop_mode", ST_ENUM8, OFF(hop_mode), "System", 0, 0, HOP_MODE_COUNT - 1},
+    {"hop_custom", ST_STRING, OFF(hop_custom_channels), "System", 129, 0, 0},
     {"gps_rx_pin", ST_I32, OFF(gps_rx_pin), "System", 0, 0, 0},
     {"gps_baud_rate", ST_U32, OFF(gps_baud_rate), "System", 0, 0, 0},
     {"power_save", ST_BOOL, OFF(power_save_enabled), "System", 0, 0, 0},

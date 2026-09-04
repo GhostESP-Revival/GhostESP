@@ -46,6 +46,19 @@ uint8_t wifi_channels_build_country_list(uint8_t *channels, uint8_t max_count);
 uint8_t wifi_channels_build_from_ap_results(uint8_t *channels, uint8_t max_count);
 
 /**
+ * @brief Parse a channel list string like "1,6,11" (also accepts spaces)
+ *
+ * Deduplicates entries, stops at max_count, and returns the number of
+ * channels parsed. Returns 0 on invalid input.
+ *
+ * @param text Input string of comma/space separated channel numbers
+ * @param channels Output array to store parsed channels
+ * @param max_count Maximum number of channels to store
+ * @return Number of channels parsed, or 0 on invalid input
+ */
+uint8_t wifi_channels_parse_list(const char *text, uint8_t *channels, uint8_t max_count);
+
+/**
  * @brief Check if a channel is 5GHz
  * 
  * @param channel Channel number to check

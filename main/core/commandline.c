@@ -414,6 +414,7 @@ void register_commands() {
     register_command("attack", handle_attack_cmd);
     register_command("list", handle_list);
     register_command("beaconspam", handle_beaconspam);
+    register_command("hop", handle_hop_cmd);
     register_command("beaconadd", handle_beaconadd);
     register_command("beaconremove", handle_beaconremove);
     register_command("beaconclear", handle_beaconclear);

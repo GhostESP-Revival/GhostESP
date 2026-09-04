@@ -3,6 +3,12 @@
 ## Attribution
 Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A trailing `@handle` credits a guest contributor for that specific line. "Ported from / adapted from" credits the upstream source a feature was based on, not GhostESP authorship.
 
+## v2.2
+
+### Added
+- Added custom channel hopping setting that applies to deauth, beacon spam, AP and station scans, airspace monitor, and packet visualizer/capture hopping.
+- Added a Country selector to Settings > Wi-Fi for display UI
+
 ## Revival v2.1.2
 
 ### Added

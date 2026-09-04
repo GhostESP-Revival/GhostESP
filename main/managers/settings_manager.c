@@ -32,6 +32,8 @@ static bool settings_should_use_noop_dualcomm_pins(void) {
 static const char *NVS_RGB_MODE_KEY = "rgb_mode";
 static const char *NVS_CHANNEL_DELAY_KEY = "channel_delay";
 static const char *NVS_BROADCAST_SPEED_KEY = "broadcast_speed";
+static const char *NVS_HOP_MODE_KEY = "hop_mode";
+static const char *NVS_HOP_CUSTOM_KEY = "hop_custom";
 static const char *NVS_AP_SSID_KEY = "ap_ssid";
 static const char *NVS_AP_PASSWORD_KEY = "ap_password";
 static const char *NVS_RGB_SPEED_KEY = "rgb_speed";
@@ -191,6 +193,8 @@ void settings_set_defaults(FSettings *settings) {
   settings->rgb_mode = RGB_MODE_NORMAL;
   settings->channel_delay = 1.0f;
   settings->broadcast_speed = 1;
+  settings->hop_mode = 0; // HOP_MODE_DEFAULT
+  settings->hop_custom_channels[0] = '\0';
   // default to the 'Bright' palette (index 3)
   settings->menu_theme = 3;
   strcpy(settings->ap_ssid, "GhostNet");
@@ -349,6 +353,18 @@ void settings_load(FSettings *settings) {
   err = nvs_get_u16(nvsHandle, NVS_BROADCAST_SPEED_KEY, &value_u16);
   if (err == ESP_OK) {
     settings->broadcast_speed = value_u16;
+  }
+
+  // Load Hop channel profile
+  err = nvs_get_u8(nvsHandle, NVS_HOP_MODE_KEY, &value_u8);
+  if (err == ESP_OK) {
+    settings->hop_mode = value_u8;
+  }
+  str_size = sizeof(settings->hop_custom_channels);
+  err = nvs_get_str(nvsHandle, NVS_HOP_CUSTOM_KEY, settings->hop_custom_channels,
+                    &str_size);
+  if (err != ESP_OK) {
+    settings->hop_custom_channels[0] = '\0';
   }
 
   // Load AP SSID
@@ -1178,6 +1194,10 @@ void settings_persist_setting(SettingsType setting) {
             err = nvs_set_u8(nvsHandle, NVS_AP_ENABLED_KEY, G_Settings.ap_enabled);
             key = NVS_AP_ENABLED_KEY;
             break;
+        case SETTING_COUNTRY:
+            err = nvs_set_u8(nvsHandle, NVS_WIFI_COUNTRY_KEY, G_Settings.wifi_country);
+            key = NVS_WIFI_COUNTRY_KEY;
+            break;
         case SETTING_POWER_SAVE:
             err = nvs_set_u8(nvsHandle, NVS_POWER_SAVE_KEY, G_Settings.power_save_enabled);
             key = NVS_POWER_SAVE_KEY;
@@ -1508,6 +1528,25 @@ uint16_t settings_get_broadcast_speed(const FSettings *settings) {
   return settings->broadcast_speed;
 }
 
+void settings_set_hop_mode(FSettings *settings, uint8_t mode) {
+  settings->hop_mode = mode;
+}
+
+uint8_t settings_get_hop_mode(const FSettings *settings) {
+  return settings->hop_mode;
+}
+
+void settings_set_hop_custom_channels(FSettings *settings, const char *channels) {
+  if (!settings || !channels) return;
+  strncpy(settings->hop_custom_channels, channels,
+          sizeof(settings->hop_custom_channels) - 1);
+  settings->hop_custom_channels[sizeof(settings->hop_custom_channels) - 1] = '\0';
+}
+
+const char *settings_get_hop_custom_channels(const FSettings *settings) {
+  return settings->hop_custom_channels;
+}
+
 void settings_set_flappy_ghost_name(FSettings *settings, const char *Name) {
   strncpy(settings->flappy_ghost_name, Name,
           sizeof(settings->flappy_ghost_name) - 1);
@@ -1550,6 +1589,8 @@ esp_err_t settings_save(const FSettings *settings) {
     float ch_delay = settings->channel_delay;
     NVS_SET(nvs_set_blob(nvsHandle, NVS_CHANNEL_DELAY_KEY, &ch_delay, sizeof(ch_delay)));
     NVS_SET(nvs_set_u16(nvsHandle, NVS_BROADCAST_SPEED_KEY, settings->broadcast_speed));
+    NVS_SET(nvs_set_u8(nvsHandle, NVS_HOP_MODE_KEY, settings->hop_mode));
+    NVS_SET(nvs_set_str(nvsHandle, NVS_HOP_CUSTOM_KEY, settings->hop_custom_channels));
     NVS_SET(nvs_set_str(nvsHandle, NVS_AP_SSID_KEY, settings->ap_ssid));
     NVS_SET(nvs_set_str(nvsHandle, NVS_AP_PASSWORD_KEY, settings->ap_password));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_RGB_SPEED_KEY, settings->rgb_speed));

@@ -90,6 +90,15 @@ void handle_help(int argc, char **argv) {
         glog("stopspam\n");
         glog("    Description: Stop ongoing beacon spam.\n");
         glog("    Usage: stopspam\n\n");
+        glog("hop\n");
+        glog("    Description: Set the channel plan used by WiFi hopping features (deauth, beacon spam, scans, monitors).\n");
+        glog("    Usage: hop [auto | all | basic | custom <channels> | <channels>]\n");
+        glog("    Examples:\n");
+        glog("        hop             : Show current hop mode and channel plan\n");
+        glog("        hop 1,6,11      : Hop only channels 1, 6, and 11\n");
+        glog("        hop all         : Hop every legal channel for this device\n");
+        glog("        hop basic       : Fixed 1,6,11\n");
+        glog("        hop auto        : Default per-feature channel plan (country / AP list)\n\n");
         glog("stopdeauth\n");
         glog("    Description: Stop ongoing deauthentication attack.\n");
         glog("    Usage: stopdeauth\n\n");

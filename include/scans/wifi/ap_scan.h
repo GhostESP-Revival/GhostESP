@@ -22,8 +22,21 @@
 #define AP_SCAN_MAX_RESULTS 100
 
 /**
+ * @brief Run blocking scans on an explicit channel list and merge results
+ *
+ * Performs one blocking scan per channel (deduplicating APs by BSSID) and
+ * publishes the merged list into the shared scan results, exactly like
+ * ap_scan_stop() does for a full sweep. Used to honor user hop profiles.
+ *
+ * @param channels Channel list to scan
+ * @param count Number of channels
+ * @return ESP_OK on success (results published), error code otherwise
+ */
+esp_err_t ap_scan_scan_channels(const uint8_t *channels, size_t count);
+
+/**
  * @brief Start a WiFi AP scan
- * 
+ *
  * Initiates a WiFi scan for access points. The scan runs synchronously
  * and blocks until complete. Results are stored internally.
  */

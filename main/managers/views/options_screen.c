@@ -18,8 +18,10 @@
 #include "gui/design_tokens.h"
 #include "gui/ios_toggle.h"
 #include "io_manager.h"
+#include "esp_wifi.h"
 #include "managers/views/airspace_monitor_screen.h"
 #include "managers/views/channel_congestion_screen.h"
+#include "managers/views/hop_profile_screen.h"
 #include "managers/views/packet_monitor_screen.h"
 #include "managers/views/wardriving_screen.h"
 #include "managers/views/ethernet_screen.h"
@@ -1466,7 +1468,7 @@ static const char * const wifi_scan_select_options[] = {
 
 static const char * const wifi_environment_options[] = {
     "Environment Sweep", "Airspace Monitor", "PineAP Detection", "Flock Camera Detection", "Channel Congestion",
-    "Packet Monitor", "Packet Visualizer", NULL
+    "Packet Monitor", "Packet Visualizer", "Hop Channels", NULL
 };
 
 static const char * const wifi_network_options[] = {
@@ -1770,6 +1772,15 @@ static const char * const timezone_values[] = {
 };
 static const int timezone_count = sizeof(timezone_values) / sizeof(timezone_values[0]);
 
+// WiFi country labels kept in sync with setup_wizard_screen.c; the index is
+// the persisted G_Settings.wifi_country value.
+static const char * const country_setting_options[] = {
+    "US (Americas)", "GB (Europe)", "JP (Japan)", "AU (Australia)", "CN (Asia)", "01 (World Safe)"
+};
+static const char * const country_setting_codes[] = {"US", "GB", "JP", "AU", "CN", "01"};
+static const int country_setting_count =
+    sizeof(country_setting_options) / sizeof(country_setting_options[0]);
+
 static const char * const brightness_options[] = {
     "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%", "100%"
 };
@@ -1856,6 +1867,8 @@ static SettingsItem settings_items[] = {
     {"STA SSID", SETTING_STA_SSID, action_options, 1, 0, SETTINGS_CAT_NETWORK, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"STA Password", SETTING_STA_PASSWORD, action_options, 1, 0, SETTINGS_CAT_NETWORK, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"WiFi Auto-Reconnect", SETTING_WIFI_AUTO_RECONNECT, bool_options, 2, 1, SETTINGS_CAT_NETWORK, false, NULL, SETTING_WIDGET_TOGGLE},
+    {"Country", SETTING_COUNTRY, country_setting_options, country_setting_count, 0, SETTINGS_CAT_NETWORK, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"Hop Channels", SETTING_HOP_CHANNELS, action_options, 1, 0, SETTINGS_CAT_NETWORK, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
 
     {"Timezone", SETTING_TIMEZONE, timezone_options, 13, 0, SETTINGS_CAT_DATE_TIME, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
 
@@ -4355,6 +4368,7 @@ static void load_current_settings_values(void) {
             case SETTING_MANAGE_FAVORITES:
             case SETTING_MAIN_MENU_ITEMS:
             case SETTING_APPS_MENU_ITEMS:
+            case SETTING_HOP_CHANNELS:
                 settings_items[i].current_value = 0;
                 break;
             case SETTING_WEB_AUTH:
@@ -4545,6 +4559,12 @@ case SETTING_GPS_BAUD_RATE: {
                 // action items; current_value index unused
                 settings_items[i].current_value = 0;
                 break;
+            case SETTING_COUNTRY: {
+                uint8_t country = settings_get_wifi_country(&G_Settings);
+                settings_items[i].current_value =
+                    (country < country_setting_count) ? country : 0;
+                break;
+            }
             case SETTING_WIFI_AUTO_RECONNECT:
                 settings_items[i].current_value = settings_get_wifi_auto_reconnect(&G_Settings) ? 1 : 0;
                 break;
@@ -4700,6 +4720,9 @@ static void apply_setting_change(int setting_index, int new_value) {
             break;
         case SETTING_MANAGE_FAVORITES:
             display_manager_switch_view(&favorites_manager_view);
+            return;
+        case SETTING_HOP_CHANNELS:
+            display_manager_switch_view(&hop_profile_view);
             return;
         case SETTING_MAIN_MENU_ITEMS:
             menu_editor_open(MENU_PLACE_MAIN);
@@ -5226,6 +5249,14 @@ case SETTING_GPS_BAUD_RATE:
                 settings_set_timezone_str(&G_Settings, timezone_values[new_value]);
                 setenv("TZ", timezone_values[new_value], 1);
                 tzset();
+            }
+            break;
+        case SETTING_COUNTRY:
+            if (new_value >= 0 && new_value < country_setting_count) {
+                settings_set_wifi_country(&G_Settings, (uint8_t)new_value);
+                // Apply immediately so scans/attacks pick it up without a reboot;
+                // main.c re-applies the persisted index on boot.
+                esp_wifi_set_country_code(country_setting_codes[new_value], true);
             }
             break;
     }
@@ -9672,6 +9703,11 @@ void option_event_cb(lv_event_t *e) {
 
     else if (strcmp(Selected_Option, "Packet Visualizer") == 0) {
         display_manager_switch_view(&packet_monitor_view);
+        view_switched = true;
+    }
+
+    else if (strcmp(Selected_Option, "Hop Channels") == 0) {
+        display_manager_switch_view(&hop_profile_view);
         view_switched = true;
     }
 

@@ -24,6 +24,7 @@
 #include "managers/settings_manager.h"
 #include "managers/views/terminal_screen.h"
 #include "scans/wifi/wifi_channels.h"
+#include "scans/wifi/hop_profile.h"
 #include "core/glog.h"
 #include "esp_wifi.h"
 #include "esp_random.h"
@@ -290,11 +291,19 @@ esp_err_t beacon_spam_broadcast_karma(const char *ssid) {
         return err;
     }
 
-    // Build country-appropriate channel list
+    // Build channel list: user hop profile when set, otherwise the
+    // country-appropriate list.
     uint8_t channels[WIFI_CHANNELS_MAX];
-    uint8_t channel_count = wifi_channels_build_country_list(channels, sizeof(channels));
+    uint8_t channel_count = 0;
+    size_t resolved_count = 0;
+    hop_profile_resolve(channels, sizeof(channels), &resolved_count);
+    if (resolved_count > 0) {
+        channel_count = (uint8_t)resolved_count;
+    } else {
+        channel_count = wifi_channels_build_country_list(channels, sizeof(channels));
+    }
 
-    // Hop through all country-appropriate channels
+    // Hop through the channel list
     for (int i = 0; i < channel_count; i++) {
         uint8_t ch = channels[i];
         if (!wifi_manager_karma_is_running()) {

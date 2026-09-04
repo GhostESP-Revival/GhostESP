@@ -14,6 +14,7 @@
 #include "core/glog.h"
 #include "core/esp_comm_manager.h"
 #include "scans/wifi/wifi_channels.h"
+#include "scans/wifi/hop_profile.h"
 #include "managers/settings_manager.h"
 #include <ctype.h>
 #include <esp_log.h>
@@ -1013,6 +1014,16 @@ static bool wardrive_is_common_5g_channel(uint8_t ch) {
 }
 
 static void wardrive_build_channel_list(void) {
+    // A user hop profile overrides the role/weighting band logic entirely.
+    size_t profile_count = 0;
+    hop_profile_resolve(wardrive_channels, WIFI_CHANNELS_MAX, &profile_count);
+    if (profile_count > 0) {
+        wardrive_channel_count = (uint8_t)profile_count;
+        ESP_LOGI(TAG, "Wardrive: using hop profile (%d channels)",
+                 (int)wardrive_channel_count);
+        return;
+    }
+
     uint8_t full_channels[WIFI_CHANNELS_MAX] = {0};
     uint8_t channels_24[WIFI_CHANNELS_MAX] = {0};
     uint8_t channels_5[WIFI_CHANNELS_MAX] = {0};

@@ -85,6 +85,8 @@ typedef enum {
     SETTING_WEB_AUTH,
     SETTING_WEBUI_AP_ONLY,
     SETTING_AP_ENABLED,
+    SETTING_COUNTRY,
+    SETTING_HOP_CHANNELS,
     SETTING_POWER_SAVE,
     SETTING_MAX_BRIGHTNESS,
     SETTING_NEOPIXEL_BRIGHTNESS,
@@ -232,6 +234,8 @@ typedef struct {
   RGBMode rgb_mode;
   float channel_delay;
   uint16_t broadcast_speed;
+  uint8_t hop_mode;            // Hop channel profile mode (hop_mode_t in hop_profile.h)
+  char hop_custom_channels[129]; // Custom hop channel list as "1,6,11"
   char ap_ssid[33];     // Max SSID length is 32 bytes + null terminator
   char ap_password[65]; // Max password length is 64 bytes + null terminator
   uint8_t rgb_speed;
@@ -383,6 +387,11 @@ float settings_get_channel_delay(const FSettings *settings);
 
 void settings_set_broadcast_speed(FSettings *settings, uint16_t speed);
 uint16_t settings_get_broadcast_speed(const FSettings *settings);
+
+void settings_set_hop_mode(FSettings *settings, uint8_t mode);
+uint8_t settings_get_hop_mode(const FSettings *settings);
+void settings_set_hop_custom_channels(FSettings *settings, const char *channels);
+const char *settings_get_hop_custom_channels(const FSettings *settings);
 
 void settings_set_flappy_ghost_name(FSettings *settings, const char *Name);
 const char *settings_get_flappy_ghost_name(const FSettings *settings);

@@ -352,7 +352,8 @@ void shell_print_command_help(const char *command) {
         {"top", "top"}, {"df", "df"}, {"tail", "tail <file> [lines]"},
         {"grep", "grep <pattern> <file>"}, {"source", "source <file>"},
         {"tee", "tee <file> <text>"}, {"env", "env"}, {"export", "export NAME=value"},
-        {"watch", "watch <seconds> <command> | watch stop"}
+        {"watch", "watch <seconds> <command> | watch stop"},
+        {"hop", "hop [auto|all|basic|custom <channels>|<channels>]"}
     };
     for (size_t i = 0; i < sizeof(help) / sizeof(help[0]); ++i) {
         if (strcasecmp(command, help[i].name) == 0) {

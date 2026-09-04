@@ -34,6 +34,7 @@ void handle_track_sta_cmd(int argc, char **argv);
 // WiFi attacks
 void handle_attack_cmd(int argc, char **argv);
 void handle_beaconspam(int argc, char **argv);
+void handle_hop_cmd(int argc, char **argv);
 void handle_beaconadd(int argc, char **argv);
 void handle_beaconremove(int argc, char **argv);
 void handle_beaconclear(int argc, char **argv);

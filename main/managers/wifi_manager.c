@@ -2,6 +2,7 @@
 
 #include "managers/wifi_manager.h"
 #include "managers/ghostscript_runtime.h"
+#include "scans/wifi/hop_profile.h"
 #include "scans/wifi/port_scan.h"
 #include "scans/wifi/arp_scan.h"
 #include "scans/wifi/ssh_scan.h"
@@ -140,6 +141,12 @@ static const uint8_t live_ap_channels[] = {
 #endif
 static const size_t live_ap_channels_len = sizeof(live_ap_channels) / sizeof(live_ap_channels[0]);
 static size_t live_ap_channel_index = 0;
+
+// Runtime channel list for "Scan APs Live": the compile-time table by
+// default, or the user hop profile when one is selected.
+static uint8_t live_ap_profile_channels[WIFI_CHANNELS_MAX];
+static const uint8_t *live_ap_active_channels = NULL;
+static size_t live_ap_active_channels_len = 0;
 
 const char *TAG = "WiFiManager";
 
@@ -3603,8 +3610,10 @@ void wifi_manager_print_scan_results_with_oui() {
 
 static void live_ap_channel_hop_timer_callback(void *arg) {
     if (!live_ap_hopping_active) return;
-    live_ap_channel_index = (live_ap_channel_index + 1) % live_ap_channels_len;
-    esp_wifi_set_channel(live_ap_channels[live_ap_channel_index], WIFI_SECOND_CHAN_NONE);
+    size_t len = live_ap_active_channels_len;
+    if (len == 0) return;
+    live_ap_channel_index = (live_ap_channel_index + 1) % len;
+    esp_wifi_set_channel(live_ap_active_channels[live_ap_channel_index], WIFI_SECOND_CHAN_NONE);
 }
 
 static esp_err_t start_live_ap_channel_hopping(void) {
@@ -3613,8 +3622,20 @@ static esp_err_t start_live_ap_channel_hopping(void) {
         esp_timer_delete(live_ap_channel_hop_timer);
         live_ap_channel_hop_timer = NULL;
     }
+
+    // User hop profile overrides the compile-time live AP table.
+    size_t profile_count = 0;
+    hop_profile_resolve(live_ap_profile_channels, WIFI_CHANNELS_MAX, &profile_count);
+    if (profile_count > 0) {
+        live_ap_active_channels = live_ap_profile_channels;
+        live_ap_active_channels_len = profile_count;
+    } else {
+        live_ap_active_channels = live_ap_channels;
+        live_ap_active_channels_len = live_ap_channels_len;
+    }
+
     live_ap_channel_index = 0;
-    esp_wifi_set_channel(live_ap_channels[live_ap_channel_index], WIFI_SECOND_CHAN_NONE);
+    esp_wifi_set_channel(live_ap_active_channels[live_ap_channel_index], WIFI_SECOND_CHAN_NONE);
     esp_timer_create_args_t timer_args = {
         .callback = live_ap_channel_hop_timer_callback,
         .name = "live_ap_hop"
@@ -4196,6 +4217,28 @@ esp_err_t wifi_manager_start_scan_with_time(int seconds) {
 
     rgb_manager_set_color(&rgb_manager, -1, 50, 255, 50, false);
 
+    // User hop profile: scan each profile channel and merge results instead
+    // of the driver's all-country-channel sweep.
+    uint8_t profile_channels[WIFI_CHANNELS_MAX];
+    size_t profile_count = 0;
+    hop_profile_resolve(profile_channels, WIFI_CHANNELS_MAX, &profile_count);
+    if (profile_count > 0) {
+        printf("WiFi Scan started (%u channels)\n", (unsigned)profile_count);
+        TERMINAL_VIEW_ADD_TEXT("WiFi Scan started\n");
+        err = ap_scan_scan_channels(profile_channels, profile_count);
+        if (err == ESP_OK) {
+            printf("Found %u access points\n", ap_count);
+            TERMINAL_VIEW_ADD_TEXT("Found %u access points\n", ap_count);
+        } else {
+            printf("WiFi scan failed to start: %s\n", esp_err_to_name(err));
+            TERMINAL_VIEW_ADD_TEXT("WiFi scan failed to start\n");
+        }
+        wifi_timed_scan_active = false;
+        esp_wifi_stop();
+        (void)ap_manager_restore_after_attack("timed scan");
+        return err;
+    }
+
     printf("WiFi Scan started\n");
     printf("Please wait %d Seconds...\n", seconds);
     TERMINAL_VIEW_ADD_TEXT("WiFi Scan started\n");
@@ -4413,16 +4456,22 @@ esp_err_t wifi_manager_start_wireshark_channel_list(const uint8_t *channels, siz
 
 void wifi_manager_start_wireshark_channel_hop(void) {
     uint8_t channels[sizeof(wireshark_channels)] = {0};
+    size_t count = 0;
 
-    // build country-appropriate channel list
-    size_t count = wifi_channels_build_country_list(channels, sizeof(channels));
+    // Use the user hop profile when one is selected; otherwise keep the
+    // historical country-appropriate channel list.
+    hop_profile_resolve(channels, sizeof(channels), &count);
+    if (count == 0) {
+        // HOP_MODE_DEFAULT (or nothing configured): country list.
+        count = wifi_channels_build_country_list(channels, sizeof(channels));
+    }
     if (count == 0) {
         ESP_LOGE(TAG, "No channels available for Wireshark hopping");
         return;
     }
     esp_err_t err = wifi_manager_start_wireshark_channel_list(channels, count);
     if (err != ESP_OK) ESP_LOGE(TAG, "Failed to start Wireshark channel hopping: %s", esp_err_to_name(err));
-    else ESP_LOGI(TAG, "Wireshark Channel Hopping Started (%d channels, 150ms interval)", count);
+    else ESP_LOGI(TAG, "Wireshark Channel Hopping Started (%d channels, 150ms interval)", (int)count);
 }
 
 void wifi_manager_stop_wireshark_channel_hop(void) {
