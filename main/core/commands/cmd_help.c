@@ -300,6 +300,18 @@ void handle_help(int argc, char **argv) {
         return;
     }
 
+#ifdef CONFIG_HAS_USB_MSC_SD
+    if (strcmp(category, "usbsd") == 0) {
+        glog("\nUSB SD Passthrough Commands:\n\n");
+        glog("usbsd\n    Toggle USB SD passthrough (card becomes a USB drive on the host PC).\n    Usage: usbsd\n\n");
+        glog("usbsd on\n    Start passthrough: SD is handed to the USB host, serial console detaches.\n    Usage: usbsd on\n\n");
+        glog("usbsd off\n    Stop passthrough and remount the SD card.\n    Usage: usbsd off\n\n");
+        glog("usbsd status\n    Show passthrough state.\n    Usage: usbsd status\n\n");
+        glog("Note: use WiFi/WebUI to exit if the serial console is detached.\n\n");
+        return;
+    }
+#endif
+
     if (strcmp(category, "led") == 0) {
         glog("\nLED & RGB Commands:\n\n");
         glog("rgbmode\n    Control LED effects (rainbow, police, strobe, knight, off)\n    Usage: rgbmode <rainbow|police|strobe|knight|off|color>\n\n");
@@ -804,6 +816,9 @@ void handle_help(int argc, char **argv) {
     glog("  help ble       - Bluetooth/BLE commands\n");
     glog("  help comm      - ESP32 communication commands\n");
     glog("  help sd        - SD card commands\n");
+#ifdef CONFIG_HAS_USB_MSC_SD
+    glog("  help usbsd     - USB SD passthrough commands\n");
+#endif
     glog("  help led       - LED/RGB commands\n");
     glog("  help gps       - GPS commands\n");
     glog("  help shell     - Headless shell commands\n");

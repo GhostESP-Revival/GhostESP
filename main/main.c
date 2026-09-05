@@ -1132,7 +1132,9 @@ void app_main(void) {
     // handled by the separate boot_app_discovery_task spawned from inside
     // deferred_sd_init_task.
     {
-        BaseType_t sd_task_rc = xTaskCreate(deferred_sd_init_task, "SD Init", 6144, NULL,
+        // 8K: sd_card_init's SDMMC/SPI locals + coredump autosave + asset pack
+        // load are all sequential in this task; 6K overflowed on Cardputer ADV.
+        BaseType_t sd_task_rc = xTaskCreate(deferred_sd_init_task, "SD Init", 8192, NULL,
                                             tskIDLE_PRIORITY + 1, NULL);
         if (sd_task_rc != pdPASS) {
             ESP_LOGE(TAG, "Failed to create SD Init task");

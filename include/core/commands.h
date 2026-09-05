@@ -58,6 +58,9 @@ void handle_webuiap_cmd(int argc, char **argv);
 // BadUSB and USB keyboard host
 void handle_badusb_cmd(int argc, char **argv);
 void handle_usb_kbd_cmd(int argc, char **argv);
+#ifdef CONFIG_HAS_USB_MSC_SD
+void handle_usbsd_cmd(int argc, char **argv);
+#endif
 #ifdef CONFIG_HAS_BADBLE
 void handle_badble_cmd(int argc, char **argv);
 #endif

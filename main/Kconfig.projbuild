@@ -482,6 +482,17 @@ menu "Ghost ESP Options"
                 keyboard and execute DuckyScript v1.0 payloads from the SD card.
                 Only available on ESP32-S3 which has USB OTG support.
 
+        config HAS_USB_MSC_SD
+            bool "USB SD Card Passthrough (TinyUSB MSC)"
+            default n
+            depends on IDF_TARGET_ESP32S3
+            depends on USING_SPI || USING_MMC || USING_MMC_1_BIT
+            help
+                Expose the SD card over the native USB port as a mass-storage
+                device, turning the board into a USB SD card reader. While
+                active, the firmware cannot access the card (it is handed to
+                the USB host) and the USB serial console is unavailable.
+
         config HAS_BADBLE
             bool "Enable BadBLE (Bluetooth HID Script Injection)"
             default y if IDF_TARGET_ESP32 || IDF_TARGET_ESP32C3 || IDF_TARGET_ESP32C5 || IDF_TARGET_ESP32C6 || IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32P4

@@ -74,6 +74,7 @@ static const char *NVS_INFRARED_EASY_MODE_KEY = "ir_easy_mode";
 static const char *NVS_IR_TX_PIN_KEY = "ir_tx_pin";
 static const char *NVS_IR_RX_PIN_KEY = "ir_rx_pin";
 static const char *NVS_WEB_AUTH_KEY = "web_auth";
+static const char *NVS_USB_MSC_KEY = "usb_msc";
 static const char *NVS_WEBUI_AP_ONLY_KEY = "webui_ap";
 static const char *NVS_ESP_COMM_TX_PIN_KEY = "esp_comm_tx";
 static const char *NVS_ESP_COMM_RX_PIN_KEY = "esp_comm_rx";
@@ -236,6 +237,7 @@ void settings_set_defaults(FSettings *settings) {
   settings->terminal_font_size = 1; // Normal (0=Small, 1=Normal, 2=Large)
   settings->invert_colors = false;
   settings->web_auth_enabled = false;
+  settings->usb_msc_enabled = false;
   settings->webui_restrict_to_ap = true;
   if (settings_should_use_noop_dualcomm_pins()) {
     settings->esp_comm_tx_pin = -1;
@@ -666,6 +668,11 @@ void settings_load(FSettings *settings) {
   err = nvs_get_u8(nvsHandle, NVS_WEB_AUTH_KEY, &value_u8);
   if (err == ESP_OK) {
     settings->web_auth_enabled = value_u8;
+  }
+
+  err = nvs_get_u8(nvsHandle, NVS_USB_MSC_KEY, &value_u8);
+  if (err == ESP_OK) {
+    settings->usb_msc_enabled = value_u8;
   }
 
   err = nvs_get_u8(nvsHandle, NVS_WEBUI_AP_ONLY_KEY, &value_u8);
@@ -1205,6 +1212,12 @@ void settings_persist_setting(SettingsType setting) {
             err = nvs_set_u8(nvsHandle, NVS_WEB_AUTH_KEY, G_Settings.web_auth_enabled);
             key = NVS_WEB_AUTH_KEY;
             break;
+#ifdef CONFIG_HAS_USB_MSC_SD
+        case SETTING_USB_MSC:
+            err = nvs_set_u8(nvsHandle, NVS_USB_MSC_KEY, G_Settings.usb_msc_enabled);
+            key = NVS_USB_MSC_KEY;
+            break;
+#endif
         case SETTING_WEBUI_AP_ONLY:
             err = nvs_set_u8(nvsHandle, NVS_WEBUI_AP_ONLY_KEY, G_Settings.webui_restrict_to_ap);
             key = NVS_WEBUI_AP_ONLY_KEY;
@@ -1656,6 +1669,7 @@ esp_err_t settings_save(const FSettings *settings) {
     NVS_SET(nvs_set_u8(nvsHandle, NVS_TERMINAL_FONT_SIZE_KEY, settings->terminal_font_size));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_INVERT_COLORS_KEY, settings->invert_colors ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_WEB_AUTH_KEY, settings->web_auth_enabled ? 1 : 0));
+    NVS_SET(nvs_set_u8(nvsHandle, NVS_USB_MSC_KEY, settings->usb_msc_enabled ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_WEBUI_AP_ONLY_KEY, settings->webui_restrict_to_ap ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_AP_ENABLED_KEY, settings->ap_enabled ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_POWER_SAVE_KEY, settings->power_save_enabled ? 1 : 0));
@@ -2012,6 +2026,14 @@ void settings_set_web_auth_enabled(FSettings *settings, bool enabled) {
 
 bool settings_get_web_auth_enabled(const FSettings *settings) {
   return settings->web_auth_enabled;
+}
+
+void settings_set_usb_msc_enabled(FSettings *settings, bool enabled) {
+  settings->usb_msc_enabled = enabled;
+}
+
+bool settings_get_usb_msc_enabled(const FSettings *settings) {
+  return settings->usb_msc_enabled;
 }
 
 void settings_set_webui_restrict_to_ap(FSettings *settings, bool enabled) {

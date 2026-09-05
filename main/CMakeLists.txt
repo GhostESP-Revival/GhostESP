@@ -208,6 +208,12 @@ if(CONFIG_HAS_BADUSB)
     list(APPEND required_components esp_tinyusb)
 endif()
 
+# USB SD passthrough (MSC) also needs the TinyUSB device stack (S3 only).
+# The MSC class itself is gated by CONFIG_TINYUSB_MSC_ENABLED in sdkconfig.
+if(CONFIG_HAS_USB_MSC_SD)
+    list(APPEND required_components esp_tinyusb)
+endif()
+
 # BadBLE uses the shared transport-neutral DuckyScript parser and the IDF HID
 # component.  Keep this separate from BadUSB so non-S3 BLE targets do not pull
 # in TinyUSB.

@@ -37,6 +37,7 @@
 #include "gui/toast.h"
 #include "core/utils.h"
 #include "managers/sd_card_manager.h"  /* MAX_PORTAL_NAME, sd_card_list_dir_paged */
+#include "managers/usb_msc_manager.h"
 #include "esp_err.h"
 #include "gui/paged_menu.h"
 #include "gui/scan_status.h"
@@ -1882,6 +1883,9 @@ static SettingsItem settings_items[] = {
     {"Power Saving Mode", SETTING_POWER_SAVE, bool_options, 2, 0, SETTINGS_CAT_POWER, false, NULL, SETTING_WIDGET_TOGGLE},
 #if CONFIG_IDF_TARGET_ESP32S3
     {"USB Host Mode", SETTING_USB_HOST_MODE, bool_options, 2, 0, SETTINGS_CAT_POWER, true, "CONFIG_IDF_TARGET_ESP32S3", SETTING_WIDGET_TOGGLE},
+#ifdef CONFIG_HAS_USB_MSC_SD
+    {"USB SD Passthrough", SETTING_USB_MSC, bool_options, 2, 0, SETTINGS_CAT_POWER, true, "CONFIG_HAS_USB_MSC_SD", SETTING_WIDGET_TOGGLE},
+#endif
 #endif
     {"Auto Save Scans", SETTING_AUTO_SAVE_SCANS, bool_options, 2, 1, SETTINGS_CAT_SCAN_SAVING, false, NULL, SETTING_WIDGET_TOGGLE},
     {"Run Setup Wizard", SETTING_RUN_SETUP_WIZARD, action_options, 1, 0, SETTINGS_CAT_SYSTEM_TOOLS, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
@@ -4443,6 +4447,11 @@ static void load_current_settings_values(void) {
             case SETTING_WEB_AUTH:
                 settings_items[i].current_value = settings_get_web_auth_enabled(&G_Settings) ? 1 : 0;
                 break;
+#ifdef CONFIG_HAS_USB_MSC_SD
+            case SETTING_USB_MSC:
+                settings_items[i].current_value = settings_get_usb_msc_enabled(&G_Settings) ? 1 : 0;
+                break;
+#endif
             case SETTING_WEBUI_AP_ONLY:
                 settings_items[i].current_value = settings_get_webui_restrict_to_ap(&G_Settings) ? 1 : 0;
                 break;
@@ -4813,6 +4822,16 @@ static void apply_setting_change(int setting_index, int new_value) {
         case SETTING_WEB_AUTH:
             settings_set_web_auth_enabled(&G_Settings, new_value == 1);
             break;
+#ifdef CONFIG_HAS_USB_MSC_SD
+        case SETTING_USB_MSC:
+            settings_set_usb_msc_enabled(&G_Settings, new_value == 1);
+            if (new_value == 1 && !usb_msc_is_active()) {
+                usb_msc_start_async();
+            } else if (new_value == 0 && usb_msc_is_active()) {
+                usb_msc_stop();
+            }
+            break;
+#endif
         case SETTING_WEBUI_AP_ONLY:
             settings_set_webui_restrict_to_ap(&G_Settings, new_value == 1);
             break;

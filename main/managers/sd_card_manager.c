@@ -11,6 +11,8 @@
 #include "esp_log.h"
 #include "esp_private/esp_gpio_reserve.h"
 #include "esp_vfs_fat.h"
+#include "diskio_impl.h"
+#include "diskio_sdmmc.h"
 #include "vendor/drivers/CH422G.h"
 #include "vendor/pcap.h"
 #include <dirent.h>
@@ -59,6 +61,11 @@ static sd_mount_type_t s_mount_type = MOUNT_NONE;
 static sd_pwr_ctrl_handle_t s_crowpanel_sd_power = NULL;
 #endif
 static TickType_t s_next_unmount_tick = 0;
+
+// USB MSC passthrough state (see sd_card_suspend_for_usb_msc)
+static bool s_msc_owns_sd = false;
+static sdmmc_card_t *s_msc_card = NULL;
+static BYTE s_msc_pdrv = 0xff;
 
 static void sd_spi_bus_release_if_tracked(void);
 
@@ -666,6 +673,11 @@ esp_err_t sd_card_init(void) {
     return ESP_OK;
   }
 
+  if (s_msc_owns_sd) {
+    ESP_LOGW(TAG, "sd_card_init: card is in USB passthrough mode");
+    return ESP_ERR_INVALID_STATE;
+  }
+
   /* Clean up stale tracked SPI state before a fresh init attempt. */
   if (s_spi_host_id >= 0) {
     sd_spi_bus_release_if_tracked();
@@ -1224,6 +1236,10 @@ esp_err_t sd_card_mount_for_flush(bool *display_was_suspended) {
   if (jit_mutex == NULL) {
     return ESP_ERR_NO_MEM;
   }
+  if (s_msc_owns_sd) {
+    ESP_LOGW(TAG, "sd_card_mount_for_flush: card is in USB passthrough mode");
+    return ESP_ERR_INVALID_STATE;
+  }
   if (xSemaphoreTakeRecursive(jit_mutex, portMAX_DELAY) != pdTRUE) {
     return ESP_ERR_TIMEOUT;
   }
@@ -1520,6 +1536,100 @@ void sd_card_unmount_with_context(sd_unmount_context_t context) {
 
 void sd_card_unmount(void) {
   sd_card_unmount_with_context(SD_UNMOUNT_CONTEXT_USER);
+}
+
+bool sd_card_usb_msc_active(void) {
+  return s_msc_owns_sd;
+}
+
+esp_err_t sd_card_suspend_for_usb_msc(sdmmc_card_t **out_card) {
+  if (s_msc_owns_sd) {
+    return ESP_ERR_INVALID_STATE;
+  }
+  if (!sd_card_manager.is_initialized || sd_card_manager.card == NULL) {
+    ESP_LOGE(TAG, "USB MSC suspend: card not mounted");
+    return ESP_ERR_INVALID_STATE;
+  }
+  if (sd_card_is_virtual_storage()) {
+    ESP_LOGE(TAG, "USB MSC suspend: virtual storage is not supported");
+    return ESP_ERR_NOT_SUPPORTED;
+  }
+
+  BYTE pdrv = ff_diskio_get_pdrv_card(sd_card_manager.card);
+  if (pdrv == 0xff) {
+    ESP_LOGE(TAG, "USB MSC suspend: card has no FatFS drive registered");
+    return ESP_ERR_INVALID_STATE;
+  }
+
+  /* Release the VFS + diskio registration while keeping the card host
+   * controller and card handle alive so the MSC class can do raw sector I/O.
+   * esp_vfs_fat_sdcard_unmount() must NOT be used here: it deinits the host
+   * and frees the card. */
+  char drv[3] = {(char)('0' + pdrv), ':', 0};
+  f_mount(NULL, drv, 0);
+  ff_diskio_unregister(pdrv);
+  esp_err_t err = esp_vfs_fat_unregister_path(SD_MOUNT_POINT);
+  if (err != ESP_OK && err != ESP_ERR_INVALID_STATE && err != ESP_ERR_NOT_FOUND) {
+    ESP_LOGE(TAG, "USB MSC suspend: failed to unregister VFS: %s", esp_err_to_name(err));
+    return err;
+  }
+
+  s_msc_card = sd_card_manager.card;
+  s_msc_pdrv = pdrv;
+  s_msc_owns_sd = true;
+  sd_card_manager.is_initialized = false;
+  ESP_LOGI(TAG, "SD handed to USB MSC (pdrv=%u)", pdrv);
+
+  if (out_card) {
+    *out_card = s_msc_card;
+  }
+  return ESP_OK;
+}
+
+esp_err_t sd_card_resume_from_usb_msc(void) {
+  if (!s_msc_owns_sd || s_msc_card == NULL) {
+    return ESP_ERR_INVALID_STATE;
+  }
+
+  sdmmc_card_t *card = s_msc_card;
+  BYTE pdrv = s_msc_pdrv;
+  s_msc_card = NULL;
+  s_msc_pdrv = 0xff;
+  s_msc_owns_sd = false;
+
+  /* Re-register the diskio + VFS on the same drive number the original mount
+   * used. esp_vfs_fat_sdcard_unmount() freed its context during suspend, so
+   * this recreates the mount from scratch without re-probing the card. */
+  ff_diskio_register_sdmmc(pdrv, card);
+  char drv[3] = {(char)('0' + pdrv), ':', 0};
+  esp_vfs_fat_conf_t conf = {
+      .base_path = SD_MOUNT_POINT,
+      .fat_drive = drv,
+      .max_files = 3,
+  };
+  FATFS *fs = NULL;
+  esp_err_t err = esp_vfs_fat_register(&conf, &fs);
+  if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+    ESP_LOGE(TAG, "USB MSC resume: VFS register failed: %s", esp_err_to_name(err));
+    ff_diskio_unregister(pdrv);
+    sd_card_manager.card = NULL;
+    return err;
+  }
+
+  FRESULT res = f_mount(fs, drv, 1);
+  if (res != FR_OK) {
+    ESP_LOGE(TAG, "USB MSC resume: f_mount failed (%d)", res);
+    f_mount(NULL, drv, 0);
+    esp_vfs_fat_unregister_path(SD_MOUNT_POINT);
+    ff_diskio_unregister(pdrv);
+    sd_card_manager.card = NULL;
+    return ESP_FAIL;
+  }
+
+  sd_card_manager.is_initialized = true;
+  sd_card_manager.card = card;
+  ESP_LOGI(TAG, "SD remounted after USB MSC (pdrv=%u)", pdrv);
+  return ESP_OK;
 }
 
 esp_err_t sd_card_append_file(const char *path, const void *data, size_t size) {

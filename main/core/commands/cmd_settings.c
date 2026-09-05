@@ -102,6 +102,7 @@ static const SettingDescriptor k_settings_desc[] = {
     {"menu_layout", ST_U8, OFF(menu_layout), "System", 0, 0, 4},
     {"infrared_easy", ST_BOOL, OFF(infrared_easy_mode), "System", 0, 0, 0},
     {"web_auth", ST_BOOL, OFF(web_auth_enabled), "System", 0, 0, 0},
+    {"usb_msc", ST_BOOL, OFF(usb_msc_enabled), "System", 0, 0, 0},
     {"rts_enabled", ST_BOOL, OFF(rts_enabled), "System", 0, 0, 0},
     {"third_ctrl", ST_BOOL, OFF(third_control_enabled), "System", 0, 0, 0},
     {"auto_save_scans", ST_BOOL, OFF(auto_save_scans), "System", 0, 0, 0},
@@ -537,6 +538,7 @@ void handle_settings_cmd(int argc, char **argv) {
         glog("    menu_layout       - Menu layout (0=Carousel, 1=Grid, 2=List, 3=Compact, 4=Hero)\n");
         glog("    infrared_easy     - Infrared easy mode (true/false)\n");
         glog("    web_auth          - Web authentication (true/false)\n");
+        glog("    usb_msc           - USB SD passthrough toggle preference (true/false)\n");
         glog("    rts_enabled       - RTS enabled (true/false)\n");
         glog("    third_ctrl        - Third control enabled (true/false)\n");
         glog("    auto_save_scans   - Auto save scan results to SD (true/false)\n");

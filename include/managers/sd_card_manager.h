@@ -124,6 +124,16 @@ typedef struct {
 } sd_card_cached_stats_t;
 void sd_card_get_cached_stats(sd_card_cached_stats_t *out);
 
+/*
+ * USB MSC passthrough support. While the SD card is handed to the USB host
+ * (mass-storage mode), the card's host controller stays initialized but the
+ * FatFS VFS at SD_MOUNT_POINT is released. Callers must treat the card as
+ * unavailable and re-mount through sd_card_resume_from_usb_msc() when done.
+ */
+esp_err_t sd_card_suspend_for_usb_msc(sdmmc_card_t **out_card);
+esp_err_t sd_card_resume_from_usb_msc(void);
+bool sd_card_usb_msc_active(void);
+
 // List evil portal directories from SD card (legacy — capped at MAX_PORTALS)
 int get_evil_portal_list(char portal_names[MAX_PORTALS][MAX_PORTAL_NAME]);
 

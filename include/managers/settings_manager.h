@@ -103,6 +103,9 @@ typedef enum {
 #endif
 #if CONFIG_IDF_TARGET_ESP32S3
     SETTING_USB_HOST_MODE,
+#ifdef CONFIG_HAS_USB_MSC_SD
+    SETTING_USB_MSC,
+#endif
 #endif
     SETTING_RUN_SETUP_WIZARD,
     SETTING_I2C_SCAN,
@@ -287,6 +290,7 @@ typedef struct {
   bool invert_colors; // Invert screen colors
   bool web_auth_enabled;
   bool webui_restrict_to_ap;
+  bool usb_msc_enabled; // Remember USB SD passthrough toggle (never auto-starts at boot)
   
   int32_t esp_comm_tx_pin; // ESP communication TX pin
   int32_t esp_comm_rx_pin; // ESP communication RX pin
@@ -511,6 +515,8 @@ bool settings_get_invert_colors(const FSettings *settings);
 // Getter and Setter for web auth
 void settings_set_web_auth_enabled(FSettings *settings, bool enabled);
 bool settings_get_web_auth_enabled(const FSettings *settings);
+void settings_set_usb_msc_enabled(FSettings *settings, bool enabled);
+bool settings_get_usb_msc_enabled(const FSettings *settings);
 void settings_set_webui_restrict_to_ap(FSettings *settings, bool enabled);
 bool settings_get_webui_restrict_to_ap(const FSettings *settings);
 
