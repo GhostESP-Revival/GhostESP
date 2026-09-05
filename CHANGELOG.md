@@ -3,6 +3,12 @@
 ## Attribution
 Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A trailing `@handle` credits a guest contributor for that specific line. "Ported from / adapted from" credits the upstream source a feature was based on, not GhostESP authorship.
 
+## Revival v2.1.3
+
+### Bug Fixes
+- Fixed boot crash on Cardputer (and other M5GFX boards) under ESP-IDF 6.1 by resetting the new spi_bus_config_t.dma_burst_size field to the driver default after M5GFX fills the config with 0xFF
+- Raised the SD Init task stack from 6K to 8K, fixing a boot-time stack overflow on Cardputer ADV
+
 ## Revival v2.1.2
 
 ### Added
