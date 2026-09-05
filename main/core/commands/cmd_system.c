@@ -14,6 +14,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "managers/ap_manager.h"
+#include "managers/ble_manager.h"
 #include "managers/gps_manager.h"
 #include "managers/infrared_manager.h"
 #include "managers/plugin_loader.h"
@@ -32,6 +33,7 @@
 #include "sdkconfig.h"
 #include "vendor/GPS/gps_logger.h"
 #include "vendor/pcap.h"
+#include <esp_heap_caps.h>
 #include <esp_log.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -334,6 +336,99 @@ void handle_startwd(int argc, char **argv) {
         status_display_show_status("Wardrive Start");
     }
 }
+
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE) && !defined(CONFIG_IDF_TARGET_ESP32P4)
+void handle_dualwd(int argc, char **argv) {
+    bool stop_flag = false;
+
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-s") == 0 || strcmp(argv[i], "stop") == 0) {
+            stop_flag = true;
+        } else if (strcmp(argv[i], "start") != 0) {
+            glog("Usage: dualwd [start|-s]\n");
+            return;
+        }
+    }
+
+    if (stop_flag) {
+        if (!csv_file_is_open()) {
+            glog("Dual wardriving is not active.\n");
+            return;
+        }
+        ble_unregister_handler(ble_wardriving_callback);
+        ble_stop();
+        stop_wardriving();
+        wifi_manager_stop_monitor_mode();
+        if (csv_buffer_has_pending_data()) {
+            csv_flush_buffer_to_file();
+        }
+        csv_file_close();
+        gps_manager_deinit(&g_gpsManager);
+        gps_manager_set_peer_gps_preferred(false);
+        gps_manager_clear_peer_fix();
+        ble_set_suspend_allowed(true);
+        glog("Dual wardriving stopped.\n");
+        status_display_show_status("Dual Drive Off");
+        return;
+    }
+
+    if (csv_file_is_open()) {
+        glog("A wardriving CSV session is already active.\n");
+        return;
+    }
+
+    if (heap_caps_get_total_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) == 0) {
+        glog("Dual wardriving requires a PSRAM device.\n");
+        status_display_show_status("PSRAM Required");
+        return;
+    }
+
+    ble_set_suspend_allowed(false);
+    gps_manager_set_peer_gps_preferred(false);
+    gps_manager_init(&g_gpsManager);
+    esp_err_t err = csv_file_open("wardriving");
+    if (err != ESP_OK) {
+        ble_set_suspend_allowed(true);
+        gps_manager_deinit(&g_gpsManager);
+        glog("Failed to open CSV for dual wardriving\n");
+        status_display_show_status("CSV Open Fail");
+        return;
+    }
+
+    if (!ble_start_scanning()) {
+        ble_set_suspend_allowed(true);
+        csv_file_close();
+        gps_manager_deinit(&g_gpsManager);
+        glog("Failed to start BLE scan for dual wardriving.\n");
+        status_display_show_status("BLE Start Fail");
+        return;
+    }
+    ble_register_handler(ble_wardriving_callback);
+
+    wifi_manager_start_monitor_mode(wardriving_scan_callback);
+    if (!start_wardriving()) {
+        ble_unregister_handler(ble_wardriving_callback);
+        ble_stop();
+        wifi_manager_stop_monitor_mode();
+        csv_file_close();
+        ble_set_suspend_allowed(true);
+        gps_manager_deinit(&g_gpsManager);
+        glog("Failed to start wardriving observation queue.\n");
+        status_display_show_status("Dual Drive Fail");
+        return;
+    }
+
+    if (esp_comm_manager_is_connected()) {
+        glog("GhostLink peer connected; helper assist is not used in dual wardriving.\n");
+    }
+
+    size_t internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    size_t psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    glog("Dual wardriving started (BLE + WiFi coexistence): internal=%u psram=%u\n",
+         (unsigned)internal_free, (unsigned)psram_free);
+    status_display_show_status("Dual Drive On");
+}
+#endif // !S2 && !GHOSTESP_NO_NATIVE_BLE && !P4
 
 void handle_crash(int argc, char **argv) {
     glog("Triggering crash for coredump test...\n");

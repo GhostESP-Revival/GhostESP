@@ -176,6 +176,8 @@ void handle_stop_flipper(int argc, char **argv) {
     }
 #endif
     ble_stop();
+    ble_unregister_handler(ble_wardriving_callback);
+    ble_set_suspend_allowed(true);
 #endif
 
     if (csv_buffer_has_pending_data()) { // Only flush if there's data in buffer

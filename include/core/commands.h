@@ -74,6 +74,9 @@ void handle_script_cmd(int argc, char **argv);
 // BLE, AirTag, Flipper, GATT, Chameleon, and BLE spam
 void handle_ble_scan_cmd(int argc, char **argv);
 void handle_ble_wardriving(int argc, char **argv);
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
+void handle_dualwd(int argc, char **argv);
+#endif
 void handle_list_airtags_cmd(int argc, char **argv);
 void handle_select_airtag(int argc, char **argv);
 void handle_spoof_airtag(int argc, char **argv);

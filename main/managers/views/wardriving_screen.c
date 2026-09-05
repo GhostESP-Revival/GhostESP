@@ -19,6 +19,7 @@
 #include "gui/accessibility_fonts.h"
 #include "managers/settings_manager.h"
 #include "lvgl.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include <stdio.h>
@@ -37,6 +38,7 @@ static lv_obj_t *lbl_fix_status = NULL;
 static lv_obj_t *lbl_fix_icon = NULL;
 static lv_obj_t *lbl_sats = NULL;
 static lv_obj_t *lbl_aps = NULL;
+static lv_obj_t *aps_label = NULL;
 static lv_obj_t *lbl_speed = NULL;
 static lv_obj_t *lbl_heading = NULL;
 static lv_obj_t *lbl_coords = NULL;
@@ -50,6 +52,7 @@ static lv_obj_t *compass_needle = NULL;
 static bool wardriving_initialized_gps = false;
 static bool wardriving_scan_mode = false;
 static bool wardriving_ble_mode = false;
+static bool wardriving_dual_mode = false;
 static bool wardriving_owns_csv_session = false;
 static bool touch_press_active = false;
 
@@ -499,14 +502,25 @@ static void update_display_cb(lv_timer_t *timer) {
         lv_label_set_text(lbl_sats, sats_buf);
     }
     
+    static uint8_t dual_ap_page = 0;
     if (lbl_aps) {
-        uint32_t ap_count = wardriving_ble_mode
+        bool show_ble_devs = wardriving_ble_mode;
+        if (wardriving_dual_mode) {
+            show_ble_devs = (dual_ap_page != 0);
+        }
+        uint32_t ap_count = show_ble_devs
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
             ? ble_wardriving_get_unique_device_count()
 #else
             ? 0
 #endif
             : csv_get_unique_wifi_ap_count_including_hidden();
+        if (aps_label && wardriving_dual_mode) {
+            lv_label_set_text(aps_label, show_ble_devs ? "BLE Devs" : "Unique APs");
+        }
+        if (wardriving_dual_mode) {
+            dual_ap_page ^= 1;
+        }
         char aps_buf[16];
         snprintf(aps_buf, sizeof(aps_buf), "%u", (unsigned int)ap_count);
         lv_label_set_text(lbl_aps, aps_buf);
@@ -771,8 +785,8 @@ void wardriving_view_create(void) {
     const lv_font_t *small_font = get_small_font();
     
     bool peer_connected = esp_comm_manager_is_connected();
-    bool peer_only_mode = !wardriving_scan_mode && peer_connected && should_prefer_peer_only_in_view();
-    bool observing_existing_session = (wardriving_scan_mode || wardriving_ble_mode) && csv_file_is_open();
+    bool peer_only_mode = !wardriving_scan_mode && !wardriving_dual_mode && peer_connected && should_prefer_peer_only_in_view();
+    bool observing_existing_session = (wardriving_scan_mode || wardriving_ble_mode || wardriving_dual_mode) && csv_file_is_open();
 
     if (observing_existing_session) {
         glog("Wardriving is already active; this view will not change its session.\n");
@@ -801,7 +815,39 @@ void wardriving_view_create(void) {
     }
 
     bool csv_ok = !observing_existing_session;
-    if (!observing_existing_session && wardriving_ble_mode) {
+    if (!observing_existing_session && wardriving_dual_mode) {
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE) && !defined(CONFIG_IDF_TARGET_ESP32P4)
+        if (heap_caps_get_total_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) == 0) {
+            glog("Dual wardriving requires a PSRAM device.\n");
+        } else {
+            ble_wardriving_reset_unique_device_count();
+            csv_ok = (csv_file_open("wardriving") == ESP_OK);
+            if (csv_ok) {
+                ble_set_suspend_allowed(false);
+                if (!ble_start_scanning()) {
+                    ble_set_suspend_allowed(true);
+                    csv_file_close();
+                    csv_ok = false;
+                    glog("Failed to start BLE scan for dual wardriving.\n");
+                } else {
+                    ble_register_handler(ble_wardriving_callback);
+                    wifi_manager_start_monitor_mode(wardriving_scan_callback);
+                    if (!start_wardriving()) {
+                        ble_unregister_handler(ble_wardriving_callback);
+                        ble_stop();
+                        wifi_manager_stop_monitor_mode();
+                        csv_file_close();
+                        ble_set_suspend_allowed(true);
+                        csv_ok = false;
+                        glog("Failed to start wardriving observation queue.\n");
+                    }
+                }
+            } else {
+                glog("Failed to open CSV for dual wardriving.\n");
+            }
+        }
+#endif
+    } else if (!observing_existing_session && wardriving_ble_mode) {
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
         ble_wardriving_reset_unique_device_count();
         csv_ok = (csv_file_open("ble_wardriving") == ESP_OK);
@@ -848,9 +894,9 @@ void wardriving_view_create(void) {
         if (!peer_helper_ok) wardriving_set_peer_assist(false);
     }
     wardriving_owns_csv_session = csv_ok && !observing_existing_session &&
-                                    (wardriving_scan_mode || wardriving_ble_mode);
+                                    (wardriving_scan_mode || wardriving_ble_mode || wardriving_dual_mode);
 
-    if (!observing_existing_session && !wardriving_scan_mode) {
+    if (!observing_existing_session && !wardriving_scan_mode && !wardriving_dual_mode) {
         gps_manager_set_peer_gps_preferred(peer_connected);
         if (!peer_connected) {
             gps_manager_clear_peer_fix();
@@ -924,8 +970,10 @@ void wardriving_view_create(void) {
     lv_obj_set_style_text_color(lbl_sats, lv_color_hex(text_color), 0);
     
     lv_obj_t *aps_card = create_card(stats_row, 48);
-    lv_obj_t *aps_label = lv_label_create(aps_card);
-    lv_label_set_text(aps_label, wardriving_ble_mode ? "BLE Devs" : "Unique APs");
+    aps_label = lv_label_create(aps_card);
+    lv_label_set_text(aps_label, wardriving_dual_mode ? "Unique APs"
+                              : wardriving_ble_mode ? "BLE Devs"
+                              : "Unique APs");
     lv_obj_set_style_text_font(aps_label, small_font, 0);
     lv_obj_set_style_text_color(aps_label, lv_color_hex(dim_color), 0);
     lbl_aps = lv_label_create(aps_card);
@@ -1007,7 +1055,8 @@ void wardriving_view_create(void) {
     lv_obj_set_width(lbl_accuracy, LV_PCT(100));
     set_label_long_mode(lbl_accuracy);
     
-    const char *bar_title = wardriving_ble_mode ? "BLE Wardriving"
+    const char *bar_title = wardriving_dual_mode ? "Dual Wardriving"
+                          : wardriving_ble_mode ? "BLE Wardriving"
                           : wardriving_scan_mode ? "Wardriving"
                           : "GPS Info";
     display_manager_add_status_bar(bar_title);
@@ -1016,7 +1065,7 @@ void wardriving_view_create(void) {
     create_touch_control_bar(root_container);
 #endif
 
-    if ((wardriving_scan_mode || wardriving_ble_mode) && !csv_ok && lbl_sd_status) {
+    if ((wardriving_scan_mode || wardriving_ble_mode || wardriving_dual_mode) && !csv_ok && lbl_sd_status) {
         lv_obj_clear_flag(lbl_sd_status, LV_OBJ_FLAG_HIDDEN);
     }
 
@@ -1027,7 +1076,7 @@ void wardriving_view_create(void) {
 }
 
 void wardriving_view_destroy(void) {
-    bool had_capture_mode = (wardriving_scan_mode || wardriving_ble_mode);
+    bool had_capture_mode = (wardriving_scan_mode || wardriving_ble_mode || wardriving_dual_mode);
     bool owned_csv_session = wardriving_owns_csv_session;
     bool force_deinit_for_template = should_force_gps_deinit_on_exit();
 
@@ -1036,7 +1085,20 @@ void wardriving_view_destroy(void) {
         update_timer = NULL;
     }
 
-    if (owned_csv_session && wardriving_ble_mode) {
+    if (owned_csv_session && wardriving_dual_mode) {
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE) && !defined(CONFIG_IDF_TARGET_ESP32P4)
+        ble_unregister_handler(ble_wardriving_callback);
+        ble_stop();
+        stop_wardriving();
+        wifi_manager_stop_monitor_mode();
+        if (csv_buffer_has_pending_data()) {
+            csv_flush_buffer_to_file();
+        }
+        csv_file_close();
+        ble_set_suspend_allowed(true);
+#endif
+        wardriving_dual_mode = false;
+    } else if (owned_csv_session && wardriving_ble_mode) {
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
         ble_stop();
         if (csv_buffer_has_pending_data()) {
@@ -1064,6 +1126,7 @@ void wardriving_view_destroy(void) {
     if (!owned_csv_session) {
         wardriving_ble_mode = false;
         wardriving_scan_mode = false;
+        wardriving_dual_mode = false;
     }
     wardriving_owns_csv_session = false;
 
@@ -1093,6 +1156,7 @@ void wardriving_view_destroy(void) {
     lbl_fix_icon = NULL;
     lbl_sats = NULL;
     lbl_aps = NULL;
+    aps_label = NULL;
     lbl_speed = NULL;
     lbl_heading = NULL;
     lbl_coords = NULL;
@@ -1111,10 +1175,28 @@ void wardriving_view_destroy(void) {
 
 void wardriving_view_set_scan_mode(bool enabled) {
     wardriving_scan_mode = enabled;
+    if (enabled) {
+        wardriving_dual_mode = false;
+    }
 }
 
 void wardriving_view_set_ble_mode(bool enabled) {
     wardriving_ble_mode = enabled;
+    if (enabled) {
+        wardriving_dual_mode = false;
+    }
+}
+
+void wardriving_view_set_dual_mode(bool enabled) {
+    wardriving_dual_mode = enabled;
+    if (enabled) {
+        wardriving_scan_mode = false;
+        wardriving_ble_mode = false;
+    }
+}
+
+bool wardriving_view_is_dual_mode(void) {
+    return wardriving_dual_mode;
 }
 
 static void get_wardriving_callback(void **callback) {

@@ -222,6 +222,12 @@ void handle_help(int argc, char **argv) {
         glog("    Usage: blewardriving [-s]\n");
         glog("    Arguments:\n");
         glog("        -s  : Stop BLE wardriving\n\n");
+        glog("dualwd\n");
+        glog("    Description: Start/Stop BLE + WiFi coexistence wardriving (PSRAM only)\n");
+        glog("    Usage: dualwd [start|-s]\n");
+        glog("    Arguments:\n");
+        glog("        start : Start dual wardriving (default)\n");
+        glog("        -s    : Stop dual wardriving\n\n");
         glog("list -airtags\n");
         glog("    Description: List discovered AirTags\n");
         glog("    Usage: list -airtags\n\n");

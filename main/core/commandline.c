@@ -481,6 +481,9 @@ void register_commands() {
     register_command("blescan", handle_ble_scan_cmd);
     register_command("blebridge", ble_bridge_handle_command);
     register_command("blewardriving", handle_ble_wardriving);
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
+    register_command("dualwd", handle_dualwd);
+#endif
     register_command("listairtags", handle_list_airtags_cmd);
     register_command("selectairtag", handle_select_airtag);
     register_command("spoofairtag", handle_spoof_airtag);

@@ -77,6 +77,8 @@ static volatile bool ble_cb_busy = false;
 static uint32_t ble_pcap_packet_count = 0;
 static uint32_t ble_pcap_event_total_count = 0;
 
+static volatile bool ble_suspend_allowed = true;
+
 #ifndef CONFIG_IDF_TARGET_ESP32S2
 static bool ble_ap_suspended = false;
 static bool ble_wifi_suspended = false;
@@ -288,6 +290,10 @@ static void ble_on_reset(int reason) {
 }
 
 static void ble_suspend_networking(void) {
+    if (!ble_suspend_allowed) {
+        ESP_LOGI(TAG_BLE, "Wi-Fi suspension suppressed (coexistence session active)");
+        return;
+    }
     if (ble_ap_suspended || ble_wifi_suspended) {
         return;
     }
@@ -1082,11 +1088,16 @@ void ble_deinit(void) {
         ble_initialized = false;
         ble_pending_clear = false;
         ble_cb_busy = false;
+        ble_suspend_allowed = true;
         ESP_LOGI(TAG_BLE, "BLE deinitialized successfully.");
         TERMINAL_VIEW_ADD_TEXT("BLE deinitialized successfully.\n");
 
         ble_resume_networking();
     }
+}
+
+void ble_set_suspend_allowed(bool allow) {
+    ble_suspend_allowed = allow;
 }
 
 bool ble_is_initialized(void) {

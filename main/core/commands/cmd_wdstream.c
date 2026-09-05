@@ -3,6 +3,7 @@
 
 #include "core/commands.h"
 #include "core/glog.h"
+#include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
@@ -420,6 +421,10 @@ static void wdstream_task(void *pvParameter) {
          cfg.wifi ? cfg.channel_desc : "none");
 
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
+    if (cfg.ble && cfg.wifi) {
+        /* Dual streaming: keep the coexistence session alive across BLE init. */
+        ble_set_suspend_allowed(false);
+    }
     if (cfg.ble) {
         ble_ready = wdstream_start_ble();
     }
@@ -463,6 +468,9 @@ static void wdstream_task(void *pvParameter) {
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     if (ble_ready) {
         wdstream_stop_ble();
+    }
+    if (cfg.ble && cfg.wifi) {
+        ble_set_suspend_allowed(true);
     }
 #endif
     if (wifi_ready) {
@@ -551,10 +559,13 @@ void handle_wdstream_cmd(int argc, char **argv) {
     cfg.channel_auto = true;
     snprintf(cfg.channel_desc, sizeof(cfg.channel_desc), "auto");
 
+    /* Default is Wi-Fi only; -ble switches to BLE only, both flags together
+     * run dual-radio streaming on PSRAM targets (coexistence arbitration). */
+    bool saw_wifi_flag = false;
     bool saw_ble_flag = false;
     for (int i = 2; i < argc; i++) {
         if (strcmp(argv[i], "-wifi") == 0) {
-            /* default mode; accepted for compatibility */
+            saw_wifi_flag = true;
         } else if (strcmp(argv[i], "-ble") == 0) {
             saw_ble_flag = true;
         } else if (strcmp(argv[i], "-i") == 0) {
@@ -580,15 +591,28 @@ void handle_wdstream_cmd(int argc, char **argv) {
         }
     }
 
-    /* Modes are mutually exclusive: -ble runs BLE only, otherwise Wi-Fi only.
-     * The two radio stacks cannot be resident at once on memory-tight targets. */
+    /* -ble runs BLE only, otherwise Wi-Fi only; both flags together require
+     * PSRAM so both radio stacks can be resident at once (coexistence). */
     cfg.ble = saw_ble_flag;
-    cfg.wifi = !saw_ble_flag;
+    cfg.wifi = saw_wifi_flag || !saw_ble_flag;
 #if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(GHOSTESP_NO_NATIVE_BLE)
     if (cfg.ble) {
         wdstream_emit("WD:ERROR error=ble_unsupported\n");
         return;
     }
+#else
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+    if (cfg.ble && cfg.wifi) {
+        wdstream_emit("WD:ERROR error=dual_unsupported\n");
+        return;
+    }
+#else
+    if (cfg.ble && cfg.wifi &&
+        heap_caps_get_total_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) == 0) {
+        wdstream_emit("WD:ERROR error=psram_required op=dual\n");
+        return;
+    }
+#endif
 #endif
 
     if (cfg.wifi && !cfg.channel_auto && cfg.channel_count == 0) {

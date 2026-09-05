@@ -1520,7 +1520,7 @@ static const char * const wifi_main_options[] = {
 };
 
 static const char * const gps_options[] = {"Start Wardriving", "Stop Wardriving", "GPS Info",
-                                    "BLE Wardriving",   NULL};
+                                    "BLE Wardriving", "BLE + WiFi Wardriving",   NULL};
 
 #if defined(CONFIG_HAS_NRF24) || defined(CONFIG_HAS_NRF24_REMOTE)
 static const char *nrf24_options[] = {"Frequency Analyzer", NULL};
@@ -1683,6 +1683,7 @@ static const char * const dual_comm_ble_options[] = {
 static const char * const dual_comm_gps_options[] = {
     "GPS Info",
     "BLE Wardriving",
+    "BLE + WiFi Wardriving",
     NULL
 };
 
@@ -8123,6 +8124,15 @@ void option_event_cb(lv_event_t *e) {
 #else
             error_popup_create("Device Does not Support Bluetooth...");
 #endif
+        } else if (strcmp(Selected_Option, "BLE + WiFi Wardriving") == 0) {
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
+            terminal_set_return_view(&options_menu_view);
+            display_manager_switch_view(&terminal_view);
+            simulateCommand("commsend dualwd");
+            view_switched = true;
+#else
+            error_popup_create("Device Does not Support Dual Wardriving...");
+#endif
         } else if (strcmp(Selected_Option, "Initialise") == 0) {
             terminal_set_return_view(&options_menu_view);
             terminal_set_dualcomm_filter(true);
@@ -9513,7 +9523,7 @@ void option_event_cb(lv_event_t *e) {
     else if (strcmp(Selected_Option, "Stop Wardriving") == 0) {
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
-        simulateCommand("startwd -s");
+        simulateCommand(wardriving_view_is_dual_mode() ? "dualwd -s" : "startwd -s");
         view_switched = true;
     }
 
@@ -9751,6 +9761,21 @@ void option_event_cb(lv_event_t *e) {
         view_switched = true;
 #else
         error_popup_create("Device Does not Support Bluetooth...");
+
+#endif
+    }
+
+    else if (strcmp(Selected_Option, "BLE + WiFi Wardriving") == 0) {
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32P4)
+        if (heap_caps_get_total_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) == 0) {
+            error_popup_create("Dual Wardriving Requires PSRAM...");
+        } else {
+            wardriving_view_set_dual_mode(true);
+            display_manager_switch_view(&wardriving_view);
+            view_switched = true;
+        }
+#else
+        error_popup_create("Device Does not Support Dual Wardriving...");
 
 #endif
     }
