@@ -2331,6 +2331,7 @@ void wifi_manager_clear_scan_results(void) {
 }
 
 void wifi_manager_start_monitor_mode(wifi_promiscuous_cb_t_t callback) {
+    if (wardriving_is_running()) stop_wardriving();
     wifi_monitor_capture_active = true;
     wifi_reconnect_reset();
 
@@ -2421,6 +2422,9 @@ void wifi_manager_start_monitor_mode(wifi_promiscuous_cb_t_t callback) {
     status_display_show_status("Monitor Started");
 }
 void wifi_manager_stop_monitor_mode() {
+    // The active wardrive backend also owns this radio and its result list.
+    // Fence its worker before releasing shared monitor tables or changing mode.
+    if (wardriving_is_running()) stop_wardriving();
     wifi_monitor_capture_active = false;
 
     wifi_mode_t mode = WIFI_MODE_NULL;

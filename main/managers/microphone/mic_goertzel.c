@@ -128,8 +128,8 @@ esp_err_t goertzel_init(uint32_t sample_rate) {
         // Allocate ring buffers from PSRAM to save internal RAM
         b->sample_ring = (int32_t *)heap_caps_calloc(b->ring_size, sizeof(int32_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (!b->sample_ring) {
-            ESP_LOGW(TAG, "PSRAM alloc failed for ring buffer, falling back to internal");
-            b->sample_ring = (int32_t *)calloc(b->ring_size, sizeof(int32_t));
+            ESP_LOGW(TAG, "PSRAM alloc failed for ring buffer, retrying");
+            b->sample_ring = (int32_t *)heap_caps_calloc(b->ring_size, sizeof(int32_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
             if (!b->sample_ring) {
                 ESP_LOGE(TAG, "Failed to allocate ring buffer");
                 return ESP_ERR_NO_MEM;
@@ -141,8 +141,8 @@ esp_err_t goertzel_init(uint32_t sample_rate) {
         // eliminating cross-band leakage from loud off-frequency tones.
         b->window = (float *)heap_caps_malloc(b->ring_size * sizeof(float), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (!b->window) {
-            ESP_LOGW(TAG, "PSRAM alloc failed for window buffer, falling back to internal");
-            b->window = (float *)malloc(b->ring_size * sizeof(float));
+            ESP_LOGW(TAG, "PSRAM alloc failed for window buffer, retrying");
+            b->window = (float *)heap_caps_malloc(b->ring_size * sizeof(float), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
             if (!b->window) {
                 ESP_LOGE(TAG, "Failed to allocate window buffer");
                 return ESP_ERR_NO_MEM;

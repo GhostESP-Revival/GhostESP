@@ -983,13 +983,24 @@ void app_main(void) {
     // include guard at the top of this file.
     MEASURE_INIT_RAM("M5 audio codec init", m5_audio_codec_init());
 #endif
+#if !defined(CONFIG_WITH_SCREEN)
+    // Headless boards (e.g. somethingsomething2) don't run mic capture at boot;
+    // the visualizer self-initializes on first mic_visualizer_start call.
+#else
     // Initialize MIC visualizer (will start sending amplitude over GhostLink when connected)
     MEASURE_INIT_RAM("Mic Visualizer init", mic_visualizer_init());
     mic_visualizer_start();
 #endif
+#endif
 #if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER) || defined(CONFIG_HAS_CROWPANEL_NS4168)
+#if !defined(CONFIG_WITH_SCREEN)
+    // Headless boards only need the receiver when `audio start` runs; it
+    // self-initializes there. Skip the boot-time I2S + decode task + 96KB
+    // ringbuf registration to preserve internal RAM.
+#else
     ESP_LOGI(TAG, "Initializing audio receiver");
     MEASURE_INIT_RAM("Audio Receiver", audio_receiver_manager_init());
+#endif
 #endif
 #ifdef CONFIG_HAS_CAMERA
     MEASURE_INIT_RAM("Motion Detector init", motion_detector_init());

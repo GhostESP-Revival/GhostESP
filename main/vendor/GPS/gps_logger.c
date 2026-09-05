@@ -115,6 +115,7 @@ static esp_err_t csv_write_chunk_to_sink(const char *data, size_t len);
 
 typedef struct {
     uint32_t hash;
+    uint8_t mac[6];
     int8_t best_rssi;
     uint8_t flags;
 } wd_dedupe_entry_t;
@@ -232,18 +233,28 @@ static bool wd_allocate_dedupe_tables(void) {
     return true;
 }
 
-static wd_dedupe_entry_t *wd_lookup_entry(wd_dedupe_entry_t *table, uint32_t hash) {
+static void wd_mac_bytes(const char *text, uint8_t mac[6]) {
+    // All producers use the canonical six-octet colon-separated format.
+    unsigned values[6] = {0};
+    if (sscanf(text, "%2x:%2x:%2x:%2x:%2x:%2x", &values[0], &values[1], &values[2],
+               &values[3], &values[4], &values[5]) != 6) memset(values, 0, sizeof(values));
+    for (unsigned i = 0; i < 6; ++i) mac[i] = (uint8_t)values[i];
+}
+
+static wd_dedupe_entry_t *wd_lookup_entry(wd_dedupe_entry_t *table, uint32_t hash, const char *text) {
     if (!table || !wd_is_pow2(wd_dedupe_size)) {
         return NULL;
     }
 
+    uint8_t mac[6];
+    wd_mac_bytes(text, mac);
     for (size_t step = 0; step < WD_PROBE_MAX; step++) {
         size_t idx = wd_probe_index(hash, step);
         wd_dedupe_entry_t *entry = &table[idx];
         if (!(entry->flags & WD_FLAG_USED)) {
             return NULL;
         }
-        if (entry->hash == hash) {
+        if (entry->hash == hash && memcmp(entry->mac, mac, 6) == 0) {
             return entry;
         }
     }
@@ -448,8 +459,8 @@ static void csv_build_pre_header(void) {
     csv_pre_header_len = (size_t)n;
 }
 
-static wd_dedupe_entry_t *csv_find_wifi_dedupe_entry(uint32_t hash) {
-    return wd_lookup_entry(wd_wifi_dedupe, hash);
+static wd_dedupe_entry_t *csv_find_wifi_dedupe_entry(uint32_t hash, const char *bssid) {
+    return wd_lookup_entry(wd_wifi_dedupe, hash, bssid);
 }
 
 static bool csv_wifi_dedupe_should_log(const wd_dedupe_entry_t *entry, int rssi, bool ssid_empty) {
@@ -472,7 +483,7 @@ bool csv_wifi_ap_should_log_peek(const char *bssid, int rssi, const char *ssid) 
     bool ssid_empty = (!ssid || ssid[0] == '\0');
 
     if (csv_mutex) xSemaphoreTake(csv_mutex, portMAX_DELAY);
-    wd_dedupe_entry_t *entry = csv_find_wifi_dedupe_entry(hash);
+    wd_dedupe_entry_t *entry = csv_find_wifi_dedupe_entry(hash, bssid);
     bool should_log = csv_wifi_dedupe_should_log(entry, rssi, ssid_empty);
     if (csv_mutex) xSemaphoreGive(csv_mutex);
 
@@ -483,7 +494,7 @@ static void csv_wifi_ap_log_commit_unlocked(const char *bssid, int rssi, const c
     uint32_t hash = wd_hash_mac(bssid);
     bool ssid_empty = (!ssid || ssid[0] == '\0');
 
-    wd_dedupe_entry_t *entry = csv_find_wifi_dedupe_entry(hash);
+    wd_dedupe_entry_t *entry = csv_find_wifi_dedupe_entry(hash, bssid);
     if (entry == NULL) {
         bool replaced = false;
         entry = wd_insert_entry(wd_wifi_dedupe, hash, &wd_wifi_idx, &replaced);
@@ -496,6 +507,7 @@ static void csv_wifi_ap_log_commit_unlocked(const char *bssid, int rssi, const c
         }
 
         entry->hash = hash;
+        wd_mac_bytes(bssid, entry->mac);
         entry->flags = WD_FLAG_USED | (ssid_empty ? WD_FLAG_NAME_EMPTY : 0);
         entry->best_rssi = (int8_t)rssi;
 
@@ -881,7 +893,7 @@ esp_err_t csv_write_data_to_buffer(wardriving_data_t *data) {
 
     if (data->ble_data.is_ble_device) {
         uint32_t hash = wd_hash_mac(data->ble_data.ble_mac);
-        dedupe_entry = wd_lookup_entry(wd_ble_dedupe, hash);
+        dedupe_entry = wd_lookup_entry(wd_ble_dedupe, hash, data->ble_data.ble_mac);
         name_empty = (data->ble_data.ble_name[0] == '\0');
         if (dedupe_entry == NULL) {
             dedupe_entry = wd_insert_entry(wd_ble_dedupe, hash, &wd_ble_idx, &dedupe_replaced);
@@ -914,7 +926,7 @@ esp_err_t csv_write_data_to_buffer(wardriving_data_t *data) {
         len = o;
     } else {
         uint32_t hash = wd_hash_mac(data->bssid);
-        dedupe_entry = csv_find_wifi_dedupe_entry(hash);
+        dedupe_entry = csv_find_wifi_dedupe_entry(hash, data->bssid);
         name_empty = (data->ssid[0] == '\0');
         if (!csv_wifi_channel_is_valid(data->channel)) {
             xSemaphoreGive(csv_mutex);
@@ -961,6 +973,7 @@ esp_err_t csv_write_data_to_buffer(wardriving_data_t *data) {
     if (data->ble_data.is_ble_device) {
         if (dedupe_new) {
             dedupe_entry->hash = wd_hash_mac(data->ble_data.ble_mac);
+            wd_mac_bytes(data->ble_data.ble_mac, dedupe_entry->mac);
             dedupe_entry->flags = WD_FLAG_USED | (name_empty ? WD_FLAG_NAME_EMPTY : 0);
             dedupe_entry->best_rssi = (int8_t)data->ble_data.ble_rssi;
             wd_ble_unique_logged++;

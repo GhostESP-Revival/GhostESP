@@ -122,7 +122,8 @@ static int64_t wardriving_view_ready_us = 0;
 
 static bool should_force_gps_deinit_on_exit(void) {
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    return (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0);
+    return (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0 ||
+            strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething2") == 0);
 #else
     return false;
 #endif
@@ -130,7 +131,8 @@ static bool should_force_gps_deinit_on_exit(void) {
 
 static bool should_prefer_peer_only_in_view(void) {
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    return (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0);
+    return (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0 ||
+            strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething2") == 0);
 #else
     return false;
 #endif
@@ -311,7 +313,9 @@ static void update_display_cb(lv_timer_t *timer) {
     bool peer_preferred = gps_manager_is_peer_gps_preferred();
     gps_t gps_snapshot = {0};
     bool using_peer = false;
-    bool have_active_gps = gps_manager_get_active_gps_snapshot(&gps_snapshot, &using_peer);
+    bool have_active_gps = wardriving_scan_mode
+        ? gps_manager_get_wardrive_snapshot(&gps_snapshot, &using_peer)
+        : gps_manager_get_active_gps_snapshot(&gps_snapshot, &using_peer);
 
     if (!g_gpsManager.isinitilized && !have_active_gps && !peer_preferred) {
         if (lbl_fix_status) lv_label_set_text(lbl_fix_status, "No GPS");
@@ -785,7 +789,8 @@ void wardriving_view_create(void) {
     const lv_font_t *small_font = get_small_font();
     
     bool peer_connected = esp_comm_manager_is_connected();
-    bool peer_only_mode = !wardriving_scan_mode && !wardriving_dual_mode && peer_connected && should_prefer_peer_only_in_view();
+    bool peer_only_mode = !wardriving_scan_mode && !wardriving_ble_mode && !wardriving_dual_mode &&
+                          peer_connected && should_prefer_peer_only_in_view();
     bool observing_existing_session = (wardriving_scan_mode || wardriving_ble_mode || wardriving_dual_mode) && csv_file_is_open();
 
     if (observing_existing_session) {
@@ -820,9 +825,18 @@ void wardriving_view_create(void) {
         if (heap_caps_get_total_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) == 0) {
             glog("Dual wardriving requires a PSRAM device.\n");
         } else {
+            bool prefer_peer_only = peer_connected && should_prefer_peer_only_in_view();
+            gps_manager_set_peer_gps_preferred(prefer_peer_only);
+            if (prefer_peer_only) {
+                gps_manager_clear_peer_fix();
+                if (g_gpsManager.isinitilized) {
+                    gps_manager_deinit(&g_gpsManager);
+                    wardriving_initialized_gps = false;
+                }
+            }
             ble_wardriving_reset_unique_device_count();
             csv_ok = (csv_file_open("wardriving") == ESP_OK);
-            if (csv_ok) {
+            if (csv_ok && !prefer_peer_only) {
                 ble_set_suspend_allowed(false);
                 if (!ble_start_scanning()) {
                     ble_set_suspend_allowed(true);
@@ -842,7 +856,8 @@ void wardriving_view_create(void) {
                         glog("Failed to start wardriving observation queue.\n");
                     }
                 }
-            } else {
+            } else if (!csv_ok) {
+                gps_manager_set_peer_gps_preferred(false);
                 glog("Failed to open CSV for dual wardriving.\n");
             }
         }
@@ -870,21 +885,7 @@ void wardriving_view_create(void) {
 
         bool peer_helper_ok = false;
         if (csv_ok && esp_comm_manager_is_connected()) {
-            char helper_command[256];
-            char helper_plan_csv[192] = {0};
-            uint16_t hop_ms = settings_get_wd_hop_helper_ms(&G_Settings);
-            bool weighted = settings_get_wd_weighted_5g(&G_Settings);
-            if (wardriving_get_helper_channel_plan_csv(helper_plan_csv, sizeof(helper_plan_csv))) {
-                snprintf(helper_command, sizeof(helper_command),
-                         "startwd --helper --channels %s --hop %u%s",
-                         helper_plan_csv, (unsigned)hop_ms, weighted ? " --weighted" : "");
-            } else {
-                snprintf(helper_command, sizeof(helper_command), "startwd --helper --hop %u%s",
-                         (unsigned)hop_ms, weighted ? " --weighted" : "");
-            }
-            wardriving_expect_peer_assist(true);
-            peer_helper_ok = esp_comm_manager_send_command_line(helper_command);
-            if (!peer_helper_ok) wardriving_expect_peer_assist(false);
+            peer_helper_ok = wardriving_start_peer_helper();
             glog(peer_helper_ok
                      ? "Wardrive helper start sent; waiting for ready status.\n"
                      : "Wardrive helper not started on peer; continuing local only.\n");

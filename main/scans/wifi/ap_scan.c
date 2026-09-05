@@ -10,6 +10,7 @@
  */
 
 #include "scans/wifi/ap_scan.h"
+#include "core/callbacks.h"
 #include "scans/wifi/wifi_channels.h"
 #include "scans/wifi/hop_profile.h"
 #include "core/scan_saver.h"
@@ -291,6 +292,10 @@ esp_err_t ap_scan_scan_channels(const uint8_t *channels, size_t count) {
 }
 
 void ap_scan_start(void) {
+    if (wardriving_is_running()) {
+        ESP_LOGW(TAG, "Stop wardriving before starting a general AP scan");
+        return;
+    }
     if (async_scan_in_progress || blocking_scan_in_progress) {
         ESP_LOGW(TAG, "Cannot start blocking scan while another AP scan is active");
         return;
@@ -429,6 +434,7 @@ cleanup:
 #endif
 
 esp_err_t ap_scan_start_async(void) {
+    if (wardriving_is_running()) return ESP_ERR_INVALID_STATE;
     if (async_scan_in_progress || blocking_scan_in_progress) {
         ESP_LOGW(TAG, "Cannot start async scan while another AP scan is active");
         return ESP_ERR_INVALID_STATE;

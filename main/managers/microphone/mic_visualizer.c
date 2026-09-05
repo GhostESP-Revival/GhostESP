@@ -45,11 +45,11 @@ static void mic_visualizer_task(void *arg) {
     int32_t *samples = NULL;
 
     size_t buffer_size = (CONFIG_MIC_BUFFER_SAMPLES * 2) * sizeof(int32_t);
-    // Allocate sample buffer from PSRAM to save internal RAM
+    // Allocate sample buffer from PSRAM to save internal RAM (retry, never internal)
     samples = (int32_t *)heap_caps_malloc(buffer_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!samples) {
-        ESP_LOGW(TAG, "PSRAM sample buffer alloc failed, falling back to internal");
-        samples = (int32_t *)malloc(buffer_size);
+        ESP_LOGW(TAG, "PSRAM sample buffer alloc failed, retrying");
+        samples = (int32_t *)heap_caps_malloc(buffer_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     }
     if (samples == NULL) {
         ESP_LOGE(TAG, "Failed to allocate sample buffer");
@@ -192,8 +192,11 @@ esp_err_t mic_visualizer_init(void) {
 
 esp_err_t mic_visualizer_start(void) {
     if (!mic_initialized) {
-        ESP_LOGE(TAG, "MIC visualizer not initialized");
-        return ESP_ERR_INVALID_STATE;
+        esp_err_t init_ret = mic_visualizer_init();
+        if (init_ret != ESP_OK) {
+            ESP_LOGE(TAG, "MIC visualizer lazy init failed");
+            return init_ret;
+        }
     }
     
     if (mic_visualizer_running) {

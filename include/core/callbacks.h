@@ -48,6 +48,10 @@ bool wardriving_get_helper_channel_plan_csv(char *out, size_t out_len);
 bool wardriving_set_helper_channels_from_csv(const char *csv);
 void wardriving_set_helper_hop_ms(uint16_t ms);
 void wardriving_set_helper_weighted_5g(bool enabled);
+bool wardriving_set_primary_channels_from_csv(const char *csv);
+bool wardriving_start_peer_helper(void);
+bool wardriving_set_active_scan(bool enabled);
+bool wardriving_is_running(void);
 
 uint32_t wardriving_get_ap_count(void);
 

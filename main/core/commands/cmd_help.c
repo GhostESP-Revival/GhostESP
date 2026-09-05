@@ -444,7 +444,7 @@ void handle_help(int argc, char **argv) {
         glog("gpsinfo\n    Show GPS info.\n    Usage: gpsinfo [-s]\n\n");
         glog("gpspin\n    Set GPS RX pin for external GPS module.\n    Usage: gpspin <pin>\n\n");
         glog("gpsbaud\n    Set GPS baud rate or auto-detect it.\n    Usage: gpsbaud <auto|0|4800|9600|19200|38400|57600|115200>\n\n");
-        glog("startwd\n    Start GPS wardriving.\n    Usage: startwd [-s] [--helper] [--channels <csv>] [--hop <ms>] [--weighted]\n\n");
+        glog("startwd\n    Start GPS wardriving.\n    Usage: startwd [-s] [--active|--monitor] [--helper] [--channels <csv>] [--hop <ms>] [--weighted]\n    C5/S3 default to driver active scans; --monitor selects beacon/probe capture.\n\n");
         return;
     }
     if (strcmp(category, "shell") == 0) {

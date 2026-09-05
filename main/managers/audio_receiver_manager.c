@@ -414,17 +414,17 @@ static void audio_decode_task(void *arg)
         ESP_LOGI(TAG, "MP3 simple decoder opened");
     }
 
-    /* Input buffer for decoder (from PSRAM) */
+    /* Input buffer for decoder (PSRAM only; 8KB internal defeats the lazy-init savings) */
     uint8_t *dec_in_buf = (uint8_t *)heap_caps_malloc(AUDIO_DEC_IN_BUF_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!dec_in_buf) {
-        dec_in_buf = (uint8_t *)malloc(AUDIO_DEC_IN_BUF_SIZE);
+        dec_in_buf = (uint8_t *)heap_caps_malloc(AUDIO_DEC_IN_BUF_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     }
 
-    /* PCM output buffer (from PSRAM) */
+    /* PCM output buffer (PSRAM only; see above) */
     size_t pcm_buf_size = AUDIO_PCM_BUF_SIZE;
     int16_t *pcm_buf = (int16_t *)heap_caps_malloc(pcm_buf_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!pcm_buf) {
-        pcm_buf = (int16_t *)malloc(pcm_buf_size);
+        pcm_buf = (int16_t *)heap_caps_malloc(pcm_buf_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     }
 
     if (!dec_in_buf || !pcm_buf) {
@@ -529,7 +529,7 @@ static void audio_decode_task(void *arg)
             if (aerr == ESP_AUDIO_ERR_BUFF_NOT_ENOUGH && out.needed_size > pcm_buf_size) {
                 void *new_buf = heap_caps_realloc(pcm_buf, out.needed_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
                 if (!new_buf) {
-                    new_buf = realloc(pcm_buf, out.needed_size);
+                    new_buf = heap_caps_realloc(pcm_buf, out.needed_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
                 }
                 if (!new_buf) {
                     ESP_LOGE(TAG, "Failed to grow PCM buffer to %lu bytes", (unsigned long)out.needed_size);

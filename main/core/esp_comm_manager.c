@@ -28,6 +28,9 @@
 #include "managers/views/terminal_screen.h"
 #include "managers/ap_manager.h"
 #include "managers/peer_storage_manager.h"
+#ifdef CONFIG_HAS_MIC
+#include "managers/microphone/mic_visualizer.h"
+#endif
 
 #define COMM_BUFFER_SIZE 256
 #define UART_RX_BUFFER_SIZE (COMM_BUFFER_SIZE * 2)
@@ -957,6 +960,11 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                     unlock_state(comm);
                     printf("Handshake complete!\n");
                     terminal_view_add_text("Handshake completed!\n");
+#ifdef CONFIG_HAS_MIC
+                    // Headless boards skip boot-time mic capture; start the
+                    // GhostLink amplitude stream now that a peer is listening.
+                    (void)mic_visualizer_start();
+#endif
                 }
             }
             break;
@@ -1025,6 +1033,11 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                 unlock_state(comm);
                 printf("Handshake complete!\n");
                 terminal_view_add_text("Handshake completed!\n");
+#ifdef CONFIG_HAS_MIC
+                // Headless boards skip boot-time mic capture; start the
+                // GhostLink amplitude stream now that a peer is listening.
+                (void)mic_visualizer_start();
+#endif
             }
             break;
 
@@ -2093,6 +2106,18 @@ static void handle_connection_loss(esp_comm_manager_t* comm, const char* reason)
     }
     printf("Connection lost (%s)\n", reason ? reason : "unknown");
     terminal_view_add_text("W: Connection lost, restarting discovery\n");
+#ifdef CONFIG_HAS_MIC
+    bool mic_was_streaming = mic_visualizer_is_running();
+    unlock_state(comm);
+    if (mic_was_streaming) {
+        (void)mic_visualizer_stop();
+    }
+    lock_state(comm);
+    if (comm->state != COMM_STATE_CONNECTED) {
+        unlock_state(comm);
+        return;
+    }
+#endif
 
     comm->state = COMM_STATE_SCANNING;
     comm->remote_output_capture = false;

@@ -157,7 +157,7 @@ static size_t audio_i2s_resample_stereo(const int16_t *in, size_t in_bytes,
     if (s_rs_buf_bytes < need) {
         int16_t *nb = (int16_t *)heap_caps_realloc(s_rs_buf, need,
                                                    MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        if (!nb) nb = (int16_t *)heap_caps_realloc(s_rs_buf, need, MALLOC_CAP_8BIT);
+        if (!nb) nb = (int16_t *)heap_caps_realloc(s_rs_buf, need, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (!nb) return 0;
         s_rs_buf = nb;
         s_rs_buf_bytes = need;
@@ -444,7 +444,7 @@ esp_err_t audio_i2s_output_write(const int16_t *data, size_t len)
         if (s_vol_buf_bytes < out_len) {
             int16_t *nb = (int16_t *)heap_caps_realloc(s_vol_buf, out_len,
                                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-            if (!nb) nb = (int16_t *)heap_caps_realloc(s_vol_buf, out_len, MALLOC_CAP_8BIT);
+            if (!nb) nb = (int16_t *)heap_caps_realloc(s_vol_buf, out_len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
             if (nb) { s_vol_buf = nb; s_vol_buf_bytes = out_len; }
         }
         if (s_vol_buf && s_vol_buf_bytes >= out_len) {

@@ -155,12 +155,20 @@ void handle_startwd(int argc, char **argv) {
     bool helper_hop_set = false;
     bool helper_weighted = false;
     bool helper_weighted_set = false;
+    const char *primary_channels = NULL;
+    bool active_set = false, active = true;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-s") == 0) {
             stop_flag = true;
         } else if (strcmp(argv[i], "--helper") == 0) {
             helper_mode = true;
+        } else if (strcmp(argv[i], "--primary-channels") == 0) {
+            if (i + 1 >= argc) { glog("startwd: --primary-channels requires a value\n"); return; }
+            primary_channels = argv[++i];
+        } else if (strcmp(argv[i], "--active") == 0 || strcmp(argv[i], "--monitor") == 0) {
+            active_set = true;
+            active = strcmp(argv[i], "--active") == 0;
         } else if (strcmp(argv[i], "--channels") == 0) {
             if (i + 1 >= argc) {
                 glog("startwd: --channels requires a value\n");
@@ -228,6 +236,11 @@ void handle_startwd(int argc, char **argv) {
                 glog("Wardriving helper is already running.\n");
                 return;
             }
+            if (active_set && !wardriving_set_active_scan(active)) return;
+            if (!wardriving_set_primary_channels_from_csv(primary_channels)) {
+                glog("Wardriving helper: invalid primary channel plan\n");
+                return;
+            }
             if (helper_channels_set) {
                 if (!wardriving_set_helper_channels_from_csv(helper_channels_csv)) {
                     glog("Wardriving helper: invalid channel list, using default helper channels.\n");
@@ -267,6 +280,7 @@ void handle_startwd(int argc, char **argv) {
             glog("Wardriving is already running.\n");
             return;
         }
+        if (active_set && !wardriving_set_active_scan(active)) return;
 
         bool prefer_peer_only = false;
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
@@ -299,21 +313,7 @@ void handle_startwd(int argc, char **argv) {
         bool peer_helper_ok = false;
         if (!esp_comm_manager_is_remote_command()) {
             if (esp_comm_manager_is_connected()) {
-                char helper_command[256];
-                char helper_plan_csv[192] = {0};
-                uint16_t hop_ms = settings_get_wd_hop_helper_ms(&G_Settings);
-                bool weighted = settings_get_wd_weighted_5g(&G_Settings);
-                if (wardriving_get_helper_channel_plan_csv(helper_plan_csv, sizeof(helper_plan_csv))) {
-                    snprintf(helper_command, sizeof(helper_command),
-                             "startwd --helper --channels %s --hop %u%s",
-                             helper_plan_csv, (unsigned)hop_ms, weighted ? " --weighted" : "");
-                } else {
-                    snprintf(helper_command, sizeof(helper_command), "startwd --helper --hop %u%s",
-                             (unsigned)hop_ms, weighted ? " --weighted" : "");
-                }
-                wardriving_expect_peer_assist(true);
-                peer_helper_ok = esp_comm_manager_send_command_line(helper_command);
-                if (!peer_helper_ok) wardriving_expect_peer_assist(false);
+                peer_helper_ok = wardriving_start_peer_helper();
                 glog(peer_helper_ok
                           ? "Wardrive helper start sent; waiting for ready status.\n"
                           : "Wardrive helper not started on peer; continuing local only.\n");
@@ -383,42 +383,66 @@ void handle_dualwd(int argc, char **argv) {
         return;
     }
 
-    ble_set_suspend_allowed(false);
-    gps_manager_set_peer_gps_preferred(false);
-    gps_manager_init(&g_gpsManager);
+    bool prefer_peer_only = false;
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    prefer_peer_only = (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0 ||
+                        strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething2") == 0) &&
+                       !esp_comm_manager_is_remote_command() &&
+                       esp_comm_manager_is_connected();
+#endif
+
+    bool dual_initialized_gps = false;
+    if (!prefer_peer_only) {
+        ble_set_suspend_allowed(false);
+        gps_manager_set_peer_gps_preferred(false);
+        gps_manager_init(&g_gpsManager);
+        dual_initialized_gps = g_gpsManager.isinitilized;
+    } else {
+        gps_manager_set_peer_gps_preferred(true);
+        gps_manager_clear_peer_fix();
+        if (g_gpsManager.isinitilized) {
+            gps_manager_deinit(&g_gpsManager);
+        }
+    }
     esp_err_t err = csv_file_open("wardriving");
     if (err != ESP_OK) {
         ble_set_suspend_allowed(true);
-        gps_manager_deinit(&g_gpsManager);
+        if (dual_initialized_gps) {
+            gps_manager_deinit(&g_gpsManager);
+        }
         glog("Failed to open CSV for dual wardriving\n");
         status_display_show_status("CSV Open Fail");
         return;
     }
 
-    if (!ble_start_scanning()) {
-        ble_set_suspend_allowed(true);
-        csv_file_close();
-        gps_manager_deinit(&g_gpsManager);
-        glog("Failed to start BLE scan for dual wardriving.\n");
-        status_display_show_status("BLE Start Fail");
-        return;
-    }
-    ble_register_handler(ble_wardriving_callback);
+    if (!prefer_peer_only) {
+        if (!ble_start_scanning()) {
+            ble_set_suspend_allowed(true);
+            csv_file_close();
+            gps_manager_deinit(&g_gpsManager);
+            glog("Failed to start BLE scan for dual wardriving.\n");
+            status_display_show_status("BLE Start Fail");
+            return;
+        }
+        ble_register_handler(ble_wardriving_callback);
 
-    wifi_manager_start_monitor_mode(wardriving_scan_callback);
-    if (!start_wardriving()) {
-        ble_unregister_handler(ble_wardriving_callback);
-        ble_stop();
-        wifi_manager_stop_monitor_mode();
-        csv_file_close();
-        ble_set_suspend_allowed(true);
-        gps_manager_deinit(&g_gpsManager);
-        glog("Failed to start wardriving observation queue.\n");
-        status_display_show_status("Dual Drive Fail");
-        return;
+        wifi_manager_start_monitor_mode(wardriving_scan_callback);
+        if (!start_wardriving()) {
+            ble_unregister_handler(ble_wardriving_callback);
+            ble_stop();
+            wifi_manager_stop_monitor_mode();
+            csv_file_close();
+            ble_set_suspend_allowed(true);
+            gps_manager_deinit(&g_gpsManager);
+            glog("Failed to start wardriving observation queue.\n");
+            status_display_show_status("Dual Drive Fail");
+            return;
+        }
     }
 
-    if (esp_comm_manager_is_connected()) {
+    if (prefer_peer_only) {
+        glog("Dual wardriving observing via GhostLink peer GPS.\n");
+    } else if (esp_comm_manager_is_connected()) {
         glog("GhostLink peer connected; helper assist is not used in dual wardriving.\n");
     }
 
