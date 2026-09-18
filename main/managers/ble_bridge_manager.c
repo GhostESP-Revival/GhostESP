@@ -992,6 +992,20 @@ static bool bridge_create_task(void) {
     return s_bridge.task_handle != NULL;
 }
 
+// Free task stack/TCB after the bridge task has exited and cleared its handle.
+// Must only run from a different task once task_handle == NULL (the exiting
+// task's own stack is still in use inside bridge_task). Returns 4k+TCB to the
+// heap while the bridge sits idle.
+static void bridge_destroy_task_resources(void) {
+    if (s_bridge.task_handle != NULL) {
+        return;
+    }
+    heap_caps_free(s_bridge.task_stack);
+    heap_caps_free(s_bridge.task_tcb);
+    s_bridge.task_stack = NULL;
+    s_bridge.task_tcb = NULL;
+}
+
 static void bridge_wait_and_send_task(void *arg) {
     (void)arg;
     for (int i = 0; i < 30; i++) {
@@ -1172,6 +1186,7 @@ void ble_bridge_stop(void) {
     for (int i = 0; i < 20 && s_bridge.task_handle; ++i) {
         vTaskDelay(pdMS_TO_TICKS(50));
     }
+    bridge_destroy_task_resources();
     bridge_log("stopped");
 #endif
 }

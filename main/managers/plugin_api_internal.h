@@ -49,7 +49,10 @@ const char *plugin_api_internal_app_id(void);
 bool plugin_api_internal_run_sync(void (*fn)(void *ctx), void *ctx);
 /* Queues fn on the UI task without waiting for it. Runs inline when the
    caller is already the UI task. fn owns ctx and must free it. */
-void plugin_api_internal_run_async(void (*fn)(void *ctx), void *ctx);
+bool plugin_api_internal_run_async(void (*fn)(void *ctx), void *ctx);
+/* Non-blocking version for frame producers that can safely drop a frame when
+   LVGL is already rendering. */
+bool plugin_api_internal_run_async_nowait(void (*fn)(void *ctx), void *ctx);
 lv_obj_t *plugin_api_internal_parent_or_current(ghostesp_ui_obj_t parent);
 void plugin_api_canvas_cleanup_timers(void);
 

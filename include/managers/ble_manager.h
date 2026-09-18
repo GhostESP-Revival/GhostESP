@@ -43,6 +43,7 @@ bool ble_init_with_pre_host(ble_pre_host_init_fn init_fn,
                             void *arg);
 void ble_deinit(void);
 void ble_stop(void);
+void ble_set_suspend_allowed(bool allow);
 void stop_ble_stack(void);
 
 // BLE status accessors

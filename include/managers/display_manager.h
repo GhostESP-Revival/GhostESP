@@ -82,6 +82,11 @@ extern View lockscreen_view;
  */
 void display_manager_init(void);
 
+#ifdef CONFIG_USE_ENCODER
+/* Apply persisted encoder-specific settings to the live decoder. */
+void display_manager_apply_encoder_settings(void);
+#endif
+
 /**
  * @brief Register a new view.
  */
@@ -202,6 +207,7 @@ lv_color_t hex_to_lv_color(const char *hex_str);
 void update_status_bar(bool wifi_enabled, bool bt_enabled, bool sd_card_mounted, int batteryPercentage, bool power_save_enabled, bool is_ap_active, bool is_charging);
 
 void display_manager_add_status_bar(const char *CurrentMenuName);
+void display_manager_set_status_bar_hidden(bool hidden);
 
 /* Current status-bar title text ("" if none). Valid until the next
  * add_status_bar call - copy if you need to keep it. */
@@ -224,7 +230,9 @@ void display_manager_resume_lvgl_task(void);
 void display_manager_suspend_input_task(void);
 void display_manager_resume_input_task(void);
 
-void display_manager_run_on_lvgl(void (*fn)(void *), void *arg);
+bool display_manager_run_on_lvgl(void (*fn)(void *), void *arg);
+/* Non-blocking variant for high-rate producers that can drop stale frames. */
+bool display_manager_run_on_lvgl_nowait(void (*fn)(void *), void *arg);
 bool display_manager_is_lvgl_task(void);
 
 /* Thread-safe replacement for lv_async_call(). LVGL's timer list and internal
@@ -235,6 +243,7 @@ bool display_manager_is_lvgl_task(void);
  * Every call site outside display_manager.c must go through this instead of
  * calling lv_async_call() directly. */
 lv_res_t display_manager_lvgl_async_call(lv_async_cb_t cb, void *user_data);
+lv_res_t display_manager_lvgl_async_call_nowait(lv_async_cb_t cb, void *user_data);
 
 /* Coalesce scroll deltas: queue a scroll_by_bounded into a small accumulator
  * instead of running it on every touch sample. The accumulator is flushed

@@ -7,6 +7,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/portmacro.h"
 #include "scans/wifi/wifi_channels.h"
+#include "scans/wifi/hop_profile.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -549,16 +550,26 @@ static void build_channel_list(void) {
     }
 
     uint8_t candidates[WIFI_CHANNELS_MAX] = {0};
-    uint8_t candidate_count = wifi_channels_build_country_list(candidates, WIFI_CHANNELS_MAX);
-    if (candidate_count == 0) {
-        static const uint8_t fallback[] = {
-            1,2,3,4,5,6,7,8,9,10,11,12,13,
-            36,40,44,48,149,153,157,161,165
-        };
-        candidate_count = 0;
-        for (size_t i = 0; i < sizeof(fallback) && candidate_count < WIFI_CHANNELS_MAX; i++) {
-            if (fallback[i] <= AIRSPACE_MAX_WIFI_CHANNEL) {
-                candidates[candidate_count++] = fallback[i];
+
+    // User hop profile takes priority; otherwise build the country-appropriate
+    // list (with the legacy fallback if the country query comes up empty).
+    size_t profile_count = 0;
+    hop_profile_resolve(candidates, WIFI_CHANNELS_MAX, &profile_count);
+    uint8_t candidate_count;
+    if (profile_count > 0) {
+        candidate_count = (uint8_t)profile_count;
+    } else {
+        candidate_count = wifi_channels_build_country_list(candidates, WIFI_CHANNELS_MAX);
+        if (candidate_count == 0) {
+            static const uint8_t fallback[] = {
+                1,2,3,4,5,6,7,8,9,10,11,12,13,
+                36,40,44,48,149,153,157,161,165
+            };
+            candidate_count = 0;
+            for (size_t i = 0; i < sizeof(fallback) && candidate_count < WIFI_CHANNELS_MAX; i++) {
+                if (fallback[i] <= AIRSPACE_MAX_WIFI_CHANNEL) {
+                    candidates[candidate_count++] = fallback[i];
+                }
             }
         }
     }

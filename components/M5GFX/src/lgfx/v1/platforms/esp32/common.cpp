@@ -628,6 +628,12 @@ namespace lgfx
         buscfg.isr_cpu_id = INTR_CPU_ID_AUTO;
   #endif
 #endif
+#if defined (ESP_IDF_VERSION_VAL) && (ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 1, 0))
+        // IDF 6.1 added dma_burst_size to spi_bus_config_t; the struct was
+        // memset to ~0 above, so reset it to 0 (driver default) to avoid
+        // gdma_config_transfer rejecting an invalid burst size.
+        buscfg.dma_burst_size = 0;
+#endif
         if (ESP_OK != spi_bus_initialize(static_cast<spi_host_device_t>(spi_host), &buscfg, dma_channel))
         {
           ESP_LOGW("LGFX", "Failed to spi_bus_initialize. ");

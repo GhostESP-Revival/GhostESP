@@ -25,6 +25,7 @@
 #include <time.h>
 #include <stdint.h>
 #include "freertos/task.h"
+#include "freertos/idf_additions.h"
 #include "esp_netif.h"
 
 #define WIGLE_UPLOAD_URL "https://api.wigle.net/api/v2/file/upload"
@@ -122,11 +123,7 @@ static bool wigle_sta_has_ip(void) {
 }
 
 static bool wigle_require_jit_mount(void) {
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    return (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0);
-#else
-    return false;
-#endif
+    return sd_card_needs_jit_mount();
 }
 
 static bool wigle_is_safe_csv_name(const char *name) {
@@ -1034,14 +1031,10 @@ esp_err_t wigle_upload_all(void) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    bool require_jit = false;
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    require_jit = (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0);
-#endif
+    bool require_jit = sd_card_needs_jit_mount();
 
     if (require_jit) {
-        /* JIT path: SD and display share SPI — mount only in brief windows,
-         * never during HTTP (DNS/TLS can stall for 7+ seconds). */
+        /* JIT path: mount only in brief file-I/O windows, never during HTTP. */
         return wigle_process_queue_jit(api_key);
     }
 
@@ -1090,7 +1083,7 @@ static void wigle_upload_all_task(void *arg) {
     vTaskDelay(pdMS_TO_TICKS(2000));
     (void)wigle_upload_all();
     wigle_upload_in_progress = false;
-    vTaskDelete(NULL);
+    vTaskDeleteWithCaps(NULL);
 }
 
 void wigle_upload_all_async(void) {
@@ -1290,7 +1283,7 @@ static void wigle_single_upload_task(void *arg) {
 
     wigle_manual_upload_in_progress = false;
     free(task);
-    vTaskDelete(NULL);
+    vTaskDeleteWithCaps(NULL);
 }
 
 esp_err_t wigle_upload_single_csv_async(const char *filename) {
@@ -1449,7 +1442,7 @@ static void wigle_stats_task(void *arg) {
     }
 
     wigle_stats_in_progress = false;
-    vTaskDelete(NULL);
+    vTaskDeleteWithCaps(NULL);
 }
 
 esp_err_t wigle_get_stats_async(void) {
@@ -1598,6 +1591,6 @@ done:
     
     wigle_test_in_progress = false;
     free(result);
-    vTaskDelete(NULL);
+    vTaskDeleteWithCaps(NULL);
 }
 

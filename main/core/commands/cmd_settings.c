@@ -6,6 +6,7 @@
 #include "gui/theme_palette_api.h"
 #include "managers/config_manager.h"
 #include "managers/settings_manager.h"
+#include "scans/wifi/hop_profile.h"
 #include "managers/settings_sd_backup.h"
 #include "managers/status_display_manager.h"
 #include "managers/wifi_manager.h"
@@ -82,6 +83,7 @@ static const SettingDescriptor k_settings_desc[] = {
     {"terminal_font_size", ST_U8, OFF(terminal_font_size), "Display", 0, 0, 2},
     {"menu_theme", ST_U8, OFF(menu_theme), "Display", 0, 0, THEME_PALETTE_THEME_COUNT - 1},
     {"font_size", ST_U8, OFF(font_size), "Display", 0, 0, 2},
+    {"row_height", ST_U8, OFF(row_height), "Display", 0, 0, MENU_ROW_HEIGHT_OPTION_COUNT - 1},
     {"reduce_motion", ST_BOOL, OFF(reduced_motion), "Display", 0, 0, 0},
     {"repeat_speed", ST_U8, OFF(input_repeat_speed), "Display", 0, 0, 2},
     {"high_contrast", ST_BOOL, OFF(high_contrast), "Display", 0, 0, 0},
@@ -89,20 +91,27 @@ static const SettingDescriptor k_settings_desc[] = {
     {"theme_bg_fx", ST_BOOL, OFF(theme_background_effects), "Display", 0, 0, 0},
     {"channel_delay", ST_FLOAT, OFF(channel_delay), "System", 0, 0, 0},
     {"broadcast_speed", ST_U16, OFF(broadcast_speed), "System", 0, 0, 65535},
+    {"hop_mode", ST_ENUM8, OFF(hop_mode), "System", 0, 0, HOP_MODE_COUNT - 1},
+    {"hop_custom", ST_STRING, OFF(hop_custom_channels), "System", 129, 0, 0},
     {"gps_rx_pin", ST_I32, OFF(gps_rx_pin), "System", 0, 0, 0},
     {"gps_baud_rate", ST_U32, OFF(gps_baud_rate), "System", 0, 0, 0},
+    {"ir_tx_pin", ST_I32, OFF(ir_tx_pin), "System", 0, -1, 127},
+    {"ir_rx_pin", ST_I32, OFF(ir_rx_pin), "System", 0, -1, 127},
     {"power_save", ST_BOOL, OFF(power_save_enabled), "System", 0, 0, 0},
     {"zebra_menus", ST_BOOL, OFF(zebra_menus_enabled), "System", 0, 0, 0},
     {"nav_buttons", ST_BOOL, OFF(nav_buttons_enabled), "System", 0, 0, 0},
     {"menu_layout", ST_U8, OFF(menu_layout), "System", 0, 0, 4},
     {"infrared_easy", ST_BOOL, OFF(infrared_easy_mode), "System", 0, 0, 0},
     {"web_auth", ST_BOOL, OFF(web_auth_enabled), "System", 0, 0, 0},
+    {"usb_msc", ST_BOOL, OFF(usb_msc_enabled), "System", 0, 0, 0},
     {"rts_enabled", ST_BOOL, OFF(rts_enabled), "System", 0, 0, 0},
     {"third_ctrl", ST_BOOL, OFF(third_control_enabled), "System", 0, 0, 0},
     {"auto_save_scans", ST_BOOL, OFF(auto_save_scans), "System", 0, 0, 0},
 
     {"flappy_name", ST_STRING, OFF(flappy_ghost_name), "Personalisation", 65, 0, 0},
     {"timezone", ST_STRING, OFF(selected_timezone), "Date & Time", 25, 0, 0},
+    {"clock_style", ST_U8, OFF(clock_style), "Date & Time", 0, 0, 2},
+    {"status_bar_clock", ST_BOOL, OFF(status_bar_clock), "Date & Time", 0, 0, 0},
     {"accent_color", ST_STRING, OFF(selected_hex_accent_color), "Personalisation", 25, 0, 0},
     {"io_btn_p10_cmd", ST_STRING, OFF(io_btn_p10_cmd), "IO Button", 129, 0, 0},
     {"io_btn_p11_cmd", ST_STRING, OFF(io_btn_p11_cmd), "IO Button", 129, 0, 0},
@@ -455,6 +464,78 @@ void handle_webuiap_cmd(int argc, char **argv) {
     glog("Usage: webuiap [on|off|toggle|status]\n");
 }
 
+// clockstyle - Switch the Clock view between digital, analog and segment faces
+void handle_clockstyle_cmd(int argc, char **argv) {
+    static const char *const names[] = {"Digital", "Analog", "Segment"};
+    uint8_t style = settings_get_clock_style(&G_Settings);
+    if (style > 2) style = 0;
+
+    if (argc == 1) {
+        style = (uint8_t)((style + 1) % 3);
+    } else if (argc == 2) {
+        if (strcmp(argv[1], "digital") == 0) {
+            style = 0;
+        } else if (strcmp(argv[1], "analog") == 0) {
+            style = 1;
+        } else if (strcmp(argv[1], "segment") == 0) {
+            style = 2;
+        } else if (strcmp(argv[1], "toggle") == 0) {
+            style = (uint8_t)((style + 1) % 3);
+        } else if (strcmp(argv[1], "status") == 0) {
+            glog("Clock style is %s.\n", names[style]);
+            return;
+        } else {
+            glog("Usage: clockstyle [digital|analog|segment|toggle|status]\n");
+            return;
+        }
+    } else {
+        glog("Usage: clockstyle [digital|analog|segment|toggle|status]\n");
+        return;
+    }
+
+    settings_set_clock_style(&G_Settings, style);
+    settings_persist_setting(SETTING_CLOCK_STYLE);
+    glog("Clock style set to %s.\n", names[style]);
+    status_display_show_status(style == 2 ? "Clock: Segment"
+                                          : (style == 1 ? "Clock: Analog" : "Clock: Digital"));
+}
+
+// statusbarclock - Show/hide the clock in the status bar centre
+void handle_statusbarclock_cmd(int argc, char **argv) {
+    bool enabled = settings_get_status_bar_clock(&G_Settings);
+
+    if (argc == 1) {
+        enabled = !enabled;
+        settings_set_status_bar_clock(&G_Settings, enabled);
+        settings_persist_setting(SETTING_STATUS_BAR_CLOCK);
+        glog("Status bar clock %s.\n", enabled ? "enabled" : "disabled");
+        return;
+    }
+
+    if (argc == 2) {
+        if (strcmp(argv[1], "on") == 0) {
+            enabled = true;
+        } else if (strcmp(argv[1], "off") == 0) {
+            enabled = false;
+        } else if (strcmp(argv[1], "toggle") == 0) {
+            enabled = !enabled;
+        } else if (strcmp(argv[1], "status") == 0) {
+            glog("Status bar clock is %s.\n", enabled ? "enabled" : "disabled");
+            return;
+        } else {
+            glog("Usage: statusbarclock [on|off|toggle|status]\n");
+            return;
+        }
+
+        settings_set_status_bar_clock(&G_Settings, enabled);
+        settings_persist_setting(SETTING_STATUS_BAR_CLOCK);
+        glog("Status bar clock %s.\n", enabled ? "enabled" : "disabled");
+        return;
+    }
+
+    glog("Usage: statusbarclock [on|off|toggle|status]\n");
+}
+
 // Settings command handler
 void handle_settings_cmd(int argc, char **argv) {
     if (argc < 2) {
@@ -515,6 +596,7 @@ void handle_settings_cmd(int argc, char **argv) {
         glog("    terminal_font_size - Terminal font size (0=Small,1=Normal,2=Large)\n");
         glog("    menu_theme        - Menu theme palette index\n");
         glog("    font_size         - Global font size (0=Small,1=Normal,2=Large)\n");
+        glog("    row_height        - Options row height (0=Compact,1=Normal,2=Large,3=Extra Large)\n");
         glog("    reduce_motion     - Reduce animations (true/false)\n");
         glog("    repeat_speed      - Input repeat speed (0-2)\n");
         glog("    high_contrast     - High contrast mode (true/false)\n");
@@ -524,17 +606,22 @@ void handle_settings_cmd(int argc, char **argv) {
         glog("    broadcast_speed   - Broadcast speed\n");
         glog("    gps_rx_pin        - GPS RX pin\n");
         glog("    gps_baud_rate     - GPS UART baud rate (0 = Kconfig default)\n");
+        glog("    ir_tx_pin         - IR TX pin (-1 = board default)\n");
+        glog("    ir_rx_pin         - IR RX pin (-1 = board default)\n");
         glog("    power_save        - Power save mode (true/false)\n");
         glog("    zebra_menus       - Zebra menus (true/false)\n");
         glog("    nav_buttons       - Navigation buttons (true/false)\n");
         glog("    menu_layout       - Menu layout (0=Carousel, 1=Grid, 2=List, 3=Compact, 4=Hero)\n");
         glog("    infrared_easy     - Infrared easy mode (true/false)\n");
         glog("    web_auth          - Web authentication (true/false)\n");
+        glog("    usb_msc           - USB SD passthrough toggle preference (true/false)\n");
         glog("    rts_enabled       - RTS enabled (true/false)\n");
         glog("    third_ctrl        - Third control enabled (true/false)\n");
         glog("    auto_save_scans   - Auto save scan results to SD (true/false)\n");
         glog("  Date & Time Settings:\n");
         glog("    timezone          - Selected timezone\n");
+        glog("    clock_style       - Clock face (0=Digital, 1=Analog, 2=Segment)\n");
+        glog("    status_bar_clock  - Show clock in status bar centre (true/false)\n");
         glog("  Personalisation Settings:\n");
         glog("    flappy_name       - Flappy Ghost name\n");
         glog("    accent_color      - Accent color (hex)\n");
@@ -569,6 +656,13 @@ void handle_settings_cmd(int argc, char **argv) {
             return;
         }
         FSettings *settings = &G_Settings;
+        // GPIO validity for pin overrides: capture the old value, run the raw
+        // write, then re-validate through the validated setter and revert.
+        int32_t ir_pin_backup = 0;
+        bool ir_pin_desc = strcmp(d->name, "ir_tx_pin") == 0 || strcmp(d->name, "ir_rx_pin") == 0;
+        if (ir_pin_desc) {
+            ir_pin_backup = *(const int32_t *)((const uint8_t *)settings + d->offset);
+        }
         if (!set_setting_value(d, settings, value)) {
             if (d->type == ST_BOOL) {
                 glog("Invalid %s. Use true or false\n", d->name);
@@ -581,6 +675,16 @@ void handle_settings_cmd(int argc, char **argv) {
                 glog("Invalid %s value\n", d->name);
             }
             return;
+        }
+        if (ir_pin_desc) {
+            bool ok = strcmp(d->name, "ir_tx_pin") == 0
+                          ? settings_set_ir_tx_pin(settings, settings->ir_tx_pin)
+                          : settings_set_ir_rx_pin(settings, settings->ir_rx_pin);
+            if (!ok) {
+                *(int32_t *)((uint8_t *)settings + d->offset) = ir_pin_backup;
+                glog("Invalid %s. Use -1 or a valid GPIO number\n", d->name);
+                return;
+            }
         }
         settings_normalize_modes(settings);
         settings_save(settings);

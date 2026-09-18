@@ -121,7 +121,9 @@ static void runner_post_ui(runner_ui_action_type_t type, const char *text) {
     if (text) {
         strncpy(action->text, text, sizeof(action->text) - 1);
     }
-    display_manager_run_on_lvgl(runner_ui_apply, action);
+    if (!display_manager_run_on_lvgl(runner_ui_apply, action)) {
+        free(action);
+    }
 }
 
 static void runner_api_set_title(const char *title) {
@@ -264,7 +266,18 @@ static void plugin_runner_tick_task(void *arg) {
                                   : plugin_runner_tick_interval(loaded);
         loaded->last_tick_ms = now_ms;
         plugin_loader_tick(loaded, elapsed_ms);
-        if (!s_tick_stop_requested) vTaskDelayUntil(&last_wake, interval ? interval : 1);
+        if (!s_tick_stop_requested) {
+            /* An over-budget app makes vTaskDelayUntil() return immediately
+               forever, which can starve IDLE on single-core targets. Give the
+               watchdog and lower-priority system tasks one tick whenever the
+               app has already missed its deadline. */
+            TickType_t now_tick = xTaskGetTickCount();
+            if (now_tick - last_wake >= interval) {
+                vTaskDelay(1);
+            } else {
+                vTaskDelayUntil(&last_wake, interval ? interval : 1);
+            }
+        }
     }
 
 #if defined(CONFIG_IDF_TARGET_ESP32P4)

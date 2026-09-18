@@ -14,9 +14,15 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "managers/ap_manager.h"
+#include "managers/ble_manager.h"
 #include "managers/gps_manager.h"
+#include "managers/infrared_manager.h"
 #include "managers/plugin_loader.h"
+#include "managers/rgb_manager.h"
+#include "managers/sd_card_manager.h"
 #include "managers/settings_manager.h"
+#include "managers/subghz_remote_manager.h"
+#include "managers/nrf24_remote_manager.h"
 #ifdef CONFIG_WITH_SCREEN
 #include "managers/views/plugin_runner_view.h"
 #endif
@@ -27,6 +33,7 @@
 #include "sdkconfig.h"
 #include "vendor/GPS/gps_logger.h"
 #include "vendor/pcap.h"
+#include <esp_heap_caps.h>
 #include <esp_log.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -148,12 +155,20 @@ void handle_startwd(int argc, char **argv) {
     bool helper_hop_set = false;
     bool helper_weighted = false;
     bool helper_weighted_set = false;
+    const char *primary_channels = NULL;
+    bool active_set = false, active = true;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-s") == 0) {
             stop_flag = true;
         } else if (strcmp(argv[i], "--helper") == 0) {
             helper_mode = true;
+        } else if (strcmp(argv[i], "--primary-channels") == 0) {
+            if (i + 1 >= argc) { glog("startwd: --primary-channels requires a value\n"); return; }
+            primary_channels = argv[++i];
+        } else if (strcmp(argv[i], "--active") == 0 || strcmp(argv[i], "--monitor") == 0) {
+            active_set = true;
+            active = strcmp(argv[i], "--active") == 0;
         } else if (strcmp(argv[i], "--channels") == 0) {
             if (i + 1 >= argc) {
                 glog("startwd: --channels requires a value\n");
@@ -221,6 +236,11 @@ void handle_startwd(int argc, char **argv) {
                 glog("Wardriving helper is already running.\n");
                 return;
             }
+            if (active_set && !wardriving_set_active_scan(active)) return;
+            if (!wardriving_set_primary_channels_from_csv(primary_channels)) {
+                glog("Wardriving helper: invalid primary channel plan\n");
+                return;
+            }
             if (helper_channels_set) {
                 if (!wardriving_set_helper_channels_from_csv(helper_channels_csv)) {
                     glog("Wardriving helper: invalid channel list, using default helper channels.\n");
@@ -260,6 +280,7 @@ void handle_startwd(int argc, char **argv) {
             glog("Wardriving is already running.\n");
             return;
         }
+        if (active_set && !wardriving_set_active_scan(active)) return;
 
         bool prefer_peer_only = false;
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
@@ -292,21 +313,7 @@ void handle_startwd(int argc, char **argv) {
         bool peer_helper_ok = false;
         if (!esp_comm_manager_is_remote_command()) {
             if (esp_comm_manager_is_connected()) {
-                char helper_command[256];
-                char helper_plan_csv[192] = {0};
-                uint16_t hop_ms = settings_get_wd_hop_helper_ms(&G_Settings);
-                bool weighted = settings_get_wd_weighted_5g(&G_Settings);
-                if (wardriving_get_helper_channel_plan_csv(helper_plan_csv, sizeof(helper_plan_csv))) {
-                    snprintf(helper_command, sizeof(helper_command),
-                             "startwd --helper --channels %s --hop %u%s",
-                             helper_plan_csv, (unsigned)hop_ms, weighted ? " --weighted" : "");
-                } else {
-                    snprintf(helper_command, sizeof(helper_command), "startwd --helper --hop %u%s",
-                             (unsigned)hop_ms, weighted ? " --weighted" : "");
-                }
-                wardriving_expect_peer_assist(true);
-                peer_helper_ok = esp_comm_manager_send_command_line(helper_command);
-                if (!peer_helper_ok) wardriving_expect_peer_assist(false);
+                peer_helper_ok = wardriving_start_peer_helper();
                 glog(peer_helper_ok
                           ? "Wardrive helper start sent; waiting for ready status.\n"
                           : "Wardrive helper not started on peer; continuing local only.\n");
@@ -315,6 +322,12 @@ void handle_startwd(int argc, char **argv) {
             }
         }
         if (!peer_helper_ok) wardriving_set_peer_assist(false);
+
+        if (prefer_peer_only && peer_helper_ok) {
+            // start_wardriving() resets GPS source selection.  The Banshee C5
+            // still scans locally, but its paired S3 is the authoritative GPS.
+            gps_manager_set_peer_gps_preferred(true);
+        }
 
         if (prefer_peer_only && !peer_helper_ok) {
             gps_manager_set_peer_gps_preferred(false);
@@ -329,6 +342,124 @@ void handle_startwd(int argc, char **argv) {
         status_display_show_status("Wardrive Start");
     }
 }
+
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE) && !defined(CONFIG_IDF_TARGET_ESP32P4)
+void handle_dualwd(int argc, char **argv) {
+    bool stop_flag = false;
+
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-s") == 0 || strcmp(argv[i], "stop") == 0) {
+            stop_flag = true;
+        } else if (strcmp(argv[i], "start") != 0) {
+            glog("Usage: dualwd [start|-s]\n");
+            return;
+        }
+    }
+
+    if (stop_flag) {
+        if (!csv_file_is_open()) {
+            glog("Dual wardriving is not active.\n");
+            return;
+        }
+        ble_unregister_handler(ble_wardriving_callback);
+        ble_stop();
+        stop_wardriving();
+        wifi_manager_stop_monitor_mode();
+        if (csv_buffer_has_pending_data()) {
+            csv_flush_buffer_to_file();
+        }
+        csv_file_close();
+        gps_manager_deinit(&g_gpsManager);
+        gps_manager_set_peer_gps_preferred(false);
+        gps_manager_clear_peer_fix();
+        ble_set_suspend_allowed(true);
+        glog("Dual wardriving stopped.\n");
+        status_display_show_status("Dual Drive Off");
+        return;
+    }
+
+    if (csv_file_is_open()) {
+        glog("A wardriving CSV session is already active.\n");
+        return;
+    }
+
+    if (heap_caps_get_total_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) == 0) {
+        glog("Dual wardriving requires a PSRAM device.\n");
+        status_display_show_status("PSRAM Required");
+        return;
+    }
+
+    bool use_peer_gps = false;
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    use_peer_gps = strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0 &&
+                   !esp_comm_manager_is_remote_command() &&
+                   esp_comm_manager_is_connected();
+#endif
+
+    bool dual_initialized_gps = false;
+    ble_set_suspend_allowed(false);
+    if (!use_peer_gps) {
+        gps_manager_set_peer_gps_preferred(false);
+        gps_manager_init(&g_gpsManager);
+        dual_initialized_gps = g_gpsManager.isinitilized;
+    } else {
+        gps_manager_set_peer_gps_preferred(true);
+        gps_manager_clear_peer_fix();
+        if (g_gpsManager.isinitilized) {
+            gps_manager_deinit(&g_gpsManager);
+        }
+    }
+    esp_err_t err = csv_file_open("wardriving");
+    if (err != ESP_OK) {
+        ble_set_suspend_allowed(true);
+        if (dual_initialized_gps) {
+            gps_manager_deinit(&g_gpsManager);
+        }
+        glog("Failed to open CSV for dual wardriving\n");
+        status_display_show_status("CSV Open Fail");
+        return;
+    }
+
+    if (!ble_start_scanning()) {
+        ble_set_suspend_allowed(true);
+        csv_file_close();
+        if (dual_initialized_gps) gps_manager_deinit(&g_gpsManager);
+        glog("Failed to start BLE scan for dual wardriving.\n");
+        status_display_show_status("BLE Start Fail");
+        return;
+    }
+    ble_register_handler(ble_wardriving_callback);
+
+    wifi_manager_start_monitor_mode(wardriving_scan_callback);
+    if (!start_wardriving()) {
+        ble_unregister_handler(ble_wardriving_callback);
+        ble_stop();
+        wifi_manager_stop_monitor_mode();
+        csv_file_close();
+        ble_set_suspend_allowed(true);
+        if (dual_initialized_gps) gps_manager_deinit(&g_gpsManager);
+        glog("Failed to start wardriving observation queue.\n");
+        status_display_show_status("Dual Drive Fail");
+        return;
+    }
+
+    // start_wardriving() intentionally resets session state, including the GPS
+    // source.  Restore the C5's peer-GPS choice after the local scanners start.
+    gps_manager_set_peer_gps_preferred(use_peer_gps);
+
+    if (use_peer_gps) {
+        glog("Dual wardriving scanning locally with GhostLink peer GPS.\n");
+    } else if (esp_comm_manager_is_connected()) {
+        glog("GhostLink peer connected; helper assist is not used in dual wardriving.\n");
+    }
+
+    size_t internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    size_t psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    glog("Dual wardriving started (BLE + WiFi coexistence): internal=%u psram=%u\n",
+         (unsigned)internal_free, (unsigned)psram_free);
+    status_display_show_status("Dual Drive On");
+}
+#endif // !S2 && !GHOSTESP_NO_NATIVE_BLE && !P4
 
 void handle_crash(int argc, char **argv) {
     glog("Triggering crash for coredump test...\n");
@@ -723,4 +854,58 @@ void handle_apps_cmd(int argc, char **argv) {
     }
 
     glog("unknown apps command: %s\n", argv[1]);
+}
+
+void handle_devices_cmd(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    glog("Enabled devices:\n");
+
+#ifdef CONFIG_HAS_INFRARED
+    {
+        int32_t tx_override = settings_get_ir_tx_pin(&G_Settings);
+        glog("  Infrared TX: GPIO%d (%s)\n", (int)infrared_get_tx_pin(),
+             tx_override >= 0 ? "override" : "default");
+    }
+#endif
+#ifdef CONFIG_HAS_INFRARED_RX
+    {
+        int32_t rx_override = settings_get_ir_rx_pin(&G_Settings);
+        glog("  Infrared RX: GPIO%d (%s) [%s]\n", (int)infrared_get_rx_pin(),
+             rx_override >= 0 ? "override" : "default",
+             infrared_manager_rx_is_initialized() ? "listening" : "idle");
+    }
+#endif
+    {
+        int32_t gps_pin = settings_get_gps_rx_pin(&G_Settings);
+        if (gps_pin > 0) {
+            glog("  GPS: RX GPIO%ld [%s]\n", (long)gps_pin,
+                 g_gpsManager.isinitilized ? "running" : "idle");
+        } else {
+            glog("  GPS: default pin [%s]\n",
+                 g_gpsManager.isinitilized ? "running" : "idle");
+        }
+    }
+    {
+        if (rgb_manager.is_separate_pins) {
+            glog("  RGB: R GPIO%d G GPIO%d B GPIO%d\n",
+                 (int)rgb_manager.red_pin, (int)rgb_manager.green_pin, (int)rgb_manager.blue_pin);
+        } else {
+            glog("  RGB: data GPIO%d, %d LEDs\n", (int)rgb_manager.pin, rgb_manager.num_leds);
+        }
+    }
+    {
+        const char *state = sd_card_manager.is_initialized ? "mounted" : "not mounted";
+        if (sd_card_manager.spi_cs_pin > 0) {
+            glog("  SD Card: SPI (CS GPIO%d) [%s]\n", sd_card_manager.spi_cs_pin, state);
+        } else {
+            glog("  SD Card: MMC [%s]\n", state);
+        }
+    }
+#ifdef CONFIG_HAS_SUBGHZ
+    glog("  SubGHz: [%s]\n", subghz_remote_manager_is_ready() ? "ready" : "idle");
+#endif
+#ifdef CONFIG_HAS_NRF24
+    glog("  NRF24: [%s]\n", nrf24_remote_manager_is_running() ? "running" : "idle");
+#endif
 }

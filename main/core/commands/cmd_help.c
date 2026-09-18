@@ -90,6 +90,15 @@ void handle_help(int argc, char **argv) {
         glog("stopspam\n");
         glog("    Description: Stop ongoing beacon spam.\n");
         glog("    Usage: stopspam\n\n");
+        glog("hop\n");
+        glog("    Description: Set the channel plan used by WiFi hopping features (deauth, beacon spam, scans, monitors).\n");
+        glog("    Usage: hop [auto | all | basic | custom <channels> | <channels>]\n");
+        glog("    Examples:\n");
+        glog("        hop             : Show current hop mode and channel plan\n");
+        glog("        hop 1,6,11      : Hop only channels 1, 6, and 11\n");
+        glog("        hop all         : Hop every legal channel for this device\n");
+        glog("        hop basic       : Fixed 1,6,11\n");
+        glog("        hop auto        : Default per-feature channel plan (country / AP list)\n\n");
         glog("stopdeauth\n");
         glog("    Description: Stop ongoing deauthentication attack.\n");
         glog("    Usage: stopdeauth\n\n");
@@ -198,6 +207,18 @@ void handle_help(int argc, char **argv) {
         glog("        -g   : Start GATT scanner for connectable devices\n");
         glog("        -r   : Scan for raw BLE packets\n");
         glog("        -s   : Stop BLE scanning\n\n");
+        glog("bledetect\n");
+        glog("    Description: Detect trackers, skimmers and beacons by signature\n");
+        glog("    Usage: bledetect [-s|-l|-c|-i|-t <index>|-u|-sp <index>|-h]\n");
+        glog("    Arguments:\n");
+        glog("        (none)      : Begin scanning for detectable BLE devices\n");
+        glog("        -s          : Stop the scan, keeping discovered devices\n");
+        glog("        -l          : List discovered devices with type, name/MAC and RSSI\n");
+        glog("        -c          : Drop stored results (scan must be stopped)\n");
+        glog("        -i          : Show scan state, device count and tracking info\n");
+        glog("        -t <index>  : Follow one device and log its live RSSI\n");
+        glog("        -u          : Stop following the tracked device\n");
+        glog("        -sp <index> : Advertise as a discovered AirTag; 'stopspoof' ends it\n\n");
         glog("blespam\n");
         glog("    Description: Start BLE advertisement spam attacks.\n");
         glog("    Usage: blespam [OPTION]\n");
@@ -213,6 +234,12 @@ void handle_help(int argc, char **argv) {
         glog("    Usage: blewardriving [-s]\n");
         glog("    Arguments:\n");
         glog("        -s  : Stop BLE wardriving\n\n");
+        glog("dualwd\n");
+        glog("    Description: Start/Stop BLE + WiFi coexistence wardriving (PSRAM only)\n");
+        glog("    Usage: dualwd [start|-s]\n");
+        glog("    Arguments:\n");
+        glog("        start : Start dual wardriving (default)\n");
+        glog("        -s    : Stop dual wardriving\n\n");
         glog("list -airtags\n");
         glog("    Description: List discovered AirTags\n");
         glog("    Usage: list -airtags\n\n");
@@ -264,6 +291,7 @@ void handle_help(int argc, char **argv) {
         glog("commstatus\n    Show communication status.\n    Usage: commstatus\n\n");
         glog("commdisconnect\n    Disconnect from current peer.\n    Usage: commdisconnect\n\n");
         glog("commsetpins\n    Change communication GPIO pins at runtime.\n    Usage: commsetpins <tx_pin> <rx_pin>\n    Example: commsetpins 4 5\n\n");
+        glog("glbench\n    Measure GhostLink throughput in both directions.\n    Usage: glbench [send|recv|both] [kb]\n           glbench stop | glbench status\n    Example: glbench send 512\n\n");
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
         glog("blebridge\n    Start/status/stop the BLE GhostLink bridge.\n    Usage: blebridge [start|stop|status|pair <peer_name>]\n\n");
 #endif
@@ -290,6 +318,18 @@ void handle_help(int argc, char **argv) {
         glog("sd_save_config\n    Save pin config to NVS.\n    Usage: sd_save_config\n\n");
         return;
     }
+
+#ifdef CONFIG_HAS_USB_MSC_SD
+    if (strcmp(category, "usbsd") == 0) {
+        glog("\nUSB SD Passthrough Commands:\n\n");
+        glog("usbsd\n    Toggle USB SD passthrough (card becomes a USB drive on the host PC).\n    Usage: usbsd\n\n");
+        glog("usbsd on\n    Start passthrough: SD is handed to the USB host, serial console detaches.\n    Usage: usbsd on\n\n");
+        glog("usbsd off\n    Stop passthrough and remount the SD card.\n    Usage: usbsd off\n\n");
+        glog("usbsd status\n    Show passthrough state.\n    Usage: usbsd status\n\n");
+        glog("Note: use WiFi/WebUI to exit if the serial console is detached.\n\n");
+        return;
+    }
+#endif
 
     if (strcmp(category, "led") == 0) {
         glog("\nLED & RGB Commands:\n\n");
@@ -319,6 +359,13 @@ void handle_help(int argc, char **argv) {
         glog("        - CPU cores and features\n");
         glog("        - Flash size and memory info\n");
         glog("        - ESP-IDF version\n\n");
+        glog("devices\n");
+        glog("    Description: List enabled hardware devices with their active pins and state\n");
+        glog("    Usage: devices\n\n");
+        glog("irpin\n");
+        glog("    Description: Show or override the IR TX/RX pins (persisted in settings)\n");
+        glog("    Usage: irpin | irpin tx|rx <pin|-1>\n");
+        glog("    TX changes apply after reboot; RX changes apply at the next IR learn\n\n");
         glog("crash\n");
         glog("    Description: Intentionally trigger a crash (for coredump testing).\n");
         glog("    Usage: crash\n");
@@ -334,6 +381,12 @@ void handle_help(int argc, char **argv) {
         glog("timezone\n");
         glog("    Description: Set the display timezone for the clock view.\n");
         glog("    Usage: timezone <TZ_STRING>\n\n");
+        glog("clockstyle\n");
+        glog("    Description: Switch the Clock view between digital, analog and segment faces.\n");
+        glog("    Usage: clockstyle [digital|analog|segment|toggle|status]\n\n");
+        glog("statusbarclock\n");
+        glog("    Description: Show or hide the clock in the status bar centre.\n");
+        glog("    Usage: statusbarclock [on|off|toggle|status]\n\n");
         glog("webauth\n");
         glog("    Description: Enable/disable web authentication.\n");
         glog("    Usage: webauth [on|off|toggle|status]\n\n");
@@ -384,6 +437,10 @@ void handle_help(int argc, char **argv) {
         glog("           snmpprobe subnet <a.b.c[.0|.]>\n");
         glog("           snmpprobe walk <IP> [OID]\n");
         glog("           snmpprobe communities <c1,c2,...|file>\n\n");
+        glog("mdnssniff\n");
+        glog("    Description: Passively sniff local names (mDNS/LLMNR/SSDP/NetBIOS) per host\n");
+        glog("    Usage: mdnssniff <IP|all>\n");
+        glog("           mdnssniff stop\n\n");
         glog("settings\n");
         glog("    Description: Manage NVS stored settings via command line\n");
         glog("    Usage: settings <command> [arguments]\n");
@@ -410,7 +467,7 @@ void handle_help(int argc, char **argv) {
         glog("gpsinfo\n    Show GPS info.\n    Usage: gpsinfo [-s]\n\n");
         glog("gpspin\n    Set GPS RX pin for external GPS module.\n    Usage: gpspin <pin>\n\n");
         glog("gpsbaud\n    Set GPS baud rate or auto-detect it.\n    Usage: gpsbaud <auto|0|4800|9600|19200|38400|57600|115200>\n\n");
-        glog("startwd\n    Start GPS wardriving.\n    Usage: startwd [-s] [--helper] [--channels <csv>] [--hop <ms>] [--weighted]\n\n");
+        glog("startwd\n    Start GPS wardriving.\n    Usage: startwd [-s] [--active|--monitor] [--helper] [--channels <csv>] [--hop <ms>] [--weighted]\n    C5/S3 default to driver active scans; --monitor selects beacon/probe capture.\n\n");
         return;
     }
     if (strcmp(category, "shell") == 0) {
@@ -788,6 +845,9 @@ void handle_help(int argc, char **argv) {
     glog("  help ble       - Bluetooth/BLE commands\n");
     glog("  help comm      - ESP32 communication commands\n");
     glog("  help sd        - SD card commands\n");
+#ifdef CONFIG_HAS_USB_MSC_SD
+    glog("  help usbsd     - USB SD passthrough commands\n");
+#endif
     glog("  help led       - LED/RGB commands\n");
     glog("  help gps       - GPS commands\n");
     glog("  help shell     - Headless shell commands\n");

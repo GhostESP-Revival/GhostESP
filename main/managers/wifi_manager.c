@@ -2,6 +2,7 @@
 
 #include "managers/wifi_manager.h"
 #include "managers/ghostscript_runtime.h"
+#include "scans/wifi/hop_profile.h"
 #include "scans/wifi/port_scan.h"
 #include "scans/wifi/arp_scan.h"
 #include "scans/wifi/ssh_scan.h"
@@ -117,6 +118,7 @@ static volatile bool g_mdns_scan_done = false;
 
 // Forward declarations for live AP scan
 static void live_ap_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type);
+static void wifi_track_callback(void *buf, wifi_promiscuous_pkt_type_t type);
 static esp_err_t start_live_ap_channel_hopping(void);
 static void stop_live_ap_channel_hopping(void);
 static bool callback_uses_selected_ap_capture_plan(wifi_promiscuous_cb_t_t callback);
@@ -140,6 +142,12 @@ static const uint8_t live_ap_channels[] = {
 #endif
 static const size_t live_ap_channels_len = sizeof(live_ap_channels) / sizeof(live_ap_channels[0]);
 static size_t live_ap_channel_index = 0;
+
+// Runtime channel list for "Scan APs Live": the compile-time table by
+// default, or the user hop profile when one is selected.
+static uint8_t live_ap_profile_channels[WIFI_CHANNELS_MAX];
+static const uint8_t *live_ap_active_channels = NULL;
+static size_t live_ap_active_channels_len = 0;
 
 const char *TAG = "WiFiManager";
 
@@ -1397,13 +1405,7 @@ esp_err_t file_handler(httpd_req_t *req) {
         return ESP_FAIL;
     }
 
-    // somethingsomething template shares spi bus; sd may be unmounted most of the time
-    bool require_jit = false;
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
-        require_jit = true;
-    }
-#endif
+    bool require_jit = sd_card_needs_jit_mount();
 
     bool display_was_suspended = false;
     bool did_mount = false;
@@ -1467,9 +1469,7 @@ esp_err_t portal_handler(httpd_req_t *req) {
         return ESP_OK;
     }
 
-    // Serve from pre-loaded portal file cache (JIT SD-mount builds: somethingsomething).
-    // This avoids re-mounting the SD from the HTTP server task where SPI bus contention
-    // with the display causes the mount to fail and returns an error page to the client.
+    // Serve from the pre-loaded portal file cache on JIT SD-mount builds.
     if (portal_file_cache != NULL && portal_file_cache_size > 0) {
         ESP_LOGD(TAG, "Using pre-loaded portal file cache (%zu bytes)", portal_file_cache_size);
         httpd_resp_set_type(req, "text/html");
@@ -1494,19 +1494,14 @@ esp_err_t portal_handler(httpd_req_t *req) {
     }
 
     // Otherwise, proceed with streaming from URL or file.
-    // JIT mount SD for somethingsomething template (SPI bus shared with display).
-    // file_handler() uses the same pattern for portal asset files.
+    // Mount SD only when the active transport requires JIT access.
     bool portal_jit_display_suspended = false;
     bool portal_jit_did_mount = false;
     bool portal_is_local_file = (strncmp(PORTALURL, "http://", 7) != 0 &&
                                  strncmp(PORTALURL, "https://", 8) != 0);
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
-        if (portal_is_local_file && !sd_card_manager.is_initialized) {
-            portal_jit_did_mount = (sd_card_mount_for_flush(&portal_jit_display_suspended) == ESP_OK);
-        }
+    if (sd_card_needs_jit_mount() && portal_is_local_file && !sd_card_manager.is_initialized) {
+        portal_jit_did_mount = (sd_card_mount_for_flush(&portal_jit_display_suspended) == ESP_OK);
     }
-#endif
     esp_err_t err = stream_data_to_client(req, PORTALURL, "text/html");
     if (portal_jit_did_mount) sd_card_unmount_after_flush(portal_jit_display_suspended);
 
@@ -1544,10 +1539,7 @@ esp_err_t get_log_handler(httpd_req_t *req) {
     char body[PORTAL_MAX_LOG_BODY_SIZE + 1];
     size_t received_total = 0;
 
-    bool require_jit = false;
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    require_jit = (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0);
-#endif
+    bool require_jit = sd_card_needs_jit_mount();
 
     while (received_total < (size_t)req->content_len) {
         int received = httpd_req_recv(req, body + received_total,
@@ -1592,10 +1584,7 @@ esp_err_t get_info_handler(httpd_req_t *req) {
     char decoded_email[128] = {0};
     char decoded_password[128] = {0};
 
-    bool require_jit = false;
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    require_jit = (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0);
-#endif
+    bool require_jit = sd_card_needs_jit_mount();
 
     if (!portal_capture_request_allowed()) {
         httpd_resp_set_hdr(req, "Connection", "close");
@@ -2031,16 +2020,12 @@ esp_err_t wifi_manager_start_evil_portal(const char *URLorFilePath, const char *
     memset(s_portal_http_rl_table, 0, sizeof(s_portal_http_rl_table));
     portal_sd_jit_mounted = false;
     portal_display_suspended = false;
-    // jit mount sd for somethingsomething template only
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
-        if (!sd_card_manager.is_initialized) {
-            if (sd_card_mount_for_flush(&portal_display_suspended) == ESP_OK) {
-                portal_sd_jit_mounted = true;
-            }
+    // JIT-mount SD only when the active transport requires it.
+    if (sd_card_needs_jit_mount() && !sd_card_manager.is_initialized) {
+        if (sd_card_mount_for_flush(&portal_display_suspended) == ESP_OK) {
+            portal_sd_jit_mounted = true;
         }
     }
-#endif
     // Log HTML buffer state at portal startup
     ESP_LOGI(TAG, "Evil portal starting - HTML buffer state: buffer=%p, size=%zu, use_html_buffer=%s", 
         html_buffer, html_buffer_size, use_html_buffer ? "true" : "false");
@@ -2077,12 +2062,9 @@ esp_err_t wifi_manager_start_evil_portal(const char *URLorFilePath, const char *
         }
     }
 
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    // For JIT-mount builds (somethingsomething): while the SD card is still mounted,
-    // pre-load the custom portal HTML file into a heap buffer so that portal_handler()
-    // can serve it without needing to re-mount the SD from the HTTP server task context
-    // (which races with the display SPI bus and causes the mount to fail).
-    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
+    // For JIT-mount builds, pre-load the custom portal HTML while the SD card is
+    // mounted so the HTTP server task does not need to remount it.
+    if (sd_card_needs_jit_mount()) {
         portal_clear_file_cache();  // discard any leftover cache from a previous portal run
         bool is_local = (URLorFilePath != NULL &&
                          strncmp(URLorFilePath, "http://", 7) != 0 &&
@@ -2131,7 +2113,6 @@ esp_err_t wifi_manager_start_evil_portal(const char *URLorFilePath, const char *
             }
         }
     }
-#endif
 
     // Unmount SD after filename generation (and portal file pre-load) to free SPI bus
     // for display/WiFi operations.
@@ -2351,6 +2332,7 @@ void wifi_manager_clear_scan_results(void) {
 }
 
 void wifi_manager_start_monitor_mode(wifi_promiscuous_cb_t_t callback) {
+    if (wardriving_is_running()) stop_wardriving();
     wifi_monitor_capture_active = true;
     wifi_reconnect_reset();
 
@@ -2378,6 +2360,10 @@ void wifi_manager_start_monitor_mode(wifi_promiscuous_cb_t_t callback) {
     } else if (callback == wifi_eapol_scan_callback) {
         // capture mgmt, data, and ctrl for full handshake context
         filter.filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT | WIFI_PROMIS_FILTER_MASK_DATA | WIFI_PROMIS_FILTER_MASK_CTRL;
+    } else if (callback == wifi_track_callback) {
+        // tracking needs MGMT (AP beacons) + DATA (active stations);
+        // CTRL frames carry no usable RSSI targets, so leave them out.
+        filter.filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT | WIFI_PROMIS_FILTER_MASK_DATA;
     } else {
         // Default: capture all frame types (for raw capture, SAE flood, etc.)
         filter.filter_mask = WIFI_PROMIS_FILTER_MASK_ALL;
@@ -2385,6 +2371,10 @@ void wifi_manager_start_monitor_mode(wifi_promiscuous_cb_t_t callback) {
     
     ESP_ERROR_CHECK(esp_wifi_set_promiscuous_filter(&filter));
     ESP_LOGI("WIFI_MANAGER", "Set hardware filter mask: 0x%02" PRIx32, filter.filter_mask);
+
+    // Backing store for handshake/probe/beacon/WPS/wardrive tables (~5KB).
+    // Allocated here so RX callbacks never observe a half-built session.
+    wifi_callbacks_monitor_tables_ensure();
 
     ESP_ERROR_CHECK(esp_wifi_set_promiscuous(true));
 
@@ -2437,6 +2427,9 @@ void wifi_manager_start_monitor_mode(wifi_promiscuous_cb_t_t callback) {
     status_display_show_status("Monitor Started");
 }
 void wifi_manager_stop_monitor_mode() {
+    // The active wardrive backend also owns this radio and its result list.
+    // Fence its worker before releasing shared monitor tables or changing mode.
+    if (wardriving_is_running()) stop_wardriving();
     wifi_monitor_capture_active = false;
 
     wifi_mode_t mode = WIFI_MODE_NULL;
@@ -2444,6 +2437,8 @@ void wifi_manager_stop_monitor_mode() {
     if (wifi_status == ESP_ERR_WIFI_NOT_INIT || mode == WIFI_MODE_NULL) {
         ESP_LOGW("WIFI_MANAGER", "Monitor stop called while Wi-Fi driver inactive (status=%s, mode=%d)",
                  esp_err_to_name(wifi_status), mode);
+        // Driver is down so no RX can flow: still release session tables.
+        wifi_callbacks_monitor_tables_release();
         return;
     } else if (wifi_status != ESP_OK) {
         ESP_LOGE("WIFI_MANAGER", "Failed to query Wi-Fi driver state: %s", esp_err_to_name(wifi_status));
@@ -2469,6 +2464,10 @@ void wifi_manager_stop_monitor_mode() {
     }
 
     // NOTE: Stopping the PineAP timer (channel_hop_timer) is handled by stop_pineap_detection() in callbacks.c
+
+    // Promiscuous delivery is off and hoppers are stopped above: safe to
+    // release the heap-on-demand monitor tables (recreated next session).
+    wifi_callbacks_monitor_tables_release();
 }
 
 void wifi_manager_init(void) {
@@ -3620,8 +3619,10 @@ void wifi_manager_print_scan_results_with_oui() {
 
 static void live_ap_channel_hop_timer_callback(void *arg) {
     if (!live_ap_hopping_active) return;
-    live_ap_channel_index = (live_ap_channel_index + 1) % live_ap_channels_len;
-    esp_wifi_set_channel(live_ap_channels[live_ap_channel_index], WIFI_SECOND_CHAN_NONE);
+    size_t len = live_ap_active_channels_len;
+    if (len == 0) return;
+    live_ap_channel_index = (live_ap_channel_index + 1) % len;
+    esp_wifi_set_channel(live_ap_active_channels[live_ap_channel_index], WIFI_SECOND_CHAN_NONE);
 }
 
 static esp_err_t start_live_ap_channel_hopping(void) {
@@ -3630,8 +3631,20 @@ static esp_err_t start_live_ap_channel_hopping(void) {
         esp_timer_delete(live_ap_channel_hop_timer);
         live_ap_channel_hop_timer = NULL;
     }
+
+    // User hop profile overrides the compile-time live AP table.
+    size_t profile_count = 0;
+    hop_profile_resolve(live_ap_profile_channels, WIFI_CHANNELS_MAX, &profile_count);
+    if (profile_count > 0) {
+        live_ap_active_channels = live_ap_profile_channels;
+        live_ap_active_channels_len = profile_count;
+    } else {
+        live_ap_active_channels = live_ap_channels;
+        live_ap_active_channels_len = live_ap_channels_len;
+    }
+
     live_ap_channel_index = 0;
-    esp_wifi_set_channel(live_ap_channels[live_ap_channel_index], WIFI_SECOND_CHAN_NONE);
+    esp_wifi_set_channel(live_ap_active_channels[live_ap_channel_index], WIFI_SECOND_CHAN_NONE);
     esp_timer_create_args_t timer_args = {
         .callback = live_ap_channel_hop_timer_callback,
         .name = "live_ap_hop"
@@ -4213,6 +4226,28 @@ esp_err_t wifi_manager_start_scan_with_time(int seconds) {
 
     rgb_manager_set_color(&rgb_manager, -1, 50, 255, 50, false);
 
+    // User hop profile: scan each profile channel and merge results instead
+    // of the driver's all-country-channel sweep.
+    uint8_t profile_channels[WIFI_CHANNELS_MAX];
+    size_t profile_count = 0;
+    hop_profile_resolve(profile_channels, WIFI_CHANNELS_MAX, &profile_count);
+    if (profile_count > 0) {
+        printf("WiFi Scan started (%u channels)\n", (unsigned)profile_count);
+        TERMINAL_VIEW_ADD_TEXT("WiFi Scan started\n");
+        err = ap_scan_scan_channels(profile_channels, profile_count);
+        if (err == ESP_OK) {
+            printf("Found %u access points\n", ap_count);
+            TERMINAL_VIEW_ADD_TEXT("Found %u access points\n", ap_count);
+        } else {
+            printf("WiFi scan failed to start: %s\n", esp_err_to_name(err));
+            TERMINAL_VIEW_ADD_TEXT("WiFi scan failed to start\n");
+        }
+        wifi_timed_scan_active = false;
+        esp_wifi_stop();
+        (void)ap_manager_restore_after_attack("timed scan");
+        return err;
+    }
+
     printf("WiFi Scan started\n");
     printf("Please wait %d Seconds...\n", seconds);
     TERMINAL_VIEW_ADD_TEXT("WiFi Scan started\n");
@@ -4430,16 +4465,22 @@ esp_err_t wifi_manager_start_wireshark_channel_list(const uint8_t *channels, siz
 
 void wifi_manager_start_wireshark_channel_hop(void) {
     uint8_t channels[sizeof(wireshark_channels)] = {0};
+    size_t count = 0;
 
-    // build country-appropriate channel list
-    size_t count = wifi_channels_build_country_list(channels, sizeof(channels));
+    // Use the user hop profile when one is selected; otherwise keep the
+    // historical country-appropriate channel list.
+    hop_profile_resolve(channels, sizeof(channels), &count);
+    if (count == 0) {
+        // HOP_MODE_DEFAULT (or nothing configured): country list.
+        count = wifi_channels_build_country_list(channels, sizeof(channels));
+    }
     if (count == 0) {
         ESP_LOGE(TAG, "No channels available for Wireshark hopping");
         return;
     }
     esp_err_t err = wifi_manager_start_wireshark_channel_list(channels, count);
     if (err != ESP_OK) ESP_LOGE(TAG, "Failed to start Wireshark channel hopping: %s", esp_err_to_name(err));
-    else ESP_LOGI(TAG, "Wireshark Channel Hopping Started (%d channels, 150ms interval)", count);
+    else ESP_LOGI(TAG, "Wireshark Channel Hopping Started (%d channels, 150ms interval)", (int)count);
 }
 
 void wifi_manager_stop_wireshark_channel_hop(void) {
@@ -5132,59 +5173,92 @@ static volatile bool sta_tracking_active = false;
 static int8_t tracking_last_rssi = 0;
 static int8_t tracking_min_rssi = 0;
 static int8_t tracking_max_rssi = -127;
+static rssi_median_t tracking_med = {0};
 static int64_t tracking_last_rx_us = 0; // timestamp of last matched packet (signal freshness)
 
+// 802.11 Frame Control is little-endian on ESP32: bits 2-3 = type,
+// bits 4-7 = subtype. Beacons are MGMT (type 0) subtype 8.
+#define WIFI_FC_TYPE_SUBTYPE_MASK 0x00FC
+#define WIFI_FC_BEACON            0x0080
+
+/* Closeness of the smoothed reading within this session's observed
+ * [min, max] range, 0-100. More meaningful than absolute dBm when comparing
+ * devices with different transmit powers. */
+int wifi_manager_get_track_closeness(void) {
+    if (!ap_tracking_active && !sta_tracking_active) return -1;
+    if (tracking_max_rssi <= tracking_min_rssi) return -1;
+    int pct = (tracking_last_rssi - tracking_min_rssi) * 100 /
+              (tracking_max_rssi - tracking_min_rssi);
+    if (pct < 0) pct = 0;
+    if (pct > 100) pct = 100;
+    return pct;
+}
+
 static void wifi_track_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
-    if (type != WIFI_PKT_MGMT) return;
-    
+    if (type != WIFI_PKT_MGMT && type != WIFI_PKT_DATA) return;
+    bool is_mgmt = (type == WIFI_PKT_MGMT);
+
     const wifi_promiscuous_pkt_t *pkt = (wifi_promiscuous_pkt_t *)buf;
     const wifi_ieee80211_packet_t *ipkt = (wifi_ieee80211_packet_t *)pkt->payload;
     wifi_ieee80211_mac_hdr_t hdr_copy;
     memcpy(&hdr_copy, &ipkt->hdr, sizeof(hdr_copy));
     const wifi_ieee80211_mac_hdr_t *hdr = &hdr_copy;
-    
+
     int8_t rssi = pkt->rx_ctrl.rssi;
     bool match = false;
-    
+
     if (ap_tracking_active && strlen((const char *)selected_ap.ssid) > 0) {
-        // track ap by bssid (addr2 for beacons)
-        if (memcmp(hdr->addr2, selected_ap.bssid, 6) == 0) {
+        // APs: beacons only (periodic, consistent rate/power). Probe
+        // responses and other MGMT at varying rates would add jitter.
+        // addr2 carries the BSSID on beacons.
+        if (is_mgmt && (hdr->frame_ctrl & WIFI_FC_TYPE_SUBTYPE_MASK) == WIFI_FC_BEACON &&
+            memcmp(hdr->addr2, selected_ap.bssid, 6) == 0) {
             match = true;
         }
     }
-    
+
     if (sta_tracking_active && station_selected) {
-        // track station by mac address (addr2 for frames from sta)
+        // Stations: MGMT + data (data frames are far denser when the client
+        // is active). addr2 is the transmitter in both cases for STA->AP.
         if (memcmp(hdr->addr2, selected_station.station_mac, 6) == 0) {
             match = true;
         }
     }
-    
+
     if (!match) return;
-    
-    int8_t delta = rssi - tracking_last_rssi;
-    
+
     if (rssi > tracking_max_rssi) tracking_max_rssi = rssi;
     if (rssi < tracking_min_rssi) tracking_min_rssi = rssi;
-    
+
+    rssi_median_push(&tracking_med, rssi);
+    int8_t med = rssi_median_get(&tracking_med);
+    int8_t delta = med - tracking_last_rssi;
+    tracking_last_rssi = med;
+
     const char *direction = "";
     if (delta > 5) direction = " ↑ CLOSER";
     else if (delta < -5) direction = " ↓ FARTHER";
-    
+
     int bars = 0;
-    if (rssi > -50) bars = 5;
-    else if (rssi > -60) bars = 4;
-    else if (rssi > -70) bars = 3;
-    else if (rssi > -80) bars = 2;
-    else if (rssi > -90) bars = 1;
-    
+    if (med > -50) bars = 5;
+    else if (med > -60) bars = 4;
+    else if (med > -70) bars = 3;
+    else if (med > -80) bars = 2;
+    else if (med > -90) bars = 1;
+
     char bar_str[8] = "";
     for (int i = 0; i < bars; i++) {
         strcat(bar_str, "#");
     }
-    
-    glog("%s %d dBm (min:%d max:%d)%s\n", bar_str, rssi, tracking_min_rssi, tracking_max_rssi, direction);
-    tracking_last_rssi = rssi;
+
+    int close_pct = wifi_manager_get_track_closeness();
+    if (close_pct >= 0) {
+        glog("%s %d dBm (min:%d max:%d close:%d%%)%s\n", bar_str, med,
+             tracking_min_rssi, tracking_max_rssi, close_pct, direction);
+    } else {
+        glog("%s %d dBm (min:%d max:%d)%s\n", bar_str, med,
+             tracking_min_rssi, tracking_max_rssi, direction);
+    }
     tracking_last_rx_us = esp_timer_get_time();
 }
 
@@ -5222,6 +5296,7 @@ void wifi_manager_track_ap(void) {
     tracking_last_rssi = selected_ap.rssi;
     tracking_min_rssi = selected_ap.rssi;
     tracking_max_rssi = selected_ap.rssi;
+    rssi_median_reset(&tracking_med);
     tracking_last_rx_us = esp_timer_get_time();
     ap_tracking_active = true;
     sta_tracking_active = false;
@@ -5260,6 +5335,7 @@ void wifi_manager_track_sta(void) {
     tracking_last_rssi = -100;
     tracking_min_rssi = -100;
     tracking_max_rssi = -127;
+    rssi_median_reset(&tracking_med);
     tracking_last_rx_us = 0; // no station packet seen yet
     ap_tracking_active = false;
     sta_tracking_active = true;

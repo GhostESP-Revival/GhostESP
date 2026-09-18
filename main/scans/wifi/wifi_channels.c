@@ -7,6 +7,7 @@
 #include "scans/wifi/ap_scan.h"
 #include "esp_log.h"
 #include "esp_wifi.h"
+#include <ctype.h>
 #include <string.h>
 
 static const char *TAG = "WiFiChannels";
@@ -187,5 +188,47 @@ uint8_t wifi_channels_build_from_ap_results(uint8_t *channels, uint8_t max_count
     }
     
     ESP_LOGI(TAG, "Built channel list from %d APs: %d unique channels", ap_count, count);
+    return count;
+}
+
+uint8_t wifi_channels_parse_list(const char *text, uint8_t *channels, uint8_t max_count) {
+    if (text == NULL || channels == NULL || max_count == 0) {
+        return 0;
+    }
+
+    uint8_t count = 0;
+    const char *cursor = text;
+
+    while (*cursor) {
+        while (*cursor && !isdigit((unsigned char)*cursor)) {
+            cursor++;
+        }
+        if (!*cursor) {
+            break;
+        }
+
+        char *end = NULL;
+        long channel = strtol(cursor, &end, 10);
+        if (end == cursor || channel < 1 || channel > 165) {
+            return 0;
+        }
+
+        bool seen = false;
+        for (uint8_t i = 0; i < count; i++) {
+            if (channels[i] == (uint8_t)channel) {
+                seen = true;
+                break;
+            }
+        }
+        if (!seen) {
+            if (count >= max_count) {
+                return 0;
+            }
+            channels[count++] = (uint8_t)channel;
+        }
+
+        cursor = end;
+    }
+
     return count;
 }

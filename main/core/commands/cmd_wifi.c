@@ -8,6 +8,8 @@
 #include "managers/settings_manager.h"
 #include "managers/status_display_manager.h"
 #include "managers/wifi_manager.h"
+#include "scans/wifi/hop_profile.h"
+#include "scans/wifi/wifi_channels.h"
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 #include "managers/ble_manager.h"
 #endif
@@ -146,6 +148,91 @@ void handle_beaconspam(int argc, char **argv) {
     } else {
         glog("Usage: beaconspam -r (for Beacon Spam Random)\n");
         status_display_show_status("Beacon Usage");
+    }
+}
+
+static const char *hop_mode_name(hop_mode_t mode) {
+    switch (mode) {
+        case HOP_MODE_DEFAULT: return "auto";
+        case HOP_MODE_ALL: return "all";
+        case HOP_MODE_BASIC: return "basic";
+        case HOP_MODE_CUSTOM: return "custom";
+        default: return "auto";
+    }
+}
+
+static void hop_print_mode(const char *verb) {
+    hop_mode_t mode = HOP_MODE_DEFAULT;
+    hop_profile_get_mode(&mode);
+
+    glog("Hop mode: %s", hop_mode_name(mode));
+    if (mode == HOP_MODE_CUSTOM) {
+        const char *custom = hop_profile_get_custom_str();
+        glog(" [%s]", (custom && *custom) ? custom : "empty");
+    }
+
+    uint8_t channels[WIFI_CHANNELS_MAX] = {0};
+    size_t count = 0;
+    hop_profile_resolve(channels, sizeof(channels), &count);
+    glog(" -> %u channel", (unsigned)count);
+    if (count != 1) glog("s");
+    glog(": ");
+    for (size_t i = 0; i < count; i++) {
+        glog("%s%u", (i == 0) ? "" : ",", (unsigned)channels[i]);
+    }
+    if (count == 0) glog("(feature auto list)");
+    glog("\n");
+
+    if (verb && *verb) {
+        status_display_show_status(verb);
+    }
+}
+
+void handle_hop_cmd(int argc, char **argv) {
+    hop_mode_t mode = HOP_MODE_DEFAULT;
+    hop_profile_get_mode(&mode);
+    bool saved = false;
+
+    if (argc < 2) {
+        hop_print_mode(NULL);
+        return;
+    }
+
+    if (strcmp(argv[1], "auto") == 0 || strcmp(argv[1], "default") == 0 ||
+        strcmp(argv[1], "clear") == 0) {
+        hop_profile_set_mode(HOP_MODE_DEFAULT);
+        saved = true;
+    } else if (strcmp(argv[1], "all") == 0) {
+        hop_profile_set_mode(HOP_MODE_ALL);
+        saved = true;
+    } else if (strcmp(argv[1], "basic") == 0 || strcmp(argv[1], "1,6,11") == 0) {
+        hop_profile_set_mode(HOP_MODE_BASIC);
+        saved = true;
+    } else if (strcmp(argv[1], "custom") == 0) {
+        if (argc < 3) {
+            glog("Usage: hop custom <1,2,3> | hop 1,2,3\n");
+            return;
+        }
+        if (!hop_profile_set_custom_from_string(argv[2])) {
+            glog("Invalid channel list '%s'. Use e.g. 1,6,11 (1-14, 36-48, 149-165)\n", argv[2]);
+            return;
+        }
+        hop_profile_set_mode(HOP_MODE_CUSTOM);
+        saved = true;
+    } else {
+        // Treat the argument as a bare channel list.
+        if (!hop_profile_set_custom_from_string(argv[1])) {
+            glog("Usage: hop [auto|all|basic|custom <1,2,3>|1,2,3]\n");
+            glog("Invalid channel list '%s'. Use e.g. 1,6,11 (1-14, 36-48, 149-165)\n", argv[1]);
+            return;
+        }
+        hop_profile_set_mode(HOP_MODE_CUSTOM);
+        saved = true;
+    }
+
+    if (saved) {
+        settings_save(&G_Settings);
+        hop_print_mode("Hop Set");
     }
 }
 

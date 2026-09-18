@@ -683,6 +683,10 @@ typedef struct ghostesp_api {
     bool (*espnow_send)(const uint8_t mac[6], const char *text);
     int (*espnow_message_count)(void);
     bool (*espnow_receive)(ghostesp_espnow_message_t *out);
+    /* Optional strict PSRAM allocation for large app buffers. Unlike malloc,
+       this never falls back to internal RAM. */
+    void *(*psram_malloc)(size_t size);
+    void (*psram_free)(void *ptr);
 } ghostesp_api_t;
 
 #define GHOSTESP_API_STRUCT_SIZE_V1 sizeof(ghostesp_api_t)

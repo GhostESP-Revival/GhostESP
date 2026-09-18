@@ -3,6 +3,84 @@
 ## Attribution
 Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A trailing `@handle` credits a guest contributor for that specific line. "Ported from / adapted from" credits the upstream source a feature was based on, not GhostESP authorship.
 
+## v2.2
+
+### Added
+- Added a clock to the centre of the status bar, toggleable in Settings > Date & Time 
+- Added switchable analog and seven-segment clock faces to the Clock view
+- Added Meshtastic-compatible LoRa support for SX1262-family radios including BLE app support with the official Meshtastic App
+- Added MeshCore companion support for SX1262-family radios (enable `HAS_MESHCORE`): on-air adverts, contacts, 8 group channels, group and direct text with ACK/returned-path, an Ed25519 identity, and a `meshcore` CLI. Meshtastic and MeshCore share one radio and are mutually exclusive at runtime.
+- Added a MeshCore BLE companion link (Nordic-UART GATT service) so the official MeshCore apps can chat, manage contacts and channels, and configure the radio.
+- Added LoRa support to:
+  - Heltec V3
+  - Elecrow CrowPanel Advance 2.4-inch
+  - Elecrow CrowPanel Advance 2.8-inch
+  - Elecrow CrowPanel Advance 4.3-inch
+  - Elecrow CrowPanel Advanced P4 7/9/10.1-inch (v1.1 and v1.2+, wireless Meshtastic module)
+- Added USB SD card passthrough on ESP32-S3 boards with an SD card
+- Added custom channel hopping setting that applies to deauth, beacon spam, AP and station scans, airspace monitor, and packet visualizer/capture hopping.
+- Added a Country selector to Settings > Wi-Fi for display UI
+- Added a Row Height setting for the options menus
+- Added support for setting IR TX/RX pins at runtime through the CLI or display UI settings menu
+- Added `dualwd` BLE + WiFi coexistence wardriving (exclusive to PSRAM devices), available from the CLI and GPS menu
+- Added Elecrow CrowPanel 1.28-inch rotary display support with USB Audio volume/mute control
+- Added `mdnssniff` passive local-name sniffer (mDNS/LLMNR/SSDP/NetBIOS) per ARP-discovered host
+- Added a `bledetect` CLI command for the device detect scan with list, track and AirTag spoof actions
+- Added a `glbench` CLI command and Settings > Tools row to benchmark GhostLink throughput and view link statistics
+- Added more devices to the BLE detect devices scan
+  - Tile trackers. Ported from `gatt_scan.c`, adapted from [Flock-You-Android](https://github.com/MaxwellDPS/Flock-You-Android/blob/main/docs/detections/BLE_TRACKER_DETECTION.md) and [Silabs](https://docs.silabs.com/bluetooth/2.13/bluetooth-code-examples-applications/bluetooth-device-tracking-with-tile)
+  - Samsung SmartTag. Adapted from [arxiv 2210.14702](https://arxiv.org/pdf/2210.14702) and [adwatch](https://github.com/bensmith83/adwatch/blob/main/docs/protocols/smarttag.md)
+  - Chipolo. Ported from `gatt_scan.c`
+  - Apple AirPods with per-model variants. Adapted from [Theengs](https://github.com/theengs/decoder/blob/development/src/devices/APPLEAIRPODS_json.h) and [Bruce ble_spam](https://github.com/BruceDevices/firmware/blob/main/src/modules/ble/ble_spam.cpp)
+  - Apple Watch. Adapted from [Theengs](https://github.com/theengs/decoder/blob/development/src/devices/APPLEWATCH_json.h)
+  - Generic FindMy clones. Ported from `gatt_scan.c`
+  - Fast Pair / Find Hub accessories. Adapted from the [Google spec](https://developers.google.com/nearby/fast-pair/specifications/extensions/fmdn)
+  - Hearing aids. Adapted from [Android docs](https://source.android.com/docs/core/connect/bluetooth/asha)
+  - Exposure beacons. Adapted from [Theengs](https://github.com/theengs/decoder/blob/development/src/devices/GAEN_json.h)
+  - Chameleon Ultra. Adapted from `chameleon_manager.c` and [Nordic docs](https://docs.nordicsemi.com/bundle/ncs-latest/page/nrf/libraries/bluetooth_services/services/nus.html)
+
+### Changed
+- Improved encoder navigation in grid app menus
+- Added a T-Embed detent mode setting
+- Defaulted the terminal to white small text and improved readability with padding, spacing and colour-coded output
+- Reorganized Settings menu categories for easier navigation
+- Smoothed and improved stability and reliability of the Track RSSI readout and added a warmer/colder trend arrow
+- Standardized bottom touch bar via shared helper
+- Unified back-key handling with shared helper
+- Standardized list/log scrolling with shared helper
+- Standardized view layout and cleanup with shared helpers
+- Mapped IR buttons to theme palette
+- Reduced GhostScript RAM use on across all boards
+- Matched Ethernet dashboard status card to the rounded action rows
+- Cleaned up boot and GhostLink console output
+- Restyled the on-screen keyboard with a standard iOS-style layout
+- Wi-Fi and Bluetooth scan result menus now scroll as a single list instead of paging through `< Prev` / `Next >` rows
+- Raised the Banshee GhostLink UART to 921600 baud and enlarged the UART receive buffer to 2048 bytes so the higher rate does not increase receive loss
+
+### Fixed
+- Fixed touch-bar row passthrough
+- Fixed NM-CYD-C5 AP row crash
+- Fixed Banshee GhostLink wardriving scans and S3 GPS fix selection
+- Fixed T-Embed rotary encoder step rate and sensitivity
+- Fixed encoder select in virtual scan-result lists
+- Fixed GhostScript crash when an event listener received an event
+- Fixed BadBLE touch-drag scrolling
+- Fixed CrowPanel display startup configs
+- Fixed ESP32-C5 merged firmware failing to boot when flashed at `0x0` by placing the bootloader at the required `0x2000` offset - @yanxke (#395)
+- Fixed BadBLE poll timer leak on exit
+- Fixed lockscreen/ghostscript touch bar gaps on large screens
+- Fixed detail titles always showing 'Details'
+- Fixed PSRAM task stack leaks across Wi-Fi attacks, scans, Ethernet, nRF24, SubGHz and MIC visualizer
+- Fixed DIAL URL/session buffer leaks and uninitialized-pointer cleanup
+- Fixed leaked LVGL async payloads when the display queue is busy
+- Fixed PCAP and wardriving CSV file handles leaking on restart
+- Fixed semaphore leaks in Chameleon and audio receiver init failures
+- Fixed Cloud Store install progress showing "0 KB downloaded" during the install phase
+- Fixed detail view info labels being cut off instead of scrolling sideways when too wide
+- Fixed T-Watch S3 RTC using the wrong I2C bus and chip address
+- Fixed RTC boot restore trusting an invalid (power-lost) oscillator time
+
+
 ## Revival v2.1.2
 
 ### Added
@@ -49,6 +127,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Neighbour icons are pre-fetched into the asset cache after each carousel/Hero transition
 - Demoted hot-path navigation and input logs to verbose so UART output no longer stalls input handling
 - Raised the persistent shared-SPI SD clock to 20 MHz on the Banshee C5 (was 10 MHz) so SD reads finish faster and free the display bus sooner
+- Massively improved Banshee C5 display responsiveness by driving the screen over the PARLIO peripheral, freeing SPI for a permanent 20MHz SD mount - @Billi-Green
 - Audio player shows exact track length parsed from Xing/VBRI headers (CBR fallback excludes ID3 tags)
 - Audio progress now follows the audible playback clock: no jump at track start, and pause/resume continues from the same point
 - 320 kbps MP3s now play on the local speaker; the bitrate cap only applies to GhostLink streaming

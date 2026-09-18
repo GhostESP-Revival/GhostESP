@@ -30,6 +30,7 @@ static bool select_pressed;
 static unsigned char select_key;
 static wad_file_t *doom_wad;
 static bool persistent_storage;
+static bool keep_storage_session;
 static bool snapshot_input;
 static bool select_physical_down;
 static bool exit_requested;
@@ -75,11 +76,10 @@ static char *doom_argv[] = {
     "-iwad", doom_iwad_path,
     "-gfxmode", "rgb565",
 };
-/* asset_storage_size is required; the async-blit pair that follows it is
-   optional (present() falls back to the synchronous blit), so anchor the
-   requirement at asset_storage_size and NULL-check the async ones. */
+/* Doom's large working buffers use the strict PSRAM allocator. The async-blit
+   pair that follows asset_storage_size remains optional. */
 #define DOOM_PORT_REQUIRED_API_SIZE \
-    (offsetof(ghostesp_api_t, asset_storage_size) + sizeof(((ghostesp_api_t *)0)->asset_storage_size))
+    (offsetof(ghostesp_api_t, psram_free) + sizeof(((ghostesp_api_t *)0)->psram_free))
 
 void doom_port_platform_init(const ghostesp_api_t *host_api);
 void doom_port_platform_push_key(bool pressed, unsigned char key);
@@ -90,6 +90,7 @@ void doom_port_storage_session_end(void);
 void doom_port_platform_present(void);
 void doom_port_platform_hide_loading(void);
 void doom_port_platform_shutdown(void);
+void doom_port_psram_free(void *ptr);
 int doom_port_platform_viewport_x(void);
 int doom_port_platform_viewport_y(void);
 int doom_port_platform_viewport_width(void);
@@ -101,6 +102,11 @@ static void doom_port_start(void) {
     select_pressed = false;
     doom_wad = NULL;
     persistent_storage = api->has_feature && api->has_feature("persistent_storage");
+    /* PARLIO leaves the SD host available on C5, so keeping the asset file
+       open avoids reopening the WAD between cache misses without suspending
+       the display. Shared-SPI targets retain the old per-tick close behavior. */
+    keep_storage_session = persistent_storage ||
+                           (api->has_feature && api->has_feature("banshee_c5"));
     snapshot_input = api->input_snapshot != NULL;
     select_physical_down = false;
     exit_requested = false;
@@ -143,6 +149,10 @@ static void doom_port_start(void) {
 static void doom_port_engine_bringup(void) {
     /* DoomGeneric returns after setup; subsequent frames run from on_tick. */
     doomgeneric_Create((int)(sizeof(doom_argv) / sizeof(doom_argv[0])), doom_argv);
+    /* Keep the original generic full-width preset. In this renderer
+       screenblocks=10 is a 320-wide view with the normal status bar; 9 is the
+       setting that introduced the visible green side border on Banshee. */
+    screenblocks = 10;
     detailLevel = 1;
     R_SetViewSize(screenblocks, detailLevel);
     for (unsigned int i = 0; i < numlumps; ++i) {
@@ -166,7 +176,7 @@ static void doom_port_stop(void) {
     __atomic_store_n(&touch_buttons.word, 0, __ATOMIC_RELAXED);
     touch_mode = DOOM_TOUCH_NONE;
 #endif
-    /* Before freeing DG_ScreenBuffer / the shadow frame below. */
+    /* Before freeing DG_ScreenBuffer / the spare frame below. */
     doom_port_platform_shutdown();
     if (doom_wad) {
         W_CloseFile(doom_wad);
@@ -176,7 +186,7 @@ static void doom_port_stop(void) {
     free(lumpinfo);
     lumpinfo = NULL;
     numlumps = 0;
-    free(DG_ScreenBuffer);
+    doom_port_psram_free(DG_ScreenBuffer);
     DG_ScreenBuffer = NULL;
     Z_Shutdown();
     engine_ready = false;
@@ -428,7 +438,7 @@ static void doom_port_tick(uint32_t elapsed_ms) {
 
     if (exit_requested) return;
     doomgeneric_Tick();
-    if (!persistent_storage) {
+    if (!keep_storage_session) {
         doom_port_wad_session_end(doom_wad);
         doom_port_storage_session_end();
     }

@@ -8,6 +8,9 @@ build
 .devcontainer
 .vscode
 /managed_components
+plugins/examples/*/managed_components/
+plugins/examples/*/dist/
+*.gapp
 .clang-tidy
 checks.json
 sdkconfig

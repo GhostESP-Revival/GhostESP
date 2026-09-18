@@ -350,11 +350,7 @@ esp_err_t pcap_export_hc22000(const char *pcap_path, char *out_path, size_t out_
 }
 
 static bool pcap_is_jit_template(void) {
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-  return strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0;
-#else
-  return false;
-#endif
+  return sd_card_needs_jit_mount();
 }
 
 typedef struct {
@@ -498,6 +494,11 @@ esp_err_t pcap_file_open_in_dir(const char *base_file_name,
   if (xSemaphoreTake(pcap_mutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
     ESP_LOGE(PCAP_TAG, "Failed to take mutex in pcap_file_open");
     return ESP_ERR_TIMEOUT;
+  }
+
+  if (pcap_file) {
+    fclose(pcap_file);
+    pcap_file = NULL;
   }
 
   buffer_offset = 0;

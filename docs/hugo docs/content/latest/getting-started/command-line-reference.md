@@ -18,7 +18,7 @@ toc: true
 - (for developers) **`mem [dump|trace <start|stop|dump>]`** — Print heap stats, dump allocation state, or control heap tracing.
 - **`reboot`** — Soft restart the device.
 - **`timezone <TZ>`** — Set timezone, e.g., `timezone EST5EDT,M3.2.0,M11.1.0`.
-- **`stop`** — Stops all active attacks, scans, and background tasks. Also restarts Wi-Fi if it was suspended by BLE.
+- **`stop`** — Stops all active attacks, scans, and background tasks, including BLE device detect and tracking. Also restarts Wi-Fi if it was suspended by BLE.
 - **`stopscan`** — Alias for `scanap -stop`; stops an active AP scan.
 - **`congestion`** — Display Wi-Fi channel congestion chart showing activity across all channels.
 
@@ -65,7 +65,7 @@ These commands are only present on builds that enable ESP-IDF core dumps **to fl
   - `-p` — Probe request flood. Broadcasts spoofed probe requests.
   - `-b` — Bad message attack (EAPOL key install).
   - `-a` — Authentication flood. Sends mass authentication frames to the AP.
-- **`stop`** — Stops all active attacks, scans, and background tasks.
+- **`stop`** — Stops all active attacks, scans, and background tasks, including BLE device detect and tracking.
 - **`stopdeauth`** / **`stopspam`** — Halt active attacks or beacon floods.
 - **`beaconspam [mode]`** — Broadcast spoof SSIDs (`-r`, `-rr`, `-l`, or custom text).
 - **`beaconadd <ssid>`** — Add an SSID to the beacon spam list.
@@ -85,6 +85,7 @@ These commands are only present on builds that enable ESP-IDF core dumps **to fl
 - **`snmpprobe [<ip>|subnet <a.b.c[.0|.]>|walk <ip> [OID]|communities <list|file>]`** — Probe SNMP v1/v2c on UDP port 161 with the built-in community list (`public`, `private`, and more) and retrieve `sysDescr` to identify network devices (routers, switches, printers). `walk` dumps a MIB subtree (default `system`). `communities` overrides the list for the session, either as `c1,c2,...` or a path to a file; `/mnt/ghostesp/snmp_communities.txt` (one community per line) is loaded automatically when present.
 - **`enumscan [subnet [a.b.c.]]|<ip>`** — SMB enumeration: negotiates SMB1/SMB2, reports OS, hostname, domain, dialect, and whether SMB signing is required, then lists shares and users via null-session RAP where the server allows it.
 - **`dhcpstarve <start [threads]|stop|display>`** — Flood a DHCP server or show collected leases.
+- **`mdnssniff <IP|all>`** / **`mdnssniff stop`** — Passively sniff local names (mDNS/LLMNR/SSDP/NetBIOS) per host; no spoofing, auto-saves when Auto Save Scans is on.
 - **`capture <-probe|-deauth|-beacon|-raw|-eapol|-wps|-pwn|-list|-export|-wireshark|-wiresharkble|-ble|-skimmer|-stop>`** — Start packet captures for the specified frame type to SD. ESP32-C5/C6 also supports `-802154` for 802.15.4 capture.
 
 ### Output
@@ -99,7 +100,15 @@ These commands are only present on builds that enable ESP-IDF core dumps **to fl
 
 ### Discovery
 
-- **`blescan [-f|-ds|-a|-r|-adv|-g|-s]`** — Scan for BLE devices, Flippers, spam detectors, raw advertising, or GATT services; `-s` stops.
+- **`blescan [-f|-ds|-a|-r|-adv|-g|-s]`** — Scan for BLE devices, Flippers, spam detectors, raw advertising, or GATT services. `-s` stops the active scan, including a running `bledetect`.
+- **`bledetect [-s|-l|-c|-i|-t <idx>|-u|-sp <idx>|-h]`** — Detect trackers, skimmers, and beacons by advertisement signature (AirTags, Flippers, Tiles, SmartTags, Chipolo, AirPods, Fast Pair, exposure beacons, and more). Bare `bledetect` starts the scan.
+  - `-l` — List discovered devices as `[index] type | name or MAC | RSSI dBm`. A `*` marks the tracked device.
+  - `-t <idx>` / `-u` — Track a device by index (its live RSSI is logged as it is re-seen) or stop tracking.
+  - `-sp <idx>` — Spoof a detected AirTag; use `stopspoof` to end it.
+  - `-s` / `-c` / `-i` — Stop the scan but keep results, clear stored results (stop the scan first), or show scan state and device count.
+  - `-h` — Show usage.
+
+  On-device: **BLE → Detect Devices**, then **List Detected Devices**, provides the same detection with per-device **Track** and **Spoof** actions.
 - **`blewardriving [-s]`** — Log BLE beacons with GPS metadata.
 
 ### Spoofing
@@ -209,6 +218,24 @@ Available on boards with `CONFIG_HAS_NRF24` or `CONFIG_HAS_NRF24_REMOTE`.
 - **`nrf24 resume`** — Resume paused analysis.
 - **`nrf24 status`** — Show current frequency, channel, detected signals, and jamming status.
 - **`nrf24 stop`** — Stop NRF24 analysis.
+
+## LoRa
+
+Available on boards with `CONFIG_HAS_LORA` (SX1262-family radio).
+
+- **`lora setup`** — Print the first-run questionnaire (region required before TX).
+- **`lora set region <name>`** — Persist the LoRa band plan (e.g., `anz`, `us915`, `eu868`). See [LoRa]({{< relref "../lora/_index.md" >}}) for the full name list and frequencies.
+- **`lora set tx <dbm>`** / **`lora set sf <5-12>`** / **`lora set bw <125|250|500>`** — Radio parameters (presets recommended; `set` takes effect on next `lora start`).
+- **`lora set companion <ble|wifi>`** — Whether the BLE PhoneAPI app link rides alongside LoRa (no-PSRAM: WiFi XOR BLE).
+- **`lora start`** / **`lora stop`** — Start or stop the radio and BLE link.
+- **`lora chat [text]`** — Without text, lists recent messages; with text, broadcasts `TEXT_MESSAGE_APP` on the mesh.
+- **`lora nodes`** — Show discovered peers with RSSI/SNR and short names.
+- **`lora ble [on|off|status]`** — Manage BLE advertising for the official Meshtastic app.
+- **`lora app`** / **`lora diag`** — Link stats and `tx_ok/fail/relay rx_ok dups duty_drops`.
+- **`lora cad`** — Run five channel-activity trials with RSSI.
+- **`lora reg <hex-address> [count]`** — Read up to eight consecutive SX1262 registers; `lora reg 0740 2` verifies the SX1262-encoded Meshtastic sync word `24 B4`.
+
+On-device: **Menu → LoRa** mirrors these with selectable rows. See the [LoRa guides]({{< relref "../lora/_index.md" >}}) for wiring, BLE pairing, and mesh framing details.
 
 ## SubGHz
 

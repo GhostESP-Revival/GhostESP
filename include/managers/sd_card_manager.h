@@ -86,9 +86,8 @@ void sd_card_unmount_after_flush(bool display_was_suspended);
 
 /*
  * Returns true when the active build keeps the SD card unmounted after
- * init and individual callers need to mount on demand (currently the
- * `somethingsomething` template). Returns false when the SD is mounted
- * once at boot and stays accessible.
+ * init and individual callers need to mount on demand. Returns false when
+ * the SD is mounted once at boot and stays accessible.
  */
 bool sd_card_needs_jit_mount(void);
 
@@ -124,6 +123,16 @@ typedef struct {
     int used_pct;
 } sd_card_cached_stats_t;
 void sd_card_get_cached_stats(sd_card_cached_stats_t *out);
+
+/*
+ * USB MSC passthrough support. While the SD card is handed to the USB host
+ * (mass-storage mode), the card's host controller stays initialized but the
+ * FatFS VFS at SD_MOUNT_POINT is released. Callers must treat the card as
+ * unavailable and re-mount through sd_card_resume_from_usb_msc() when done.
+ */
+esp_err_t sd_card_suspend_for_usb_msc(sdmmc_card_t **out_card);
+esp_err_t sd_card_resume_from_usb_msc(void);
+bool sd_card_usb_msc_active(void);
 
 // List evil portal directories from SD card (legacy — capped at MAX_PORTALS)
 int get_evil_portal_list(char portal_names[MAX_PORTALS][MAX_PORTAL_NAME]);

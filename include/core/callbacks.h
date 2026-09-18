@@ -48,6 +48,10 @@ bool wardriving_get_helper_channel_plan_csv(char *out, size_t out_len);
 bool wardriving_set_helper_channels_from_csv(const char *csv);
 void wardriving_set_helper_hop_ms(uint16_t ms);
 void wardriving_set_helper_weighted_5g(bool enabled);
+bool wardriving_set_primary_channels_from_csv(const char *csv);
+bool wardriving_start_peer_helper(void);
+bool wardriving_set_active_scan(bool enabled);
+bool wardriving_is_running(void);
 
 uint32_t wardriving_get_ap_count(void);
 
@@ -92,7 +96,6 @@ typedef struct {
 } wps_network_t;
 
 extern gps_t *gps;
-extern wps_network_t detected_wps_networks[MAX_WPS_NETWORKS];
 extern int detected_network_count;
 extern esp_timer_handle_t stop_timer;
 extern int should_store_wps;
@@ -107,5 +110,7 @@ void cleanup_pcap_queue(void);
 uint32_t wifi_callbacks_get_handshake_count(void);
 void wifi_callbacks_reset_handshake_tracking(void);
 void wifi_callbacks_set_pcap_enabled(bool enabled);
+void wifi_callbacks_monitor_tables_ensure(void);
+void wifi_callbacks_monitor_tables_release(void);
 
 #endif

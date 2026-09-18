@@ -12,6 +12,7 @@
 #include "managers/ap_manager.h"
 #include "managers/ble_manager.h"
 #include "managers/ghostchi_manager.h"
+#include "scans/wifi/hop_profile.h"
 #include "core/glog.h"
 #include "esp_log.h"
 #include "esp_wifi.h"
@@ -223,7 +224,16 @@ void aerial_detector_deinit(void) {
 
 static void build_allowed_channels_list(void) {
     allowed_channel_count = 0;
-    
+
+    // A user hop profile overrides the country-based channel plan.
+    size_t profile_count = 0;
+    hop_profile_resolve(allowed_channels, sizeof(allowed_channels), &profile_count);
+    if (profile_count > 0) {
+        allowed_channel_count = (uint8_t)profile_count;
+        ESP_LOGI(TAG, "using hop profile with %d channels", allowed_channel_count);
+        return;
+    }
+
     // get current wifi country configuration
     wifi_country_t country;
     esp_err_t ret = esp_wifi_get_country(&country);

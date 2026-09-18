@@ -85,6 +85,8 @@ typedef enum {
     SETTING_WEB_AUTH,
     SETTING_WEBUI_AP_ONLY,
     SETTING_AP_ENABLED,
+    SETTING_COUNTRY,
+    SETTING_HOP_CHANNELS,
     SETTING_POWER_SAVE,
     SETTING_MAX_BRIGHTNESS,
     SETTING_NEOPIXEL_BRIGHTNESS,
@@ -98,12 +100,17 @@ typedef enum {
 #endif
 #ifdef CONFIG_USE_ENCODER
     SETTING_ENCODER_INVERT,
+    SETTING_ENCODER_LATCH,
 #endif
 #if CONFIG_IDF_TARGET_ESP32S3
     SETTING_USB_HOST_MODE,
+#ifdef CONFIG_HAS_USB_MSC_SD
+    SETTING_USB_MSC,
+#endif
 #endif
     SETTING_RUN_SETUP_WIZARD,
     SETTING_I2C_SCAN,
+    SETTING_GL_BENCH,
     SETTING_FACTORY_RESET,
     SETTING_SETUP_COMPLETE,
     SETTING_WIGLE_API_KEY,
@@ -135,6 +142,7 @@ typedef enum {
     SETTING_MENU_ROUNDED,
     SETTING_EPILEPSY_WARNING,
     SETTING_FONT_SIZE,
+    SETTING_ROW_HEIGHT,
     SETTING_REDUCED_MOTION,
     SETTING_INPUT_REPEAT_SPEED,
     SETTING_HIGH_CONTRAST,
@@ -165,6 +173,9 @@ typedef enum {
     SETTING_WIFI_AUTO_RECONNECT,
     // Timezone quick-edit
     SETTING_TIMEZONE,
+    // Clock display
+    SETTING_CLOCK_STYLE,
+    SETTING_STATUS_BAR_CLOCK,
     // OTA firmware update
     SETTING_OTA_CHANNEL,
     SETTING_OTA_UPDATE_AVAILABLE,
@@ -184,12 +195,25 @@ typedef enum {
     SETTING_MENU_CONFIG,
     SETTING_MAIN_MENU_ITEMS,
     SETTING_APPS_MENU_ITEMS,
+    // Runtime-configurable hardware pins (-1 = use compiled CONFIG_* default)
+    SETTING_IR_TX_PIN,
+    SETTING_IR_RX_PIN,
+    // Read-only "enabled devices" status rows (not NVS-backed)
+    SETTING_DEVICE_IR,
+    SETTING_DEVICE_GPS,
+    SETTING_DEVICE_SUBGHZ,
+    SETTING_DEVICE_NRF24,
+    SETTING_DEVICE_SD,
+    SETTING_DEVICE_RGB,
 } SettingsType;
 
 /* 16 slots x 64B names. The NVS blob is [count][FAVORITES_MAX x 64]; older
  * 8-slot layouts are migrated on load (see settings_manager.c). */
 #define FAVORITES_MAX 16
 #define FAVORITE_NAME_LEN 64
+
+/* Number of presets offered by the options-list Row Height setting. */
+#define MENU_ROW_HEIGHT_OPTION_COUNT 4
 
 #define GPS_BAUD_AUTO 1U
 
@@ -232,6 +256,8 @@ typedef struct {
   RGBMode rgb_mode;
   float channel_delay;
   uint16_t broadcast_speed;
+  uint8_t hop_mode;            // Hop channel profile mode (hop_mode_t in hop_profile.h)
+  char hop_custom_channels[129]; // Custom hop channel list as "1,6,11"
   char ap_ssid[33];     // Max SSID length is 32 bytes + null terminator
   char ap_password[65]; // Max password length is 64 bytes + null terminator
   uint8_t rgb_speed;
@@ -252,6 +278,8 @@ typedef struct {
   PrinterAlignment printer_alignment; // Text alignment
   char flappy_ghost_name[65];
   char selected_timezone[25];
+  uint8_t clock_style;   // Clock view face: 0 = Digital, 1 = Analog
+  bool status_bar_clock; // Show the clock in the status bar centre
   char selected_hex_accent_color[25];
   int gps_rx_pin;
   uint32_t gps_baud_rate;      // 0 = use Kconfig default (CONFIG_GPS_UART_BAUD_RATE)
@@ -273,6 +301,7 @@ typedef struct {
   bool invert_colors; // Invert screen colors
   bool web_auth_enabled;
   bool webui_restrict_to_ap;
+  bool usb_msc_enabled; // Remember USB SD passthrough toggle (never auto-starts at boot)
   
   int32_t esp_comm_tx_pin; // ESP communication TX pin
   int32_t esp_comm_rx_pin; // ESP communication RX pin
@@ -283,6 +312,8 @@ typedef struct {
 
   // Infrared settings
   bool infrared_easy_mode; // Easy learn mode toggle
+  int32_t ir_tx_pin;       // IR transmit pin override, -1 = use CONFIG_INFRARED_LED_PIN
+  int32_t ir_rx_pin;       // IR receive pin override, -1 = use CONFIG_INFRARED_RX_PIN
   
   // Navigation buttons setting
   bool nav_buttons_enabled; // Toggle for main menu navigation buttons
@@ -297,6 +328,9 @@ typedef struct {
   uint32_t status_idle_timeout_ms; // delay before starting idle animation
 #endif
   bool encoder_invert_direction;
+#ifdef CONFIG_USE_ENCODER
+  bool encoder_legacy_latch;
+#endif
   bool setup_complete;
   bool auto_save_scans;
   uint8_t wifi_country;
@@ -335,6 +369,7 @@ typedef struct {
     bool menu_rounded;              // Rounded corners on menu items
     bool epilepsy_warning_enabled;  // Show warning before flashing LED effects
     uint8_t font_size;              // 0=Small, 1=Normal, 2=Large
+    uint8_t row_height;             // Options-list row size preset (0=Compact, 1=Normal, 2=Large, 3=Extra large)
     bool reduced_motion;            // Disable animations
     uint8_t input_repeat_speed;     // 0=Slow, 1=Normal, 2=Fast
     bool high_contrast;             // High contrast color overrides
@@ -384,6 +419,11 @@ float settings_get_channel_delay(const FSettings *settings);
 void settings_set_broadcast_speed(FSettings *settings, uint16_t speed);
 uint16_t settings_get_broadcast_speed(const FSettings *settings);
 
+void settings_set_hop_mode(FSettings *settings, uint8_t mode);
+uint8_t settings_get_hop_mode(const FSettings *settings);
+void settings_set_hop_custom_channels(FSettings *settings, const char *channels);
+const char *settings_get_hop_custom_channels(const FSettings *settings);
+
 void settings_set_flappy_ghost_name(FSettings *settings, const char *Name);
 const char *settings_get_flappy_ghost_name(const FSettings *settings);
 
@@ -392,6 +432,11 @@ bool settings_get_rts_enabled(const FSettings *settings);
 
 void settings_set_timezone_str(FSettings *settings, const char *Name);
 const char *settings_get_timezone_str(const FSettings *settings);
+
+void settings_set_clock_style(FSettings *settings, uint8_t style);
+uint8_t settings_get_clock_style(const FSettings *settings);
+void settings_set_status_bar_clock(FSettings *settings, bool enabled);
+bool settings_get_status_bar_clock(const FSettings *settings);
 
 void settings_set_accent_color_str(FSettings *settings, const char *Name);
 const char *settings_get_accent_color_str(const FSettings *settings);
@@ -417,6 +462,12 @@ const char *settings_get_portal_ssid(const FSettings *settings);
 
 void settings_set_gps_rx_pin(FSettings *settings, uint8_t RxPin);
 uint8_t settings_get_gps_rx_pin(const FSettings *settings);
+
+// IR pin overrides (validated: -1 = use compiled default)
+bool settings_set_ir_tx_pin(FSettings *settings, int32_t pin);
+int32_t settings_get_ir_tx_pin(const FSettings *settings);
+bool settings_set_ir_rx_pin(FSettings *settings, int32_t pin);
+int32_t settings_get_ir_rx_pin(const FSettings *settings);
 
 void settings_set_gps_baud_rate(FSettings *settings, uint32_t baud);
 uint32_t settings_get_gps_baud_rate(const FSettings *settings);
@@ -484,6 +535,8 @@ bool settings_get_invert_colors(const FSettings *settings);
 // Getter and Setter for web auth
 void settings_set_web_auth_enabled(FSettings *settings, bool enabled);
 bool settings_get_web_auth_enabled(const FSettings *settings);
+void settings_set_usb_msc_enabled(FSettings *settings, bool enabled);
+bool settings_get_usb_msc_enabled(const FSettings *settings);
 void settings_set_webui_restrict_to_ap(FSettings *settings, bool enabled);
 bool settings_get_webui_restrict_to_ap(const FSettings *settings);
 
@@ -535,6 +588,10 @@ uint8_t settings_get_neopixel_max_brightness(const FSettings *settings);
 // Encoder direction inversion settings
 void settings_set_encoder_invert_direction(FSettings *settings, bool enabled);
 bool settings_get_encoder_invert_direction(const FSettings *settings);
+#ifdef CONFIG_USE_ENCODER
+void settings_set_encoder_legacy_latch(FSettings *settings, bool enabled);
+bool settings_get_encoder_legacy_latch(const FSettings *settings);
+#endif
 
 void settings_set_auto_save_scans(FSettings *settings, bool enabled);
 bool settings_get_auto_save_scans(const FSettings *settings);
@@ -622,6 +679,8 @@ bool settings_get_epilepsy_warning_enabled(const FSettings *settings);
 
 void settings_set_font_size(FSettings *settings, uint8_t size);
 uint8_t settings_get_font_size(const FSettings *settings);
+void settings_set_row_height(FSettings *settings, uint8_t height);
+uint8_t settings_get_row_height(const FSettings *settings);
 void settings_set_reduced_motion(FSettings *settings, bool enabled);
 bool settings_get_reduced_motion(const FSettings *settings);
 void settings_set_input_repeat_speed(FSettings *settings, uint8_t speed);

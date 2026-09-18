@@ -1,5 +1,6 @@
 #include "managers/display_manager.h"
 #include "driver/gpio.h"
+#include <time.h>
 #include "esp_sleep.h"
 #include "esp_timer.h"
 #include "esp_log.h"
@@ -7,6 +8,9 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "lvgl_helpers.h"
+#ifdef CONFIG_USE_C5_PARLIO_DISPLAY
+#include "lvgl_tft/banshee_c5_parlio.h"
+#endif
 #include "managers/sd_card_manager.h"
 #include "managers/plugin_api.h"
 #include "managers/settings_manager.h"
@@ -146,6 +150,173 @@ static volatile bool g_cached_batt_valid = false;
 #include "lvgl_i2c/i2c_manager.h"
 #endif
 
+#if defined(CONFIG_CROWPANEL_ADVANCE_5_LCD) || defined(CONFIG_CROWPANEL_ADVANCE_7_LCD)
+#define CROWPANEL_ADVANCE_CONTROLLER_ADDR      0x30
+#define CROWPANEL_ADVANCE_CONTROLLER_WAKE_GPIO GPIO_NUM_1
+#define CROWPANEL_ADVANCE_CONTROLLER_WAKE_CMD  250u
+#define CROWPANEL_ADVANCE_BACKLIGHT_MAX_RAW     245u
+
+/* Advance 5/7 panels use an STC8 controller for backlight and touch power. */
+static esp_err_t crowpanel_advance_stc8_write(uint8_t value) {
+    return lvgl_i2c_write(CONFIG_LV_I2C_TOUCH_PORT,
+                          CROWPANEL_ADVANCE_CONTROLLER_ADDR,
+                          I2C_NO_REG, &value, 1);
+}
+
+static esp_err_t crowpanel_advance_stc8_prepare(void) {
+    uint8_t wake_cmd = CROWPANEL_ADVANCE_CONTROLLER_WAKE_CMD;
+    esp_err_t err = crowpanel_advance_stc8_write(wake_cmd);
+
+    for (unsigned attempt = 0; err != ESP_OK && attempt < 3; ++attempt) {
+        gpio_config_t wake_gpio = {
+            .pin_bit_mask = 1ULL << CROWPANEL_ADVANCE_CONTROLLER_WAKE_GPIO,
+            .mode = GPIO_MODE_OUTPUT,
+            .pull_up_en = GPIO_PULLUP_DISABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE,
+        };
+        esp_err_t gpio_err = gpio_config(&wake_gpio);
+        if (gpio_err != ESP_OK) {
+            ESP_LOGW("DisplayManager", "CrowPanel Advance controller wake GPIO failed: %s",
+                     esp_err_to_name(gpio_err));
+            return gpio_err;
+        }
+
+        gpio_set_level(CROWPANEL_ADVANCE_CONTROLLER_WAKE_GPIO, 0);
+        vTaskDelay(pdMS_TO_TICKS(120));
+        gpio_set_direction(CROWPANEL_ADVANCE_CONTROLLER_WAKE_GPIO, GPIO_MODE_INPUT);
+        gpio_set_pull_mode(CROWPANEL_ADVANCE_CONTROLLER_WAKE_GPIO, GPIO_FLOATING);
+        vTaskDelay(pdMS_TO_TICKS(100));
+        err = crowpanel_advance_stc8_write(wake_cmd);
+    }
+
+    if (err == ESP_OK) {
+        ESP_LOGI("DisplayManager", "CrowPanel Advance STC8 controller ready at 0x%02x",
+                 CROWPANEL_ADVANCE_CONTROLLER_ADDR);
+    } else {
+        ESP_LOGW("DisplayManager", "CrowPanel Advance STC8 controller unavailable after wake: %s",
+                 esp_err_to_name(err));
+    }
+    return err;
+}
+#endif
+
+#if defined(CONFIG_CROWPANEL_ADVANCE_24_LCD) || defined(CONFIG_CROWPANEL_ADVANCE_28_LCD)
+/* Both the V1.0 factory image and the V1.1/V1.2 examples perform this board
+ * reset before initializing the ST7789. GPIO2 remains high after the pulse. */
+static esp_err_t crowpanel_advance_small_factory_reset(void) {
+    const gpio_config_t reset_gpios = {
+        .pin_bit_mask = (1ULL << GPIO_NUM_1) | (1ULL << GPIO_NUM_2),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    esp_err_t err = gpio_config(&reset_gpios);
+    if (err == ESP_OK) err = gpio_set_level(GPIO_NUM_1, 0);
+    if (err == ESP_OK) err = gpio_set_level(GPIO_NUM_2, 0);
+    if (err == ESP_OK) {
+        vTaskDelay(pdMS_TO_TICKS(20));
+        err = gpio_set_level(GPIO_NUM_2, 1);
+    }
+    if (err == ESP_OK) vTaskDelay(pdMS_TO_TICKS(100));
+    gpio_set_direction(GPIO_NUM_1, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(GPIO_NUM_1, GPIO_FLOATING);
+
+    if (err == ESP_OK) {
+        ESP_LOGI("DisplayManager", "CrowPanel Advance 2.4/2.8 factory GPIO reset complete");
+    } else {
+        ESP_LOGE("DisplayManager", "CrowPanel Advance 2.4/2.8 factory GPIO reset failed: %s",
+                 esp_err_to_name(err));
+    }
+    return err;
+}
+#endif
+
+#ifdef CONFIG_CROWPANEL_ADVANCE_43_LCD
+#define CROWPANEL_ADVANCE43_TCA9534_ADDR        0x18
+#define CROWPANEL_ADVANCE43_TCA_OUTPUT_REG      0x01
+#define CROWPANEL_ADVANCE43_TCA_CONFIG_REG      0x03
+#define CROWPANEL_ADVANCE43_FACTORY_OUTPUTS     0x16 /* P1=H, P2=H, P3=L, P4=H */
+#define CROWPANEL_ADVANCE43_FACTORY_OUTPUT_MASK 0x1e /* P1..P4 */
+#define CROWPANEL_ADVANCE43_RESET_BIT           0x04 /* TCA9534 P2 */
+
+static esp_err_t crowpanel_advance43_tca9534_read(uint8_t reg, uint8_t *value) {
+    return lvgl_i2c_read(CONFIG_LV_I2C_TOUCH_PORT,
+                         CROWPANEL_ADVANCE43_TCA9534_ADDR,
+                         reg, value, 1);
+}
+
+static esp_err_t crowpanel_advance43_tca9534_write(uint8_t reg, uint8_t value) {
+    return lvgl_i2c_write(CONFIG_LV_I2C_TOUCH_PORT,
+                          CROWPANEL_ADVANCE43_TCA9534_ADDR,
+                          reg, &value, 1);
+}
+
+/* Match factory_code.ino: configure TCA9534 P1..P4 as outputs, assert its
+ * board-control rails, then pulse P2 while ESP GPIO1 holds the reset line low.
+ * P1 is left high by the factory and this board has no software dimmer. */
+static esp_err_t crowpanel_advance43_factory_power_sequence(void) {
+    uint8_t config = 0;
+    uint8_t outputs = 0;
+    esp_err_t err = crowpanel_advance43_tca9534_read(
+        CROWPANEL_ADVANCE43_TCA_CONFIG_REG, &config);
+    if (err != ESP_OK) goto failed;
+
+    config &= (uint8_t)~CROWPANEL_ADVANCE43_FACTORY_OUTPUT_MASK;
+    err = crowpanel_advance43_tca9534_write(
+        CROWPANEL_ADVANCE43_TCA_CONFIG_REG, config);
+    if (err != ESP_OK) goto failed;
+
+    err = crowpanel_advance43_tca9534_read(
+        CROWPANEL_ADVANCE43_TCA_OUTPUT_REG, &outputs);
+    if (err != ESP_OK) goto failed;
+    outputs = (uint8_t)((outputs & ~CROWPANEL_ADVANCE43_FACTORY_OUTPUT_MASK) |
+                        CROWPANEL_ADVANCE43_FACTORY_OUTPUTS);
+    err = crowpanel_advance43_tca9534_write(
+        CROWPANEL_ADVANCE43_TCA_OUTPUT_REG, outputs);
+    if (err != ESP_OK) goto failed;
+
+    gpio_config_t reset_gpio = {
+        .pin_bit_mask = 1ULL << GPIO_NUM_1,
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    err = gpio_config(&reset_gpio);
+    if (err != ESP_OK) goto failed;
+    err = gpio_set_level(GPIO_NUM_1, 0);
+    if (err != ESP_OK) goto release_gpio;
+
+    outputs &= (uint8_t)~CROWPANEL_ADVANCE43_RESET_BIT;
+    err = crowpanel_advance43_tca9534_write(
+        CROWPANEL_ADVANCE43_TCA_OUTPUT_REG, outputs);
+    if (err != ESP_OK) goto release_gpio;
+    vTaskDelay(pdMS_TO_TICKS(20));
+
+    outputs |= CROWPANEL_ADVANCE43_RESET_BIT;
+    err = crowpanel_advance43_tca9534_write(
+        CROWPANEL_ADVANCE43_TCA_OUTPUT_REG, outputs);
+    if (err != ESP_OK) goto release_gpio;
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+release_gpio:
+    gpio_set_direction(GPIO_NUM_1, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(GPIO_NUM_1, GPIO_FLOATING);
+    if (err == ESP_OK) {
+        ESP_LOGI("DisplayManager", "CrowPanel Advance 4.3 factory TCA9534 startup complete (0x%02x)",
+                 CROWPANEL_ADVANCE43_TCA9534_ADDR);
+        return ESP_OK;
+    }
+
+failed:
+    ESP_LOGE("DisplayManager", "CrowPanel Advance 4.3 TCA9534 startup failed at 0x%02x: %s",
+             CROWPANEL_ADVANCE43_TCA9534_ADDR, esp_err_to_name(err));
+    return err;
+}
+#endif
+
 #ifdef CONFIG_Waveshare_LCD
 #include "vendor/drivers/CH422G.h"
 #endif
@@ -229,7 +400,11 @@ void set_keyboard_brightness(uint8_t brightness);
 #define BACKLIGHT_TIMER LEDC_TIMER_0
 #define RGB_TIMER       LEDC_TIMER_1
 
+#ifdef CONFIG_USE_C5_PARLIO_DISPLAY
 #define LVGL_TASK_PERIOD_MS 5
+#else
+#define LVGL_TASK_PERIOD_MS 10
+#endif
 #define INTERMEDIATE_DIM_PERCENT 20
 #define INTERMEDIATE_DIM_DURATION_MS 5000
 static const char *TAG = "DisplayManager";
@@ -242,6 +417,25 @@ lv_obj_t *sd_label = NULL;
 lv_obj_t *battery_label = NULL;
 lv_obj_t *level_label = NULL;
 lv_obj_t *mainlabel = NULL;
+lv_obj_t *status_clock_label = NULL;
+/* Title max width with/without the centre clock (0 = clock not present). */
+static lv_coord_t s_status_title_w = 0;
+static lv_coord_t s_status_title_w_clock = 0;
+
+/* A narrow bar cannot hold the title, a centred clock and the full icon
+ * cluster at once. There, the centre alternates the clock with the Ghostchi
+ * level and the level leaves the icon cluster (which also frees room for the
+ * icons). Large panels have space for both at once, so they keep the badge. */
+#if !GUI_LARGE_SCREEN && !defined(CONFIG_CROWPANEL_1P28_ROTARY)
+#define STATUS_CLOCK_CYCLES_LEVEL 1
+#else
+#define STATUS_CLOCK_CYCLES_LEVEL 0
+#endif
+#define STATUS_CLOCK_CYCLE_TIME_MS  8000
+#define STATUS_CLOCK_CYCLE_LEVEL_MS 2500
+
+static int64_t s_clock_phase_start_us = 0;
+static bool s_clock_cycle_active = false;
 
 static View *s_lockscreen_return_view = NULL;
 
@@ -360,6 +554,24 @@ static joystick_t enc_button;
 static joystick_t exit_button;
 static TaskHandle_t encoder_poll_task_handle = NULL;
 static void encoder_poll_task(void *pvParameters);
+
+static encoder_latch_mode_t display_manager_encoder_latch_mode(void)
+{
+    encoder_latch_mode_t mode = ENCODER_LATCH_FOUR3;
+#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "LilyGo TEmbedC1101") == 0) {
+        mode = settings_get_encoder_legacy_latch(&G_Settings)
+             ? ENCODER_LATCH_FOUR3
+             : ENCODER_LATCH_TWO03;
+    }
+#endif
+    return mode;
+}
+
+void display_manager_apply_encoder_settings(void)
+{
+    encoder_set_latch_mode(&g_encoder, display_manager_encoder_latch_mode());
+}
 #endif
 
 #define FADE_DURATION_MS GUI_ANIM_TRANSITION
@@ -1212,6 +1424,15 @@ void update_status_bar(bool wifi_enabled, bool bt_enabled, bool sd_card_mounted,
     lv_label_set_text_fmt(battery_label, "%s %d%%", battery_symbol, batteryPercentage);
   }
 
+#ifdef CONFIG_CROWPANEL_1P28_ROTARY
+  /* The round panel has only a compact top pill. Keep secondary status
+   * badges out of it; Wi-Fi is the single persistent system indicator and
+   * the active view owns feature-specific state such as USB HID readiness. */
+  lv_obj_add_flag(level_label, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(sd_label, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(bt_label, LV_OBJ_FLAG_HIDDEN);
+#endif
+
   lv_obj_invalidate(status_bar);
 
   // set status bar icon colors based on power save mode and AP state
@@ -1258,10 +1479,87 @@ void update_status_bar(bool wifi_enabled, bool bt_enabled, bool sd_card_mounted,
   }
 }
 
+/* Format the status-bar centre clock. 12-hour, no seconds, matching the
+ * Clock view's digital face (e.g. "3:45 PM"). */
+static void status_clock_format(char *buf, size_t len) {
+  time_t now = time(NULL);
+  struct tm tmv;
+  localtime_r(&now, &tmv);
+  int hour_12 = tmv.tm_hour % 12;
+  if (hour_12 == 0) hour_12 = 12;
+  snprintf(buf, len, "%d:%02d %s", hour_12, tmv.tm_min, tmv.tm_hour >= 12 ? "PM" : "AM");
+}
+
 static void status_update_cb(lv_timer_t *timer) {
   if (s_status_updates_paused) return; // Skip updates while RF-sensitive work runs
   if (!status_bar || !lv_obj_is_valid(status_bar)) return;
   if (is_backlight_off) return; // Skip updates when backlight is off
+
+  /* Ghostchi level, computed once per tick: the icon-cluster badge and the
+   * centre label (when it alternates with the clock) both read it. */
+  char level_text[16] = "";
+  if (level_label && lv_obj_is_valid(level_label)) {
+    ghostchi_snapshot_t snap;
+    ghostchi_manager_get_snapshot(&snap);
+    static const unsigned int lv_xp[] = {
+        0, 10, 40, 90, 160, 250, 360, 490, 640, 810, 1000,
+        1210, 1440, 1690, 1960, 2250, 2560, 2890, 3240, 3610, 4000,
+        4410, 4840, 5290, 5760, 6250, 6760, 7290, 7840, 8410, 9000,
+        9610, 10240, 10890, 11560, 12250, 12960, 13690, 14440, 15210, 16000,
+        16810, 17640, 18490, 19360, 20250, 21160, 22090, 23040, 24010, 25000
+    };
+    unsigned int level = 1;
+    unsigned int xp = snap.total_xp;
+    for (size_t i = 1; i < sizeof(lv_xp) / sizeof(lv_xp[0]); ++i) {
+      if (xp < lv_xp[i]) { level = (unsigned int)i; break; }
+      if (i == sizeof(lv_xp) / sizeof(lv_xp[0]) - 1) level = (unsigned int)i;
+    }
+    snprintf(level_text, sizeof(level_text), "Lv%u", level);
+  }
+
+#if STATUS_CLOCK_CYCLES_LEVEL
+  bool cycle_level = false;
+#endif
+  bool level_in_centre = false;
+  if (status_clock_label && lv_obj_is_valid(status_clock_label)) {
+    bool clock_on = settings_get_status_bar_clock(&G_Settings);
+    if (clock_on) {
+#if STATUS_CLOCK_CYCLES_LEVEL
+      cycle_level = true;
+      int64_t now_us = esp_timer_get_time();
+      if (!s_clock_cycle_active) {
+        s_clock_cycle_active = true;
+        s_clock_phase_start_us = now_us;
+      }
+      int64_t elapsed_ms = (now_us - s_clock_phase_start_us) / 1000;
+      if (elapsed_ms >= STATUS_CLOCK_CYCLE_TIME_MS + STATUS_CLOCK_CYCLE_LEVEL_MS) {
+        s_clock_phase_start_us = now_us;
+        elapsed_ms = 0;
+      }
+      level_in_centre = (elapsed_ms >= STATUS_CLOCK_CYCLE_TIME_MS) && (level_text[0] != '\0');
+#endif
+      char clock_text[16];
+      if (level_in_centre) {
+        snprintf(clock_text, sizeof(clock_text), "%s", level_text);
+      } else {
+        status_clock_format(clock_text, sizeof(clock_text));
+      }
+      if (strcmp(lv_label_get_text(status_clock_label), clock_text) != 0) {
+        lv_label_set_text(status_clock_label, clock_text);
+      }
+      lv_obj_clear_flag(status_clock_label, LV_OBJ_FLAG_HIDDEN);
+    } else {
+      s_clock_cycle_active = false;
+      lv_obj_add_flag(status_clock_label, LV_OBJ_FLAG_HIDDEN);
+    }
+    /* Restore the title's full width when the clock is off. */
+    if (mainlabel && lv_obj_is_valid(mainlabel) && s_status_title_w_clock > 0) {
+      lv_coord_t want_w = clock_on ? s_status_title_w_clock : s_status_title_w;
+      if (lv_obj_get_width(mainlabel) != want_w) {
+        lv_obj_set_width(mainlabel, want_w);
+      }
+    }
+  }
 
   bool HasBluetooth;
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
@@ -1288,28 +1586,23 @@ static void status_update_cb(lv_timer_t *timer) {
   update_status_bar(true, HasBluetooth, sd_card_manager.is_initialized,
                     battery_percentage, settings_get_power_save_enabled(&G_Settings), server_running, is_charging);
 
-  if (level_label && lv_obj_is_valid(level_label)) {
-    ghostchi_snapshot_t snap;
-    ghostchi_manager_get_snapshot(&snap);
-    static const unsigned int lv_xp[] = {
-        0, 10, 40, 90, 160, 250, 360, 490, 640, 810, 1000,
-        1210, 1440, 1690, 1960, 2250, 2560, 2890, 3240, 3610, 4000,
-        4410, 4840, 5290, 5760, 6250, 6760, 7290, 7840, 8410, 9000,
-        9610, 10240, 10890, 11560, 12250, 12960, 13690, 14440, 15210, 16000,
-        16810, 17640, 18490, 19360, 20250, 21160, 22090, 23040, 24010, 25000
-    };
-    unsigned int level = 1;
-    unsigned int xp = snap.total_xp;
-    for (size_t i = 1; i < sizeof(lv_xp) / sizeof(lv_xp[0]); ++i) {
-      if (xp < lv_xp[i]) { level = (unsigned int)i; break; }
-      if (i == sizeof(lv_xp) / sizeof(lv_xp[0]) - 1) level = (unsigned int)i;
-    }
-    char level_text[16];
-    snprintf(level_text, sizeof(level_text), "Lv%u", level);
+  if (level_label && lv_obj_is_valid(level_label) && level_text[0] != '\0') {
     if (strcmp(lv_label_get_text(level_label), level_text) != 0) {
       lv_label_set_text(level_label, level_text);
     }
+#ifndef CONFIG_CROWPANEL_1P28_ROTARY
+#if STATUS_CLOCK_CYCLES_LEVEL
+    /* While the centre alternates the level in, the badge stands down so the
+     * two never show at once and the icons keep a stable position. */
+    if (cycle_level) {
+      lv_obj_add_flag(level_label, LV_OBJ_FLAG_HIDDEN);
+    } else {
+      lv_obj_clear_flag(level_label, LV_OBJ_FLAG_HIDDEN);
+    }
+#else
     lv_obj_clear_flag(level_label, LV_OBJ_FLAG_HIDDEN);
+#endif
+#endif
   }
 }
 
@@ -1354,6 +1647,9 @@ void display_manager_update_status_bar_color(void) {
   if (level_label && lv_obj_is_valid(level_label)) {
     lv_obj_set_style_text_color(level_label, text_color, 0);
   }
+  if (status_clock_label && lv_obj_is_valid(status_clock_label)) {
+    lv_obj_set_style_text_color(status_clock_label, primary_text, 0);
+  }
 
   status_update_cb(NULL);
 }
@@ -1393,47 +1689,105 @@ void display_manager_add_status_bar(const char *CurrentMenuName) {
         sd_label = NULL;
         battery_label = NULL;
         level_label = NULL;
+        status_clock_label = NULL;
+        s_clock_cycle_active = false; /* fresh bar starts on the time phase */
         lvgl_obj_del_safe(&old_bar);
     }
     status_bar = lv_obj_create(lv_scr_act());
+#ifdef CONFIG_CROWPANEL_1P28_ROTARY
+  /* Keep the status strip inside the circular aperture rather than placing
+   * text/icons at the square framebuffer corners. */
+  lv_obj_set_size(status_bar, 112, 20);
+  lv_obj_align(status_bar, LV_ALIGN_TOP_MID, 0, 16);
+#else
   lv_obj_set_size(status_bar, LV_HOR_RES, GUI_STATUS_BAR_H);
   lv_obj_align(status_bar, LV_ALIGN_TOP_MID, 0, 0);
+#endif
   lv_obj_set_style_bg_color(status_bar, status_bg_color, LV_PART_MAIN);
   lv_obj_set_scrollbar_mode(status_bar, LV_SCROLLBAR_MODE_OFF);
+#ifdef CONFIG_CROWPANEL_1P28_ROTARY
+  lv_obj_set_style_border_side(status_bar, LV_BORDER_SIDE_FULL, LV_PART_MAIN);
+  lv_obj_set_style_border_width(status_bar, 1, LV_PART_MAIN);
+#else
   lv_obj_set_style_border_side(status_bar, LV_BORDER_SIDE_BOTTOM, LV_PART_MAIN);
   lv_obj_set_style_border_width(status_bar, 2, LV_PART_MAIN);
+#endif
   lv_obj_set_style_border_color(status_bar, lv_color_hex(theme_palette_get_accent(theme)), LV_PART_MAIN);
   lv_obj_set_style_border_opa(status_bar, LV_OPA_40, LV_PART_MAIN);
+  lv_obj_set_style_pad_all(status_bar, 0, LV_PART_MAIN);
   lv_obj_clear_flag(status_bar, LV_OBJ_FLAG_SCROLLABLE);
+#ifdef CONFIG_CROWPANEL_1P28_ROTARY
+  lv_obj_set_style_radius(status_bar, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+#else
   lv_obj_set_style_radius(status_bar, 0, LV_PART_MAIN);
+#endif
 
   lv_obj_t *left_container = lv_obj_create(status_bar);
   lv_obj_remove_style_all(left_container);
+#ifdef CONFIG_CROWPANEL_1P28_ROTARY
+  lv_obj_set_size(left_container, 72, 20);
+#elif GUI_LARGE_SCREEN
+  /* Wide panels have a true left title zone. A content-sized container
+   * centered in the bar put the title near x=200 on an 800px CrowPanel. */
+  lv_obj_set_size(left_container, lv_pct(50), GUI_STATUS_BAR_H);
+#elif defined(CONFIG_CROWPANEL_ADVANCE_SMALL_SPI_LCD)
+  /* The 320x240 Advance panels need the same left title zone as the wide
+   * panels; a content-sized container centers the title in the whole bar. */
+  lv_obj_set_size(left_container, lv_pct(50), GUI_STATUS_BAR_H);
+#else
   lv_obj_set_size(left_container, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+#endif
   lv_obj_set_flex_flow(left_container, LV_FLEX_FLOW_ROW);
+#ifdef CONFIG_CROWPANEL_1P28_ROTARY
+  lv_obj_set_flex_align(left_container, LV_FLEX_ALIGN_CENTER,
+                        LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_align(left_container, LV_ALIGN_CENTER, 0, 0);
+#else
+  lv_obj_set_flex_align(left_container, LV_FLEX_ALIGN_START,
+                        LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
   lv_obj_align(left_container, LV_ALIGN_LEFT_MID,
 #ifdef CONFIG_IS_ATOMS3R
-               1, /* tighter inset: use more of the 128px width */
+               1,
 #else
                GUI_GRID,
 #endif
                0);
+#endif
   mainlabel = lv_label_create(left_container);
   lv_label_set_text(mainlabel, label_text);
   lv_obj_set_style_text_color(mainlabel, lv_color_hex(theme_palette_get_text(theme)), 0);
   lv_label_set_long_mode(mainlabel, LV_LABEL_LONG_DOT);
+#ifdef CONFIG_CROWPANEL_1P28_ROTARY
+  lv_obj_set_width(mainlabel, 72);
+  lv_obj_set_style_text_align(mainlabel, LV_TEXT_ALIGN_CENTER, 0);
+#elif GUI_LARGE_SCREEN || defined(CONFIG_CROWPANEL_ADVANCE_SMALL_SPI_LCD)
+  lv_obj_set_width(mainlabel, LV_PCT(100));
+  lv_obj_set_style_text_align(mainlabel, LV_TEXT_ALIGN_LEFT, 0);
+#else
   lv_obj_set_width(mainlabel, LV_HOR_RES / 2 - GUI_SAFEAREA_HOR);
+  lv_obj_set_style_text_align(mainlabel, LV_TEXT_ALIGN_LEFT, 0);
+#endif
   lv_obj_set_style_text_font(mainlabel, accessibility_get_font_small(), 0);
 
   lv_obj_t *right_container = lv_obj_create(status_bar);
   lv_obj_remove_style_all(right_container);
+#ifdef CONFIG_CROWPANEL_1P28_ROTARY
+  lv_obj_set_size(right_container, 28, 20);
+#else
   lv_obj_set_size(right_container, lv_pct(50), GUI_STATUS_BAR_H);
+#endif
   lv_obj_set_flex_flow(right_container, LV_FLEX_FLOW_ROW);
   lv_obj_set_flex_align(right_container, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+#ifdef CONFIG_CROWPANEL_1P28_ROTARY
+  lv_obj_set_style_pad_column(right_container, 0, 0);
+#else
   lv_obj_set_style_pad_column(right_container, GUI_GRID, 0);
+#endif
   lv_obj_align(right_container, LV_ALIGN_RIGHT_MID,
 #ifdef CONFIG_IS_ATOMS3R
                -1, /* tighter inset: push icons further right */
+#elif defined(CONFIG_CROWPANEL_1P28_ROTARY)
+               -4,
 #else
                -GUI_GRID,
 #endif
@@ -1465,6 +1819,42 @@ void display_manager_add_status_bar(const char *CurrentMenuName) {
   lv_obj_set_style_text_font(battery_label, accessibility_get_font_icon(), 0);
   lv_obj_add_flag(battery_label, LV_OBJ_FLAG_HIDDEN);
 
+  /* Centre clock. The round rotary aperture has no room between its centred
+   * title and the icons, so it is skipped there. */
+#ifndef CONFIG_CROWPANEL_1P28_ROTARY
+  status_clock_label = lv_label_create(status_bar);
+  lv_obj_set_style_text_color(status_clock_label, lv_color_hex(theme_palette_get_text(theme)), 0);
+  lv_obj_set_style_text_font(status_clock_label, accessibility_get_font_small(), 0);
+  lv_obj_align(status_clock_label, LV_ALIGN_CENTER, 0, 0);
+  {
+    char clock_text[16];
+    status_clock_format(clock_text, sizeof(clock_text));
+    lv_label_set_text(status_clock_label, clock_text);
+  }
+  lv_obj_add_flag(status_clock_label, LV_OBJ_FLAG_HIDDEN);
+#if STATUS_CLOCK_CYCLES_LEVEL
+  /* The level badge leaves the icon cluster on narrow bars, so the centre
+   * becomes its tap target for the Ghostchi screen. */
+  lv_obj_add_flag(status_clock_label, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(status_clock_label, level_label_click_cb, LV_EVENT_CLICKED, NULL);
+#endif
+
+  /* Keep the title clear of the centred clock: cap its width at half the bar
+   * minus the clock's half-width, instead of letting it run to mid-screen.
+   * Remember the original width so turning the clock off restores it. */
+  lv_obj_update_layout(status_bar);
+#if GUI_LARGE_SCREEN || defined(CONFIG_CROWPANEL_ADVANCE_SMALL_SPI_LCD)
+  s_status_title_w = LV_HOR_RES / 2;
+#else
+  s_status_title_w = LV_HOR_RES / 2 - GUI_SAFEAREA_HOR;
+#endif
+  s_status_title_w_clock = LV_HOR_RES / 2 - GUI_SAFEAREA_HOR
+                           - lv_obj_get_width(status_clock_label) / 2 - GUI_GRID;
+  if (s_status_title_w_clock < 40) s_status_title_w_clock = 40;
+  lv_obj_set_width(mainlabel, settings_get_status_bar_clock(&G_Settings)
+                                 ? s_status_title_w_clock : s_status_title_w);
+#endif
+
   bool HasBluetooth;
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
   HasBluetooth = true;
@@ -1492,17 +1882,35 @@ void display_manager_add_status_bar(const char *CurrentMenuName) {
   }
 }
 
+void display_manager_set_status_bar_hidden(bool hidden) {
+  if (!status_bar || !lv_obj_is_valid(status_bar)) return;
+  if (hidden) {
+    lv_obj_add_flag(status_bar, LV_OBJ_FLAG_HIDDEN);
+  } else {
+    lv_obj_clear_flag(status_bar, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(status_bar);
+  }
+}
+
 void display_manager_raise_status_bar(void) {
   if (!status_bar || !lv_obj_is_valid(status_bar)) return;
   lv_obj_set_parent(status_bar, lv_layer_top());
+#ifdef CONFIG_CROWPANEL_1P28_ROTARY
+  lv_obj_align(status_bar, LV_ALIGN_TOP_MID, 0, 16);
+#else
   lv_obj_align(status_bar, LV_ALIGN_TOP_MID, 0, 0);
+#endif
   lv_obj_move_foreground(status_bar);
 }
 
 void display_manager_restore_status_bar(void) {
   if (!status_bar || !lv_obj_is_valid(status_bar)) return;
   lv_obj_set_parent(status_bar, lv_scr_act());
+#ifdef CONFIG_CROWPANEL_1P28_ROTARY
+  lv_obj_align(status_bar, LV_ALIGN_TOP_MID, 0, 16);
+#else
   lv_obj_align(status_bar, LV_ALIGN_TOP_MID, 0, 0);
+#endif
   lv_obj_move_foreground(status_bar);
 }
 
@@ -1737,7 +2145,7 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
   }
 #endif
 #if defined(CONFIG_CROWPANEL_ADVANCE_24_LCD) || defined(CONFIG_CROWPANEL_ADVANCE_28_LCD)
-  /* The 2.4/2.8 GT911 shares the I2C bus with the RTC. Initialize it before
+  /* The 2.4/2.8 FT6336U shares the I2C bus with the RTC. Initialize it before
    * the LVGL driver so touch probing cannot race another early I2C client. */
   ESP_LOGI(TAG, "Pre-initializing CrowPanel 2.4/2.8 touch I2C bus (SDA=15, SCL=16)");
   esp_err_t crowpanel_small_i2c_ret = lvgl_i2c_init(CONFIG_LV_I2C_TOUCH_PORT);
@@ -1745,18 +2153,52 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
     ESP_LOGE(TAG, "Failed to initialize CrowPanel 2.4/2.8 touch I2C bus: %s",
              esp_err_to_name(crowpanel_small_i2c_ret));
   }
+  crowpanel_advance_small_factory_reset();
 #endif
 #ifdef CONFIG_CROWPANEL_ADVANCE_RGB_LCD
-  esp_err_t crowpanel_7_i2c_ret = lvgl_i2c_init(CONFIG_LV_I2C_TOUCH_PORT);
-  if (crowpanel_7_i2c_ret != ESP_OK && crowpanel_7_i2c_ret != ESP_ERR_INVALID_STATE) {
-    ESP_LOGE(TAG, "Failed to initialize CrowPanel Advance 7 touch I2C bus: %s",
-             esp_err_to_name(crowpanel_7_i2c_ret));
+  esp_err_t crowpanel_i2c_ret = lvgl_i2c_init(CONFIG_LV_I2C_TOUCH_PORT);
+  if (crowpanel_i2c_ret != ESP_OK && crowpanel_i2c_ret != ESP_ERR_INVALID_STATE) {
+    ESP_LOGE(TAG, "Failed to initialize CrowPanel Advance touch I2C bus: %s",
+             esp_err_to_name(crowpanel_i2c_ret));
   }
+#ifdef CONFIG_CROWPANEL_ADVANCE_43_LCD
+  else {
+    crowpanel_advance43_factory_power_sequence();
+  }
+#else
+  else if (crowpanel_advance_stc8_prepare() == ESP_OK) {
+    /* Current factory sources send 0 after activation for maximum brightness. */
+    uint8_t backlight_on = 0;
+    esp_err_t backlight_err = crowpanel_advance_stc8_write(backlight_on);
+    if (backlight_err != ESP_OK) {
+      ESP_LOGW(TAG, "CrowPanel Advance initial backlight-on failed: %s",
+               esp_err_to_name(backlight_err));
+    }
+  }
+#endif
 #endif
   ESP_LOGI(TAG, "display_manager: initializing LVGL...");
   lv_init();
   ESP_LOGI(TAG, "display_manager: LVGL core init done, free internal RAM: %d bytes", 
            (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+#ifdef CONFIG_CROWPANEL_1P28_ROTARY
+  /* The factory firmware enables both board power rails before touching the
+   * display. GPIO40 is the active-low power indicator. Do this before the
+   * generic SPI/LVGL driver so the panel and touch controller are powered
+   * during their reset/probe sequences. */
+  gpio_config_t crowpanel_power = {
+    .pin_bit_mask = (1ULL << 1) | (1ULL << 2) | (1ULL << 40),
+    .mode = GPIO_MODE_OUTPUT,
+    .pull_up_en = GPIO_PULLUP_DISABLE,
+    .pull_down_en = GPIO_PULLDOWN_DISABLE,
+    .intr_type = GPIO_INTR_DISABLE,
+  };
+  gpio_config(&crowpanel_power);
+  gpio_set_level(1, 1);
+  gpio_set_level(2, 1);
+  gpio_set_level(40, 0);
+  ESP_LOGI(TAG, "CrowPanel rotary power rails enabled (GPIO1/GPIO2), indicator active");
+#endif
 #if defined(CONFIG_USE_CARDPUTER) || defined(CONFIG_USE_CARDPUTER_ADV) || defined(CONFIG_IS_ATOMS3R)
   init_m5gfx_display();
 #elif defined(CONFIG_USE_TDISPLAY_S3)
@@ -1793,7 +2235,7 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
     return;
   }
 #elif defined(CONFIG_CROWPANEL_ADVANCE_RGB_LCD)
-  /* The Advance 7 uses the dedicated RGB driver below. Keep the legacy LVGL
+  /* Advance 4.3/5/7 use the dedicated RGB driver below. Keep the legacy LVGL
    * display helper out of this branch; only initialize GT911 touch here. */
   touch_driver_init();
 #else
@@ -1871,17 +2313,28 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
   buf1_pixels = (size_t)width * (size_t)height;
   buf2_pixels = 0;
 #elif defined(CONFIG_IDF_TARGET_ESP32C5)
-  /* Keep the C5 SPI flush buffers in DMA-capable internal RAM. PSRAM draw
+   /* Keep the C5 display buffers in DMA-capable internal RAM. PSRAM draw
      buffers force the SPI driver to allocate internal bounce buffers at flush
      time, which is fragile once WiFi/LVGL have fragmented internal RAM.
-     Only somethingsomething gets a second buffer: LVGL renders the next
-     chunk while the SPI DMA flushes the previous one, hiding render time
-     behind the transfer. Other C5 boards stay single-buffered to save
-     internal RAM. */
+     Boards with enough internal RAM use two buffers so LVGL can render the
+     next chunk while DMA flushes the previous one. */
+#ifdef CONFIG_USE_C5_PARLIO_DISPLAY
+  buf1_pixels = (size_t)width * 8;
+#else
   buf1_pixels = (size_t)width * 5;
+#endif
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-  if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
+  if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "NM-CYD-C5") == 0) {
+    /* Match the 10-line CYD buffer depth and double-buffer this SPI panel.
+       RGB565 usage is 2 * 240 * 10 * 2 = 9,600 bytes. */
+    buf1_pixels = (size_t)width * 10;
+    buf2_pixels = (size_t)width * 10;
+  } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
+#ifdef CONFIG_USE_C5_PARLIO_DISPLAY
+    buf2_pixels = (size_t)width * 8;
+#else
     buf2_pixels = (size_t)width * 5;
+#endif
   }
 #endif
 #elif defined(CONFIG_IDF_TARGET_ESP32S2)
@@ -1909,7 +2362,11 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
       if (buf1) ESP_LOGI(TAG, "display_manager: AtomS3R buf1 allocated in PSRAM (%d bytes)", (int)buf1_bytes);
     }
 #elif defined(CONFIG_IDF_TARGET_ESP32C5)
+#if defined(CONFIG_USE_C5_PARLIO_DISPLAY)
+    buf1 = banshee_c5_parlio_alloc_draw_buffer(buf1_bytes);
+#else
     buf1 = heap_caps_malloc(buf1_bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+#endif
     if (buf1) ESP_LOGI(TAG, "display_manager: buf1 allocated in internal DMA RAM (%d bytes)", (int)buf1_bytes);
 #elif defined(CONFIG_SPIRAM)
     buf1 = heap_caps_malloc(buf1_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
@@ -1925,7 +2382,11 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
     buf2 = heap_caps_malloc(buf2_bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
     if (buf2) ESP_LOGI(TAG, "display_manager: AtomS3R buf2 allocated in internal DMA RAM (%d bytes)", (int)buf2_bytes);
 #elif defined(CONFIG_IDF_TARGET_ESP32C5)
+#if defined(CONFIG_USE_C5_PARLIO_DISPLAY)
+    buf2 = banshee_c5_parlio_alloc_draw_buffer(buf2_bytes);
+#else
     buf2 = heap_caps_malloc(buf2_bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+#endif
     if (buf2) ESP_LOGI(TAG, "display_manager: buf2 allocated in internal DMA RAM (%d bytes)", (int)buf2_bytes);
 #elif defined(CONFIG_SPIRAM)
     buf2 = heap_caps_malloc(buf2_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
@@ -1944,7 +2405,7 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
     buf2 = NULL;
     return;
   }
-  if (!buf2) {
+  if (buf2_pixels > 0 && !buf2) {
     ESP_LOGW(TAG, "display_manager: buf2 allocation failed, falling back to single buffer");
     buf2_pixels = 0;
   }
@@ -2074,18 +2535,26 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
                  ENCODER_LATCH_FOUR3);
     joystick_init(&enc_button, 7, 500 /*hold ms*/, false); // P07 = encoder button
 #else
-    // Direct GPIO encoder (TEmbed C1101)
+    // Direct GPIO encoder. The vendor T-Embed example uses the two-transition
+    // latch mode; other direct-GPIO boards retain the four-transition mode.
     encoder_init(&g_encoder,
                  CONFIG_ENCODER_INA,
                  CONFIG_ENCODER_INB,
                  true,                    /* pull-ups */
-                 ENCODER_LATCH_FOUR3);    /* detented knobs */
+                 display_manager_encoder_latch_mode());
     joystick_init(&enc_button, CONFIG_ENCODER_KEY,
                   500 /*hold ms*/, true);
 
-    // Run encoder sampling at 1 kHz for cleaner quadrature decoding
+    // Run encoder sampling at 1 kHz for cleaner quadrature decoding. The
+    // CrowPanel sampler outranks the touch/input task so an I2C transaction
+    // cannot hide quadrature phases during a quick spin.
+#ifdef CONFIG_CROWPANEL_1P28_ROTARY
+    const UBaseType_t encoder_poll_priority = HARDWARE_INPUT_TASK_PRIORITY + 1;
+#else
+    const UBaseType_t encoder_poll_priority = HARDWARE_INPUT_TASK_PRIORITY;
+#endif
     if (xTaskCreate(encoder_poll_task, "EncPoll", 2048, NULL,
-                    HARDWARE_INPUT_TASK_PRIORITY, &encoder_poll_task_handle) != pdPASS) {
+                    encoder_poll_priority, &encoder_poll_task_handle) != pdPASS) {
         ESP_LOGE(TAG, "Failed to create encoder poll task");
     }
 
@@ -3045,10 +3514,12 @@ static void dm_switch_wait_async_cb(void *param) {
   free(call);
 }
 
-lv_res_t display_manager_lvgl_async_call(lv_async_cb_t cb, void *user_data) {
-  if (!cb) return LV_RES_INV;
-  if (!s_lvgl_call_mutex) {
-    /* Called before display_manager_init() finished creating the mutex; there
+static lv_res_t display_manager_lvgl_async_call_with_timeout(lv_async_cb_t cb,
+                                                              void *user_data,
+                                                              TickType_t timeout) {
+    if (!cb) return LV_RES_INV;
+    if (!s_lvgl_call_mutex) {
+        /* Called before display_manager_init() finished creating the mutex; there
      * is no concurrent lv_timer_handler() running yet, so this is safe. */
     return lv_async_call(cb, user_data);
   }
@@ -3056,13 +3527,23 @@ lv_res_t display_manager_lvgl_async_call(lv_async_cb_t cb, void *user_data) {
    * may run well past MUTEX_TIMEOUT_MS (tuned for the unrelated, short dm-state
    * critical sections elsewhere in this file), so give enqueueing callers more
    * room before dropping the call. */
-  if (xSemaphoreTakeRecursive(s_lvgl_call_mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
-    ESP_LOGW(TAG, "display_manager_lvgl_async_call: timed out waiting for LVGL call mutex");
-    return LV_RES_INV;
-  }
+    if (xSemaphoreTakeRecursive(s_lvgl_call_mutex, timeout) != pdTRUE) {
+        if (timeout != 0) {
+            ESP_LOGW(TAG, "display_manager_lvgl_async_call: timed out waiting for LVGL call mutex");
+        }
+        return LV_RES_INV;
+    }
   lv_res_t res = lv_async_call(cb, user_data);
-  xSemaphoreGiveRecursive(s_lvgl_call_mutex);
-  return res;
+    xSemaphoreGiveRecursive(s_lvgl_call_mutex);
+    return res;
+}
+
+lv_res_t display_manager_lvgl_async_call(lv_async_cb_t cb, void *user_data) {
+    return display_manager_lvgl_async_call_with_timeout(cb, user_data, pdMS_TO_TICKS(100));
+}
+
+lv_res_t display_manager_lvgl_async_call_nowait(lv_async_cb_t cb, void *user_data) {
+    return display_manager_lvgl_async_call_with_timeout(cb, user_data, 0);
 }
 
 typedef struct {
@@ -3081,17 +3562,33 @@ bool display_manager_is_lvgl_task(void) {
   return !lvgl_task_handle || xTaskGetCurrentTaskHandle() == lvgl_task_handle;
 }
 
-void display_manager_run_on_lvgl(void (*fn)(void *), void *arg) {
-  if (!fn) return;
-  if (!display_manager_is_lvgl_task()) {
-    dm_lvgl_call_t *call = malloc(sizeof(*call));
-    if (!call) return;
-    call->fn = fn;
-    call->arg = arg;
-    display_manager_lvgl_async_call(dm_run_on_lvgl_async_cb, call);
-    return;
+static bool display_manager_run_on_lvgl_common(void (*fn)(void *), void *arg,
+                                                bool wait_for_lvgl) {
+    if (!fn) return false;
+    if (!display_manager_is_lvgl_task()) {
+        dm_lvgl_call_t *call = malloc(sizeof(*call));
+        if (!call) return false;
+        call->fn = fn;
+        call->arg = arg;
+        lv_res_t result = wait_for_lvgl
+                              ? display_manager_lvgl_async_call(dm_run_on_lvgl_async_cb, call)
+                              : display_manager_lvgl_async_call_nowait(dm_run_on_lvgl_async_cb, call);
+        if (result != LV_RES_OK) {
+            free(call);
+            return false;
+        }
+    return true;
   }
-  fn(arg);
+    fn(arg);
+    return true;
+}
+
+bool display_manager_run_on_lvgl(void (*fn)(void *), void *arg) {
+    return display_manager_run_on_lvgl_common(fn, arg, true);
+}
+
+bool display_manager_run_on_lvgl_nowait(void (*fn)(void *), void *arg) {
+    return display_manager_run_on_lvgl_common(fn, arg, false);
 }
 
 void display_manager_switch_view(View *view) {
@@ -3100,7 +3597,9 @@ void display_manager_switch_view(View *view) {
   if (!call) return;
   call->fn = dm_switch_async_cb;
   call->arg = view;
-  display_manager_lvgl_async_call(dm_run_on_lvgl_async_cb, call);
+  if (display_manager_lvgl_async_call(dm_run_on_lvgl_async_cb, call) != LV_RES_OK) {
+    free(call);
+  }
 }
 
 bool display_manager_switch_view_and_wait_for_refresh(View *view) {
@@ -3129,7 +3628,12 @@ bool display_manager_switch_view_and_wait_for_refresh(View *view) {
   call->view = view;
   call->done = done;
 
-  display_manager_lvgl_async_call(dm_switch_wait_async_cb, call);
+  if (display_manager_lvgl_async_call(dm_switch_wait_async_cb, call) != LV_RES_OK) {
+    vSemaphoreDelete(done);
+    free(call);
+    display_manager_switch_view(view);
+    return false;
+  }
   if (xSemaphoreTake(done, pdMS_TO_TICKS(2000)) != pdTRUE) {
     ESP_LOGW(TAG, "Timed out waiting for first view refresh");
     return false;
@@ -3184,14 +3688,22 @@ static void dm_raise_status_bar_for_overlay(void) {
     lv_label_set_text(mainlabel, "Locked");
   }
   lv_obj_set_parent(status_bar, lv_layer_top());
+#ifdef CONFIG_CROWPANEL_1P28_ROTARY
+  lv_obj_align(status_bar, LV_ALIGN_TOP_MID, 0, 16);
+#else
   lv_obj_align(status_bar, LV_ALIGN_TOP_MID, 0, 0);
+#endif
   lv_obj_move_foreground(status_bar);
 }
 
 static void dm_restore_status_bar_after_overlay(void) {
   if (!status_bar || !lv_obj_is_valid(status_bar)) return;
   lv_obj_set_parent(status_bar, lv_scr_act());
+#ifdef CONFIG_CROWPANEL_1P28_ROTARY
+  lv_obj_align(status_bar, LV_ALIGN_TOP_MID, 0, 16);
+#else
   lv_obj_align(status_bar, LV_ALIGN_TOP_MID, 0, 0);
+#endif
   lv_obj_move_foreground(status_bar);
   if (mainlabel && lv_obj_is_valid(mainlabel)) {
     lv_label_set_text(mainlabel, s_pre_lock_status_title);
@@ -3267,6 +3779,7 @@ static bool touch_move_events_enabled_for_view_name(const char *view_name) {
           strcmp(view_name, "NFC") == 0 ||
           strcmp(view_name, "Infrared View") == 0 ||
           strcmp(view_name, "SubGHz") == 0 ||
+          strcmp(view_name, "LoRa") == 0 ||
           strcmp(view_name, "Ethernet") == 0 ||
           strcmp(view_name, "AirspaceMonitorView") == 0 ||
           strcmp(view_name, "Audio Player") == 0 ||
@@ -3277,6 +3790,7 @@ static bool touch_move_events_enabled_for_view_name(const char *view_name) {
            strcmp(view_name, "GhostScript Runner") == 0 ||
            strcmp(view_name, "SD App") == 0 ||
            strcmp(view_name, "BadUSB") == 0 ||
+           strcmp(view_name, "BadBLE") == 0 ||
           strcmp(view_name, "WardrivingView") == 0 ||
           strcmp(view_name, "Trackpad") == 0 ||
           strcmp(view_name, "Cloud Store") == 0 ||
@@ -3386,15 +3900,19 @@ static void display_manager_set_backlight_raw(uint8_t percentage) {
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "CrowPanel 5-inch backlight update failed: %s", esp_err_to_name(err));
     }
-#elif defined(CONFIG_CROWPANEL_ADVANCE_RGB_LCD)
-    /* V1.2+ CrowPanel Advance 7-inch boards route backlight control through
+#elif defined(CONFIG_CROWPANEL_ADVANCE_43_LCD)
+    /* Factory firmware leaves TCA9534 P1 high and exposes no dimming control. */
+    (void)percentage;
+#elif defined(CONFIG_CROWPANEL_ADVANCE_5_LCD) || defined(CONFIG_CROWPANEL_ADVANCE_7_LCD)
+    /* CrowPanel Advance 5/7-inch boards route backlight through
      * the onboard STC8H1K28 at 0x30. Its scale is inverted: 0=max and
-     * 245=off. The factory firmware uses the same raw one-byte command. */
-    uint8_t stc8_backlight = (uint8_t)(((100u - percentage) * 245u + 50u) / 100u);
-    esp_err_t err = lvgl_i2c_write(CONFIG_LV_I2C_TOUCH_PORT, 0x30, I2C_NO_REG,
-                                   &stc8_backlight, 1);
+     * 245=off. Older 5-inch v1.1 and 7-inch v1.2 boards use a different
+     * command protocol and require a revision-specific build. */
+    uint8_t stc8_backlight = (uint8_t)(((100u - percentage) *
+                                        CROWPANEL_ADVANCE_BACKLIGHT_MAX_RAW + 50u) / 100u);
+    esp_err_t err = crowpanel_advance_stc8_write(stc8_backlight);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "CrowPanel Advance 7-inch STC8 backlight update failed: %s",
+        ESP_LOGW(TAG, "CrowPanel Advance STC8 backlight update failed: %s",
                  esp_err_to_name(err));
     }
 #elif defined(CONFIG_LV_DISP_BACKLIGHT_PWM)
@@ -3664,7 +4182,11 @@ static void encoder_poll_task(void *pvParameters)
 #endif
 
 void hardware_input_task(void *pvParameters) {
+#ifdef CONFIG_USE_C5_PARLIO_DISPLAY
+  const TickType_t tick_interval = pdMS_TO_TICKS(5);
+#else
   const TickType_t tick_interval = pdMS_TO_TICKS(10);
+#endif
   const int touch_move_min_delta = 8;
 
   lv_indev_drv_t touch_driver;
@@ -3862,13 +4384,27 @@ void hardware_input_task(void *pvParameters) {
           is_backlight_dimmed = false;
           is_backlight_off = false;
         } else {
+#ifdef CONFIG_CROWPANEL_1P28_ROTARY
+          /* Fast spins can include accelerated detents. Drain the decoder in
+           * one burst so they reach the audio view on this hardware tick. */
+          const int max_encoder_events_per_tick = 12;
+#else
           const int max_encoder_events_per_tick = 4;
+#endif
           for (int i = 0; i < max_encoder_events_per_tick; i++) {
               encoder_direction_t raw_dir = encoder_peek_direction(&g_encoder);
               if (raw_dir == ENCODER_DIR_NONE) break;
 
               int8_t dir = (int8_t)raw_dir;
-              if (settings_get_encoder_invert_direction(&G_Settings)) {
+              bool invert_encoder = settings_get_encoder_invert_direction(&G_Settings);
+#ifdef CONFIG_CROWPANEL_1P28_ROTARY
+              /* The factory firmware treats the A-rising/B-low phase as
+               * its increment path. The shared four-state decoder reports
+               * that physical cycle as CCW, so normalize the board once;
+               * the user setting still provides the final invert toggle. */
+              invert_encoder = !invert_encoder;
+#endif
+              if (invert_encoder) {
                   dir = (int8_t)-dir;
               }
 
@@ -3885,8 +4421,23 @@ void hardware_input_task(void *pvParameters) {
         }
     }
 
-    /* push-switch -> treat like "button" */
-    if (joystick_just_pressed(&enc_button)) {
+    /* push-switch -> treat like "button". The factory uses a 20 ms debounce;
+     * retain that edge filter for the CrowPanel while leaving other encoder
+     * boards on their established input path. */
+    bool encoder_button_pressed = joystick_just_pressed(&enc_button);
+#ifdef CONFIG_CROWPANEL_1P28_ROTARY
+    static TickType_t crowpanel_last_button_tick = 0;
+    if (encoder_button_pressed) {
+      TickType_t now = xTaskGetTickCount();
+      if (crowpanel_last_button_tick != 0 &&
+          (now - crowpanel_last_button_tick) < pdMS_TO_TICKS(20)) {
+        encoder_button_pressed = false;
+      } else {
+        crowpanel_last_button_tick = now;
+      }
+    }
+#endif
+    if (encoder_button_pressed) {
         // treat an encoder click as "touch"
         last_touch_time = xTaskGetTickCount();
         if (is_backlight_dimmed || is_backlight_off) {
@@ -4604,8 +5155,12 @@ void hardware_input_task(void *pvParameters) {
         event.data.touch_data.point.x = touch_data.point.x;
         event.data.touch_data.point.y = touch_data.point.y;
         event.data.touch_data.state = touch_data.state;
-        if (xQueueSend(input_queue, &event, pdMS_TO_TICKS(10)) != pdTRUE) {
-          ESP_LOGE(TAG, "Failed to send touch input to queue\n");
+        /* Never let the raw touch task block behind a busy LVGL frame.  A
+         * press is edge-triggered and a queued copy is only useful if it can
+         * be delivered immediately; blocking here was turning a short render
+         * stall into an apparent panel freeze. */
+        if (xQueueSend(input_queue, &event, 0) != pdTRUE) {
+          ESP_LOGW(TAG, "Touch press dropped: input queue full");
         }
       }
     } else if (touch_data.state == LV_INDEV_STATE_PR && touch_active && !skip_next_release) {
@@ -4655,8 +5210,8 @@ void hardware_input_task(void *pvParameters) {
         event.type = INPUT_TYPE_TOUCH;
         event.is_touch_move = false;
         event.data.touch_data = touch_data;
-        if (xQueueSend(input_queue, &event, pdMS_TO_TICKS(10)) != pdTRUE) {
-          ESP_LOGE(TAG, "Failed to send touch input to queue\n");
+        if (xQueueSend(input_queue, &event, 0) != pdTRUE) {
+          ESP_LOGW(TAG, "Touch release dropped: input queue full");
         }
       }
     }
@@ -5069,7 +5624,11 @@ void processEvent() {  // do not process events until the display manager is up
 /* ---- scroll coalescing ------------------------------------------------- */
 
 #define SCROLL_COALESCE_MAX_STEP 64
+#ifdef CONFIG_USE_C5_PARLIO_DISPLAY
+#define SCROLL_FLUSH_INTERVAL_MS 5
+#else
 #define SCROLL_FLUSH_INTERVAL_MS 16
+#endif
 
 typedef struct {
   lv_obj_t *target;
@@ -5204,6 +5763,8 @@ bool touch_drag_release(touch_drag_t *d, const lv_indev_data_t *data) {
 
 void lvgl_tick_task(void *arg) {
 #ifdef CONFIG_CROWPANEL_ADVANCED_P4
+  const uint32_t max_idle_delay_ms = 5;
+#elif defined(CONFIG_USE_C5_PARLIO_DISPLAY)
   const uint32_t max_idle_delay_ms = 5;
 #else
   const uint32_t max_idle_delay_ms = 10;

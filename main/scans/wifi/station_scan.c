@@ -12,6 +12,7 @@
 #include "scans/wifi/station_scan.h"
 #include "scans/wifi/ap_scan.h"
 #include "scans/wifi/wifi_channels.h"
+#include "scans/wifi/hop_profile.h"
 #include "core/scan_saver.h"
 #include "core/ouis.h"
 #include "core/glog.h"
@@ -341,11 +342,19 @@ static esp_err_t start_scansta_channel_hopping(void) {
         scansta_channel_hop_timer = NULL;
     }
 
-    uint8_t planned_count = wifi_channels_build_from_ap_results(scansta_channels,
-                                                                 WIFI_CHANNELS_MAX);
-    if (planned_count == 0) {
-        planned_count = wifi_channels_build_country_list(scansta_channels,
-                                                         WIFI_CHANNELS_MAX);
+    uint8_t planned_count = 0;
+    size_t profile_count = 0;
+    hop_profile_resolve(scansta_channels, WIFI_CHANNELS_MAX, &profile_count);
+    if (profile_count > 0) {
+        planned_count = (uint8_t)profile_count;
+    } else {
+        // HOP_MODE_DEFAULT: AP-result list first, then country list.
+        planned_count = wifi_channels_build_from_ap_results(scansta_channels,
+                                                            WIFI_CHANNELS_MAX);
+        if (planned_count == 0) {
+            planned_count = wifi_channels_build_country_list(scansta_channels,
+                                                             WIFI_CHANNELS_MAX);
+        }
     }
     scansta_channel_count = 0;
     for (uint8_t i = 0; i < planned_count; i++) {

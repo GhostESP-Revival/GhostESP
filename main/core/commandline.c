@@ -414,6 +414,7 @@ void register_commands() {
     register_command("attack", handle_attack_cmd);
     register_command("list", handle_list);
     register_command("beaconspam", handle_beaconspam);
+    register_command("hop", handle_hop_cmd);
     register_command("beaconadd", handle_beaconadd);
     register_command("beaconremove", handle_beaconremove);
     register_command("beaconclear", handle_beaconclear);
@@ -454,6 +455,7 @@ void register_commands() {
     register_command("enumscan", handle_enum_scan);
     register_command("congestion", handle_congestion_cmd);
     register_command("listenprobes", handle_listen_probes_cmd);
+    register_command("mdnssniff", handle_mdns_sniff);
     register_command("settings", handle_settings_cmd);
     register_command("loglevel", handle_log_level_cmd);
     register_command("fav", handle_fav_cmd);
@@ -466,6 +468,7 @@ void register_commands() {
     register_command("commstatus", handle_comm_status);
     register_command("commdisconnect", handle_comm_disconnect);
     register_command("commsetpins", handle_comm_setpins);
+    register_command("glbench", handle_glbench_cmd);
 #if GHOSTESP_OTA_SUPPORTED
     // Only registered on 8MB/16MB boards -- these handlers live in
     // peer_ota_manager.c, so registering them unconditionally would pull
@@ -478,8 +481,12 @@ void register_commands() {
 
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     register_command("blescan", handle_ble_scan_cmd);
+    register_command("bledetect", handle_ble_detect_cmd);
     register_command("blebridge", ble_bridge_handle_command);
     register_command("blewardriving", handle_ble_wardriving);
+#if !defined(CONFIG_IDF_TARGET_ESP32P4)
+    register_command("dualwd", handle_dualwd);
+#endif
     register_command("listairtags", handle_list_airtags_cmd);
     register_command("selectairtag", handle_select_airtag);
     register_command("spoofairtag", handle_spoof_airtag);
@@ -495,6 +502,8 @@ void register_commands() {
     register_command("apcred", handle_apcred);
     register_command("apenable", handle_ap_enable_cmd);
     register_command("chipinfo", handle_chip_info_cmd);
+    register_command("devices", handle_devices_cmd);
+    register_command("irpin", handle_ir_pin_cmd);
     register_command("rgbmode", handle_rgb_mode);
     register_command("setrgbpins", handle_setrgb);
     register_command("setrgbcount", handle_setrgbcount);
@@ -529,6 +538,8 @@ void register_commands() {
     register_command("setcountry", handle_setcountry);
     register_command("webauth", handle_web_auth_cmd);
     register_command("webuiap", handle_webuiap_cmd);
+    register_command("clockstyle", handle_clockstyle_cmd);
+    register_command("statusbarclock", handle_statusbarclock_cmd);
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
     register_command("blespam", handle_ble_spam_cmd);
 #endif
@@ -540,8 +551,16 @@ void register_commands() {
     register_command("ir", handle_ir_cmd);
 #endif
     register_command("nrf24", handle_nrf24_cmd);
+    register_command("lora", handle_lora_cmd);
+    register_command("meshtastic", handle_lora_cmd);
+    register_command("meshcore", handle_meshcore_cmd);
+    register_command("mc", handle_meshcore_cmd);
+    register_command("mesh", handle_mesh_cmd);
     register_command("audio", handle_audio_cmd);
     register_command("badusb", handle_badusb_cmd);
+#ifdef CONFIG_HAS_USB_MSC_SD
+    register_command("usbsd", handle_usbsd_cmd);
+#endif
 #ifdef CONFIG_HAS_BADBLE
     register_command("badble", handle_badble_cmd);
 #endif

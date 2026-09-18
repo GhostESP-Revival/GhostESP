@@ -1080,14 +1080,22 @@ void serial_manager_restore_console(void) {
       .rx_buffer_size = BUF_SIZE,
       .tx_buffer_size = BUF_SIZE,
   };
-  esp_err_t ret = usb_serial_jtag_driver_install(&usb_serial_jtag_config);
-  if (ret != ESP_OK) {
-    ESP_LOGW("SerialManager",
-             "USB-JTAG restore skipped: %s (TinyUSB may still own the bus)",
-             esp_err_to_name(ret));
-  } else {
-    ESP_LOGI("SerialManager", "USB-JTAG restored after BadUSB teardown");
+  /* TinyUSB disconnect is asynchronous on the S3. Retry briefly so the
+   * console driver does not lose the race for the USB peripheral when a HID
+   * view is closed. Return immediately after the first successful install to
+   * avoid treating an already-restored driver as an error. */
+  esp_err_t ret = ESP_FAIL;
+  for (int attempt = 0; attempt < 5; attempt++) {
+    ret = usb_serial_jtag_driver_install(&usb_serial_jtag_config);
+    if (ret == ESP_OK) {
+      ESP_LOGI("SerialManager", "USB-JTAG restored after BadUSB teardown");
+      return;
+    }
+    vTaskDelay(pdMS_TO_TICKS(100));
   }
+  ESP_LOGW("SerialManager",
+           "USB-JTAG restore skipped: %s (TinyUSB may still own the bus)",
+           esp_err_to_name(ret));
 #endif
 }
 
@@ -1158,8 +1166,7 @@ int handle_serial_command(const char *input) {
         strcmp(actual_command, "badusb trackpad_stop") == 0 ||
         strcmp(actual_command, "badusb stop") == 0;
     if (!quiet_badusb_setting) {
-      glog("Received command from peer: %s\n", actual_command);
-      glog("Executing received command: %s\n", actual_command);
+      glog("Peer command: %s\n", actual_command);
     }
     if (handle_peer_badusb_trackpad_fast(actual_command)) {
       esp_comm_manager_set_remote_command_flag(false);

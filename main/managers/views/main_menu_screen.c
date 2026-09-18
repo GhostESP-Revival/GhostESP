@@ -751,6 +751,16 @@ static int grid_horizontal_target(int direction) {
     return target;
 }
 
+static int grid_encoder_target(int direction) {
+    /* The encoder walks the visible grid in row-major order, then advances
+     * to the next page. Dedicated left/right controls keep horizontal paging. */
+    if (current_layout == MAIN_MENU_LAYOUT_LAUNCHER ||
+        current_layout == MAIN_MENU_LAYOUT_COMPACT) {
+        return selected_item_index + direction;
+    }
+    return grid_horizontal_target(direction);
+}
+
 /**
  *  @brief handles keyboard button presses
  */
@@ -1038,9 +1048,9 @@ static void menu_item_event_handler(InputEvent *event) {
         } else {
             const bool inverted = settings_get_carousel_invert_direction(&G_Settings);
             if (event->data.encoder.direction > 0)
-                select_menu_item(grid_horizontal_target(1), inverted ? false : true); // CW == right
+                select_menu_item(grid_encoder_target(1), inverted ? false : true); // CW == right
             else
-                select_menu_item(grid_horizontal_target(-1), inverted ? true : false);  // CCW == left
+                select_menu_item(grid_encoder_target(-1), inverted ? true : false);  // CCW == left
         }
     } else if (event->type == INPUT_TYPE_KEYBOARD) {
         ESP_LOGI(TAG, "keyboard event");
@@ -1541,6 +1551,11 @@ void main_menu_create(void) {
     // Check if navigation buttons should be shown based on user setting
     // Also respect the original logic for device capabilities
     bool should_show_nav_buttons = settings_get_nav_buttons_enabled(&G_Settings);
+#ifdef CONFIG_CROWPANEL_1P28_ROTARY
+    /* The panel is physically circular; keep the edge pixels clear and let
+     * the encoder/touch swipe provide previous/next navigation. */
+    should_show_nav_buttons = false;
+#endif
 #if GUI_LARGE_TOUCH_UI && defined(CONFIG_USE_TOUCHSCREEN)
     should_show_nav_buttons = false;
 #endif

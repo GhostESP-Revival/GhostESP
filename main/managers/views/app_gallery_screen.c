@@ -1374,6 +1374,11 @@ static void apps_plugin_reload_done(void *arg) {
     }
 
     bool should_show_nav_buttons = settings_get_nav_buttons_enabled(&G_Settings);
+#ifdef CONFIG_CROWPANEL_1P28_ROTARY
+    /* Side arrows land in the circular mask's corners.  Hero mode already
+     * exposes the current position through the bottom pips. */
+    should_show_nav_buttons = false;
+#endif
 #if GUI_LARGE_TOUCH_UI && defined(CONFIG_USE_TOUCHSCREEN)
     should_show_nav_buttons = false;
 #endif
@@ -1654,6 +1659,16 @@ static int apps_grid_horizontal_target(int direction) {
     if (page >= layout.page_count) page = 0;
     int target = page * layout.page_capacity + slot;
     return target < num_apps ? target : num_apps - 1;
+}
+
+static int apps_encoder_target(int direction) {
+    /* Encoder navigation is linear through each page: top row, bottom row,
+     * then the next page. The left/right controls retain horizontal paging. */
+    if (apps_layout == MAIN_MENU_LAYOUT_LAUNCHER ||
+        apps_layout == MAIN_MENU_LAYOUT_COMPACT) {
+        return selected_app_index + direction;
+    }
+    return apps_grid_horizontal_target(direction);
 }
 
 /**
@@ -1948,9 +1963,9 @@ void apps_menu_event_handler(InputEvent *event) {
             handle_app_item_selection(selected_app_index);
         } else {
             if (event->data.encoder.direction > 0) {
-                select_app_item(apps_grid_horizontal_target(1), true);
+                select_app_item(apps_encoder_target(1), true);
             } else {
-                select_app_item(apps_grid_horizontal_target(-1), false);
+                select_app_item(apps_encoder_target(-1), false);
             }
         }
 #if defined(CONFIG_USE_ENCODER) || defined(CONFIG_IS_ATOMS3R)

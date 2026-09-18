@@ -284,14 +284,6 @@ static esp_err_t asset_sd_begin(bool *mounted_here, bool *display_suspended) {
     if (mounted_here) *mounted_here = false;
     if (display_suspended) *display_suspended = false;
 
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
-        esp_err_t err = sd_card_mount_for_flush(display_suspended);
-        if (err == ESP_OK && mounted_here) *mounted_here = true;
-        return err;
-    }
-#endif
-
     if (sd_card_manager.is_initialized) return ESP_OK;
     esp_err_t err = sd_card_mount_for_flush(display_suspended);
     if (err == ESP_OK && mounted_here) *mounted_here = true;

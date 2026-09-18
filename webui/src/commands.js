@@ -210,6 +210,34 @@ const CMD = {
     return { cmd: 'apcred', risky: false, stopFirst: false, cat: 'Misc', desc: 'Show AP credentials' };
   },
   apenable:        (on) => ({ cmd: `apenable ${on ? 'on' : 'off'}`, risky: true, stopFirst: false, cat: 'Misc', desc: 'Enable/disable AP' }),
+
+  // LoRa (SX1262-family mesh: stock framing + default-key crypto + BLE app link)
+  loraStatus:      () => ({ cmd: 'lora status',      risky: false, stopFirst: false, cat: 'LoRa', desc: 'LoRa status' }),
+  loraStart:       () => ({ cmd: 'lora start',       risky: true,  stopFirst: true,  cat: 'LoRa', desc: 'Start LoRa radio' }),
+  loraStop:        () => ({ cmd: 'lora stop',        risky: false, stopFirst: false, cat: 'LoRa', desc: 'Stop LoRa radio' }),
+  loraChat:        (text) => ({ cmd: text ? `lora chat ${text}` : 'lora chat', risky: false, stopFirst: false, cat: 'LoRa', desc: 'Send/list LoRa chat' }),
+  loraNodes:       () => ({ cmd: 'lora nodes',       risky: false, stopFirst: false, cat: 'LoRa', desc: 'List LoRa nodes' }),
+  loraDiag:        () => ({ cmd: 'lora diag',        risky: false, stopFirst: false, cat: 'LoRa', desc: 'LoRa diagnostics' }),
+  loraBle:         (on) => ({ cmd: on == null ? 'lora ble' : on ? 'lora ble on' : 'lora ble off', risky: false, stopFirst: false, cat: 'LoRa', desc: 'LoRa BLE app link' }),
+  loraApp:         () => ({ cmd: 'lora app',         risky: false, stopFirst: false, cat: 'LoRa', desc: 'Meshtastic app link status' }),
+
+  // MeshCore (alternative SX1262-family mesh; companion-only, exclusive with LoRa)
+  mcStatus:        () => ({ cmd: 'meshcore status',   risky: false, stopFirst: false, cat: 'MeshCore', desc: 'MeshCore status' }),
+  mcStart:         () => ({ cmd: 'meshcore start',    risky: true,  stopFirst: true,  cat: 'MeshCore', desc: 'Start MeshCore (stops Meshtastic)' }),
+  mcStop:          () => ({ cmd: 'meshcore stop',     risky: false, stopFirst: false, cat: 'MeshCore', desc: 'Stop MeshCore' }),
+  mcChat:          (text) => ({ cmd: text ? `meshcore send ${text}` : 'meshcore messages', risky: false, stopFirst: false, cat: 'MeshCore', desc: 'Send/list MeshCore messages' }),
+  mcContacts:      () => ({ cmd: 'meshcore contacts', risky: false, stopFirst: false, cat: 'MeshCore', desc: 'List MeshCore contacts' }),
+  mcChannels:      () => ({ cmd: 'meshcore channels', risky: false, stopFirst: false, cat: 'MeshCore', desc: 'List MeshCore channels' }),
+  mcAdvert:        () => ({ cmd: 'meshcore advert',   risky: false, stopFirst: false, cat: 'MeshCore', desc: 'Send MeshCore advert' }),
+  mcSelftest:      () => ({ cmd: 'meshcore selftest', risky: false, stopFirst: false, cat: 'MeshCore', desc: 'MeshCore crypto self test' }),
+
+  // Unified mesh layer: one place to see and switch the active backend.
+  meshStatus:      () => ({ cmd: 'mesh',                    risky: false, stopFirst: false, cat: 'Mesh', desc: 'Active mesh + how to switch' }),
+  meshSwitchMt:    () => ({ cmd: 'mesh switch meshtastic',  risky: true,  stopFirst: true,  cat: 'Mesh', desc: 'Switch to Meshtastic' }),
+  meshSwitchMc:    () => ({ cmd: 'mesh switch meshcore',    risky: true,  stopFirst: true,  cat: 'Mesh', desc: 'Switch to MeshCore' }),
+  meshOff:         () => ({ cmd: 'mesh off',                risky: false, stopFirst: false, cat: 'Mesh', desc: 'Stop the active mesh' }),
+  meshChat:        (text) => ({ cmd: text ? `mesh send ${text}` : 'mesh messages', risky: false, stopFirst: false, cat: 'Mesh', desc: 'Send/list on active mesh' }),
+  meshPeers:       () => ({ cmd: 'mesh peers',              risky: false, stopFirst: false, cat: 'Mesh', desc: 'Peers on active mesh' }),
 };
 
 /** Registry of UI action definitions for WiFi page groups */
@@ -440,6 +468,37 @@ const SETTINGS_SCHEMA = [
   },
 ];
 
+/** LoRa action definitions (Terminal + future dedicated page). */
+const LORA_GROUPS = {
+  'Radio': [
+    { label: 'LoRa Status',  factory: () => CMD.loraStatus() },
+    { label: 'Start LoRa',   factory: () => CMD.loraStart() },
+    { label: 'Stop LoRa',    factory: () => CMD.loraStop() },
+    { label: 'Diagnostics',  factory: () => CMD.loraDiag() },
+  ],
+  'Mesh': [
+    { label: 'List Messages', factory: () => CMD.loraChat() },
+    { label: 'List Nodes',    factory: () => CMD.loraNodes() },
+  ],
+  'App': [
+    { label: 'App Link Status', factory: () => CMD.loraApp() },
+    { label: 'BLE On',          factory: () => CMD.loraBle(true) },
+    { label: 'BLE Off',         factory: () => CMD.loraBle(false) },
+  ],
+};
+/** Unified mesh switch actions (Meshtastic <-> MeshCore, one radio). */
+const MESH_GROUPS = {
+  'Active mesh': [
+    { label: 'Mesh Status',          factory: () => CMD.meshStatus() },
+    { label: 'Switch to Meshtastic', factory: () => CMD.meshSwitchMt() },
+    { label: 'Switch to MeshCore',   factory: () => CMD.meshSwitchMc() },
+    { label: 'Stop Mesh',            factory: () => CMD.meshOff() },
+  ],
+  'Chat': [
+    { label: 'List Messages', factory: () => CMD.meshChat() },
+    { label: 'List Peers',    factory: () => CMD.meshPeers() },
+  ],
+};
 /** Helper to build a command string with metadata */
 function buildCommand(factoryResult) {
   if (!factoryResult || typeof factoryResult !== 'object') return null;
@@ -458,7 +517,8 @@ function isRiskyCommand(commandString) {
     /^trackap\b/i, /^tracksta\b/i, /^trackgatt\b/i, /^selectflipper\b/i,
     /^spoofairtag\b/i, /^aerialscan\b/i, /^aerialspoof\b/i,
     /^ir dazzler\b/i, /^ir learn\b/i, /^badusb run\b/i,
-    /^reboot\b/i, /^apenable\b/i,
+    /^reboot\b/i, /^apenable\b/i, /^lora start\b/i,
+    /^mesh (switch|on|off)\b/i,
   ];
   return riskyPatterns.some(p => p.test(commandString.trim()));
 }
@@ -474,6 +534,8 @@ function commandCategory(commandString) {
   if (c.startsWith('sd ')) return 'Files';
   if (c.startsWith('badusb')) return 'BadUSB';
   if (c.startsWith('badble')) return 'BadBLE';
+  if (c.startsWith('mesh') || c.startsWith('meshtastic') || c === 'mc' || c.startsWith('mc ')) return 'Mesh';
+  if (c.startsWith('lora')) return 'LoRa';
   if (c.startsWith('comm')) return 'GhostLink';
   if (c.startsWith('settings')) return 'Settings';
   return 'System';

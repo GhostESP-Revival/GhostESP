@@ -24,6 +24,7 @@
 #include "core/callbacks.h"
 #include "core/glog.h"
 #include "scans/wifi/station_scan.h"
+#include "scans/wifi/hop_profile.h"
 #include "scans/wifi/wifi_channels.h"
 #include "vendor/pcap.h"
 #include "esp_wifi.h"
@@ -259,7 +260,7 @@ static void deauth_task(void *param) {
         deauth_task_running = false;
         deauth_task_handle = NULL;
         deauth_stop_requested = false;
-        vTaskDelete(NULL);
+        vTaskDeleteWithCaps(NULL);
         return;
     }
 
@@ -269,7 +270,7 @@ static void deauth_task(void *param) {
         deauth_task_running = false;
         deauth_task_handle = NULL;
         deauth_stop_requested = false;
-        vTaskDelete(NULL);
+        vTaskDeleteWithCaps(NULL);
         return;
     }
 
@@ -342,7 +343,7 @@ static void deauth_task(void *param) {
     deauth_task_running = false;
     deauth_stop_requested = false;
     deauth_task_handle = NULL;
-    vTaskDelete(NULL);
+    vTaskDeleteWithCaps(NULL);
 }
 
 void deauth_attack_start(void) {
@@ -369,8 +370,14 @@ void deauth_attack_start(void) {
         status_display_show_attack("Deauth", "starting");
 #endif
         
-        // Build country-appropriate channel list for deauth
-        wireshark_channels_count = wifi_channels_build_country_list(wireshark_channels, sizeof(wireshark_channels));
+        // Build channel list for broadcast deauth (user hop profile or the
+        // country-appropriate default list).
+        hop_profile_resolve(wireshark_channels, sizeof(wireshark_channels),
+                            &wireshark_channels_count);
+        if (wireshark_channels_count == 0) {
+            wireshark_channels_count = wifi_channels_build_country_list(
+                wireshark_channels, sizeof(wireshark_channels));
+        }
         
         // Copy selected AP info from wifi_manager globals
         extern wifi_ap_record_t selected_ap;
@@ -548,7 +555,7 @@ static void deauth_station_task(void *param) {
         }
     }
     deauth_station_task_handle = NULL;
-    vTaskDelete(NULL);
+    vTaskDeleteWithCaps(NULL);
 }
 
 bool deauth_attack_stop_station(void) {
@@ -562,7 +569,7 @@ bool deauth_attack_stop_station(void) {
         }
         
         if (deauth_station_task_handle != NULL) {
-            vTaskDelete(deauth_station_task_handle);
+            vTaskDeleteWithCaps(deauth_station_task_handle);
             deauth_station_task_handle = NULL;
         }
         deauth_station_stop_requested = false;
@@ -594,7 +601,7 @@ static void handshake_deauth_task(void *param) {
         handshake_deauth_task_running = false;
         handshake_deauth_task_handle = NULL;
         handshake_deauth_stop_requested = false;
-        vTaskDelete(NULL);
+        vTaskDeleteWithCaps(NULL);
         return;
     }
 
@@ -675,7 +682,7 @@ static void handshake_deauth_task(void *param) {
     handshake_deauth_task_running = false;
     handshake_deauth_stop_requested = false;
     handshake_deauth_task_handle = NULL;
-    vTaskDelete(NULL);
+    vTaskDeleteWithCaps(NULL);
 }
 
 void deauth_attack_start_handshake_deauth(void) {
@@ -737,8 +744,14 @@ void deauth_attack_start_handshake_deauth(void) {
         glog("PCAP capture enabled for handshake recording\n");
     }
 
-    // Build country-appropriate channel list
-    wireshark_channels_count = wifi_channels_build_country_list(wireshark_channels, sizeof(wireshark_channels));
+    // Build channel list for handshake deauth (user hop profile or the
+    // country-appropriate default list).
+    hop_profile_resolve(wireshark_channels, sizeof(wireshark_channels),
+                        &wireshark_channels_count);
+    if (wireshark_channels_count == 0) {
+        wireshark_channels_count = wifi_channels_build_country_list(
+            wireshark_channels, sizeof(wireshark_channels));
+    }
 
     if (hs_station_selected) {
         char sanitized_ssid[33];
@@ -814,6 +827,7 @@ void deauth_attack_start_handshake_deauth(void) {
         handshake_deauth_task_handle = NULL;
         handshake_deauth_stop_requested = false;
         esp_wifi_set_promiscuous(false);
+        pcap_file_close();
         esp_wifi_stop();
         (void)ap_manager_restore_after_attack("hs+deauth start");
         return;

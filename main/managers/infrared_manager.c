@@ -1,4 +1,5 @@
 #include "managers/infrared_manager.h"
+#include "managers/settings_manager.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -36,22 +37,51 @@ static uint32_t s_poltergeist_io24_hold_refcount = 0;
 /* optional hook provided by infrared_view.c to pause RX while TX allocates a channel */
 __attribute__((weak)) void infrared_rx_pause_for_tx(bool pause) { (void)pause; }
 
+// Effective IR TX pin, resolved once per boot so a settings change can never
+// retarget an already-created RMT channel mid-session.
+#ifdef CONFIG_HAS_INFRARED
+static gpio_num_t s_ir_tx_pin_resolved = GPIO_NUM_NC;
+#endif
+
+gpio_num_t infrared_get_tx_pin(void) {
+#ifdef CONFIG_HAS_INFRARED
+    if (s_ir_tx_pin_resolved == GPIO_NUM_NC) {
+        int32_t override_pin = settings_get_ir_tx_pin(&G_Settings);
+        s_ir_tx_pin_resolved = (gpio_num_t)(override_pin >= 0 ? override_pin : CONFIG_INFRARED_LED_PIN);
+        ESP_LOGI(TAG_IR_MANAGER, "IR TX pin: GPIO%d (%s)", (int)s_ir_tx_pin_resolved,
+                 override_pin >= 0 ? "override" : "default");
+    }
+    return s_ir_tx_pin_resolved;
+#else
+    return GPIO_NUM_NC;
+#endif
+}
+
+gpio_num_t infrared_get_rx_pin(void) {
+#ifdef CONFIG_HAS_INFRARED_RX
+    int32_t override_pin = settings_get_ir_rx_pin(&G_Settings);
+    return (gpio_num_t)(override_pin >= 0 ? override_pin : CONFIG_INFRARED_RX_PIN);
+#else
+    return GPIO_NUM_NC;
+#endif
+}
+
 bool infrared_manager_init(void) {
     bool ok = sd_card_manager.is_initialized;
 #ifdef CONFIG_HAS_INFRARED
     if (ok && CONFIG_HAS_INFRARED) {
-        gpio_reset_pin(CONFIG_INFRARED_LED_PIN);
-        gpio_set_direction(CONFIG_INFRARED_LED_PIN, GPIO_MODE_OUTPUT);
-        gpio_set_level(CONFIG_INFRARED_LED_PIN, 0);
-        ESP_LOGI(TAG_IR_MANAGER, "IR LED pin initialized: %d", CONFIG_INFRARED_LED_PIN);
+        gpio_reset_pin(infrared_get_tx_pin());
+        gpio_set_direction(infrared_get_tx_pin(), GPIO_MODE_OUTPUT);
+        gpio_set_level(infrared_get_tx_pin(), 0);
+        ESP_LOGI(TAG_IR_MANAGER, "IR LED pin initialized: %d", infrared_get_tx_pin());
     }
 #endif
 #if defined(CONFIG_BUILD_CONFIG_TEMPLATE) && defined(CONFIG_HAS_INFRARED)
     if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "poltergeist") == 0) {
-        gpio_reset_pin(CONFIG_INFRARED_LED_PIN);
-        gpio_set_direction(CONFIG_INFRARED_LED_PIN, GPIO_MODE_OUTPUT);
-        gpio_set_level(CONFIG_INFRARED_LED_PIN, 0);
-        ESP_LOGI(TAG_IR_MANAGER, "IO%d configured for poltergeist template", CONFIG_INFRARED_LED_PIN);
+        gpio_reset_pin(infrared_get_tx_pin());
+        gpio_set_direction(infrared_get_tx_pin(), GPIO_MODE_OUTPUT);
+        gpio_set_level(infrared_get_tx_pin(), 0);
+        ESP_LOGI(TAG_IR_MANAGER, "IO%d configured for poltergeist template", infrared_get_tx_pin());
     }
 #endif
     return ok;
@@ -694,7 +724,7 @@ static bool send_rmt(const uint32_t *timings, size_t count, uint32_t freq, float
         rmt_tx_channel_config_t cfg = {
             .clk_src = RMT_CLK_SRC_DEFAULT,
 #ifdef CONFIG_HAS_INFRARED
-            .gpio_num = CONFIG_INFRARED_LED_PIN,
+            .gpio_num = infrared_get_tx_pin(),
 #else
             .gpio_num = GPIO_NUM_NC,
 #endif
@@ -758,9 +788,9 @@ void infrared_manager_poltergeist_hold_io24_begin(void) {
 #if defined(CONFIG_BUILD_CONFIG_TEMPLATE) && defined(CONFIG_HAS_INFRARED)
     if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "poltergeist") != 0) return;
     if (s_poltergeist_io24_hold_refcount == 0) {
-        gpio_reset_pin(CONFIG_INFRARED_LED_PIN);
-        gpio_set_direction(CONFIG_INFRARED_LED_PIN, GPIO_MODE_OUTPUT);
-        gpio_set_level(CONFIG_INFRARED_LED_PIN, 1);
+        gpio_reset_pin(infrared_get_tx_pin());
+        gpio_set_direction(infrared_get_tx_pin(), GPIO_MODE_OUTPUT);
+        gpio_set_level(infrared_get_tx_pin(), 1);
         vTaskDelay(pdMS_TO_TICKS(250));
     }
     s_poltergeist_io24_hold_refcount++;
@@ -773,7 +803,7 @@ void infrared_manager_poltergeist_hold_io24_end(void) {
     if (s_poltergeist_io24_hold_refcount == 0) return;
     s_poltergeist_io24_hold_refcount--;
     if (s_poltergeist_io24_hold_refcount == 0) {
-        gpio_set_level(CONFIG_INFRARED_LED_PIN, 0);
+        gpio_set_level(infrared_get_tx_pin(), 0);
     }
 #endif
 }
@@ -792,7 +822,7 @@ bool infrared_manager_transmit(const infrared_signal_t *signal) {
 #endif
 
 #ifdef CONFIG_HAS_INFRARED
-    gpio_set_level(CONFIG_INFRARED_LED_PIN, 1);
+    gpio_set_level(infrared_get_tx_pin(), 1);
 #endif
     rgb_manager_set_color(&rgb_manager, -1, 51, 0, 51, false);
     bool ok = false;
@@ -853,7 +883,7 @@ bool infrared_manager_transmit(const infrared_signal_t *signal) {
         }
     }
 #ifdef CONFIG_HAS_INFRARED
-    gpio_set_level(CONFIG_INFRARED_LED_PIN, 0);
+    gpio_set_level(infrared_get_tx_pin(), 0);
 #endif
 #if defined(CONFIG_BUILD_CONFIG_TEMPLATE) && defined(CONFIG_HAS_INFRARED)
     if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "poltergeist") == 0 && poltergeist_local_hold) {
@@ -1045,7 +1075,7 @@ bool infrared_manager_dazzler_start(void) {
 
     rmt_tx_channel_config_t cfg = {
         .clk_src = RMT_CLK_SRC_DEFAULT,
-        .gpio_num = CONFIG_INFRARED_LED_PIN,
+        .gpio_num = infrared_get_tx_pin(),
         .mem_block_symbols = SOC_RMT_MEM_WORDS_PER_CHANNEL,
         .resolution_hz = 1000000,
         .trans_queue_depth = 1,

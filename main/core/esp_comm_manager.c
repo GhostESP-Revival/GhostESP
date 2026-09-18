@@ -28,9 +28,38 @@
 #include "managers/views/terminal_screen.h"
 #include "managers/ap_manager.h"
 #include "managers/peer_storage_manager.h"
+#ifdef CONFIG_HAS_MIC
+#include "managers/microphone/mic_visualizer.h"
+#endif
 
 #define COMM_BUFFER_SIZE 256
-#define UART_RX_BUFFER_SIZE (COMM_BUFFER_SIZE * 2)
+/* UART RX ring size.
+ *
+ * comm_rx_task now runs above the render (15) and hardware-input (14) tasks
+ * and yields a tick every UART_RX_YIELD_BYTES, so a busy display can no longer
+ * starve the receiver for a whole frame. The ring still has to absorb that
+ * yield plus longer stalls (flash writes, WiFi, interrupt latency): a 512-byte
+ * ring is only ~6 ms of slack at 921600 and measurably dropped bytes on the
+ * unicore C5, 2048 restores margin. The high-water alert threshold is derived
+ * from this value, so it scales automatically.
+ * Costs ~1.5 KB of internal RAM. */
+#define UART_RX_BUFFER_SIZE 2048
+
+/* comm_rx_task priority. Must sit above RENDERING_TASK_PRIORITY (15) and
+ * HARDWARE_INPUT_TASK_PRIORITY (14) so a long frame cannot overflow the ring
+ * while LVGL redraws, but below the ESP-IDF system tasks (esp_timer 22, IPC
+ * 24) so those still get their slices. */
+#define COMM_RX_TASK_PRIO 16
+
+/* Bytes comm_rx_task may process between one-tick yields. At the fastest
+ * supported baud this is >20 ms of line time, so the ring absorbs the gap and
+ * throughput is unaffected while the UI and idle task keep running. */
+#define UART_RX_YIELD_BYTES UART_RX_BUFFER_SIZE
+
+/* GhostLink UART baud for the board templates that set one explicitly.
+ * 921600 is 2x the previous 460800 and well inside the ESP32 UART limit, but
+ * needs the enlarged RX ring above to avoid increasing receive loss. */
+#define COMM_DEFAULT_BAUD 921600
 #define COMM_PACKET_SIZE 64
 #define DISCOVERY_INTERVAL_MS 3000
 #define HANDSHAKE_TIMEOUT_MS 3000
@@ -186,6 +215,7 @@ typedef struct {
     uint32_t tx_dropped_packets;
     uint32_t rx_queue_dropped_packets;
     uint32_t rx_crc_error_count;
+    uint32_t stream_ignored_packets;
     size_t rx_buffer_high_watermark;
     uint32_t rx_high_water_alerts;
 
@@ -682,6 +712,7 @@ static void tx_task(void* arg) {
 static void rx_task(void* arg) {
     esp_comm_manager_t* comm = (esp_comm_manager_t*)arg;
     uint8_t rx_buffer[COMM_BUFFER_SIZE];
+    size_t since_yield = 0;
 
     while (comm->initialized) {
         int len = uart_read_bytes(s_uart_num, rx_buffer, COMM_BUFFER_SIZE, pdMS_TO_TICKS(10));
@@ -806,11 +837,20 @@ static void rx_task(void* arg) {
                 }
             }
 
+            since_yield += (size_t)len;
+
             int drained = uart_read_bytes(s_uart_num, rx_buffer, COMM_BUFFER_SIZE, 0);
             if (drained > 0) {
                 len = drained;
             } else {
                 len = 0;
+            }
+
+            if (since_yield >= UART_RX_YIELD_BYTES) {
+                /* See COMM_RX_TASK_PRIO: without this the higher-priority task
+                 * would starve the UI and idle task for a whole stream. */
+                vTaskDelay(1);
+                since_yield = 0;
             }
         }
     }
@@ -955,8 +995,13 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                         comm->protocol_task_handle = t;
                     }
                     unlock_state(comm);
-                    printf("Handshake complete!\n");
+                    printf("Handshake completed!\n");
                     terminal_view_add_text("Handshake completed!\n");
+#ifdef CONFIG_HAS_MIC
+                    // Headless boards skip boot-time mic capture; start the
+                    // GhostLink amplitude stream now that a peer is listening.
+                    (void)mic_visualizer_start();
+#endif
                 }
             }
             break;
@@ -1023,8 +1068,13 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                     comm->protocol_task_handle = t;
                 }
                 unlock_state(comm);
-                printf("Handshake complete!\n");
+                printf("Handshake completed!\n");
                 terminal_view_add_text("Handshake completed!\n");
+#ifdef CONFIG_HAS_MIC
+                // Headless boards skip boot-time mic capture; start the
+                // GhostLink amplitude stream now that a peer is listening.
+                (void)mic_visualizer_start();
+#endif
             }
             break;
 
@@ -1055,17 +1105,29 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
 
         case PACKET_TYPE_STREAM:
             if (comm->state != COMM_STATE_CONNECTED) {
-                printf("STREAM packet ignored: not connected\n");
+                comm->stream_ignored_packets++;
+                if ((comm->stream_ignored_packets & 0x0F) == 1) {
+                    printf("STREAM packet ignored: not connected (ignored=%lu)\n",
+                           (unsigned long)comm->stream_ignored_packets);
+                }
                 break;
             }
             if (packet->length < 1) {
-                printf("STREAM packet ignored: empty payload\n");
+                comm->stream_ignored_packets++;
+                if ((comm->stream_ignored_packets & 0x0F) == 1) {
+                    printf("STREAM packet ignored: empty payload (ignored=%lu)\n",
+                           (unsigned long)comm->stream_ignored_packets);
+                }
                 break;
             }
             {
                 uint8_t channel = packet->data[0];
                 if (channel >= COMM_MAX_STREAM_CHANNELS) {
-                    printf("STREAM packet ignored: invalid channel %d\n", channel);
+                    comm->stream_ignored_packets++;
+                    if ((comm->stream_ignored_packets & 0x0F) == 1) {
+                        printf("STREAM packet ignored: invalid channel %d (ignored=%lu)\n",
+                               channel, (unsigned long)comm->stream_ignored_packets);
+                    }
                     break;
                 }
                 comm_stream_callback_t cb = comm->stream_handlers[channel];
@@ -1351,14 +1413,14 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
             resolved_tx = GPIO_NUM_13;
             resolved_rx = GPIO_NUM_14;
         }
-        resolved_baud = 460800;
+        resolved_baud = COMM_DEFAULT_BAUD;
     } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething2") == 0) {
         desired_uart = UART_NUM_1;
         if ((int)tx_pin == (int)DEFAULT_TX_PIN && (int)rx_pin == (int)DEFAULT_RX_PIN) {
             resolved_tx = GPIO_NUM_9;
             resolved_rx = GPIO_NUM_10;
         }
-        resolved_baud = 460800;
+        resolved_baud = COMM_DEFAULT_BAUD;
     } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "Ace_S3") == 0) {
         desired_uart = UART_NUM_1;
         if ((int)tx_pin == (int)DEFAULT_TX_PIN && (int)rx_pin == (int)DEFAULT_RX_PIN) {
@@ -1490,7 +1552,7 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
     }
 #endif
 
-    if (uart_share_ensure_installed(s_uart_num, COMM_BUFFER_SIZE * 2, 0, 0) == ESP_OK) {
+    if (uart_share_ensure_installed(s_uart_num, UART_RX_BUFFER_SIZE, 0, 0) == ESP_OK) {
         if (uart_share_acquire(s_uart_num, UART_SHARE_OWNER_DUALCOMM, pdMS_TO_TICKS(2000)) == ESP_OK) {
             s_comm_manager->uart_driver_installed = true;
         }
@@ -1527,7 +1589,7 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
     s_comm_manager->rx_task_res.tcb = alloc_task_tcb();
     if (s_comm_manager->rx_task_res.stack && s_comm_manager->rx_task_res.tcb) {
         s_comm_manager->rx_task_handle = xTaskCreateStatic(rx_task, "comm_rx_task", rx_stack_bytes,
-                                                           s_comm_manager, 12,
+                                                           s_comm_manager, COMM_RX_TASK_PRIO,
                                                            s_comm_manager->rx_task_res.stack,
                                                            s_comm_manager->rx_task_res.tcb);
     }
@@ -1947,6 +2009,35 @@ bool esp_comm_manager_get_pins(gpio_num_t* tx_pin, gpio_num_t* rx_pin) {
     return true;
 }
 
+uint32_t esp_comm_manager_get_baud(void) {
+    return s_comm_manager ? s_comm_manager->baud_rate : 0;
+}
+
+bool esp_comm_manager_get_stats(esp_comm_manager_stats_t* out) {
+    if (!s_comm_manager || !out) {
+        return false;
+    }
+
+    esp_comm_manager_t* comm = s_comm_manager;
+    memset(out, 0, sizeof(*out));
+
+    out->tx_dropped_packets = comm->tx_dropped_packets;
+    out->rx_queue_dropped_packets = comm->rx_queue_dropped_packets;
+    out->rx_crc_error_count = comm->rx_crc_error_count;
+    out->stream_ignored_packets = comm->stream_ignored_packets;
+    out->rx_buffer_high_watermark = comm->rx_buffer_high_watermark;
+    out->rx_high_water_alerts = comm->rx_high_water_alerts;
+    out->baud = comm->baud_rate;
+
+    if (comm->tx_queue) {
+        out->tx_queue_waiting = (unsigned)uxQueueMessagesWaiting(comm->tx_queue);
+    }
+    if (comm->rx_packet_queue) {
+        out->rx_queue_free = (unsigned)uxQueueSpacesAvailable(comm->rx_packet_queue);
+    }
+    return true;
+}
+
 void esp_comm_manager_disconnect(void) {
     if (s_comm_manager) {
         comm_state_t previous_state = s_comm_manager->state;
@@ -2093,6 +2184,18 @@ static void handle_connection_loss(esp_comm_manager_t* comm, const char* reason)
     }
     printf("Connection lost (%s)\n", reason ? reason : "unknown");
     terminal_view_add_text("W: Connection lost, restarting discovery\n");
+#ifdef CONFIG_HAS_MIC
+    bool mic_was_streaming = mic_visualizer_is_running();
+    unlock_state(comm);
+    if (mic_was_streaming) {
+        (void)mic_visualizer_stop();
+    }
+    lock_state(comm);
+    if (comm->state != COMM_STATE_CONNECTED) {
+        unlock_state(comm);
+        return;
+    }
+#endif
 
     comm->state = COMM_STATE_SCANNING;
     comm->remote_output_capture = false;

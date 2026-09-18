@@ -84,6 +84,17 @@ menu "Ghost ESP Options"
         help
             Set the height of the TFT display.
 
+    config CROWPANEL_1P28_ROTARY
+        bool "Elecrow CrowPanel 1.28-inch rotary display"
+        default n
+        depends on IDF_TARGET_ESP32S3 && WITH_SCREEN
+        help
+            Enable the Elecrow CrowPanel 1.28-inch HMI with its round
+            240x240 GC9A01 SPI display, CST816D touch controller, rotary
+            encoder, encoder push switch, and GPIO46 PWM backlight.
+            This also selects the round-display-safe main menu and app
+            gallery presentation.
+
     config CROWPANEL_EPAPER_42
         bool "Use Elecrow CrowPanel 4.2-inch e-paper"
         default n
@@ -253,6 +264,23 @@ menu "Ghost ESP Options"
         help
             Enable support for ILI9341 display module.
 
+    config USE_C5_PARLIO_DISPLAY
+        bool "Use ESP32-C5 PARLIO display transport"
+        default n
+        depends on IDF_TARGET_ESP32C5 && WITH_SCREEN && LV_TFT_DISPLAY_PROTOCOL_SPI
+        help
+            Drive the display through the ESP32-C5 PARLIO peripheral in
+            single-data-line SPI mode. This leaves SPI2 available for an
+            independent SD card bus.
+
+    config C5_PARLIO_CLOCK_HZ
+        int "ESP32-C5 PARLIO pixel clock (Hz)"
+        default 80000000
+        range 1 80000000
+        depends on USE_C5_PARLIO_DISPLAY
+        help
+            Pixel clock used by the ESP32-C5 PARLIO display transport.
+
     config WITH_STATUS_DISPLAY
         bool "Enable Status Display"
         default n
@@ -311,6 +339,25 @@ menu "Ghost ESP Options"
         help
             GPIO pin for display reset. Set to -1 to disable.
             For Heltec V3, this should be GPIO21.
+
+    config STATUS_DISPLAY_SCALE_Y
+        int "Status display vertical scale"
+        range 1 2
+        default 2
+        depends on WITH_STATUS_DISPLAY
+        help
+            Vertical pixel doubling for status text/animations. 2 = chunky
+            double-height glyphs, 1 = native 1:1 pixels (sharper on 128x64
+            OLEDs, more rows fit). Horizontal scale is always 1.
+
+    config STATUS_DISPLAY_BUTTON_PIN
+        int "Status display animation-cycle button (-1 to disable)"
+        default -1
+        depends on WITH_STATUS_DISPLAY
+        help
+            GPIO for a button that cycles the status-display idle animation
+            on each press (e.g. Heltec V3 PRG button = GPIO0). Set to -1 to
+            disable. Polled with debounce; no extra task is created.
 
     endmenu
 
@@ -464,6 +511,21 @@ menu "Ghost ESP Options"
                 Enable BadUSB support. Uses TinyUSB device mode to emulate a USB HID
                 keyboard and execute DuckyScript v1.0 payloads from the SD card.
                 Only available on ESP32-S3 which has USB OTG support.
+
+        config HAS_USB_MSC_SD
+            bool "USB SD Card Passthrough (TinyUSB MSC)"
+            default n
+            depends on IDF_TARGET_ESP32S3
+            depends on USING_SPI || USING_MMC || USING_MMC_1_BIT
+            # The manager includes the TinyUSB MSC headers whenever this
+            # feature is selected, so keep the component's class and its
+            # generated buffer-size symbol enabled as one feature.
+            select TINYUSB_MSC_ENABLED
+            help
+                Expose the SD card over the native USB port as a mass-storage
+                device, turning the board into a USB SD card reader. While
+                active, the firmware cannot access the card (it is handed to
+                the USB host) and the USB serial console is unavailable.
 
         config HAS_BADBLE
             bool "Enable BadBLE (Bluetooth HID Script Injection)"
@@ -1018,6 +1080,246 @@ menu "Ghost ESP Options"
                 depends on HAS_SUBGHZ
                 help
                     Delay after tuning a channel before reading RSSI.
+
+        endmenu
+
+        menu "LoRa Options"
+
+            config HAS_LORA
+                bool "Enable LoRa App (SX1262/SX1276/LLCC68)"
+                default n
+                help
+                    Enable the LoRa app: lora CLI, WebUI commands, LVGL view
+                    (screened boards), and SX1262-family backend with stock
+                    Meshtastic air framing and BLE PhoneAPI app support.
+
+            config HAS_MESHCORE
+                bool "Enable MeshCore companion (SX1262-family)"
+                default y
+                depends on HAS_LORA
+                help
+                    Enable the MeshCore companion stack: the `meshcore` CLI,
+                    MeshCore on-air protocol (adverts, group + direct text,
+                    contacts, channels) and the vendored Ed25519 identity.
+                    Meshtastic and MeshCore share one radio and are mutually
+                    exclusive at runtime.
+
+                    Defaults to y wherever LoRa is enabled, so every Meshtastic
+                    build also ships the MeshCore switch.
+
+            choice MESHCORE_DEFAULT_REGION
+                prompt "MeshCore default preset"
+                depends on HAS_MESHCORE
+                default MESHCORE_REGION_US
+                help
+                    First-flash radio preset. Change at runtime with
+                    `meshcore set freq|bw|sf|cr`.
+
+                config MESHCORE_REGION_US
+                    bool "US/CA 910.525 MHz BW62.5 SF7 CR5"
+
+                config MESHCORE_REGION_EU
+                    bool "EU/UK 869.618 MHz BW62.5 SF8 CR8"
+            endchoice
+
+            config LORA_SPI_HOST
+                int "LoRa SPI Host"
+                range 2 3
+                default 2
+                depends on HAS_LORA
+                help
+                    SPI host for LoRa radio (2 = SPI2_HOST, 3 = SPI3_HOST).
+
+            config LORA_SPI_MOSI_PIN
+                int "LoRa MOSI Pin"
+                default 10
+                depends on HAS_LORA
+                help
+                    GPIO for LoRa MOSI (Heltec V3 default 10).
+
+            config LORA_SPI_MISO_PIN
+                int "LoRa MISO Pin"
+                default 11
+                depends on HAS_LORA
+                help
+                    GPIO for LoRa MISO (Heltec V3 default 11).
+
+            config LORA_SPI_SCK_PIN
+                int "LoRa SCK Pin"
+                default 9
+                depends on HAS_LORA
+                help
+                    GPIO for LoRa SCK (Heltec V3/V3.2 default 9).
+
+            config LORA_NSS_PIN
+                int "LoRa NSS Pin"
+                default 8
+                depends on HAS_LORA
+                help
+                    GPIO for LoRa chip select (Heltec V3/V3.2 default 8).
+
+            config LORA_DIO1_PIN
+                int "LoRa DIO1 Pin"
+                default 14
+                depends on HAS_LORA
+                help
+                    GPIO for LoRa DIO1 IRQ (Heltec V3 default 14).
+
+            config LORA_BUSY_PIN
+                int "LoRa BUSY Pin"
+                default 13
+                depends on HAS_LORA
+                help
+                    GPIO for LoRa BUSY (Heltec V3 default 13).
+
+            config LORA_RST_PIN
+                int "LoRa RST Pin (-1 to disable)"
+                default 12
+                depends on HAS_LORA
+                help
+                    GPIO for LoRa reset (Heltec V3 default 12).
+
+            config LORA_VEXT_PIN
+                int "LoRa radio power pin / Vext (-1 to disable)"
+                default -1
+                depends on HAS_LORA
+                help
+                    GPIO that powers the LoRa radio rail (e.g. Vext on Heltec
+                    V3 = GPIO36, shared with the OLED). Driven before SPI
+                    bring-up so the radio never probes unpowered. Set to -1
+                    when the rail is always on.
+
+            config LORA_VEXT_ACTIVE_LOW
+                bool "LoRa Vext is active-low"
+                default y
+                depends on HAS_LORA
+                help
+                    y = drive LOW to power the radio (Heltec Vext),
+                    n = drive HIGH.
+
+            config LORA_ENABLE_PIN
+                int "LoRa wireless-module enable pin (-1 to disable)"
+                default -1
+                depends on HAS_LORA
+                help
+                    Optional board pin that selects the wireless-module
+                    function before radio bring-up. Elecrow CrowPanel Advance
+                    2.4/2.8 uses GPIO45 active-low; leave -1 for integrated
+                    radios and modules that are always selected.
+
+            config LORA_ENABLE_ACTIVE_LOW
+                bool "LoRa wireless-module enable is active-low"
+                default y
+                depends on HAS_LORA && LORA_ENABLE_PIN >= 0
+                help
+                    y = drive the enable pin LOW to select the radio,
+                    n = drive it HIGH.
+
+            choice LORA_MODULE
+                prompt "LoRa module"
+                depends on HAS_LORA
+                default LORA_MODULE_SX1262
+
+                config LORA_MODULE_SX1262
+                    bool "SX1262"
+
+                config LORA_MODULE_SX1276
+                    bool "SX1276"
+
+                config LORA_MODULE_LLCC68
+                    bool "LLCC68"
+            endchoice
+
+            choice LORA_TCXO_VOLTAGE
+                prompt "SX126x DIO3 TCXO voltage"
+                depends on HAS_LORA
+                default LORA_TCXO_1V8
+                help
+                    Voltage selected by the SX126x SetDIO3AsTCXOCtrl command.
+                    Heltec V3 uses 1.8 V; the Elecrow CrowPanel wireless
+                    Meshtastic module uses 3.3 V. Select disabled only for a
+                    module with a crystal or externally powered oscillator.
+
+                config LORA_TCXO_DISABLED
+                    bool "Disabled / crystal"
+
+                config LORA_TCXO_1V8
+                    bool "1.8 V (Heltec V3)"
+
+                config LORA_TCXO_3V3
+                    bool "3.3 V (Elecrow CrowPanel module)"
+            endchoice
+
+            config LORA_MAX_TX_DBM
+                int "LoRa max TX (dBm)"
+                range 2 22
+                default 17
+                depends on HAS_LORA
+                help
+                    Board/regulatory TX cap enforced by the manager.
+
+            config LORA_MSG_RING
+                int "LoRa message ring entries"
+                range 4 32
+                default 32
+                depends on HAS_LORA
+                help
+                    Retained chat messages (32 by default; fixed RAM ring).
+
+            choice LORA_REGION_DEFAULT
+                prompt "LoRa default region (first flash only; `lora set region` after)"
+                depends on HAS_LORA
+                default LORA_REGION_US915
+
+                config LORA_REGION_US915
+                    bool "US915"
+                config LORA_REGION_EU868
+                    bool "EU868"
+                config LORA_REGION_EU433
+                    bool "EU433"
+                config LORA_REGION_CN
+                    bool "CN"
+                config LORA_REGION_JP
+                    bool "JP"
+                config LORA_REGION_ANZ
+                    bool "ANZ (AU/NZ 915)"
+                config LORA_REGION_KR
+                    bool "KR"
+                config LORA_REGION_TW
+                    bool "TW"
+                config LORA_REGION_RU
+                    bool "RU"
+                config LORA_REGION_IN
+                    bool "IN"
+                config LORA_REGION_NZ865
+                    bool "NZ865"
+                config LORA_REGION_TH
+                    bool "TH"
+                config LORA_REGION_UA433
+                    bool "UA433"
+                config LORA_REGION_MY433
+                    bool "MY433"
+                config LORA_REGION_MY919
+                    bool "MY919"
+                config LORA_REGION_SG923
+                    bool "SG923"
+                config LORA_REGION_PH433
+                    bool "PH433"
+                config LORA_REGION_PH868
+                    bool "PH868"
+                config LORA_REGION_PH915
+                    bool "PH915"
+                config LORA_REGION_ANZ433
+                    bool "ANZ433"
+                config LORA_REGION_KZ433
+                    bool "KZ433"
+                config LORA_REGION_KZ863
+                    bool "KZ863"
+                config LORA_REGION_NP865
+                    bool "NP865"
+                config LORA_REGION_BR902
+                    bool "BR902"
+            endchoice
 
         endmenu
 
@@ -1733,17 +2035,6 @@ menu "Ghost ESP Options"
             Enable extra TFT/SD SPI bus coordination for boards that share
             MOSI/MISO/CLK between display and SD card.
 
-    config EXPERIMENTAL_C5_PARALLEL_TFT_SD_SPI
-        bool "Experimental ESP32-C5 persistent TFT/SD SPI bus"
-        default n
-        depends on IDF_TARGET_ESP32C5 && USING_SPI && WITH_SCREEN && LV_TFT_DISPLAY_PROTOCOL_SPI
-        help
-            Keep the TFT and SD card attached to SPI2 simultaneously by routing
-            SPI2 clock and MOSI to both sets of GPIOs. Transactions still share
-            one controller and are serialized by the SPI driver. This currently
-            applies only to the somethingsomething board template. Disable this
-            option to restore the existing JIT mount and display handoff path.
-
     config SD_MMC_D0 
         int "SD Card D0 Pin"
         default 13
@@ -1908,4 +2199,3 @@ menu "Ghost ESP Options"
     endmenu
 
 endmenu
-
