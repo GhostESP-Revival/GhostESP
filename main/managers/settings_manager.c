@@ -82,6 +82,9 @@ static const char *NVS_MENU_THEME_KEY = "menu_theme";
 static const char *NVS_TERMINAL_TEXT_COLOR_KEY = "term_color";
 static const char *NVS_TERMINAL_FONT_SIZE_KEY = "term_font";
 static const char *NVS_INVERT_COLORS_KEY = "invert_colors";
+#ifdef CONFIG_BANSHEE_LITE_C5
+static const char *NVS_AUTO_FLIP_KEY = "auto_flip";
+#endif
 static const char *NVS_INFRARED_EASY_MODE_KEY = "ir_easy_mode";
 static const char *NVS_IR_TX_PIN_KEY = "ir_tx_pin";
 static const char *NVS_IR_RX_PIN_KEY = "ir_rx_pin";
@@ -252,6 +255,9 @@ void settings_set_defaults(FSettings *settings) {
   settings->terminal_text_color = 0xFFFFFF; // White
   settings->terminal_font_size = 0; // Small (0=Small, 1=Normal, 2=Large)
   settings->invert_colors = false;
+#ifdef CONFIG_BANSHEE_LITE_C5
+  settings->auto_flip_enabled = false;
+#endif
   settings->web_auth_enabled = false;
   settings->usb_msc_enabled = false;
   settings->webui_restrict_to_ap = true;
@@ -696,6 +702,12 @@ void settings_load(FSettings *settings) {
   if (err == ESP_OK) {
     settings->invert_colors = (value_u8 != 0);
   }
+#ifdef CONFIG_BANSHEE_LITE_C5
+  err = nvs_get_u8(nvsHandle, NVS_AUTO_FLIP_KEY, &value_u8);
+  if (err == ESP_OK) {
+    settings->auto_flip_enabled = (value_u8 != 0);
+  }
+#endif
 
   err = nvs_get_u8(nvsHandle, NVS_WEB_AUTH_KEY, &value_u8);
   if (err == ESP_OK) {
@@ -1252,6 +1264,12 @@ void settings_persist_setting(SettingsType setting) {
             err = nvs_set_u8(nvsHandle, NVS_INVERT_COLORS_KEY, G_Settings.invert_colors);
             key = NVS_INVERT_COLORS_KEY;
             break;
+#ifdef CONFIG_BANSHEE_LITE_C5
+        case SETTING_AUTO_FLIP:
+            err = nvs_set_u8(nvsHandle, NVS_AUTO_FLIP_KEY, G_Settings.auto_flip_enabled);
+            key = NVS_AUTO_FLIP_KEY;
+            break;
+#endif
         case SETTING_WEB_AUTH:
             err = nvs_set_u8(nvsHandle, NVS_WEB_AUTH_KEY, G_Settings.web_auth_enabled);
             key = NVS_WEB_AUTH_KEY;
@@ -1750,6 +1768,9 @@ esp_err_t settings_save(const FSettings *settings) {
     NVS_SET(nvs_set_u32(nvsHandle, NVS_TERMINAL_TEXT_COLOR_KEY, settings->terminal_text_color));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_TERMINAL_FONT_SIZE_KEY, settings->terminal_font_size));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_INVERT_COLORS_KEY, settings->invert_colors ? 1 : 0));
+#ifdef CONFIG_BANSHEE_LITE_C5
+    NVS_SET(nvs_set_u8(nvsHandle, NVS_AUTO_FLIP_KEY, settings->auto_flip_enabled ? 1 : 0));
+#endif
     NVS_SET(nvs_set_u8(nvsHandle, NVS_WEB_AUTH_KEY, settings->web_auth_enabled ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_USB_MSC_KEY, settings->usb_msc_enabled ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_WEBUI_AP_ONLY_KEY, settings->webui_restrict_to_ap ? 1 : 0));
@@ -2104,6 +2125,16 @@ void settings_set_invert_colors(FSettings *settings, bool enabled) {
 bool settings_get_invert_colors(const FSettings *settings) {
   return settings->invert_colors;
 }
+
+#ifdef CONFIG_BANSHEE_LITE_C5
+void settings_set_auto_flip_enabled(FSettings *settings, bool enabled) {
+  if (settings) settings->auto_flip_enabled = enabled;
+}
+
+bool settings_get_auto_flip_enabled(const FSettings *settings) {
+  return settings && settings->auto_flip_enabled;
+}
+#endif
 
 void settings_set_web_auth_enabled(FSettings *settings, bool enabled) {
   settings->web_auth_enabled = enabled;

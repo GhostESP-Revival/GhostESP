@@ -1467,6 +1467,17 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
     desired_uart = UART_NUM_1;
 #endif
 
+#if (defined(CONFIG_BANSHEE_LITE_C5) || defined(CONFIG_BANSHEE_LITE_S3)) && \
+    defined(CONFIG_GHOSTLINK_TX_PIN) && defined(CONFIG_GHOSTLINK_RX_PIN)
+#if CONFIG_GHOSTLINK_TX_PIN >= 0 && CONFIG_GHOSTLINK_RX_PIN >= 0
+    /* A profile pin map is more specific than the legacy template defaults. */
+    if ((int)tx_pin == (int)DEFAULT_TX_PIN && (int)rx_pin == (int)DEFAULT_RX_PIN) {
+        resolved_tx = (gpio_num_t)CONFIG_GHOSTLINK_TX_PIN;
+        resolved_rx = (gpio_num_t)CONFIG_GHOSTLINK_RX_PIN;
+    }
+#endif
+#endif
+
     if (comm_pins_conflict_with_rgb_display(resolved_tx, resolved_rx)) {
         return;
     }

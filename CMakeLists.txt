@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.16.0)
 
+# ESP-IDF cross-compiles cannot run CMake's temporary test executables during
+# compiler detection. Build static libraries for try_compile checks instead.
+set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+
 # Set IDF_TARGET from environment variable if defined
 if(DEFINED ENV{IDF_TARGET})
     set(IDF_TARGET $ENV{IDF_TARGET})

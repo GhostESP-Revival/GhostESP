@@ -220,6 +220,10 @@ void display_manager_restore_status_bar(void);
 void display_manager_set_low_i2c_mode(bool on);
 bool display_manager_is_low_i2c_mode(void);
 
+#ifdef CONFIG_BANSHEE_LITE_C5
+void display_manager_set_auto_flip_enabled(bool enabled);
+#endif
+
 void display_manager_suspend_lvgl_task(void);
 void display_manager_resume_lvgl_task(void);
 void display_manager_suspend_input_task(void);

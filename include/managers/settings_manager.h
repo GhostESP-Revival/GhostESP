@@ -82,6 +82,9 @@ typedef enum {
     SETTING_THIRD_CONTROL,
     SETTING_TERMINAL_COLOR,
     SETTING_INVERT_COLORS,
+#ifdef CONFIG_BANSHEE_LITE_C5
+    SETTING_AUTO_FLIP,
+#endif
     SETTING_WEB_AUTH,
     SETTING_WEBUI_AP_ONLY,
     SETTING_AP_ENABLED,
@@ -299,6 +302,9 @@ typedef struct {
   uint8_t terminal_font_size;   // 0=Small, 1=Normal, 2=Large
   uint8_t menu_theme;  // Theme for main menu colors (0=Default)
   bool invert_colors; // Invert screen colors
+#ifdef CONFIG_BANSHEE_LITE_C5
+  bool auto_flip_enabled; // Rotate the UI when the device is held sideways
+#endif
   bool web_auth_enabled;
   bool webui_restrict_to_ap;
   bool usb_msc_enabled; // Remember USB SD passthrough toggle (never auto-starts at boot)
@@ -531,6 +537,10 @@ void settings_set_terminal_font_size(FSettings *settings, uint8_t size);
 uint8_t settings_get_terminal_font_size(const FSettings *settings);
 void settings_set_invert_colors(FSettings *settings, bool enabled);
 bool settings_get_invert_colors(const FSettings *settings);
+#ifdef CONFIG_BANSHEE_LITE_C5
+void settings_set_auto_flip_enabled(FSettings *settings, bool enabled);
+bool settings_get_auto_flip_enabled(const FSettings *settings);
+#endif
 
 // Getter and Setter for web auth
 void settings_set_web_auth_enabled(FSettings *settings, bool enabled);

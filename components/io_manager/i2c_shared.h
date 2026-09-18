@@ -21,6 +21,9 @@ esp_err_t i2c_shared_get_or_create_bus(i2c_port_num_t port,
                                        i2c_master_bus_handle_t *out_bus,
                                        bool *out_created);
 
+/* True when the pin belongs to the active board's shared I2C wiring. */
+bool i2c_shared_is_board_i2c_pin(gpio_num_t pin);
+
 /* Remove a shared bus and cached devices so another peripheral can temporarily
  * claim the same GPIOs. The bus can be recreated afterward. */
 esp_err_t i2c_shared_release_bus(i2c_port_num_t port);

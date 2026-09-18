@@ -67,7 +67,9 @@ static mc_advert_blob_t *s_blob_cache;  // MC_ADVERT_BLOB_CACHE
 static int s_blob_next;
 
 static void blob_cache_put(const uint8_t *pub, const uint8_t *blob, uint8_t len) {
-    if (!s_blob_cache || !pub || !blob || len == 0 || len > MC_MAX_TRANS_UNIT) return;
+    // len is uint8_t so it cannot exceed MC_MAX_TRANS_UNIT (255); the == 0
+    // check below is the only meaningful guard here.
+    if (!s_blob_cache || !pub || !blob || len == 0) return;
     int slot = -1;
     for (int i = 0; i < MC_ADVERT_BLOB_CACHE; ++i) {
         if (memcmp(s_blob_cache[i].pub, pub, MC_PUB_KEY_SIZE) == 0) { slot = i; break; }
@@ -572,7 +574,8 @@ static void maybe_forward(mc_packet_t *pkt) {
     mc_packet_set_path_hash_count(pkt, (uint8_t)(n + 1));
 
     uint8_t len = mc_packet_write_to(pkt, s_fwd_frame);
-    if (len == 0 || len > sizeof(s_fwd_frame)) return;
+    // len is uint8_t so it cannot exceed the MC_MAX_TRANS_UNIT buffer size.
+    if (len == 0) return;
     s_fwd_len = len;
     s_fwd_pending = true;
 
