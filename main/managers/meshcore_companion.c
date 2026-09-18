@@ -444,10 +444,12 @@ static void handle_send_channel_txt(const uint8_t *f, size_t len) {
     uint8_t channel_idx = f[2];
     uint32_t timestamp;
     memcpy(&timestamp, &f[3], 4);
+    // Text is a raw binary tail: no NUL terminator, so pass the frame's real
+    // remaining length or strlen() would read past it into stale bytes.
     const char *text = (const char *)&f[7];
     if (txt_type != MC_TXT_TYPE_PLAIN) { write_err(MC_ERR_UNSUPPORTED_CMD); return; }
     if (!mc_mesh_channel(channel_idx)) { write_err(MC_ERR_NOT_FOUND); return; }
-    if (mc_mesh_send_group_text(channel_idx, text, timestamp)) write_ok();
+    if (mc_mesh_send_group_text_len(channel_idx, text, (int)len - 7, timestamp)) write_ok();
     else write_err(MC_ERR_NOT_FOUND);
 }
 
@@ -482,7 +484,11 @@ static void handle_send_txt(const uint8_t *f, size_t len) {
     uint32_t msg_timestamp;
     memcpy(&msg_timestamp, &f[i], 4); i += 4;
     const uint8_t *prefix = &f[i]; i += 6;
+    // Raw binary tail after the 6-byte prefix: length is what remains in the
+    // frame, not a NUL-terminated string.
     const char *text = (const char *)&f[i];
+    int text_len = (int)len - i;
+    if (text_len < 0) text_len = 0;
     mc_contact_t *recipient = mc_mesh_find_contact_pubkey(prefix, 6);
     if (!recipient || (txt_type != MC_TXT_TYPE_PLAIN && txt_type != MC_TXT_TYPE_CLI_DATA)) {
         write_err(recipient ? MC_ERR_UNSUPPORTED_CMD : MC_ERR_NOT_FOUND);
@@ -494,8 +500,8 @@ static void handle_send_txt(const uint8_t *f, size_t len) {
         msg_timestamp = mc_mesh_now_unique();
     }
     uint32_t expected_ack = 0, est_timeout = 0;
-    int rc = mc_mesh_send_direct_text(recipient, msg_timestamp, attempt, txt_type, text,
-                                      &expected_ack, &est_timeout);
+    int rc = mc_mesh_send_direct_text_len(recipient, msg_timestamp, attempt, txt_type, text,
+                                          text_len, &expected_ack, &est_timeout);
     if (rc == MC_MSG_SEND_FAILED) { write_err(MC_ERR_TABLE_FULL); return; }
     if (expected_ack) ack_table_add(expected_ack, recipient);
     uint8_t out[10];

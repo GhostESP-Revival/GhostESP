@@ -741,17 +741,18 @@ static void return_path_retry(mc_contact_t *c, const uint8_t *path, uint8_t path
     }
 }
 
-bool mc_mesh_send_group_text(uint8_t channel_idx, const char *text, uint32_t timestamp) {
+bool mc_mesh_send_group_text_len(uint8_t channel_idx, const char *text, int text_len,
+                                 uint32_t timestamp) {
     if (!mesh_ready()) return false;
     const mc_channel_t *ch = mc_mesh_channel(channel_idx);
     if (!ch || (!ch->secret[0] && !ch->secret[15])) return false;
+    if (text_len < 0) text_len = 0;
 
     uint8_t temp[5 + MC_MAX_TEXT_LEN + 32];
     memcpy(temp, &timestamp, 4);
     temp[4] = 0; // TXT_TYPE_PLAIN, attempt 0
     int prefix = snprintf((char *)&temp[5], sizeof(temp) - 5, "%s: ", s_prefs.node_name);
     if (prefix < 0) prefix = 0;
-    int text_len = (int)strlen(text);
     if (prefix + text_len > MC_MAX_TEXT_LEN) text_len = MC_MAX_TEXT_LEN - prefix;
     if (text_len < 0) text_len = 0;
     memcpy(&temp[5 + prefix], text, (size_t)text_len);
@@ -762,6 +763,11 @@ bool mc_mesh_send_group_text(uint8_t channel_idx, const char *text, uint32_t tim
     }
     send_flood_scoped(&pkt);
     return true;
+}
+
+bool mc_mesh_send_group_text(uint8_t channel_idx, const char *text, uint32_t timestamp) {
+    if (!text) return false;
+    return mc_mesh_send_group_text_len(channel_idx, text, (int)strlen(text), timestamp);
 }
 
 bool mc_mesh_send_group_data(uint8_t channel_idx, uint8_t path_len, const uint8_t *path,
@@ -782,12 +788,10 @@ bool mc_mesh_send_group_data(uint8_t channel_idx, uint8_t path_len, const uint8_
     return true;
 }
 
-int mc_mesh_send_direct_text(const mc_contact_t *to, uint32_t timestamp, uint8_t attempt,
-                             uint8_t txt_type, const char *text, uint32_t *expected_ack,
-                             uint32_t *est_timeout) {
-    if (!to) return MC_MSG_SEND_FAILED;
-    int text_len = (int)strlen(text);
-    if (text_len > MC_MAX_TEXT_LEN) return MC_MSG_SEND_FAILED;
+int mc_mesh_send_direct_text_len(const mc_contact_t *to, uint32_t timestamp, uint8_t attempt,
+                                 uint8_t txt_type, const char *text, int text_len,
+                                 uint32_t *expected_ack, uint32_t *est_timeout) {
+    if (!to || text_len < 0 || text_len > MC_MAX_TEXT_LEN) return MC_MSG_SEND_FAILED;
 
     mc_contact_t *c = mc_mesh_find_contact_pubkey(to->pub_key, MC_PUB_KEY_SIZE);
     if (!c) return MC_MSG_SEND_FAILED;
@@ -796,7 +800,8 @@ int mc_mesh_send_direct_text(const mc_contact_t *to, uint32_t timestamp, uint8_t
     uint8_t temp[5 + MC_MAX_TEXT_LEN + 2];
     memcpy(temp, &timestamp, 4);
     temp[4] = (uint8_t)((attempt & 3) | (txt_type << 2));
-    memcpy(&temp[5], text, (size_t)text_len + 1);
+    memcpy(&temp[5], text, (size_t)text_len);
+    temp[5 + text_len] = 0;
     int len = 5 + text_len;
 
     uint32_t ack = 0;
@@ -831,6 +836,14 @@ int mc_mesh_send_direct_text(const mc_contact_t *to, uint32_t timestamp, uint8_t
                        (uint32_t)((air * MC_DIRECT_SEND_PERHOP_FACTOR + MC_DIRECT_SEND_PERHOP_EXTRA_MS) * (hops + 1));
     }
     return MC_MSG_SEND_SENT_DIRECT;
+}
+
+int mc_mesh_send_direct_text(const mc_contact_t *to, uint32_t timestamp, uint8_t attempt,
+                             uint8_t txt_type, const char *text, uint32_t *expected_ack,
+                             uint32_t *est_timeout) {
+    if (!text) return MC_MSG_SEND_FAILED;
+    return mc_mesh_send_direct_text_len(to, timestamp, attempt, txt_type, text, (int)strlen(text),
+                                        expected_ack, est_timeout);
 }
 
 int mc_mesh_send_request(const mc_contact_t *to, const uint8_t *req_data, uint8_t data_len,

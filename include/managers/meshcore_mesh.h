@@ -110,7 +110,11 @@ void mc_mesh_set_default_scope(const char *name, const uint8_t *key16);
 bool mc_mesh_send_advert(bool flood);
 
 // Group text/data TX. `path_len` == MC_OUT_PATH_UNKNOWN floods.
+// The _len variants take an explicit text length: companion frames are binary
+// and not NUL-terminated, so strlen() would read past the frame.
 bool mc_mesh_send_group_text(uint8_t channel_idx, const char *text, uint32_t timestamp);
+bool mc_mesh_send_group_text_len(uint8_t channel_idx, const char *text, int text_len,
+                                 uint32_t timestamp);
 bool mc_mesh_send_group_data(uint8_t channel_idx, uint8_t path_len, const uint8_t *path,
                              uint16_t data_type, const uint8_t *data, int data_len);
 
@@ -119,6 +123,9 @@ bool mc_mesh_send_group_data(uint8_t channel_idx, uint8_t path_len, const uint8_
 int mc_mesh_send_direct_text(const mc_contact_t *to, uint32_t timestamp, uint8_t attempt,
                              uint8_t txt_type, const char *text, uint32_t *expected_ack,
                              uint32_t *est_timeout);
+int mc_mesh_send_direct_text_len(const mc_contact_t *to, uint32_t timestamp, uint8_t attempt,
+                                 uint8_t txt_type, const char *text, int text_len,
+                                 uint32_t *expected_ack, uint32_t *est_timeout);
 
 // Raw frame TX (companion CMD_SEND_RAW_PACKET).
 bool mc_mesh_send_raw_frame(const uint8_t *frame, uint8_t len, uint8_t priority);

@@ -443,8 +443,22 @@ bool mc_manager_send_text(const char *text) {
 bool mc_manager_send_channel_text(uint8_t channel, const char *text) {
     if (!s_running) { s_last_error = "not running"; return false; }
     bool ok = mc_mesh_send_group_text(channel, text, mc_mesh_now());
-    if (!ok) s_last_error = "channel not set";
-    return ok;
+    if (!ok) {
+        s_last_error = "channel not set";
+        return false;
+    }
+    // Mirror the sent line into the chat ring so the on-device view shows our
+    // own channel messages (Meshtastic's ring does this).
+    mc_msg_t m;
+    memset(&m, 0, sizeof(m));
+    snprintf(m.text, sizeof(m.text), "%s", text ? text : "");
+    m.channel = channel;
+    m.timestamp_ms = (uint32_t)(esp_timer_get_time() / 1000);
+    m.outgoing = true;
+    m.direct = false;
+    m.read = true;
+    push_msg(&m);
+    return true;
 }
 
 static bool parse_pubkey_prefix(const char *s, uint8_t *out, int *out_len) {
@@ -467,6 +481,23 @@ static bool parse_pubkey_prefix(const char *s, uint8_t *out, int *out_len) {
     return true;
 }
 
+static bool send_dm_to_contact(const mc_contact_t *c, const char *text) {
+    uint32_t ack = 0, timeout = 0;
+    int rc = mc_mesh_send_direct_text(c, mc_mesh_now(), 0, MC_TXT_TYPE_PLAIN, text, &ack, &timeout);
+    if (rc == MC_MSG_SEND_FAILED) { s_last_error = "send failed"; return false; }
+    mc_msg_t m;
+    memset(&m, 0, sizeof(m));
+    snprintf(m.who, sizeof(m.who), "%.23s", c->name);
+    snprintf(m.text, sizeof(m.text), "%s", text);
+    m.node_hash = c->pub_key[0];
+    m.timestamp_ms = (uint32_t)(esp_timer_get_time() / 1000);
+    m.direct = true;
+    m.outgoing = true;
+    m.read = true;
+    push_msg(&m);
+    return true;
+}
+
 bool mc_manager_send_dm(const char *peer, const char *text) {
     if (!s_running) { s_last_error = "not running"; return false; }
     const mc_contact_t *c = NULL;
@@ -480,18 +511,26 @@ bool mc_manager_send_dm(const char *peer, const char *text) {
         c = found;
     }
     if (!c) { s_last_error = "contact not found"; return false; }
-    uint32_t ack = 0, timeout = 0;
-    int rc = mc_mesh_send_direct_text(c, mc_mesh_now(), 0, MC_TXT_TYPE_PLAIN, text, &ack, &timeout);
-    if (rc == MC_MSG_SEND_FAILED) { s_last_error = "send failed"; return false; }
-    mc_msg_t m;
-    memset(&m, 0, sizeof(m));
-    snprintf(m.who, sizeof(m.who), "%.23s", c->name);
-    snprintf(m.text, sizeof(m.text), "%s", text);
-    m.timestamp_ms = (uint32_t)(esp_timer_get_time() / 1000);
-    m.direct = true;
-    m.outgoing = true;
-    push_msg(&m);
-    return true;
+    return send_dm_to_contact(c, text);
+}
+
+bool mc_manager_send_dm_hash(uint8_t peer_hash, const char *text) {
+    if (!s_running) { s_last_error = "not running"; return false; }
+    uint8_t prefix = peer_hash;
+    const mc_contact_t *c = mc_mesh_find_contact_pubkey(&prefix, 1);
+    if (!c) { s_last_error = "contact not found"; return false; }
+    return send_dm_to_contact(c, text);
+}
+
+void mc_manager_chat_read(uint32_t peer_hash) {
+    if (!s_msgs) return;
+    for (uint16_t i = 0; i < s_msg_count; ++i) {
+        uint16_t slot;
+        msg_index_to_slot(i, &slot);
+        mc_msg_t *m = &s_msgs[slot];
+        bool in_conversation = peer_hash ? (m->direct && m->node_hash == peer_hash) : !m->direct;
+        if (in_conversation) m->read = true;
+    }
 }
 
 bool mc_manager_send_advert(bool flood) {

@@ -2405,8 +2405,12 @@ void lora_mesh_tick(void) {
 }
 
 // Driver background hook (weak in lora_sx1262.c): runs ~5Hz in the radio
-// task while RX is armed, so NodeInfo goes out without a new task.
+// task while RX is armed, so NodeInfo goes out without a new task. The hook is
+// unconditional from the driver's side, so gate it on Meshtastic actually
+// owning the radio: when MeshCore runs instead, its own modem is armed and
+// Meshtastic housekeeping (NodeInfo/position/telemetry) would air as garbage.
 void lora_bg_tick(void) {
+    if (!lora_manager_is_running()) return;
     lora_mesh_tick();
 }
 
