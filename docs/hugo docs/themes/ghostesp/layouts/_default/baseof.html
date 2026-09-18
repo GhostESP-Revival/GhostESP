@@ -55,6 +55,9 @@
   {{ else }}
     <link rel="canonical" href="{{ .Permalink | absURL }}">
   {{ end }}
+  {{ with .OutputFormats.Get "aitext" }}
+    <link rel="alternate" type="text/plain" href="{{ .RelPermalink }}" title="Plain text for AI agents">
+  {{ end }}
 
   <meta name="description" content="{{ $meta.Get "description" | htmlEscape }}">
   <meta property="og:site_name" content="{{ .Site.Title | htmlEscape }}">
@@ -216,7 +219,7 @@
         </div>
       {{ end }}
       <div class="sidebar__search">
-        <input type="search" placeholder="Search" autocomplete="off" data-search-input data-search-index="{{ "index.json" | relURL }}">
+        <input type="search" placeholder="Search" autocomplete="off" data-search-input data-search-index="{{ if $currentVersion }}{{ printf "%s/search-index.json" $currentVersion | relURL }}{{ else }}{{ "search-index.json" | relURL }}{{ end }}" data-search-fallback="{{ "index.json" | relURL }}" data-search-page="{{ "search/" | relURL }}">
         <div class="sidebar__search-results" data-search-results role="listbox"></div>
       </div>
       <nav class="sidebar__nav">
@@ -319,6 +322,12 @@
   {{ with resources.Get "js/search.js" }}
     {{ $asset := . | fingerprint }}
     <script src="{{ $asset.RelPermalink }}" defer></script>
+  {{ end }}
+  {{ if eq .Layout "search" }}
+    {{ with resources.Get "js/search-page.js" }}
+      {{ $asset := . | fingerprint }}
+      <script src="{{ $asset.RelPermalink }}" defer></script>
+    {{ end }}
   {{ end }}
   {{ with resources.Get "js/sidebar.js" }}
     {{ $asset := . | fingerprint }}

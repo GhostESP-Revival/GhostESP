@@ -1,0 +1,77 @@
+{{- /* /llms.txt — a compact, human- and AI-readable map of the docs with
+     links to machine-readable endpoints. */ -}}
+{{- $versions := slice -}}
+{{- with .Site.Params.versioning -}}
+  {{- range .options -}}
+    {{- $versions = $versions | append .id -}}
+  {{- end -}}
+{{- end -}}
+{{- $pagesByVersion := dict -}}
+{{- range $versions -}}{{- $pagesByVersion = merge $pagesByVersion (dict . (slice)) -}}{{- end -}}
+{{- range .Site.RegularPages -}}
+  {{- $segments := split (strings.TrimPrefix "/" .RelPermalink) "/" -}}
+  {{- $v := "" -}}
+  {{- if gt (len $segments) 0 -}}{{- $v = index $segments 0 -}}{{- end -}}
+  {{- if in $versions $v -}}
+    {{- $pagesByVersion = merge $pagesByVersion (dict $v ((index $pagesByVersion $v) | append .)) -}}
+  {{- end -}}
+{{- end -}}
+# {{ .Site.Title }}
+
+> GhostESP is an open-source Wi-Fi and multi-protocol wireless security platform for ESP32 devices. This site documents flashing, the on-device UI, the WebUI, the serial CLI, and every wireless feature.
+
+Documentation base URL: {{ .Site.BaseURL }}
+Firmware versions documented: {{ delimit $versions ", " }}
+
+## For AI agents and tooling
+
+- Site-wide search index (JSON, compact, all versions): {{ "search-index.json" | relURL }}
+- Per-version search index (JSON, includes full page text): e.g. {{ "latest/search-index.json" | relURL }}
+- Per-page plain text: append `index.txt` to any docs URL, e.g. {{ "latest/wifi/deauth/index.txt" | relURL }}
+- Human, URL-addressable search page: {{ "search/" | relURL }}?q=your+query
+- Sitemap: {{ "sitemap.xml" | relURL }}
+
+Each search-index record contains: id, url, version, section, title, description, keywords, summary, headings (with anchors), lastmod, and text_url.
+
+## Agent quick start (prompt)
+
+Copy the block below into your agent/bot. Replace DOCS_URL with this site's origin.
+
+```
+You are a GhostESP documentation assistant. Answer only from the docs.
+
+Finding pages (do not guess URLs):
+1. Fetch DOCS_URL/search-index.json once and cache it. It is a JSON array covering
+   every page in every firmware version.
+2. Each record: title, description, keywords[], summary, section,
+   headings[{id,title,level}], url, version, text_url.
+3. Rank candidates by the user's question against title, then keywords, then
+   headings[].title, then description/summary. Prefer version "latest" unless the
+   user names a version.
+4. Read the best record as clean text by fetching its text_url
+   (for example DOCS_URL/latest/wifi/deauth/index.txt). That is the full page with
+   headings and links, and costs far fewer tokens than the HTML page.
+5. If you need a narrower slice, search within the per-version index that includes
+   full text: DOCS_URL/latest/search-index.json.
+
+Answering:
+- Cite the exact url. When you used a specific section, link its anchor:
+  url#<heading id> (ids are in the record's headings[]).
+- Quote commands and menu paths exactly as they appear in the fetched text.
+- If nothing matches, say so and link DOCS_URL/search/?q=<terms>.
+- Never invent commands, menu paths, or settings.
+
+Useful URL patterns:
+- Human, linkable search: DOCS_URL/search/?q=deauth&version=latest
+- Plain text for any page: <page url>index.txt
+- Full page map: DOCS_URL/llms.txt
+```
+
+## Documentation
+
+{{ range $versions }}
+### {{ . }}
+{{ range (index $pagesByVersion .) }}
+- [{{ .Title }}]({{ .RelPermalink }}): {{ with .Params.description }}{{ . | plainify | strings.TrimSpace }}{{ else }}{{ .Summary | plainify | strings.TrimSpace | truncate 160 }}{{ end }}
+{{- end }}
+{{ end -}}

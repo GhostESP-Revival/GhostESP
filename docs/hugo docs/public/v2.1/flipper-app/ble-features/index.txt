@@ -1,0 +1,45 @@
+Title: BLE Features
+Description: Bluetooth Low Energy operations available in the Flipper Zero companion app.
+URL: /v2.1/flipper-app/ble-features/
+Version: v2.1
+Section: Flipper Zero App
+Keywords: ble, bluetooth, scanning, attacks, airtag, skimmer
+Search index: /search-index.json
+
+# BLE Features
+
+> Bluetooth Low Energy operations available in the Flipper Zero companion app.
+
+## On this page
+
+- [Scanning &amp;amp; Detection](#scanning--detection)
+- [Attacks &amp;amp; Spoofing](#attacks--spoofing)
+- [Packet Capture](#packet-capture)
+- [Common Workflow: BLE Device Scanning](#common-workflow-ble-device-scanning)
+
+---
+
+## Scanning &amp; Detection
+- Skimmer Detection: Find credit card skimmers
+- Flipper Discovery: Locate nearby Flipper Zero devices
+- AirTag Scanning: Scan for Apple AirTags
+- BLE Spam Detection: Identify BLE spam attacks
+- Traffic Viewing: View all BLE advertising traffic
+- RSSI Tracking: Track Flipper device signal strength
+## Attacks &amp; Spoofing
+- BLE Spam Modes:
+Apple device spam
+- Microsoft device spam
+- Samsung device spam
+- Google device spam
+- Random device spam
+- AirTag Spoofing: Spoof selected AirTag devices
+- Device Selection: Choose AirTag and Flipper devices from discovered lists
+## Packet Capture
+- Raw BLE Capture: Capture all BLE advertising packets
+- PCAP Export: Export BLE captures for analysis
+## Common Workflow: BLE Device Scanning
+- Navigate to Bluetooth → Scanning &amp; Detection → Scan BLE
+- Wait for scan to complete
+- View discovered devices
+- Select device for additional actions (spoof, track, etc.)

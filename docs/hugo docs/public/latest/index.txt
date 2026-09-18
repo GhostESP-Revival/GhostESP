@@ -1,0 +1,94 @@
+Title: GhostESP: Revival
+Description: GhostESP is a Wi-Fi pentesting and multi-protocol wireless security platform for ESP32 devices. Scan Wi-Fi networks, capture handshakes, launch attacks, read NFC tags, learn and transmit IR signals, and more.
+URL: /latest/
+Version: latest
+Section: GhostESP Documentation
+Keywords: ESP32, security testing, WiFi, NFC, infrared, penetration testing, toolkit, wireless security
+Search index: /search-index.json
+
+# GhostESP: Revival
+
+> GhostESP is a Wi-Fi pentesting and multi-protocol wireless security platform for ESP32 devices. Scan Wi-Fi networks, capture handshakes, launch attacks, read NFC tags, learn and transmit IR signals, and more.
+
+## On this page
+
+- [Start here](#start-here)
+- [Explore capabilities](#explore-capabilities)
+
+---
+
+## Start here
+[
+## 1. Check your board
+Confirm your board, supported features, and the firmware build you need.
+](/latest/getting-started/supported-hardware/)
+[
+## 2. Flash GhostESP
+Use the recommended web flasher or choose a manual USB or Flipper Zero method.
+](/latest/getting-started/installation-guide/)
+[
+## 3. Connect to GhostESP
+Choose the on-device UI, WebUI, serial CLI, Flipper app, or desktop control app.
+](/latest/getting-started/control-methods/)
+[
+## 4. Try your first scan
+Run a passive Wi-Fi scan and confirm that your device is working.
+](/latest/getting-started/first-scan/)
+## Explore capabilities
+Choose a section below when you already know what you want to do.
+[
+## Wi-Fi
+Scan networks, capture handshakes, and launch attacks.
+](/latest/wifi/)
+[
+## Bluetooth
+Scan, advertise, read GATT services, and target AirTags.
+](/latest/ble/)
+[
+## SubGHz
+Scan, capture, and replay sub-GHz radio signals with a CC1101.
+](/latest/subghz/)
+[
+## NFC
+Read, write, and save NFC tags.
+](/latest/nfc/)
+[
+## Infrared
+Learn and transmit IR signals and universal remotes.
+](/latest/infrared/)
+[
+## GPS
+Log wardrives and tag captures with location data.
+](/latest/gps/)
+[
+## LoRa
+Meshtastic chat on SX1262, BLE app link, stock radio interop.
+](/latest/lora/)
+[
+## Ethernet
+Fingerprint hosts and scan the wired network.
+](/latest/ethernet/)
+[
+## Camera
+Stream MJPEG video and run motion detection.
+](/latest/camera/)
+[
+## USB
+Use keyboard, BadUSB, keyboard mode, and mouse jiggler features.
+](/latest/usb/)
+[
+## Flipper Zero App
+Control GhostESP from a Flipper Zero.
+](/latest/flipper-app/)
+[
+## GhostScript
+Automate multi-step workflows with Lua scripts.
+](/latest/ghostscript/)
+[
+## Customization
+Theme packages, boot images, and device styling.
+](/latest/customization/)
+[
+## Companion Tools
+Desktop Control App and screen mirroring over USB.
+](/latest/companion-tools/)

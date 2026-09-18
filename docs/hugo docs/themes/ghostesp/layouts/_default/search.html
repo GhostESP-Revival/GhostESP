@@ -1,0 +1,35 @@
+{{ define "main" }}
+{{ $versions := slice }}
+{{ with .Site.Params.versioning }}
+  {{ range .options }}
+    {{ $versions = $versions | append . }}
+  {{ end }}
+{{ end }}
+<div class="doc search-page" data-search-page data-search-index="{{ "search-index.json" | relURL }}">
+  <header class="search-page__header">
+    <h1>{{ .Title }}</h1>
+    <p>{{ .Description }}</p>
+  </header>
+  <form class="search-page__form" role="search" action="{{ "search/" | relURL }}" method="get" data-search-page-form>
+    <input type="search" name="q" class="search-page__input" data-search-page-input placeholder="Search the docs…" autocomplete="off" spellcheck="false" aria-label="Search query">
+    <select name="version" class="search-page__version" data-search-page-version aria-label="Filter by firmware version">
+      <option value="">All versions</option>
+      {{ range $versions }}<option value="{{ .id }}">{{ .name }}</option>{{ end }}
+    </select>
+    <button type="submit" class="search-page__submit">Search</button>
+  </form>
+  <p class="search-page__status" data-search-page-status role="status" aria-live="polite"></p>
+  <div class="search-page__results" data-search-page-results></div>
+  <details class="search-page__api">
+    <summary>For bots &amp; tooling</summary>
+    <ul>
+      <li>Compact search index (all versions): <a href="{{ "search-index.json" | relURL }}"><code>search-index.json</code></a></li>
+      <li>Per-version index with full text: <a href="{{ "latest/search-index.json" | relURL }}"><code>latest/search-index.json</code></a></li>
+      <li>Any page as plain text: append <code>index.txt</code> to its URL, e.g. <a href="{{ "latest/wifi/deauth/index.txt" | relURL }}"><code>/latest/wifi/deauth/index.txt</code></a></li>
+      <li>AI map of the docs: <a href="{{ "llms.txt" | relURL }}"><code>llms.txt</code></a></li>
+    </ul>
+    <p><strong>Agent prompt:</strong> copy the ready-to-use instructions from <a href="{{ "agent-prompt.txt" | relURL }}"><code>agent-prompt.txt</code></a> or the <code>llms.txt</code> prompt section.</p>
+    <pre class="search-agent-prompt">Fetch {{ "search-index.json" | relURL }} to rank candidate pages, then read the best result's text_url (for example {{ "latest/wifi/deauth/index.txt" | relURL }}) instead of the HTML. Cite exact URLs and heading anchors, and prefer version "latest" unless the user names a version.</pre>
+  </details>
+</div>
+{{ end }}

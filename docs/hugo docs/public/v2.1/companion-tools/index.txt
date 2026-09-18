@@ -1,0 +1,15 @@
+Title: Companion Tools
+Description: Desktop tools for controlling and viewing your GhostESP device over USB.
+URL: /v2.1/companion-tools/
+Version: v2.1
+Section: GhostESP: Revival
+Keywords: control app, commander, screen mirror, desktop, serial
+Search index: /search-index.json
+
+# Companion Tools
+
+> Desktop tools for controlling and viewing your GhostESP device over USB.
+
+---
+
+Host-side tools that connect to your GhostESP device over USB serial: the Control App desktop GUI and Screen Mirroring. For the on-device Flipper companion, see the [Flipper Zero App](/v2.1/flipper-app/) section.

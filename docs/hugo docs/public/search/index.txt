@@ -1,0 +1,14 @@
+Title: Search
+Description: Search every GhostESP documentation page across all firmware versions. Results deep-link to the exact section and include plain-text links for AI agents.
+URL: /search/
+Version: n/a
+Section: GhostESP Documentation
+Search index: /search-index.json
+
+# Search
+
+> Search every GhostESP documentation page across all firmware versions. Results deep-link to the exact section and include plain-text links for AI agents.
+
+---
+
+

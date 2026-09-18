@@ -1,0 +1,46 @@
+Title: Installation Guide
+Description: Flash GhostESP with the recommended web flasher
+URL: /latest/getting-started/installation-guide/
+Version: latest
+Section: Getting Started
+Search index: /search-index.json
+
+# Installation Guide
+
+> Flash GhostESP with the recommended web flasher
+
+## On this page
+
+- [What this does](#what-this-does)
+- [Before you start](#before-you-start)
+- [Flash with the web flasher](#flash-with-the-web-flasher)
+- [Expected result](#expected-result)
+- [Troubleshooting](#troubleshooting)
+- [Related tasks](#related-tasks)
+
+---
+
+## What this does
+The web flasher installs the GhostESP firmware on a compatible ESP32 board directly from your browser. It is the recommended method for most users.
+## Before you start
+- A compatible ESP32 board (see [Supported Hardware](/latest/getting-started/supported-hardware/))
+- A USB cable (Micro USB or USB-C; must be a data cable, not charge-only)
+- A modern web browser (Chrome, Brave, or Edge; Firefox doesn’t support WebSerial)
+## Flash with the web flasher
+- Open [ghostesp.net/flasher](https://ghostesp.net/flasher) in Chrome, Brave, or Edge.
+- Close any app that is using the board’s serial port.
+- Enter bootloader mode: hold BOOT, connect USB, then release BOOT.
+- If that does not work, hold BOOT, tap RESET, wait 1-2 seconds, then release BOOT.
+- Select the matching ESP32 variant, click Connect, and follow the browser prompts.
+- When flashing finishes, unplug and reconnect the board.
+## Expected result
+GhostESP boots and creates a Wi-Fi access point named GhostNet with password GhostNet.
+## Troubleshooting
+- The board is not detected: Confirm the cable supports data, close other serial apps, then enter bootloader mode again.
+- The web flasher times out: Reconnect the board and repeat the bootloader steps. Clear the browser cache only if the flasher page itself fails to load correctly.
+- GhostNet does not appear after flashing: Verify the selected firmware matches your board and restart the device. Use a [serial console](https://ghostesp.net/serial) at 115200 baud to inspect boot output.
+## Related tasks
+- [Connect to GhostESP](/latest/getting-started/control-methods/)
+- [Try your first scan](/latest/getting-started/first-scan/)
+- [Manual USB flashing](/latest/getting-started/manual-flashing/)
+- [Flash with Flipper Zero](/latest/getting-started/flipper-flashing/)

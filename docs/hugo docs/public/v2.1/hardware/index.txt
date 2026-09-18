@@ -1,0 +1,16 @@
+Title: Hardware
+Description: GhostESP&#39;s own open-source hardware devices
+URL: /v2.1/hardware/
+Version: v2.1
+Section: GhostESP: Revival
+Keywords: GhostLink P1, hardware, CYD, 18650, handheld
+Search index: /search-index.json
+
+# Hardware
+
+> GhostESP&#39;s own open-source hardware devices
+
+---
+
+GhostESP sells and maintains its own open-source hardware line, built around off-the-shelf ESP32 modules and open 3D-printed enclosures.
+- [GhostLink P1](/v2.1/hardware/ghostlink-p1/) is a 3D-printable handheld with a 1.9&#34; display, 5-way nav, microSD, onboard 18650 charging. Buy pre-assembled on [shop.ghostesp.net](https://shop.ghostesp.net), or print and build it yourself: the files, parts list and wiring are all open.

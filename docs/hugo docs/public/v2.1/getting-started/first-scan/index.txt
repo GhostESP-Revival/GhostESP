@@ -1,0 +1,49 @@
+Title: Try Your First Scan
+Description: Confirm GhostESP is working with a passive Wi-Fi scan.
+URL: /v2.1/getting-started/first-scan/
+Version: v2.1
+Section: Getting Started
+Search index: /search-index.json
+
+# Try Your First Scan
+
+> Confirm GhostESP is working with a passive Wi-Fi scan.
+
+## On this page
+
+- [What this does](#what-this-does)
+- [Before you start](#before-you-start)
+- [On-device steps](#on-device-steps)
+- [CLI steps](#cli-steps)
+- [Expected result](#expected-result)
+- [Troubleshooting](#troubleshooting)
+- [Related tasks](#related-tasks)
+
+---
+
+## What this does
+This first task passively lists nearby Wi-Fi access points. It does not connect to a network or transmit anything.
+## Before you start
+- GhostESP is flashed and powered on.
+- Use the on-device UI or a serial CLI connection. Do not run this scan from the WebUI on a single-board setup because the Wi-Fi radio is hosting GhostNet.
+- Attach the board’s supported Wi-Fi antenna if it has an external antenna connector.
+## On-device steps
+- Open Menu → WiFi → Scanning.
+- Choose Scan Access Points.
+- Wait for the scan to complete.
+- Choose List Access Points to review the results.
+## CLI steps
+- Open the GhostESP serial terminal.
+- Run scanap.
+- Wait for the scan to finish.
+- Run list -a to view the saved access-point list.
+## Expected result
+GhostESP lists nearby networks with their name, channel, signal strength, and manufacturer when available. If no networks appear, move closer to a known access point and try again.
+## Troubleshooting
+- No networks found: Confirm the board supports Wi-Fi, attach its antenna if applicable, move closer to an access point, and scan again.
+- The scan stops immediately: Stop any active Wi-Fi task or portal, then retry.
+- The WebUI disconnects: Run Wi-Fi scans from the on-device UI or serial CLI, not from the WebUI on a single-board setup.
+## Related tasks
+- [Scan nearby Wi-Fi networks](/v2.1/wifi/survey/)
+- [Connect GhostESP to a Wi-Fi network](/v2.1/wifi/connect/)
+- [Connect to GhostESP](/v2.1/getting-started/control-methods/)
