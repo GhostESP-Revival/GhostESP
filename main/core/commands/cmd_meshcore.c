@@ -23,6 +23,7 @@
 static void mc_print_help(void) {
     glog("meshcore                 Show status\n"
          "meshcore on / off        Start / stop (stops Meshtastic first)\n"
+         "meshcore autostart [on|off]  Boot into MeshCore (on) / disable\n"
          "meshcore send <text>     Send a group message on channel 0\n"
          "meshcore ch <0-39> <text> Send a group message on a channel\n"
          "meshcore dm <name|!hex> <text>  Direct message a contact\n"
@@ -86,13 +87,45 @@ void handle_meshcore_cmd(int argc, char **argv) {
             glog("Stopped Meshtastic (one radio: MeshCore now owns it)\n");
         }
 #endif
-        if (mc_manager_start()) glog("MeshCore started\n");
-        else glog("MeshCore start failed: %s\n", mc_manager_last_error());
+        if (mc_manager_start()) {
+            mc_manager_set_default_backend_meshcore(true);
+            glog("MeshCore started\n");
+        } else {
+            glog("MeshCore start failed: %s\n", mc_manager_last_error());
+        }
         return;
     }
     if (strcmp(sub, "stop") == 0) {
         mc_manager_stop();
         glog("MeshCore stopped\n");
+        return;
+    }
+    if (strcmp(sub, "autostart") == 0) {
+#ifdef CONFIG_HAS_LORA
+        const char *arg = argc >= 3 ? argv[2] : NULL;
+        if (arg && (strcmp(arg, "off") == 0 || strcmp(arg, "0") == 0 ||
+                    strcmp(arg, "false") == 0)) {
+            glog(lora_manager_set_auto_start(false) ? "Auto-start OFF\n"
+                                                    : "auto-start save failed\n");
+            return;
+        }
+        if (arg && (strcmp(arg, "on") == 0 || strcmp(arg, "1") == 0 ||
+                    strcmp(arg, "true") == 0 || strcmp(arg, "meshcore") == 0 ||
+                    strcmp(arg, "mc") == 0)) {
+            /* Selecting MeshCore also makes it the remembered boot protocol. */
+            mc_manager_set_default_backend_meshcore(true);
+            glog(lora_manager_set_auto_start(true)
+                     ? "Auto-start ON (MeshCore)\n"
+                     : "auto-start save failed\n");
+            return;
+        }
+        glog("meshcore autostart: %s (%s)\n",
+             lora_manager_auto_start_enabled() ? "on" : "off",
+             mc_manager_default_backend_meshcore() ? "MeshCore" : "Meshtastic");
+        glog("Set: meshcore autostart on|off\n");
+#else
+        glog("LoRa not enabled on this board\n");
+#endif
         return;
     }
     if (strcmp(sub, "selftest") == 0) {
@@ -124,7 +157,7 @@ void handle_meshcore_cmd(int argc, char **argv) {
         return;
     }
     if (strcmp(sub, "ch") == 0) {
-        if (argc < 4) { glog("Usage: meshcore ch <0-7> <text>\n"); return; }
+         if (argc < 4) { glog("Usage: meshcore ch <0-39> <text>\n"); return; }
         int idx = atoi(argv[2]);
         char tmp[192] = {0};
         for (int i = 3; i < argc; ++i) {

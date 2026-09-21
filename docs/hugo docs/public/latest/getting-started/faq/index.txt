@@ -22,6 +22,9 @@ Search index: /search-index.json
 - [8. Why does my connection to the GhostESP AP drop when issuing WiFi commands?](#8-why-does-my-connection-to-the-ghostesp-ap-drop-when-issuing-wifi-commands)
 - [9. I’m not seeing any output when connecting via Serial.](#9-im-not-seeing-any-output-when-connecting-via-serial)
 - [10. Why won’t my SD card work?](#10-why-wont-my-sd-card-work)
+- [11. Do I need to install ESP-IDF or build from source?](#11-do-i-need-to-install-esp-idf-or-build-from-source)
+- [12. Which variant do I choose in the web flasher?](#12-which-variant-do-i-choose-in-the-web-flasher)
+- [13. I already flashed an older version. How do I update?](#13-i-already-flashed-an-older-version-how-do-i-update)
 
 ---
 
@@ -63,3 +66,11 @@ Switching modes will disconnect your device from the AP.
 - “Generic” firmware builds include SD card support by default; use sd_config to see the pins or sd_pins_spi &lt;cs&gt; &lt;clk&gt; &lt;miso&gt; &lt;mosi&gt; to set SPI pins and sd_save_config to save the pin config to NVS.
 - Ensure your SD card is formatted as FAT32.
 - Try using a SanDisk brand SD card 32GB or less.
+### 11. Do I need to install ESP-IDF or build from source?
+- No. Flashing a released build needs nothing but a browser: see the [Installation Guide](/latest/getting-started/installation-guide/).
+- Building from source is only required if you are changing firmware code or adding a board. See [Environment Setup](/latest/development/environment-setup/) if that is what you want to do.
+### 12. Which variant do I choose in the web flasher?
+- The flasher asks for the chip family, not the board name. Look your board up in the Chip column of [Supported Hardware](/latest/getting-started/supported-hardware/).
+- Choosing the wrong chip is the most common reason a board flashes but never boots.
+### 13. I already flashed an older version. How do I update?
+- See [Firmware Updates](/latest/getting-started/firmware-updates/) for the OTA and manual options available for your board.

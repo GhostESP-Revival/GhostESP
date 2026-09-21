@@ -5,126 +5,202 @@
 
   const MIN_QUERY_LENGTH = 2;
   const MAX_RESULTS = 8;
-  let fuse = null;
+  const MAX_HEADING_LINKS = 3;
+  const DEBOUNCE_MS = 150;
+
+  const moduleUrl = input.dataset.pagefindModule || '/pagefind/pagefind.js';
+  const searchPageUrl = input.dataset.searchPageUrl || 'search/';
+  const versionEl = document.querySelector('[data-current-version]');
+  const currentVersion = versionEl ? versionEl.dataset.currentVersion : null;
+
+  let pagefind = null;
   let loading = false;
   let hasLoaded = false;
   let selectedIndex = -1;
   let debounceTimer = null;
-  const indexUrl = input.dataset.searchIndex || 'index.json';
-  const fallbackUrl = input.dataset.searchFallback || 'index.json';
-  const searchPageUrl = input.dataset.searchPage || 'search/';
-  const versionEl = document.querySelector('[data-current-version]');
-  const currentVersion = versionEl ? versionEl.dataset.currentVersion : null;
+  let requestId = 0;
 
   const escapeHtml = (text) => {
     const div = document.createElement('div');
-    div.textContent = text;
+    div.textContent = text == null ? '' : String(text);
     return div.innerHTML;
   };
 
-  const highlightMatches = (text, query) => {
-    if (!query) return escapeHtml(text);
-    const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const regex = new RegExp(`(${escaped})`, 'gi');
-    return escapeHtml(text).replace(regex, '<mark>$1</mark>');
+  const cleanTitle = (text) => String(text == null ? '' : text)
+    .replace(/\s*[·|]\s*GhostESP Documentation\s*$/i, '')
+    .trim();
+
+  const setVisible = (visible) => {
+    resultsContainer.dataset.visible = visible ? 'true' : 'false';
   };
 
-  const extractMatchFragment = (result, query) => {
-    const content = result.item.content || '';
-    const trimmedQuery = query.trim();
-    if (!content || !trimmedQuery) {
-      return null;
-    }
-
-    const lowerQuery = trimmedQuery.toLowerCase();
-    const lowerContent = content.toLowerCase();
-    let index = lowerContent.indexOf(lowerQuery);
-
-    if (index === -1) {
-      const matches = result.matches || [];
-      const fallback = matches.find(match => match.key === 'content' && match.value);
-      if (fallback) {
-        const value = fallback.value;
-        const lowerValue = value.toLowerCase();
-        const matchIndex = lowerValue.indexOf(lowerQuery);
-        if (matchIndex !== -1) {
-          const segment = value.slice(Math.max(0, matchIndex - 60), Math.min(value.length, matchIndex + trimmedQuery.length + 60));
-          const snippet = segment.replace(/\s+/g, ' ').trim();
-          if (snippet) {
-            return {
-              snippet,
-              leading: matchIndex > 0,
-              trailing: matchIndex + trimmedQuery.length < value.length
-            };
-          }
-        }
-      }
-      return null;
-    }
-
-    const totalLength = content.length;
-    const start = Math.max(0, index - 60);
-    const end = Math.min(totalLength, index + trimmedQuery.length + 60);
-    const snippet = content.slice(start, end).replace(/\s+/g, ' ').trim();
-    if (!snippet) {
-      return null;
-    }
-
-    return {
-      snippet,
-      leading: start > 0,
-      trailing: end < totalLength
-    };
+  const showMessage = (className, text) => {
+    resultsContainer.innerHTML = '';
+    const el = document.createElement('div');
+    el.className = className;
+    el.textContent = text;
+    resultsContainer.appendChild(el);
+    setVisible(true);
   };
 
-  const buildMatchSnippet = (result, query) => {
-    const fragment = extractMatchFragment(result, query);
-    if (fragment) {
-      let text = fragment.snippet;
-      if (fragment.leading) {
-        text = `…${text}`;
-      }
-      if (fragment.trailing) {
-        text = `${text}…`;
-      }
-      return highlightMatches(text, query);
-    }
+  const appendSearchAllLink = (query, label) => {
+    const trimmed = (query || '').trim();
+    if (!trimmed || !searchPageUrl) return;
+    const link = document.createElement('a');
+    link.className = 'sidebar__result-all';
+    const params = new URLSearchParams({ q: trimmed });
+    if (currentVersion) params.set('version', currentVersion);
+    link.href = `${searchPageUrl}?${params.toString()}`;
+    link.textContent = label || `Search all versions for “${trimmed}”`;
+    resultsContainer.appendChild(link);
+  };
 
-    const description = result.item.description || '';
-    if (description) {
-      return highlightMatches(description.substring(0, 120), query);
+  const headingLinks = (data) => {
+    const subs = Array.isArray(data.sub_results) ? data.sub_results : [];
+    const seen = new Set([data.url]);
+    const links = [];
+    for (const sub of subs) {
+      if (!sub || !sub.url || seen.has(sub.url)) continue;
+      if (!sub.title) continue;
+      seen.add(sub.url);
+      links.push(sub);
+      if (links.length >= MAX_HEADING_LINKS) break;
     }
+    return links;
+  };
 
+  // Pagefind lists sub_results in document order, so the matched section is the
+  // first heading whose excerpt contains a <mark> hit. Linking there lands the
+  // reader on the passage they searched for instead of the top of the page.
+  const matchedSectionUrl = (data) => {
+    const subs = Array.isArray(data.sub_results) ? data.sub_results : [];
+    for (const sub of subs) {
+      if (!sub || !sub.url || sub.url.indexOf('#') === -1) continue;
+      if (sub.excerpt && sub.excerpt.indexOf('<mark') !== -1) return sub.url;
+    }
     return '';
   };
 
-  const buildResultHref = (result, query) => {
-    const permalink = result.item.permalink;
-    if (permalink.includes('#')) {
-      return permalink;
+  const renderResults = (items, query, options) => {
+    const opts = options || {};
+    resultsContainer.innerHTML = '';
+
+    if (!items.length) {
+      showMessage('sidebar__result--empty', currentVersion && !opts.fellBack
+        ? 'No results found in this version'
+        : 'No results found');
+      appendSearchAllLink(query);
+      return;
     }
 
-    const fragment = extractMatchFragment(result, query);
-    if (!fragment) {
-      return permalink;
+    const total = opts.total || items.length;
+    const count = document.createElement('div');
+    count.className = 'sidebar__result--count';
+    count.textContent = total > items.length
+      ? `Top ${items.length} of ${total} results${opts.fellBack ? ' in all versions' : ''}`
+      : `${total} result${total !== 1 ? 's' : ''}${opts.fellBack ? ' in all versions' : ''}`;
+    resultsContainer.appendChild(count);
+
+    items.forEach((data, idx) => {
+      const item = document.createElement('a');
+      item.className = 'sidebar__result';
+      item.href = matchedSectionUrl(data) || data.url;
+      item.setAttribute('role', 'option');
+      item.dataset.index = idx;
+
+      const title = escapeHtml(cleanTitle(data.meta && data.meta.title) || data.url);
+      const excerpt = data.excerpt || '';
+      const subs = headingLinks(data);
+      const subsHtml = subs.length
+        ? `<span class="sidebar__result-headings">${subs
+            .map((sub) => `<span class="sidebar__result-heading">${escapeHtml(cleanTitle(sub.title))}</span>`)
+            .join('')}</span>`
+        : '';
+
+      item.innerHTML = `<strong>${title}</strong>${excerpt ? `<span>${excerpt}</span>` : ''}${subsHtml}`;
+      resultsContainer.appendChild(item);
+    });
+
+    appendSearchAllLink(query);
+    selectedIndex = -1;
+    setVisible(true);
+  };
+
+  const search = async (query) => {
+    const q = (query || '').trim();
+    if (q.length < MIN_QUERY_LENGTH) {
+      setVisible(false);
+      resultsContainer.innerHTML = '';
+      return;
     }
 
-    let fragmentText = fragment.snippet.replace(/\s+/g, ' ').trim();
-    const trimmedQuery = query.trim();
-    if (trimmedQuery) {
-      const lowerFragment = fragmentText.toLowerCase();
-      const lowerQuery = trimmedQuery.toLowerCase();
-      const phraseIndex = lowerFragment.indexOf(lowerQuery);
-      if (phraseIndex !== -1) {
-        fragmentText = fragmentText.substring(phraseIndex, phraseIndex + trimmedQuery.length);
+    if (!hasLoaded) {
+      loadPagefind();
+      return;
+    }
+    if (!pagefind) return;
+
+    const id = ++requestId;
+
+    let response;
+    try {
+      response = await pagefind.search(q, currentVersion ? { filters: { version: currentVersion } } : undefined);
+    } catch (error) {
+      console.error('Pagefind search error:', error);
+      if (id === requestId) showMessage('sidebar__result--error', 'Search failed');
+      return;
+    }
+    if (id !== requestId) return;
+
+    let refs = response.results || [];
+    let fellBack = false;
+
+    // If the current firmware version has no match, fall back to every version
+    // rather than showing an empty result list.
+    if (!refs.length && currentVersion) {
+      try {
+        const allVersions = await pagefind.search(q);
+        if (id !== requestId) return;
+        refs = allVersions.results || [];
+        fellBack = refs.length > 0;
+      } catch (error) {
+        // Keep the empty state from the scoped search.
       }
     }
-    if (!fragmentText) {
-      return permalink;
-    }
 
-    const encoded = encodeURIComponent(fragmentText);
-    return `${permalink}#:~:text=${encoded}`;
+    const top = refs.slice(0, MAX_RESULTS);
+    const items = await Promise.all(top.map((ref) => ref.data().catch(() => null)));
+    if (id !== requestId) return;
+
+    renderResults(items.filter(Boolean), q, { total: refs.length, fellBack });
+  };
+
+  const debouncedSearch = (query) => {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => search(query), DEBOUNCE_MS);
+  };
+
+  const loadPagefind = async () => {
+    if (hasLoaded || loading) return;
+    loading = true;
+    showMessage('sidebar__result--loading', 'Loading search…');
+    try {
+      pagefind = await import(moduleUrl);
+      // Ask Pagefind to stamp result URLs with ?highlight=<query> so the page
+      // they land on can mark the matched terms.
+      await pagefind.options({ highlightParam: 'highlight' });
+      hasLoaded = true;
+      if (input.value.trim().length >= MIN_QUERY_LENGTH) {
+        search(input.value);
+      } else {
+        setVisible(false);
+      }
+    } catch (error) {
+      console.error('Pagefind load error:', error);
+      showMessage('sidebar__result--error', 'Failed to load search');
+    } finally {
+      loading = false;
+    }
   };
 
   const updateSelection = () => {
@@ -134,150 +210,14 @@
     });
   };
 
-  const appendSearchAllLink = (query) => {
-    const trimmed = (query || '').trim();
-    if (!trimmed || !searchPageUrl) return;
-    const link = document.createElement('a');
-    link.className = 'sidebar__result-all';
-    const params = new URLSearchParams({ q: trimmed });
-    if (currentVersion) params.set('version', currentVersion);
-    link.href = `${searchPageUrl}?${params.toString()}`;
-    link.textContent = `Search all versions for “${trimmed}”`;
-    resultsContainer.appendChild(link);
-  };
-
-  const renderResults = (results, query) => {
-    resultsContainer.innerHTML = '';
-
-    if (!results.length) {
-      const empty = document.createElement('div');
-      empty.className = 'sidebar__result--empty';
-      empty.textContent = currentVersion ? 'No results found in this version' : 'No results found';
-      resultsContainer.appendChild(empty);
-      appendSearchAllLink(query);
-      resultsContainer.dataset.visible = 'true';
-      return;
-    }
-
-    const count = document.createElement('div');
-    count.className = 'sidebar__result--count';
-    count.textContent = `${results.length} result${results.length !== 1 ? 's' : ''}`;
-    resultsContainer.appendChild(count);
-
-    results.slice(0, MAX_RESULTS).forEach((result, idx) => {
-      const match = result.item;
-      const item = document.createElement('a');
-      item.className = 'sidebar__result';
-      item.href = buildResultHref(result, query);
-      item.setAttribute('role', 'option');
-      item.dataset.index = idx;
-      
-      const title = highlightMatches(match.title, query);
-      const snippet = buildMatchSnippet(result, query);
-      
-      item.innerHTML = `<strong>${title}</strong>${snippet ? `<span>${snippet}</span>` : ''}`;
-      resultsContainer.appendChild(item);
-    });
-
-    appendSearchAllLink(query);
-
-    selectedIndex = -1;
-    resultsContainer.dataset.visible = 'true';
-  };
-
-  const search = (query) => {
-    const q = query.trim();
-    if (q.length < MIN_QUERY_LENGTH) {
-      resultsContainer.dataset.visible = 'false';
-      resultsContainer.innerHTML = '';
-      return;
-    }
-
-    if (!fuse) {
-      resultsContainer.innerHTML = '<div class="sidebar__result--loading">Loading search index...</div>';
-      resultsContainer.dataset.visible = 'true';
-      return;
-    }
-
-    const phrase = q.toLowerCase();
-    const results = fuse.search(q);
-    const scopedResults = currentVersion
-      ? results.filter(result => {
-          const resultVersion = (result.item.version || '').toLowerCase();
-          return !resultVersion || resultVersion === currentVersion.toLowerCase();
-        })
-      : results;
-    let filteredResults = scopedResults.filter(result => {
-      const item = result.item;
-      return [item.content, item.description, item.title].some(field => field && field.toLowerCase().includes(phrase));
-    });
-
-    if (!filteredResults.length) {
-      filteredResults = scopedResults;
-    }
-
-    renderResults(filteredResults, q);
-  };
-
-  const debouncedSearch = (query) => {
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => search(query), 300);
-  };
-
-  const loadIndex = async () => {
-    if (hasLoaded || loading) return;
-    loading = true;
-    try {
-      const candidates = [indexUrl, fallbackUrl].filter((url, i, arr) => url && arr.indexOf(url) === i);
-      let data = null;
-      for (const url of candidates) {
-        try {
-          const response = await fetch(url, { credentials: 'same-origin' });
-          if (!response.ok) continue;
-          const parsed = await response.json();
-          if (Array.isArray(parsed) && parsed.length) {
-            data = parsed;
-            break;
-          }
-        } catch (error) {
-          // Try the next candidate index.
-        }
-      }
-      if (!data) throw new Error('Failed to fetch search index');
-      
-      fuse = new Fuse(data, {
-        keys: [
-          { name: 'title', weight: 2 },
-          { name: 'description', weight: 1.5 },
-          { name: 'content', weight: 1 }
-        ],
-        includeScore: true,
-        includeMatches: true,
-        threshold: 0.4,
-        minMatchCharLength: 2,
-        ignoreLocation: true
-      });
-      
-      hasLoaded = true;
-      if (input.value.length >= MIN_QUERY_LENGTH) {
-        search(input.value);
-      }
-    } catch (error) {
-      console.error('Search index load error:', error);
-      resultsContainer.innerHTML = '<div class="sidebar__result--error">Failed to load search</div>';
-    } finally {
-      loading = false;
-    }
-  };
-
   input.addEventListener('input', (event) => {
-    loadIndex();
+    loadPagefind();
     debouncedSearch(event.target.value);
   });
 
   input.addEventListener('focus', () => {
-    loadIndex();
-    if (input.value.length >= MIN_QUERY_LENGTH) {
+    loadPagefind();
+    if (input.value.trim().length >= MIN_QUERY_LENGTH) {
       search(input.value);
     }
   });
@@ -303,7 +243,7 @@
       items[selectedIndex]?.click();
     } else if (event.key === 'Escape') {
       event.preventDefault();
-      resultsContainer.dataset.visible = 'false';
+      setVisible(false);
       input.blur();
     }
   });
@@ -318,6 +258,6 @@
 
   document.addEventListener('click', (event) => {
     if (event.target === input || resultsContainer.contains(event.target)) return;
-    resultsContainer.dataset.visible = 'false';
+    setVisible(false);
   });
 })();

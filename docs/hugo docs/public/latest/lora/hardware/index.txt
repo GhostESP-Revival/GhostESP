@@ -2,7 +2,7 @@ Title: LoRa Hardware
 Description: SX1262 wiring, power, and board notes for GhostESP LoRa
 URL: /latest/lora/hardware/
 Version: latest
-Section: LoRa Meshtastic
+Section: LoRa (Meshtastic &amp; MeshCore)
 Keywords: LoRa, SX1262, Heltec V3, Heltec V3.2, Vext, SPI, Kconfig
 Search index: /search-index.json
 
@@ -25,7 +25,7 @@ Search index: /search-index.json
 Ship with ESP32-S3 &#43; SX1262 &#43; SX1262 TCXO &#43; OLED on the same PCB. Board configs power the radio via Vext.
 The onboard radio uses SCK GPIO9, MISO GPIO11, MOSI GPIO10, CS GPIO8, DIO1 GPIO14, BUSY GPIO13, and RESET GPIO12 on both V3 and V3.2.
 - Vext / VEXT power: GPIO drives the external 3.3 V rail for SX1262 and OLED. GhostESP asserts Vext at lora start and de-asserts it at lora stop.
-- Heltec V3.2 notes: same pins as V3 but with updated TCXO and corrected antenna switch. Use the Heltec V3.2 board config; V3 config also works but may log TCXO warm-up warnings. Battery voltage divider is on a different ADC channel — fuel gauge scaling differs.
+- Heltec V3.2 notes: same pins as V3 but with updated TCXO and corrected antenna switch. Use the Heltec V3.2 board config; V3 config also works but may log TCXO warm-up warnings. Battery voltage divider is on a different ADC channel, so fuel gauge scaling differs.
 ## SPI and optional SD on S3
 Heltec V3 does not include an SD socket. If no external SD board is fitted, messages such as mosi not valid or Failed to find a free SPI host for SD mean the optional SD pins are not configured; they do not indicate a LoRa failure.
 - A following SX1262 ready line confirms that the radio initialized successfully.

@@ -15,6 +15,7 @@ Search index: /search-index.json
 - [Before you start](#before-you-start)
 - [On-device steps](#on-device-steps)
 - [Flashing steps](#flashing-steps)
+- [Advanced: flashing the separate binaries](#advanced-flashing-the-separate-binaries)
 - [Expected result](#expected-result)
 - [Troubleshooting](#troubleshooting)
 - [Related tasks](#related-tasks)
@@ -35,21 +36,29 @@ Manual USB flashing installs a downloaded release bundle with ESP Huhn Tool. Use
 - Extract the downloaded firmware archive.
 - Open [ESP Huhn Tool](https://esp.huhn.me/) and click Connect.
 - Select the board’s serial port.
-- Add the three release binaries using the offsets below.
+- Add merged.bin at offset 0x0. This single file contains the bootloader, partition table, and firmware at the correct offsets for your board, so it is the recommended path.
+- Click Flash and wait for it to finish.
+- Unplug and reconnect the board.
+## Advanced: flashing the separate binaries
+If you prefer to flash the individual files, use the offsets below. The bootloader offset depends on the chip, and the firmware offset depends on your board’s partition layout — getting either wrong produces a board that flashes successfully but never boots.
 Chip |
 bootloader.bin |
 partitions.bin |
 firmware.bin |
-ESP32-S2 |
+ESP32, ESP32-S2 |
 0x1000 |
 0x8000 |
-0x10000 |
-ESP32-S3 / C3 / C5 / C6 |
+0x10000 (factory) or 0x20000 (OTA) |
+ESP32-C5 |
+0x2000 |
+0x8000 |
+0x10000 (factory) or 0x20000 (OTA) |
+ESP32-S3, ESP32-C3, ESP32-C6, ESP32-P4 |
 0x0 |
 0x8000 |
-0x10000 |
-- Click Flash and wait for it to finish.
-- Unplug and reconnect the board.
+0x10000 (factory) or 0x20000 (OTA) |
+Check the OTA column in [Supported Hardware](/latest/getting-started/supported-hardware/): ✓ means the release uses a dual-partition layout, so firmware.bin belongs at 0x20000. Manual builds use the single-app layout at 0x10000. If you are unsure which you have, flash merged.bin instead.
+ESP32-C5 note: the C5 ROM expects the bootloader at 0x2000, not 0x1000 or 0x0. Some third-party flasher instructions still say 0x0 for C5 boards — that will not boot.
 ## Expected result
 GhostESP starts and creates the GhostNet access point. You can verify boot output with a [serial console](https://ghostesp.net/serial) at 115200 baud.
 ## Troubleshooting

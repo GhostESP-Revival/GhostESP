@@ -71,7 +71,7 @@ Useful URL patterns:
 - [Installation](/latest/flipper-app/installation/): Install the GhostESP companion app on your Flipper Zero device.
 - [Keyboard Control](/latest/usb/keyboard/): Using a USB keyboard to control GhostESP
 - [Learning Signals](/latest/infrared/learning/): Capture IR buttons and remotes with GhostESP
-- [LoRa Getting Started](/latest/lora/getting-started/): First-run checklist for GhostESP LoRa Meshtastic
+- [LoRa First Run](/latest/lora/getting-started/): Set up GhostESP LoRa and send your first message
 - [Motion Detector](/latest/camera/motion-detector/): On-device motion detection using the onboard camera, with optional SD snapshots and Discord alerts.
 - [Network Fingerprinting](/latest/ethernet/fingerprinting/): Scan and identify devices on your Ethernet network.
 - [Scanning](/latest/ble/scanning/): Discover and analyze nearby Bluetooth Low Energy devices.
@@ -97,7 +97,7 @@ Useful URL patterns:
 - [E-paper Reader](/latest/apps/reader/): Read comics and books from an SD card on CrowPanel e-paper displays
 - [HTTP Requests](/latest/ethernet/http/): Perform HTTP GET requests from the command line.
 - [Installation Guide](/latest/getting-started/installation-guide/): Flash GhostESP with the recommended web flasher
-- [LoRa Commands](/latest/lora/commands/): CLI reference for GhostESP LoRa Meshtastic
+- [LoRa Commands](/latest/lora/commands/): Command reference for GhostESP LoRa: Meshtastic, MeshCore and boot auto-start
 - [M5Stack AtomS3R](/latest/hardware/atoms3r/): Using the M5Stack AtomS3R with GhostESP, including its button navigation and Grove port.
 - [Saving Tags](/latest/nfc/saving/): Store scanned NFC tags as Flipper-compatible files
 - [Screen Mirroring](/latest/companion-tools/screen-mirroring/): Mirror your GhostESP display to your desktop for easier viewing and remote control.
@@ -107,6 +107,7 @@ Useful URL patterns:
 - [BadBLE](/latest/ble/badble/): Bluetooth HID keyboard — DuckyScript over BLE
 - [Deauthentication Attacks](/latest/wifi/deauth/): Force devices to disconnect from a Wi-Fi network.
 - [IR Dazzler](/latest/infrared/dazzler/): Continuous IR flood mode for camera interference
+- [MeshCore Mode](/latest/lora/meshcore/): Run GhostESP as a MeshCore node on the same SX1262 radio
 - [USB Keyboard Mode](/latest/usb/usb-keyboard-mode/): Use your ESP32-S3 as a real USB keyboard
 - [USB Dongle Mode (Wireshark)](/latest/wifi/wireshark/): Use GhostESP as a wireless capture dongle for Wireshark.
 - [Waterfall Spectrum Analyzer](/latest/subghz/waterfall/): Use the SubGHz waterfall to visualize CC1101 RSSI activity across common RF bands.
@@ -146,6 +147,7 @@ Useful URL patterns:
 - [Hardware Support](/latest/subghz/hardware/): Boards and peripherals required for GhostESP SubGHz
 - [Usage Guide](/latest/flipper-app/usage/): Basic navigation and common workflows for the Flipper Zero companion app.
 - [WebUI](/latest/getting-started/webui-guide/): Access and control GhostESP through the web interface.
+- [Wiring Modules and Peripherals](/latest/getting-started/peripheral-wiring/): Find the pins your board uses for CC1101, NRF24, NFC, GPS, and SD cards, and wire add-on modules safely.
 - [CLI Reference](/latest/getting-started/command-line-reference/): Common GhostESP CLI commands grouped by category.
 - [Troubleshooting](/latest/flipper-app/troubleshooting/): Solve common issues with the Flipper Zero companion app.
 - [SD Card](/latest/getting-started/sd-card/): Using SD card storage with GhostESP for file management, captures, and configuration.

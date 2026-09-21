@@ -5,12 +5,12 @@
     {{ $versions = $versions | append . }}
   {{ end }}
 {{ end }}
-<div class="doc search-page" data-search-page data-search-index="{{ "search-index.json" | relURL }}">
+<div class="doc search-page" data-search-page data-pagefind-module="{{ "pagefind/pagefind.js" | relURL }}">
   <header class="search-page__header">
     <h1>{{ .Title }}</h1>
     <p>{{ .Description }}</p>
   </header>
-  <form class="search-page__form" role="search" action="{{ "search/" | relURL }}" method="get" data-search-page-form>
+  <form class="search-page__form" role="search" action="{{ "search/" | relURL }}" method="get" data-search-page-form onsubmit="return false">
     <input type="search" name="q" class="search-page__input" data-search-page-input placeholder="Search the docs…" autocomplete="off" spellcheck="false" aria-label="Search query">
     <select name="version" class="search-page__version" data-search-page-version aria-label="Filter by firmware version">
       <option value="">All versions</option>

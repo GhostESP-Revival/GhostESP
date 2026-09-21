@@ -46,6 +46,7 @@ static mc_contact_t *s_contacts;   // MC_CONTACT_SLOTS
 static int s_num_contacts;
 static mc_channel_t *s_channels;   // MC_MAX_GROUP_CHANNELS
 static mc_prefs_t s_prefs;
+static bool s_prefs_loaded;
 static mc_mesh_callbacks_t s_cb;
 static mc_tx_fn s_tx;
 static void *s_tx_ctx;
@@ -67,7 +68,8 @@ static mc_advert_blob_t *s_blob_cache;  // MC_ADVERT_BLOB_CACHE
 static int s_blob_next;
 
 static void blob_cache_put(const uint8_t *pub, const uint8_t *blob, uint8_t len) {
-    if (!s_blob_cache || !pub || !blob || len == 0 || len > MC_MAX_TRANS_UNIT) return;
+    /* len is uint8_t and MC_MAX_TRANS_UNIT is 255, so it always fits. */
+    if (!s_blob_cache || !pub || !blob || len == 0) return;
     int slot = -1;
     for (int i = 0; i < MC_ADVERT_BLOB_CACHE; ++i) {
         if (memcmp(s_blob_cache[i].pub, pub, MC_PUB_KEY_SIZE) == 0) { slot = i; break; }
@@ -376,6 +378,10 @@ bool mc_mesh_set_node_name(const char *name) {
 }
 
 mc_prefs_t *mc_mesh_prefs(void) {
+    if (!s_prefs_loaded) {
+        (void)mc_store_load_prefs(&s_prefs);
+        s_prefs_loaded = true;
+    }
     return &s_prefs;
 }
 
@@ -572,7 +578,8 @@ static void maybe_forward(mc_packet_t *pkt) {
     mc_packet_set_path_hash_count(pkt, (uint8_t)(n + 1));
 
     uint8_t len = mc_packet_write_to(pkt, s_fwd_frame);
-    if (len == 0 || len > sizeof(s_fwd_frame)) return;
+    /* len is uint8_t and s_fwd_frame is MC_MAX_TRANS_UNIT (255) bytes. */
+    if (len == 0) return;
     s_fwd_len = len;
     s_fwd_pending = true;
 
@@ -1383,6 +1390,7 @@ bool mc_mesh_init(void) {
     mc_identity_init();
 
     mc_store_load_prefs(&s_prefs);
+    s_prefs_loaded = true;
 
     s_num_contacts = MC_MAX_ANON_CONTACTS;
     int loaded = 0;

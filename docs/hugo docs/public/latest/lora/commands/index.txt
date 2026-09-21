@@ -1,55 +1,256 @@
 Title: LoRa Commands
-Description: CLI reference for GhostESP LoRa Meshtastic
+Description: Command reference for GhostESP LoRa: Meshtastic, MeshCore and boot auto-start
 URL: /latest/lora/commands/
 Version: latest
-Section: LoRa Meshtastic
-Keywords: LoRa, Meshtastic, CLI, commands, SX1262
+Section: LoRa (Meshtastic &amp; MeshCore)
+Keywords: LoRa, Meshtastic, MeshCore, CLI, commands, SX1262
 Search index: /search-index.json
 
 # LoRa Commands
 
-> CLI reference for GhostESP LoRa Meshtastic
+> Command reference for GhostESP LoRa: Meshtastic, MeshCore and boot auto-start
 
 ## On this page
 
-- [Lifecycle](#lifecycle)
-- [Configuration](#configuration)
-- [Messaging and nodes](#messaging-and-nodes)
-- [BLE bridge](#ble-bridge)
-- [Companion and setup](#companion-and-setup)
+- [Start, stop, status](#start-stop-status)
+- [Protocol switching](#protocol-switching)
+- [Boot auto-start](#boot-auto-start)
+- [Messages and peers](#messages-and-peers)
+- [Radio settings](#radio-settings)
+- [Phone app and companion](#phone-app-and-companion)
+- [Diagnostics](#diagnostics)
+- [Active mesh verbs](#active-mesh-verbs)
+- [Regions](#regions)
 
 ---
 
-All LoRa commands are under the lora prefix. Run lora help or help all for the live list.
-## Lifecycle
-- lora status — show radio state, region, frequency, modem settings, TX power, companion mode, and last error.
-- lora start — power Vext (Heltec), init SX1262, join LongFast channel, begin RX/TX.
-- lora stop — stop RX, deinit radio, release Vext if held.
-## Configuration
-- lora set region &lt;code&gt; — set the legal region, such as anz, us915, eu868, eu433, or jp. Persists to NVS.
-- lora set sf &lt;5..12&gt; — spreading factor. Higher SF = longer range, lower rate.
-- lora set bw &lt;kHz&gt; — bandwidth (125, 250, or 500). Must match peers.
-- lora set tx &lt;dBm&gt; — TX power, clamped to the region limit.
-- lora set owner &lt;long&gt; &lt;short&gt; — set the advertised node names. Keep the long name to 24 bytes and the short name to 4 bytes, then send NodeInfo again.
-- lora set companion &lt;wifi|ble&gt; — transport for the GhostESP companion app bridge.
-Changes take effect on next lora start (or immediately if already running, where supported).
-## Messaging and nodes
-- lora chat &lt;text&gt; — broadcast a text message on the LongFast channel (default-key encrypted).
-- lora dm &lt;node&gt; &lt;text&gt; — send an authenticated PKI direct message. The peer key must already be known.
-- lora nodes — list known nodes: ID, short/long name, last heard, SNR/RSSI, hops.
-- lora nodeinfo [node] — advertise our name/key and request a NodeInfo reply. Use this after either node is wiped.
-- lora pkinfo &lt;node&gt; — show the stored peer key and our key. The command is pkinfo, without a space.
-- lora diag — IRQ counters, TX queue, app FIFO, and last RX metadata.
-- lora cad — run five channel-activity trials with instantaneous RSSI.
-- lora reg &lt;hex-address&gt; [count] — read one to eight consecutive SX1262 registers after a successful start; for example, lora reg 0740 2 should report the SX1262-encoded Meshtastic sync word 24 B4.
-lora pubkey, lora pkselftest, lora pkitest, lora pktry, and lora pki-regen are diagnostic commands. Avoid pki-regen during normal troubleshooting because it replaces the identity key that peers have stored.
-## BLE bridge
-- lora ble on — start the Meshtastic BLE GATT service (Ghost-XXXX adv).
-- lora ble off — stop the BLE service and advertising.
-- lora ble status — show BLE link state, MTU, connected phone, and nonce sync.
-## Companion and setup
-- lora app — print companion app pairing hint (advertised name &#43; channel hash).
-- lora companion wifi — bridge mesh to companion app over Wi-Fi (keeps BLE free for scans).
-- lora companion ble — bridge over BLE (shares radio; prefer wifi when scanning).
-- lora setup — interactive wizard: region → channel → companion transport → start.
-See [Getting Started](/latest/lora/getting-started/) for first-run order and [BLE App Link](/latest/lora/ble-app/) for phone pairing.
+Reference for the lora, mesh and meshcore commands. Setting up for the first time? Start with [First run](/latest/lora/getting-started/). Run lora help or help all for the live list on the device.
+## Start, stop, status
+Command |
+What it does |
+lora status |
+Radio state, region, frequency, modem, TX power, companion mode, last error |
+lora start / lora on |
+Power Vext (Heltec), init the SX1262, join LongFast, begin RX/TX |
+lora stop / lora off |
+Stop RX, release the radio and Vext |
+lora setup |
+Interactive first-run wizard: region, channel, companion, start |
+mesh |
+Show what owns the radio, and the remembered boot choice |
+mesh off |
+Stop the active protocol |
+## Protocol switching
+One radio, one protocol at a time.
+Command |
+What it does |
+mesh switch meshtastic |
+Stop MeshCore, start Meshtastic, remember it |
+mesh switch meshcore |
+Stop Meshtastic, start MeshCore, remember it |
+mesh on [protocol] |
+Start the remembered protocol, or the one you name |
+The remembered choice only changes after a protocol starts successfully, so a failed switch never leaves boot pointed at a dead radio.
+## Boot auto-start
+Auto-start is opt-in and remembers whether to start and which protocol.
+Command |
+What it does |
+lora autostart |
+Show the setting and the boot protocol |
+lora autostart meshtastic |
+Boot Meshtastic (needs a saved region) |
+lora autostart meshcore |
+Boot MeshCore (no region needed) |
+lora autostart on / off |
+Toggle auto-start, keep the current protocol |
+mesh autostart &lt;meshtastic|meshcore|off&gt; |
+Same thing from mesh |
+meshcore autostart on|off |
+MeshCore shortcut; on also selects MeshCore |
+The radio starts late in boot, after the display and storage init, so it never starves system memory. Confirm what came up with mesh after a reboot.
+## Messages and peers
+Command |
+What it does |
+lora chat &lt;text&gt; |
+Broadcast on the LongFast channel (default-key encrypted) |
+lora chat |
+List recent messages (aliases: lora send, lora messages) |
+lora nodes |
+List known nodes: ID, names, last heard, SNR/RSSI, hops |
+lora nodeinfo [node] |
+Advertise our name/key and request a reply |
+lora dm &lt;node&gt; &lt;text&gt; |
+Encrypted direct message; the peer key must be known |
+lora pkinfo &lt;node&gt; |
+Show the stored peer key and our own key |
+lora channels |
+Show the 8 channel slots, their roles and hashes |
+## Radio settings
+Changes apply on the next lora start unless noted.
+Command |
+What it does |
+lora set region &lt;code&gt; |
+Legal band plan; see [Regions](#regions) for all 24 codes |
+lora region &lt;code&gt; |
+Shorthand for lora set region |
+lora set sf &lt;5..12&gt; |
+Spreading factor; higher means longer range, lower rate |
+lora set bw &lt;125|250|500&gt; |
+Bandwidth in kHz; must match peers |
+lora set cr &lt;5..8&gt; |
+Coding rate, CR4/5 to CR4/8 |
+lora set tx &lt;dBm&gt; |
+TX power, clamped to the region limit |
+lora set preset &lt;0..16&gt; |
+Use a named Meshtastic preset instead of a custom modem |
+lora set hop &lt;1..7&gt; |
+Hop limit: how many relays a packet may cross |
+lora set role &lt;0..12&gt; |
+Device role: 0 client, 1 client mute, 2 router, 5 tracker, 6 sensor, 8 client hidden, 10 TAK tracker, 11 router late, 12 client base |
+lora set offset &lt;MHz&gt; |
+Frequency offset correction for a drifting crystal |
+lora set ovrfreq &lt;MHz&gt; |
+Hard frequency override, ignoring the region plan |
+lora set chnum &lt;n&gt; |
+Select the region frequency slot directly |
+lora set txen &lt;on|off&gt; |
+Enable or disable transmit (listen-only) |
+lora set owner &lt;long&gt; &lt;short&gt; |
+Advertised names (24 / 4 bytes), then send NodeInfo again |
+lora set companion &lt;wifi|ble&gt; |
+Transport for the companion app bridge |
+## Phone app and companion
+Command |
+What it does |
+lora ble on / off |
+Start or stop the Meshtastic BLE service (Ghost-XXXX) |
+lora ble status |
+Link state, MTU, connected phone, nonce sync |
+lora app |
+Pairing hint: advertised name and channel hash |
+lora companion wifi |
+Bridge over Wi-Fi (keeps BLE free for scans) |
+lora companion ble |
+Bridge over BLE (shares the radio) |
+lora setup |
+Interactive first-run wizard |
+Pairing steps are in [BLE App Link](/latest/lora/ble-app/).
+## Diagnostics
+Command |
+What it does |
+lora diag |
+IRQ counters, TX queue, app FIFO, last RX metadata |
+lora cad |
+Five channel-activity trials with instantaneous RSSI |
+lora reg &lt;hex&gt; [count] |
+Read SX1262 registers; lora reg 0740 2 should show sync word 24 B4 |
+lora pubkey |
+Our Curve25519 public key |
+lora pkselftest |
+X25519, SHA-256 and AES-CCM known-answer tests |
+lora pkitest &lt;node&gt; |
+PKI encrypt and decrypt loopback against a peer (no TX) |
+lora pktry &lt;hex&gt; |
+Probe a captured frame against the PKI decrypt variants |
+lora pki-regen |
+Generate a new identity keypair |
+Avoid lora pki-regen in normal troubleshooting: it replaces the identity key peers already stored, and they need a fresh NodeInfo before direct messages work again. The mesh selftest verb runs the crypto self test for whichever protocol is active.
+## Active mesh verbs
+The same actions without naming a protocol, applied to whichever one is running:
+Command |
+What it does |
+mesh send &lt;text&gt; |
+Send on channel 0 |
+mesh messages |
+Read received messages |
+mesh dm &lt;peer&gt; &lt;text&gt; |
+Direct message |
+mesh peers |
+Nodes (Meshtastic) or contacts (MeshCore) |
+mesh channels |
+List channels |
+mesh app [on|off] |
+BLE app link |
+mesh selftest |
+Crypto self test for the active protocol |
+mesh meshtastic &lt;args&gt; / mesh meshcore &lt;args&gt; |
+Run a protocol-specific command |
+## Regions
+All 24 region codes lora set region accepts, with the band they cover and the duty-cycle limit applied to transmits. The exact centre frequency also depends on the preset and channel slot, so two nodes on the same region and preset always land on the same frequency.
+Code |
+Band (MHz) |
+Duty |
+us915 |
+902.0 - 928.0 |
+100% |
+eu868 |
+869.400 - 869.65 |
+10% |
+eu433 |
+433.0 - 434.0 |
+10% |
+cn |
+470.0 - 510.0 |
+100% |
+jp |
+920.5 - 923.5 |
+100% |
+anz |
+915.0 - 928.0 |
+100% |
+kr |
+920.0 - 923.0 |
+100% |
+tw |
+920.0 - 925.0 |
+100% |
+ru |
+868.7 - 869.2 |
+100% |
+in |
+865.0 - 867.0 |
+100% |
+nz865 |
+864.0 - 868.0 |
+100% |
+th |
+920.0 - 925.0 |
+10% |
+ua433 |
+433.0 - 434.7 |
+10% |
+my433 |
+433.0 - 435.0 |
+100% |
+my919 |
+919.0 - 924.0 |
+100% |
+sg923 |
+917.0 - 925.0 |
+100% |
+ph433 |
+433.0 - 434.7 |
+100% |
+ph868 |
+868.0 - 869.4 |
+100% |
+ph915 |
+915.0 - 918.0 |
+100% |
+anz433 |
+433.05 - 434.79 |
+100% |
+kz433 |
+433.075 - 434.775 |
+100% |
+kz863 |
+863.0 - 868.0 |
+100% |
+np865 |
+865.0 - 868.0 |
+100% |
+br902 |
+902.0 - 907.5 |
+100% |
+Pick the region legal for where you are. The duty guard throttles transmits when the band’s airtime budget is used up, and lora status shows the remaining budget.
+See [MeshCore mode](/latest/lora/meshcore/) for the meshcore commands, and [Mesh details](/latest/lora/mesh/) for the wire format.

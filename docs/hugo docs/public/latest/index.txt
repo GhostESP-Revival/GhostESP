@@ -34,6 +34,7 @@ Choose the on-device UI, WebUI, serial CLI, Flipper app, or desktop control app.
 ## 4. Try your first scan
 Run a passive Wi-Fi scan and confirm that your device is working.
 ](/latest/getting-started/first-scan/)
+Stuck? The [FAQ](/latest/getting-started/faq/) covers setup, credentials, and common failures. If you are adding a module or changing pins, see [Wiring Modules and Peripherals](/latest/getting-started/peripheral-wiring/).
 ## Explore capabilities
 Choose a section below when you already know what you want to do.
 [

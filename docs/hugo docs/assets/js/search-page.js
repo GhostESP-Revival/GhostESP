@@ -1,23 +1,29 @@
 (() => {
-  const root = document.querySelector('[data-search-page]');
-  if (!root) return;
+  // Resolve the container from the results element rather than the bare
+  // [data-search-page] attribute: the sidebar input also carries a
+  // data-search-page-url attribute and appears earlier in the DOM, so a bare
+  // attribute lookup would hand back the wrong element.
+  const resultsEl = document.querySelector('[data-search-page-results]');
+  const root = resultsEl ? resultsEl.closest('[data-search-page]') : null;
+  if (!root || !resultsEl) return;
 
   const input = root.querySelector('[data-search-page-input]');
   const versionSelect = root.querySelector('[data-search-page-version]');
-  const resultsEl = root.querySelector('[data-search-page-results]');
   const statusEl = root.querySelector('[data-search-page-status]');
   const form = root.querySelector('[data-search-page-form]');
-  if (!input || !resultsEl) return;
+  if (!input) return;
 
-  const indexUrl = root.dataset.searchIndex || 'search-index.json';
+  const moduleUrl = root.dataset.pagefindModule || '/pagefind/pagefind.js';
   const MIN_QUERY_LENGTH = 2;
   const MAX_RESULTS = 40;
+  const MAX_HEADING_LINKS = 4;
+  const DEBOUNCE_MS = 150;
 
-  let fuse = null;
-  let items = [];
-  let loading = false;
+  let pagefind = null;
   let hasLoaded = false;
+  let loading = false;
   let debounceTimer = null;
+  let requestId = 0;
   let lastState = { q: '', version: '' };
 
   const escapeHtml = (text) => {
@@ -26,17 +32,9 @@
     return div.innerHTML;
   };
 
-  const highlight = (text, query) => {
-    const escaped = escapeHtml(text);
-    const q = (query || '').trim();
-    if (!q) return escaped;
-    const pattern = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    try {
-      return escaped.replace(new RegExp(`(${pattern})`, 'gi'), '<mark>$1</mark>');
-    } catch (error) {
-      return escaped;
-    }
-  };
+  const cleanTitle = (text) => String(text == null ? '' : text)
+    .replace(/\s*[·|]\s*GhostESP Documentation\s*$/i, '')
+    .trim();
 
   const getParam = (name) => new URLSearchParams(window.location.search).get(name) || '';
 
@@ -51,159 +49,136 @@
     window.history.replaceState(null, '', url);
   };
 
-  const matchingHeadings = (item, query) => {
-    const headings = Array.isArray(item.headings) ? item.headings : [];
-    const q = (query || '').trim().toLowerCase();
-    if (!q) return [];
-    return headings
-      .filter((heading) => (heading.title || '').toLowerCase().includes(q))
-      .slice(0, 4);
-  };
-
-  const buildHref = (item, query) => {
-    const hits = matchingHeadings(item, query);
-    if (hits.length) {
-      return `${item.url}#${hits[0].id}`;
+  const headingLinks = (data) => {
+    const subs = Array.isArray(data.sub_results) ? data.sub_results : [];
+    const seen = new Set([data.url]);
+    const links = [];
+    for (const sub of subs) {
+      if (!sub || !sub.url || !sub.title || seen.has(sub.url)) continue;
+      seen.add(sub.url);
+      links.push(sub);
+      if (links.length >= MAX_HEADING_LINKS) break;
     }
-    return item.url;
+    return links;
   };
 
-  const snippetFor = (result, query) => {
-    const item = result.item;
-    const q = (query || '').trim().toLowerCase();
-    const candidates = [item.summary, item.description, item.content].filter(Boolean);
-    for (const text of candidates) {
-      const lower = text.toLowerCase();
-      const index = q ? lower.indexOf(q) : -1;
-      if (index !== -1) {
-        const start = Math.max(0, index - 90);
-        const end = Math.min(text.length, index + q.length + 110);
-        return `${start > 0 ? '…' : ''}${text.slice(start, end).replace(/\s+/g, ' ').trim()}${end < text.length ? '…' : ''}`;
-      }
+  // Pagefind lists sub_results in document order, so the matched section is the
+  // first heading whose excerpt contains a <mark> hit. Linking there lands the
+  // reader on the passage they searched for instead of the top of the page.
+  const matchedSectionUrl = (data) => {
+    const subs = Array.isArray(data.sub_results) ? data.sub_results : [];
+    for (const sub of subs) {
+      if (!sub || !sub.url || sub.url.indexOf('#') === -1) continue;
+      if (sub.excerpt && sub.excerpt.indexOf('<mark') !== -1) return sub.url;
     }
-    return item.summary || item.description || '';
+    return '';
   };
 
-  const renderBrowse = (query) => {
-    const version = versionSelect ? versionSelect.value : '';
-    const scoped = items.filter((item) => !version || item.version === version);
-    const seen = new Map();
-    scoped.forEach((item) => {
-      if (item.section && item.section_url && !seen.has(item.section_url)) {
-        seen.set(item.section_url, item.section);
-      }
-    });
-    const sections = Array.from(seen.entries()).slice(0, 30);
-    if (!sections.length) {
-      resultsEl.innerHTML = '';
-      return;
-    }
-    resultsEl.innerHTML = `
-      <div class="search-browse">
-        <h2>Browse ${version ? escapeHtml(version) : 'latest'} sections</h2>
-        <div class="search-browse__chips">
-          ${sections.map(([url, label]) => `<a class="search-browse__chip" href="${escapeHtml(url)}">${escapeHtml(label)}</a>`).join('')}
-        </div>
-      </div>`;
+  const versionOf = (data) => {
+    const filters = data.filters || {};
+    const value = filters.version;
+    if (Array.isArray(value)) return value[0] || '';
+    return value || '';
   };
 
-  const renderResults = (results, query) => {
-    if (!results.length) {
+  const renderResults = (items, query, total) => {
+    if (!items.length) {
       resultsEl.innerHTML = '<div class="search-empty">No matching pages. Try a shorter or different query.</div>';
       return;
     }
 
-    resultsEl.innerHTML = results.slice(0, MAX_RESULTS).map((result) => {
-      const item = result.item;
-      const headingHits = matchingHeadings(item, query);
-      const headingLinks = headingHits.length
-        ? `<div class="search-result__headings">${headingHits
-            .map((heading) => `<a href="${escapeHtml(item.url)}#${escapeHtml(heading.id)}">${highlight(heading.title, query)}</a>`)
+    resultsEl.innerHTML = items.map((data) => {
+      const subs = headingLinks(data);
+      const headingHtml = subs.length
+        ? `<div class="search-result__headings">${subs
+            .map((sub) => `<a href="${escapeHtml(sub.url)}">${escapeHtml(cleanTitle(sub.title))}</a>`)
             .join('')}</div>`
         : '';
-      const textLink = item.text_url
-        ? `<a class="search-result__text" href="${escapeHtml(item.text_url)}">plain text</a>`
+      const version = versionOf(data);
+      const section = (data.meta && data.meta.section) || 'Docs';
+      const textUrl = (data.meta && data.meta.text_url) || '';
+      const textLink = textUrl
+        ? `<a class="search-result__text" href="${escapeHtml(textUrl)}">plain text</a>`
         : '';
-      const section = item.section ? escapeHtml(item.section) : 'Docs';
+      const href = matchedSectionUrl(data) || data.url;
       return `
         <article class="search-result">
           <div class="search-result__top">
-            <h3 class="search-result__title"><a href="${escapeHtml(buildHref(item, query))}">${highlight(item.title, query)}</a></h3>
-            <span class="search-result__version">${escapeHtml(item.version || '')}</span>
+            <h3 class="search-result__title"><a href="${escapeHtml(href)}">${escapeHtml(cleanTitle(data.meta && data.meta.title) || data.url)}</a></h3>
+            <span class="search-result__version">${escapeHtml(version)}</span>
           </div>
-          <p class="search-result__crumb">${section}</p>
-          <p class="search-result__snippet">${highlight(snippetFor(result, query), query)}</p>
-          ${headingLinks}
+          <p class="search-result__crumb">${escapeHtml(section)}</p>
+          <p class="search-result__snippet">${data.excerpt || ''}</p>
+          ${headingHtml}
           ${textLink}
         </article>`;
     }).join('');
   };
 
-  const run = (query, usePush) => {
+  const run = async (query) => {
     const q = (query || '').trim();
     const version = versionSelect ? versionSelect.value : '';
     syncUrl(q, version);
 
     if (q.length < MIN_QUERY_LENGTH) {
       if (statusEl) statusEl.textContent = '';
-      renderBrowse(q);
+      resultsEl.innerHTML = '<div class="search-empty">Start typing to search every page across all firmware versions.</div>';
       return;
     }
 
-    if (!fuse) {
-      if (statusEl) statusEl.textContent = 'Loading search index…';
+    if (!hasLoaded) {
+      loadPagefind();
       return;
     }
+    if (!pagefind) return;
 
-    let results = fuse.search(q);
-    if (version) {
-      results = results.filter((result) => result.item.version === version);
+    const id = ++requestId;
+    if (statusEl) statusEl.textContent = 'Searching…';
+
+    let response;
+    try {
+      response = await pagefind.search(q, version ? { filters: { version } } : undefined);
+    } catch (error) {
+      console.error('Pagefind search error:', error);
+      if (id === requestId && statusEl) statusEl.textContent = '';
+      if (id === requestId) resultsEl.innerHTML = '<div class="search-empty">Search failed. Please try again.</div>';
+      return;
     }
+    if (id !== requestId) return;
+
+    const refs = response.results || [];
+    const shown = Math.min(refs.length, MAX_RESULTS);
+    const items = await Promise.all(refs.slice(0, MAX_RESULTS).map((ref) => ref.data().catch(() => null)));
+    if (id !== requestId) return;
 
     if (statusEl) {
-      const shown = Math.min(results.length, MAX_RESULTS);
-      statusEl.textContent = results.length
-        ? `${results.length} result${results.length === 1 ? '' : 's'}${results.length > shown ? ` (showing first ${shown})` : ''}`
+      statusEl.textContent = refs.length
+        ? `${refs.length} result${refs.length === 1 ? '' : 's'}${refs.length > shown ? ` (showing first ${shown})` : ''}`
         : '';
     }
-    renderResults(results, q);
+    renderResults(items.filter(Boolean), q, refs.length);
   };
 
   const debouncedRun = (query) => {
     clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => run(query), 250);
+    debounceTimer = setTimeout(() => run(query), DEBOUNCE_MS);
   };
 
-  const loadIndex = async () => {
+  const loadPagefind = async () => {
     if (hasLoaded || loading) return;
     loading = true;
-    if (statusEl) statusEl.textContent = 'Loading search index…';
+    if (statusEl) statusEl.textContent = 'Loading search…';
     try {
-      const response = await fetch(indexUrl, { credentials: 'same-origin' });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const data = await response.json();
-      items = Array.isArray(data) ? data : [];
-      fuse = new Fuse(items, {
-        keys: [
-          { name: 'title', weight: 3 },
-          { name: 'description', weight: 2 },
-          { name: 'keywords', weight: 2 },
-          { name: 'headings.title', weight: 1.5 },
-          { name: 'section', weight: 1 },
-          { name: 'summary', weight: 1 }
-        ],
-        includeScore: true,
-        includeMatches: true,
-        ignoreLocation: true,
-        threshold: 0.35,
-        minMatchCharLength: 2
-      });
+      pagefind = await import(moduleUrl);
+      // Ask Pagefind to stamp result URLs with ?highlight=<query> so the page
+      // they land on can mark the matched terms.
+      await pagefind.options({ highlightParam: 'highlight' });
       hasLoaded = true;
       run(input.value);
     } catch (error) {
-      console.error('Search index load error:', error);
+      console.error('Pagefind load error:', error);
       if (statusEl) statusEl.textContent = '';
-      resultsEl.innerHTML = '<div class="search-empty">Could not load the search index. Please try again.</div>';
+      resultsEl.innerHTML = '<div class="search-empty">Could not load search. Please try again.</div>';
     } finally {
       loading = false;
     }
@@ -215,7 +190,7 @@
   if (initialVersion && versionSelect) versionSelect.value = initialVersion;
   input.value = initialQuery;
   lastState = { q: initialQuery, version: initialVersion };
-  loadIndex();
+  loadPagefind();
 
   input.addEventListener('input', (event) => {
     debouncedRun(event.target.value);

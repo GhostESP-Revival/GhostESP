@@ -129,6 +129,8 @@ void lora_manager_stop(void);
 bool lora_manager_is_running(void);
 bool lora_manager_is_present(void);   // probe result
 const char *lora_manager_last_error(void);
+bool lora_manager_auto_start_enabled(void);
+bool lora_manager_set_auto_start(bool enabled);
 
 // Params (persisted to NVS, applied on start)
 bool lora_manager_set_region(lora_region_t region);

@@ -155,7 +155,7 @@
   {{ end }}
   {{ $homeLink := $scratch.Get "homeLink" }}
   {{ $logo := resources.Get "images/ghostesp.png" | fingerprint }}
-  <header class="topbar">
+  <header class="topbar" data-pagefind-ignore>
     <button class="topbar__toggle" type="button" onclick="toggleSidebar()" aria-label="Toggle navigation" aria-expanded="false">
       <svg class="icon icon-menu" viewBox="0 0 24 24" aria-hidden="true">
         <line class="icon-menu__line icon-menu__line--top" x1="5" y1="7" x2="19" y2="7"></line>
@@ -198,8 +198,8 @@
       </button>
     </div>
   </header>
-  <div class="app">
-    <aside class="sidebar" id="sidebar"{{ if $hasVersioning }} data-current-version="{{ $currentVersion }}"{{ end }}>
+  <div class="app"{{ if $hasVersioning }} data-pagefind-filter="version:{{ $currentVersion }}"{{ end }}>
+    <aside class="sidebar" id="sidebar" data-pagefind-ignore{{ if $hasVersioning }} data-current-version="{{ $currentVersion }}"{{ end }}>
       <div class="sidebar__brand">
         <a href="{{ "/" | relURL }}" class="sidebar__title">
           {{ with $logo }}
@@ -219,7 +219,7 @@
         </div>
       {{ end }}
       <div class="sidebar__search">
-        <input type="search" placeholder="Search" autocomplete="off" data-search-input data-search-index="{{ if $currentVersion }}{{ printf "%s/search-index.json" $currentVersion | relURL }}{{ else }}{{ "search-index.json" | relURL }}{{ end }}" data-search-fallback="{{ "index.json" | relURL }}" data-search-page="{{ "search/" | relURL }}">
+        <input type="search" placeholder="Search" autocomplete="off" data-search-input data-pagefind-module="{{ "pagefind/pagefind.js" | relURL }}" data-search-page-url="{{ "search/" | relURL }}">
         <div class="sidebar__search-results" data-search-results role="listbox"></div>
       </div>
       <nav class="sidebar__nav">
@@ -301,10 +301,12 @@
       </nav>
     </aside>
     <div class="content">
-      <main class="content__body">
+      {{ $sectionTitle := "" }}{{ with .Parent }}{{ $sectionTitle = .LinkTitle }}{{ end }}
+      {{ $textURL := "" }}{{ with .OutputFormats.Get "aitext" }}{{ $textURL = .RelPermalink }}{{ end }}
+      <main class="content__body"{{ if eq .Layout "search" }} data-pagefind-ignore{{ else }} data-pagefind-body data-pagefind-meta="title[data-page-title], section[data-section], text_url[data-text-url]" data-page-title="{{ .Title }}" data-section="{{ $sectionTitle }}" data-text-url="{{ $textURL }}"{{ end }}>
         {{ block "main" . }}{{ end }}
       </main>
-      <footer class="content__footer">
+      <footer class="content__footer" data-pagefind-ignore>
         <nav class="content__resources" aria-label="GhostESP resources">
           <a href="https://ghostesp.net/flasher">Web Flasher</a>
           <a href="https://github.com/GhostESP-Revival/GhostESP">GitHub</a>
@@ -318,28 +320,37 @@
   </div>
   <div class="sidebar__overlay" id="overlay" onclick="toggleSidebar()"></div>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/fuse.js@7.0.0/dist/fuse.min.js"></script>
   {{ with resources.Get "js/search.js" }}
-    {{ $asset := . | fingerprint }}
+    {{ $asset := . | minify | fingerprint }}
     <script src="{{ $asset.RelPermalink }}" defer></script>
   {{ end }}
   {{ if eq .Layout "search" }}
     {{ with resources.Get "js/search-page.js" }}
-      {{ $asset := . | fingerprint }}
+      {{ $asset := . | minify | fingerprint }}
       <script src="{{ $asset.RelPermalink }}" defer></script>
     {{ end }}
   {{ end }}
   {{ with resources.Get "js/sidebar.js" }}
-    {{ $asset := . | fingerprint }}
+    {{ $asset := . | minify | fingerprint }}
     <script src="{{ $asset.RelPermalink }}" defer></script>
   {{ end }}
   {{ with resources.Get "js/theme.js" }}
-    {{ $asset := . | fingerprint }}
+    {{ $asset := . | minify | fingerprint }}
     <script src="{{ $asset.RelPermalink }}" defer></script>
   {{ end }}
   {{ with resources.Get "js/compat-table.js" }}
-    {{ $asset := . | fingerprint }}
+    {{ $asset := . | minify | fingerprint }}
     <script src="{{ $asset.RelPermalink }}" defer></script>
   {{ end }}
+  {{/* Search-result highlighting. Result URLs carry ?highlight=<query>; the
+       bundle is only fetched when a reader actually arrived from a search.
+       Pagefind marks text inside [data-pagefind-body] and skips
+       [data-pagefind-ignore], so the sidebar and topbar stay clean. */}}
+  <script type="module">
+    if (new URLSearchParams(window.location.search).has('highlight')) {
+      await import('{{ "pagefind/pagefind-highlight.js" | relURL }}');
+      new PagefindHighlight({ highlightParam: 'highlight' });
+    }
+  </script>
 </body>
 </html>

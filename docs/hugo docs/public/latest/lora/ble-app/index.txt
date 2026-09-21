@@ -2,7 +2,7 @@ Title: LoRa BLE App Link
 Description: Pair the official Meshtastic app to GhostESP over BLE
 URL: /latest/lora/ble-app/
 Version: latest
-Section: LoRa Meshtastic
+Section: LoRa (Meshtastic &amp; MeshCore)
 Keywords: LoRa, Meshtastic, BLE, phone app, Ghost-XXXX, MTU
 Search index: /search-index.json
 
@@ -25,9 +25,10 @@ GhostESP exposes the same BLE GATT service as stock Meshtastic nodes so the offi
 - Name: Ghost-XXXX where XXXX is the last two bytes of the node ID (hex).
 - Service: Meshtastic BLE service UUID; LongFast channel is the default (chash 0x08).
 - Start: lora ble on (or lora start if BLE bridge is set to auto). Check lora ble status.
+MeshCore runs its own companion service under meshcore ble on (Nordic-UART-style GATT); the two are mutually exclusive because one radio owns the SX1262. See [MeshCore Mode](/latest/lora/meshcore/).
 ## Pairing
 - Enable location/Bluetooth on your phone and open the official Meshtastic app.
-- Scan — select Ghost-XXXX when it appears.
+- Scan, then select Ghost-XXXX when it appears.
 - Wait for configuration sync to complete. The app should then show the LongFast channel, node list, and chat.
 ## Text flow
 - App → mesh: type in the app; GhostESP encrypts as AES-CTR with the channel PSK and transmits via SX1262.

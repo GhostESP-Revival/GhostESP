@@ -212,6 +212,32 @@ RGBManager_t rgb_manager;  // Global instance for entire project
 int ieee80211_raw_frame_sanity_check(int32_t arg, int32_t arg2, int32_t arg3) { return 0; }
 static const char *TAG = "Main.c";
 
+/* Opt-in boot auto-start: start the remembered mesh protocol (NVS "mesh"/"mode"
+ * selects Meshtastic vs MeshCore). On display boards this runs late in
+ * app_main — after the AP manager, display and SD-init task have claimed their
+ * internal RAM — so a radio start can never price boot-critical allocations
+ * (like the 8 KiB SD task stack) out of the internal heap. Headless USB builds
+ * keep the early position. Idempotent: both managers no-op when running. */
+static void mesh_auto_start_boot(void) {
+#ifdef CONFIG_HAS_LORA
+    if (!lora_manager_auto_start_enabled()) return;
+#ifdef CONFIG_HAS_MESHCORE
+    if (mc_manager_default_backend_meshcore()) {
+        if (!mc_manager_is_running() && !mc_manager_start()) {
+            ESP_LOGW(TAG, "MeshCore auto-start failed: %s", mc_manager_last_error());
+        }
+        return;
+    }
+#endif
+    if (lora_manager_is_running()) return;
+    if (lora_manager_needs_setup()) {
+        ESP_LOGW(TAG, "Meshtastic auto-start skipped: region is not set");
+    } else if (!lora_manager_start()) {
+        ESP_LOGW(TAG, "Meshtastic auto-start failed: %s", lora_manager_last_error());
+    }
+#endif
+}
+
 /* timegm() is not available in ESP-IDF's newlib for ESP32-C5 (RISC-V).
  * Provide a minimal implementation that both main.c (RTC sync) and
  * minmea.c (GPS timestamp conversion) can link against. */
@@ -849,6 +875,9 @@ void app_main(void) {
 #endif
 
 #ifdef USB_MODULE
+    // Headless USB builds exit below; start the mesh before leaving, while the
+    // display-path memory pressure this board never sees does not apply.
+    mesh_auto_start_boot();
     wifi_manager_auto_deauth();
     return;
 #endif
@@ -1178,6 +1207,12 @@ void app_main(void) {
                                             tskIDLE_PRIORITY + 1, NULL);
         if (sd_task_rc != pdPASS) {
             ESP_LOGE(TAG, "Failed to create SD Init task");
+#ifdef CONFIG_WITH_SCREEN
+            /* The splash only dismisses when this task signals completion.
+             * If the task could not be created (internal heap exhausted),
+             * release the splash here so boot can never wedge on the loader. */
+            boot_status_signal_completion();
+#endif
         }
     }
 
@@ -1271,6 +1306,12 @@ void app_main(void) {
         }
 #endif
     }
+
+    // Auto-start the remembered mesh protocol here, after every boot-critical
+    // internal allocation (AP manager, display/LVGL, splash, SD-init task
+    // stack) has been made. A failed start is logged and simply leaves the
+    // radio off instead of starving the boot.
+    mesh_auto_start_boot();
 
     printf("\n");
     ESP_LOGI(TAG, "Build config used: %s", CONFIG_BUILD_CONFIG_TEMPLATE);

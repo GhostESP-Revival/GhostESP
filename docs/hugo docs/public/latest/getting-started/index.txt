@@ -17,4 +17,5 @@ New to GhostESP? Work through these pages in order:
 - [Flash GhostESP](/latest/getting-started/installation-guide/) — start with the web flasher, or choose a manual USB or Flipper Zero method.
 - [Connect to GhostESP](/latest/getting-started/control-methods/) — pick the on-device UI, WebUI, serial CLI, Flipper app, or desktop app.
 - [Try your first scan](/latest/getting-started/first-scan/) — run a passive Wi-Fi scan to confirm your device works.
-After that, configure [SD card storage](/latest/getting-started/sd-card/), connect a second board with [GhostLink](/latest/getting-started/dual-communication/) or [BLE Bridge](/latest/getting-started/ble-bridge/), and review [firmware updates](/latest/getting-started/firmware-updates/). The [FAQ](/latest/getting-started/faq/) covers common setup questions.
+After that, configure [SD card storage](/latest/getting-started/sd-card/), connect a second board with [GhostLink](/latest/getting-started/dual-communication/) or [BLE Bridge](/latest/getting-started/ble-bridge/), and review [firmware updates](/latest/getting-started/firmware-updates/).
+Stuck on something? Start with the [FAQ](/latest/getting-started/faq/). If you are adding a module or reconfiguring pins, see [Wiring Modules and Peripherals](/latest/getting-started/peripheral-wiring/).

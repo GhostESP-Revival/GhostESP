@@ -228,6 +228,8 @@ Available on boards with `CONFIG_HAS_LORA` (SX1262-family radio).
 - **`lora set tx <dbm>`** / **`lora set sf <5-12>`** / **`lora set bw <125|250|500>`** — Radio parameters (presets recommended; `set` takes effect on next `lora start`).
 - **`lora set companion <ble|wifi>`** — Whether the BLE PhoneAPI app link rides alongside LoRa (no-PSRAM: WiFi XOR BLE).
 - **`lora start`** / **`lora stop`** — Start or stop the radio and BLE link.
+- **`lora autostart [meshtastic|meshcore|on|off]`** — Choose whether and which protocol starts on boot; no argument prints the current setting and boot protocol. `mesh autostart <meshtastic|meshcore|off>` and `meshcore autostart on|off` are equivalent.
+- **`mesh`** / **`mesh switch <meshtastic|meshcore>`** / **`mesh on [proto]`** / **`mesh off`** — Show, switch, start or stop the active mesh protocol (only one owns the radio). See [MeshCore]({{< relref "../lora/meshcore.md" >}}) for the second stack.
 - **`lora chat [text]`** — Without text, lists recent messages; with text, broadcasts `TEXT_MESSAGE_APP` on the mesh.
 - **`lora nodes`** — Show discovered peers with RSSI/SNR and short names.
 - **`lora ble [on|off|status]`** — Manage BLE advertising for the official Meshtastic app.

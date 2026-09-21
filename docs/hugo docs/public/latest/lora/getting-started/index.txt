@@ -1,52 +1,81 @@
-Title: LoRa Getting Started
-Description: First-run checklist for GhostESP LoRa Meshtastic
+Title: LoRa First Run
+Description: Set up GhostESP LoRa and send your first message
 URL: /latest/lora/getting-started/
 Version: latest
-Section: LoRa Meshtastic
+Section: LoRa (Meshtastic &amp; MeshCore)
 Keywords: LoRa, Meshtastic, SX1262, getting started, Heltec
 Search index: /search-index.json
 
-# LoRa Getting Started
+# LoRa First Run
 
-> First-run checklist for GhostESP LoRa Meshtastic
+> Set up GhostESP LoRa and send your first message
 
 ## On this page
 
-- [1. Enable the build flag](#1-enable-the-build-flag)
-- [2. Set your region](#2-set-your-region)
-- [3. Start the radio](#3-start-the-radio)
-- [4. Wait for NodeInfo](#4-wait-for-nodeinfo)
-- [5. Test public chat](#5-test-public-chat)
-- [Direct messages](#direct-messages)
+- [Before you start](#before-you-start)
+- [1. Set your region](#1-set-your-region)
+- [2. Start the radio](#2-start-the-radio)
+- [3. See who is around](#3-see-who-is-around)
+- [4. Send a message](#4-send-a-message)
+- [5. Message one person](#5-message-one-person)
+- [6. Keep it on between reboots](#6-keep-it-on-between-reboots)
+- [Use the phone app](#use-the-phone-app)
+- [Prefer MeshCore?](#prefer-meshcore)
+- [If something is off](#if-something-is-off)
 
 ---
 
-Bring up the mesh in five steps. Assumes a Heltec V3/V3.2 or a correctly wired SX1262.
-## 1. Enable the build flag
-Set CONFIG_HAS_LORA=y (or select Heltec V3 / V3.2 board config which enables it). Rebuild and flash; LoRa is not available on non-SX1262 builds.
-idf.py menuconfig # Component config -&gt; GhostESP Features -&gt; HAS_LORA
-idf.py build flash monitor
-## 2. Set your region
-Pick the LongFast-legal preset for your country before transmitting:
-lora set region anz
-Replace anz with us915, eu868, eu433, jp, etc. Region selects frequency, bandwidth, SF, coding rate, and power.
-## 3. Start the radio
+The short path: one region, one radio start, one message. Full syntax lives in the [command reference](/latest/lora/commands/).
+## Before you start
+- A LoRa board: Heltec V3/V3.2, a CrowPanel Advance, or a wired SX1262 ([hardware](/latest/lora/hardware/)).
+- Something to talk to: a second node, or the phone app.
+- A way to type commands: serial console or the WebUI.
+## 1. Set your region
+Meshtastic will not transmit on an unknown band plan, so pick yours first:
+lora set region us915
+All 24 region codes:
+us915, eu868, eu433, cn, jp, anz, kr, tw, ru, in, nz865, th,
+ua433, my433, my919, sg923, ph433, ph868, ph915, anz433, kz433,
+kz863, np865, br902
+The [command reference](/latest/lora/commands/) lists the frequency band and duty limit for each. An unknown name makes lora set region print the list again.
+MeshCore skips this step: it uses the frequency you configure instead.
+## 2. Start the radio
 lora start
-Watch the console:
-- SX1262 ready — SPI and DIO/RESET/BUSY pins responded.
-- chash 0x08 — LongFast default channel hash; confirms default PSK (AQ==). If you see a different chash, re-check lora set region and channel key.
-- If you see SX1262 not detected, see [Hardware](/latest/lora/hardware/).
-## 4. Wait for NodeInfo
-GhostESP broadcasts its NodeInfo after start. Within 30–60 seconds you should see NodeInfo RX/TX logs and lora nodes start to populate. Stock nodes rebroadcast every ~3 hours.
+You should see SX1262 ready and chash 0x08. A SX1262 not detected line means the radio is not wired, or the wrong board profile is flashed. See [Hardware](/latest/lora/hardware/).
+You can start it from the device too: open LoRa and pick the first row, or double-press on the Heltec LoRa page.
+## 3. See who is around
 lora nodes
-## 5. Test public chat
-- Ghost to Ghost: on two GhostESP nodes on the same region/channel, run lora chat hello on each and confirm RX on the peer.
-- App to mesh: pair the official app per [BLE App Link](/latest/lora/ble-app/), send a text, and verify it arrives via lora chat or the peer’s console.
-## Direct messages
-DMs need the other node’s current public key. After either node is wiped or factory-reset, exchange NodeInfo again:
+Neighbouring nodes appear within 30-60 seconds with name, signal and hop count. A node with no name, or showing Key unavailable, has not sent its NodeInfo yet. Run lora nodeinfo &lt;node&gt; and wait for the reply.
+## 4. Send a message
+From the device: LoRa → Messages → Public chat → Write.
+From the command line:
+lora chat hello mesh
+## 5. Message one person
+Direct messages are encrypted to the peer’s public key, which arrives with NodeInfo:
+lora dm !e026f431 hello
+If that is refused, request the key first and confirm it arrived:
 lora nodeinfo !e026f431
 lora pkinfo !e026f431
-lora dm !e026f431 hello
-Replace the example ID with the destination shown by lora nodes. pkinfo must show a peer key before a DM can be sent. In the phone app, wait for the node to appear with its name and key before opening the direct-message conversation.
-A public chat packet does not contain a node name or public key. If a node is blank, stale, or reports Key unavailable, send lora nodeinfo &lt;node&gt; and wait for the reply. Do not run lora pki-regen unless you intentionally want a new GhostESP identity key.
-Next: [Commands](/latest/lora/commands/) for tuning SF/BW/TX and diagnostics.
+## 6. Keep it on between reboots
+lora autostart meshtastic # or: lora autostart meshcore
+The radio starts a few seconds after the interface. Check what came up after a reboot with mesh.
+## Use the phone app
+Pair the official Meshtastic app over BLE so the mesh shows up like any other node. See [BLE App Link](/latest/lora/ble-app/).
+## Prefer MeshCore?
+Switch protocols and follow [MeshCore mode](/latest/lora/meshcore/):
+mesh switch meshcore
+Only one protocol runs at a time.
+## If something is off
+Symptom |
+Fix |
+region is not set |
+lora set region &lt;code&gt; |
+SX1262 not detected |
+Check the board profile and wiring ([hardware](/latest/lora/hardware/)) |
+No nodes after a minute |
+Both ends need the same region, antennas fitted, and range |
+A node shows Key unavailable |
+lora nodeinfo &lt;node&gt;, wait, then lora pkinfo &lt;node&gt; |
+Messages stay on Sending |
+The peer is not acknowledging. Check it is powered and in range |
+Next: [Command reference](/latest/lora/commands/) · [MeshCore mode](/latest/lora/meshcore/) · [Phone app](/latest/lora/ble-app/)

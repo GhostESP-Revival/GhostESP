@@ -40,11 +40,15 @@ typedef struct {
     char who[24];
     char text[160];
     uint8_t channel;
-    uint32_t node_hash; // first byte of the peer pub key; 0 for group messages
+    uint8_t peer_key[MC_PUB_KEY_SIZE]; // full peer key; zero for group messages
+    uint32_t node_hash; // display/CLI prefix; never use as a DM identity
     uint32_t timestamp_ms;
+    uint32_t packet_id; // expected ACK tag for direct outgoing messages
+    uint32_t delivery_deadline_ms;
     bool outgoing;
     bool direct;
     bool read;
+    uint8_t delivery; // 0: sent/received, 1: awaiting ACK, 2: delivered, 3: failed
 } mc_msg_t;
 
 void mc_manager_early_init(void); // NVS/identity load only
@@ -65,9 +69,10 @@ void mc_manager_get_status(mc_status_t *out);
 bool mc_manager_send_text(const char *text);                    // channel 0
 bool mc_manager_send_channel_text(uint8_t channel, const char *text);
 bool mc_manager_send_dm(const char *peer, const char *text);    // by name or pubkey hex
-// Send to a contact by the first byte of its pub key (the key the on-device
-// chat view groups conversations by).
+// Legacy CLI helper. Prefixes are accepted for compatibility only; the UI
+// uses the full public-key helper below.
 bool mc_manager_send_dm_hash(uint8_t peer_hash, const char *text);
+bool mc_manager_send_dm_key(const uint8_t peer_key[MC_PUB_KEY_SIZE], const char *text);
 bool mc_manager_send_advert(bool flood);
 
 uint16_t mc_manager_msg_count(void);
@@ -76,6 +81,8 @@ bool mc_manager_latest_message(mc_msg_t *out, uint32_t *out_seq);
 uint16_t mc_manager_msg_since(uint32_t *io_seq, mc_msg_t *out, uint16_t max);
 // Mark a conversation read; 0 selects the group (channel) chat.
 void mc_manager_chat_read(uint32_t peer_hash);
+void mc_manager_chat_read_key(const uint8_t peer_key[MC_PUB_KEY_SIZE]);
+void mc_manager_chat_read_channel(uint8_t channel);
 
 // Run a known-answer self test over the crypto + packet core.
 uint8_t mc_manager_selftest(void);

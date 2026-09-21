@@ -16,6 +16,7 @@
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_timer.h"
+#include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
@@ -265,9 +266,35 @@ static esp_err_t pre_host_init(void *arg) {
         return ESP_FAIL;
     }
     if (!s_worker) {
-        if (xTaskCreate(worker_task, "meshcore_ble", MC_BLE_WORKER_STACK, NULL, 7, &s_worker) != pdPASS) {
-            s_worker = NULL;
-            return ESP_FAIL;
+        /* PSRAM-preferred stack: keeps the 6 KiB worker off the small internal
+         * heap on display boards. Held for the boot lifetime (the worker is
+         * never deleted), falling back to a plain internal task. */
+        static StackType_t *worker_stack;
+        static StaticTask_t *worker_tcb;
+        if (!worker_stack) {
+            worker_stack = heap_caps_malloc(MC_BLE_WORKER_STACK * sizeof(StackType_t),
+                                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        }
+        if (!worker_tcb) {
+            worker_tcb = heap_caps_malloc(sizeof(StaticTask_t),
+                                          MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        }
+        bool static_ok = worker_stack && worker_tcb;
+        if (static_ok) {
+            s_worker = xTaskCreateStatic(worker_task, "meshcore_ble", MC_BLE_WORKER_STACK,
+                                         NULL, 7, worker_stack, worker_tcb);
+        }
+        if (!static_ok || !s_worker) {
+            ESP_LOGW(TAG, "worker static alloc failed; using internal stack");
+            if (worker_stack) heap_caps_free(worker_stack);
+            if (worker_tcb) heap_caps_free(worker_tcb);
+            worker_stack = NULL;
+            worker_tcb = NULL;
+            if (xTaskCreate(worker_task, "meshcore_ble", MC_BLE_WORKER_STACK, NULL, 7,
+                            &s_worker) != pdPASS) {
+                s_worker = NULL;
+                return ESP_FAIL;
+            }
         }
     }
     if (!s_adv_timer) {

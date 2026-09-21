@@ -219,6 +219,32 @@ html[data-theme="dark"] .sidebar__result mark {
   color: inherit;
 }
 
+/* Section names for the sub-results Pagefind returns, so a sidebar hit shows
+   which heading matched instead of only the page title. */
+.sidebar__result-headings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-top: 0.15rem;
+}
+
+.sidebar__result-heading {
+  font-size: 0.75rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.3rem;
+  background-color: rgba(var(--accent-rgb), 0.12);
+  color: var(--fg-muted);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar__result--active .sidebar__result-heading {
+  background-color: rgba(255, 255, 255, 0.18);
+  color: inherit;
+}
+
 .sidebar__result--count {
   padding: 0.4rem 0.75rem;
   font-size: 0.85rem;
@@ -346,8 +372,22 @@ html[data-theme="dark"] .sidebar__link--active {
   padding: 0.2rem 0.6rem 0.65rem;
 }
 
-.sidebar__group-items:not(.show) {
-  display: none;
+/* Bootstrap's `.collapse:not(.show)` rule hides the list, but it also forces
+   `display: block` when open. Keep the flex layout in the open and animating
+   states, and keep the list rendered while `.collapsing` animates its height.
+   Without this, `display: none` during the transition means the height
+   animation renders nothing, no `transitionend` fires, and the section only
+   appears after Bootstrap's transition-timeout fallback — a visible delay
+   before the list pops open. */
+.sidebar__group-items.show,
+.sidebar__group-items.collapsing {
+  display: flex;
+}
+
+/* Bootstrap animates the sidebar accordion over 350ms. Shorten it so the
+   section feels responsive without dropping the animation entirely. */
+.sidebar__group-items.collapsing {
+  transition: height 0.18s ease;
 }
 
 .sidebar__sublink {
