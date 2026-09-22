@@ -545,7 +545,7 @@ void sd_card_get_cached_stats(sd_card_cached_stats_t *out) {
     }
 }
 
-#if defined(CONFIG_IS_S3TWATCH) || defined(CONFIG_IS_ATOMS3R)
+#if defined(CONFIG_IS_S3TWATCH) || defined(CONFIG_IS_ATOMS3R) || defined(CONFIG_IS_GENERIC_ESP32S3_16MB)
 static wl_handle_t s_wl_handle = WL_INVALID_HANDLE;
 static bool s_virtual_storage_mounted = false;
 
@@ -685,7 +685,7 @@ esp_err_t sd_card_init(void) {
   sd_card_manager.card = NULL;
 
 
-#if defined(CONFIG_IS_S3TWATCH) || defined(CONFIG_IS_ATOMS3R)
+#if defined(CONFIG_IS_S3TWATCH) || defined(CONFIG_IS_ATOMS3R) || defined(CONFIG_IS_GENERIC_ESP32S3_16MB)
   ESP_LOGI(TAG, "Board without SD card detected - attempting virtual storage mount");
   
   vTaskDelay(pdMS_TO_TICKS(100));
@@ -1412,7 +1412,7 @@ void sd_card_jit_end(bool display_was_suspended) {
 }
 
 void sd_card_unmount_with_context(sd_unmount_context_t context) {
-#if defined(CONFIG_IS_S3TWATCH) || defined(CONFIG_IS_ATOMS3R)
+#if defined(CONFIG_IS_S3TWATCH) || defined(CONFIG_IS_ATOMS3R) || defined(CONFIG_IS_GENERIC_ESP32S3_16MB)
   if (s_virtual_storage_mounted) {
     unmount_virtual_storage();
     sd_card_manager.is_initialized = false;
@@ -2077,7 +2077,7 @@ read_error:
 }
 
 void sd_card_print_config() {
-#if defined(CONFIG_IS_S3TWATCH) || defined(CONFIG_IS_ATOMS3R)
+#if defined(CONFIG_IS_S3TWATCH) || defined(CONFIG_IS_ATOMS3R) || defined(CONFIG_IS_GENERIC_ESP32S3_16MB)
   if (s_virtual_storage_mounted) {
     printf("Storage Configuration: Virtual Flash Storage\n");
     printf("Mount Point: /mnt\n");
@@ -2108,8 +2108,22 @@ void sd_card_print_config() {
 }
 
 bool sd_card_is_virtual_storage() {
-#if defined(CONFIG_IS_S3TWATCH) || defined(CONFIG_IS_ATOMS3R)
+#if defined(CONFIG_IS_S3TWATCH) || defined(CONFIG_IS_ATOMS3R) || defined(CONFIG_IS_GENERIC_ESP32S3_16MB)
   return s_virtual_storage_mounted;
+#else
+  return false;
+#endif
+}
+
+// Compile-time capability check (as opposed to sd_card_is_virtual_storage(),
+// which reports whether it is *currently mounted*): true when this build
+// includes the mount_virtual_storage() code path at all. Used by the
+// "sd vstorage" CLI commands (main/core/commands/cmd_sd.c) to warn when a
+// storage partition is being created/resized on a board whose firmware
+// will never actually mount it.
+bool sd_card_virtual_storage_supported() {
+#if defined(CONFIG_IS_S3TWATCH) || defined(CONFIG_IS_ATOMS3R) || defined(CONFIG_IS_GENERIC_ESP32S3_16MB)
+  return true;
 #else
   return false;
 #endif

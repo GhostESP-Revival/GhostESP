@@ -5,6 +5,7 @@
 #include "core/glog.h"
 #include "esp_vfs_fat.h"
 #include "managers/sd_card_manager.h"
+#include "managers/sd_vstorage_manager.h"
 #include "managers/status_display_manager.h"
 #include "sdkconfig.h"
 #include "mbedtls/base64.h"
@@ -162,6 +163,10 @@ void handle_sd_cmd(int argc, char **argv) {
         glog("  sd mkdir <path>                  - Create directory\n");
         glog("  sd rm <idx|path>                 - Delete file or empty directory\n");
         glog("  sd tree [path] [depth]           - Recursive listing\n");
+        glog("  sd vstorage info                 - Show flash usage and the storage size cap\n");
+        glog("  sd vstorage create <MB>          - Create the virtual-storage partition\n");
+        glog("  sd vstorage resize <MB> -y       - Resize it (DESTROYS existing contents)\n");
+        glog("  sd vstorage delete -y            - Delete it, freeing the space back\n");
         return;
     }
 
@@ -766,6 +771,168 @@ void handle_sd_cmd(int argc, char **argv) {
         free(stack);
         glog("SD:OK:tree %zu items\n", count);
         sd_cli_cleanup();
+        return;
+    }
+
+    if (strcmp(sub, "vstorage") == 0) {
+        if (argc < 3) {
+            glog("SD:VSTORAGE:USAGE\n");
+            glog("  sd vstorage info                 - Show flash usage and the storage size cap\n");
+            glog("  sd vstorage create <MB>          - Create the virtual-storage partition\n");
+            glog("  sd vstorage resize <MB> -y       - Resize it (DESTROYS existing contents)\n");
+            glog("  sd vstorage delete -y            - Delete it, freeing the space back\n");
+            return;
+        }
+        const char *vsub = argv[2];
+
+        if (strcmp(vsub, "info") == 0) {
+            sd_vstorage_info_t info;
+            sd_vstorage_status_t st = sd_vstorage_get_info(&info);
+            if (st != SD_VSTORAGE_OK) {
+                glog("SD:VSTORAGE:ERR:%s\n", sd_vstorage_status_str(st));
+                return;
+            }
+            glog("SD:VSTORAGE:INFO:chip_total_bytes=%llu\n", (unsigned long long)info.chip_total_bytes);
+            glog("SD:VSTORAGE:INFO:chip_total_mb=%llu\n", (unsigned long long)(info.chip_total_bytes / (1024 * 1024)));
+            glog("SD:VSTORAGE:INFO:used_bytes=%llu\n", (unsigned long long)info.used_bytes);
+            glog("SD:VSTORAGE:INFO:used_mb=%llu\n", (unsigned long long)(info.used_bytes / (1024 * 1024)));
+            glog("SD:VSTORAGE:INFO:free_bytes=%llu\n", (unsigned long long)info.free_bytes);
+            glog("SD:VSTORAGE:INFO:free_mb=%llu\n", (unsigned long long)(info.free_bytes / (1024 * 1024)));
+            glog("SD:VSTORAGE:INFO:cap_bytes=%llu\n", (unsigned long long)info.cap_bytes);
+            glog("SD:VSTORAGE:INFO:cap_mb=%llu\n", (unsigned long long)(info.cap_bytes / (1024 * 1024)));
+            if (info.storage_exists) {
+                glog("SD:VSTORAGE:INFO:storage_exists=true\n");
+                glog("SD:VSTORAGE:INFO:storage_offset=0x%lx\n", (unsigned long)info.storage_offset);
+                glog("SD:VSTORAGE:INFO:storage_size_bytes=%lu\n", (unsigned long)info.storage_size_bytes);
+                glog("SD:VSTORAGE:INFO:storage_size_mb=%lu\n", (unsigned long)(info.storage_size_bytes / (1024 * 1024)));
+            } else {
+                glog("SD:VSTORAGE:INFO:storage_exists=false\n");
+            }
+            glog("SD:VSTORAGE:INFO:board_mounts_virtual_storage=%s\n",
+                 sd_card_virtual_storage_supported() ? "true" : "false");
+            glog("SD:OK\n");
+            return;
+        }
+
+        if (strcmp(vsub, "create") == 0 || strcmp(vsub, "resize") == 0) {
+            bool is_resize = (strcmp(vsub, "resize") == 0);
+            if (argc < 4) {
+                glog("SD:ERR:usage: sd vstorage %s <MB>%s\n", vsub, is_resize ? " -y" : "");
+                return;
+            }
+            if (!sd_cli_is_number(argv[3])) {
+                glog("SD:ERR:invalid_size:%s\n", argv[3]);
+                return;
+            }
+            long mb = atol(argv[3]);
+            if (mb <= 0 || mb > 4095) {
+                glog("SD:ERR:size_out_of_range:%s\n", argv[3]);
+                return;
+            }
+
+            bool confirmed = false;
+            for (int i = 4; i < argc; i++) {
+                if (strcmp(argv[i], "-y") == 0 || strcmp(argv[i], "--yes") == 0 ||
+                    strcmp(argv[i], "--confirm") == 0) {
+                    confirmed = true;
+                }
+            }
+
+            sd_vstorage_info_t info;
+            bool have_info = (sd_vstorage_get_info(&info) == SD_VSTORAGE_OK);
+            bool exists = have_info && info.storage_exists;
+
+            /* Destructive-action gate. "resize" always needs -y for an
+             * existing partition (that is the explicit ask). "create" is
+             * only destructive -- and therefore only needs -y -- when a
+             * storage partition already exists, since create_or_resize
+             * would then resize it in place; a genuinely fresh create
+             * never needs confirmation. */
+            if (is_resize) {
+                if (!exists) {
+                    glog("SD:ERR:%s\n", sd_vstorage_status_str(SD_VSTORAGE_ERR_NOT_FOUND));
+                    glog("SD:VSTORAGE:HINT:nothing exists to resize, use 'sd vstorage create %ld' instead\n", mb);
+                    return;
+                }
+                if (!confirmed) {
+                    glog("SD:VSTORAGE:WARN:destructive\n");
+                    glog("SD:VSTORAGE:WARN:Resizing DESTROYS the current storage partition's contents (%lu MB at 0x%lx).\n",
+                         (unsigned long)(info.storage_size_bytes / (1024 * 1024)), (unsigned long)info.storage_offset);
+                    glog("SD:ERR:confirmation_required\n");
+                    glog("SD:VSTORAGE:HINT:re-run as: sd vstorage resize %ld -y\n", mb);
+                    return;
+                }
+            } else if (exists && !confirmed) {
+                glog("SD:VSTORAGE:WARN:destructive\n");
+                glog("SD:VSTORAGE:WARN:A storage partition already exists (%lu MB at 0x%lx); creating one now would "
+                     "resize it in place and DESTROY its contents.\n",
+                     (unsigned long)(info.storage_size_bytes / (1024 * 1024)), (unsigned long)info.storage_offset);
+                glog("SD:ERR:confirmation_required\n");
+                glog("SD:VSTORAGE:HINT:re-run as: sd vstorage create %ld -y (or: sd vstorage resize %ld -y)\n", mb, mb);
+                return;
+            }
+
+            uint32_t size_bytes = (uint32_t)mb * 1024u * 1024u;
+            bool reboot_required = false;
+            sd_vstorage_status_t st = create_or_resize_storage_partition(size_bytes, &reboot_required);
+            if (st != SD_VSTORAGE_OK) {
+                glog("SD:ERR:%s\n", sd_vstorage_status_str(st));
+                return;
+            }
+
+            glog("SD:VSTORAGE:%s:OK size_mb=%ld\n", is_resize ? "RESIZE" : "CREATE", mb);
+            if (!sd_card_virtual_storage_supported()) {
+                glog("SD:VSTORAGE:WARN:this firmware build does not mount virtual storage on this board; the "
+                     "partition now exists on flash but nothing will use it.\n");
+            }
+            if (reboot_required) {
+                glog("SD:VSTORAGE:REBOOT_REQUIRED:1\n");
+                glog("SD:VSTORAGE:REBOOT_REQUIRED:Reboot the device now for the new partition table to take effect.\n");
+            }
+            glog("SD:OK\n");
+            return;
+        }
+
+        if (strcmp(vsub, "delete") == 0) {
+            bool confirmed = false;
+            for (int i = 3; i < argc; i++) {
+                if (strcmp(argv[i], "-y") == 0 || strcmp(argv[i], "--yes") == 0 ||
+                    strcmp(argv[i], "--confirm") == 0) {
+                    confirmed = true;
+                }
+            }
+
+            sd_vstorage_info_t info;
+            bool have_info = (sd_vstorage_get_info(&info) == SD_VSTORAGE_OK);
+            if (!have_info || !info.storage_exists) {
+                glog("SD:ERR:%s\n", sd_vstorage_status_str(SD_VSTORAGE_ERR_NOT_FOUND));
+                return;
+            }
+            if (!confirmed) {
+                glog("SD:VSTORAGE:WARN:destructive\n");
+                glog("SD:VSTORAGE:WARN:This PERMANENTLY deletes the storage partition (%lu MB at 0x%lx) and all its contents.\n",
+                     (unsigned long)(info.storage_size_bytes / (1024 * 1024)), (unsigned long)info.storage_offset);
+                glog("SD:ERR:confirmation_required\n");
+                glog("SD:VSTORAGE:HINT:re-run as: sd vstorage delete -y\n");
+                return;
+            }
+
+            bool reboot_required = false;
+            sd_vstorage_status_t st = delete_storage_partition(&reboot_required);
+            if (st != SD_VSTORAGE_OK) {
+                glog("SD:ERR:%s\n", sd_vstorage_status_str(st));
+                return;
+            }
+            glog("SD:VSTORAGE:DELETE:OK\n");
+            if (reboot_required) {
+                glog("SD:VSTORAGE:REBOOT_REQUIRED:1\n");
+                glog("SD:VSTORAGE:REBOOT_REQUIRED:Reboot the device now for the freed space to be usable.\n");
+            }
+            glog("SD:OK\n");
+            return;
+        }
+
+        glog("SD:ERR:unknown_vstorage_subcommand:%s\n", vsub);
         return;
     }
 

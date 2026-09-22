@@ -79,6 +79,7 @@ esp_err_t sd_card_save_config();
 esp_err_t sd_card_load_config();
 void sd_card_print_config();
 bool sd_card_is_virtual_storage();
+bool sd_card_virtual_storage_supported();
 
 // mount sd just-in-time for short io, then unmount after
 esp_err_t sd_card_mount_for_flush(bool *display_was_suspended);

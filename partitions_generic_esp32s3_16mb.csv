@@ -1,0 +1,19 @@
+# Non-OTA (factory) partition table for a generic ESP32-S3 DevKitC-1-style
+# board (16MB flash, 8MB PSRAM, no display/persona hardware).
+#
+# Mirrors partitions_atoms3r.csv (single factory app slot, no OTA) with the
+# 'storage' FAT partition placed at the same 0x400000 offset the S3TWatch
+# and AtomS3R builds use, giving the on-device VFS (/mnt) for IR captures
+# and asset packs without an SD card.
+#
+# Placeholder sizing: storage is fixed at 4MB here. This is NOT the final
+# user-resizable scheme (that is separate, future work) - it just claims a
+# sensible slice of the 12MB that is otherwise unused on this 16MB chip.
+# 0x800000-0x1000000 (8MB) is left free for that future work and/or OTA
+# slots, same rationale as partitions_ota_s3twatch.csv.
+#
+# Name,     Type, SubType, Offset,  Size,    Flags
+nvs,        data, nvs,     0x9000,  0x7000,
+app0,       app,  factory, 0x10000, 0x3D0000,
+coredump,   data, coredump,0x3E0000,0x20000,
+storage,    data, fat,     0x400000,0x400000,
