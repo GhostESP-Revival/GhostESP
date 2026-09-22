@@ -13,6 +13,7 @@
 #include "managers/nrf24_remote_manager.h"
 #include "core/uart_share.h"
 #include "i2c_bus_lock.h"
+#include "core/callbacks.h"
 #include "vendor/pcap.h"
 
 #if CONFIG_HAS_CAMERA
@@ -892,7 +893,9 @@ static void plugin_wifi_promisc_cb(void *buf, wifi_promiscuous_pkt_type_t type) 
     (void)type;
     if (!buf) return;
     wifi_promiscuous_pkt_t *pkt = (wifi_promiscuous_pkt_t *)buf;
-    if (s_wifi_pcap_active) pcap_write_packet_to_buffer(pkt->payload, pkt->rx_ctrl.sig_len, PCAP_CAPTURE_WIFI);
+    // Queued, not written inline: this is the raw WiFi driver promiscuous
+    // callback context, same reason as the built-in capture callbacks.
+    if (s_wifi_pcap_active) enqueue_pcap_write(pkt->payload, pkt->rx_ctrl.sig_len);
     if (s_wifi_packet_cb) s_wifi_packet_cb(pkt->payload, pkt->rx_ctrl.sig_len, pkt->rx_ctrl.rssi, pkt->rx_ctrl.channel, s_wifi_packet_user);
 }
 

@@ -3,6 +3,7 @@
 #include "esp_wifi_types.h"
 #include "freertos/FreeRTOS.h"
 #include "vendor/GPS/MicroNMEA.h"
+#include "vendor/pcap.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <esp_timer.h>
@@ -105,6 +106,21 @@ extern bool g_listen_probes_save_to_sd;
 
 // cleanup function to free pcap queue when not capturing
 void cleanup_pcap_queue(void);
+
+// Queue a captured frame for the dedicated pcap writer task to persist to SD
+// (real or virtual) instead of writing/flushing inline from a driver/host
+// callback context. Any capture path that writes to the pcap buffer from a
+// WiFi/BLE/etc. RX or event callback should go through one of these rather
+// than calling pcap_write_packet_to_buffer() directly.
+void enqueue_pcap_write_typed(const uint8_t *payload, uint16_t len, pcap_capture_type_t cap_type);
+void enqueue_pcap_write(const uint8_t *payload, uint16_t len);
+
+// Creates the writer task/queue/pool if not already running. Called lazily
+// from enqueue_pcap_write*() (see there), and should also be called
+// proactively by any capture-start path (pcap_init() already does this)
+// before it enables a WiFi/BLE/etc. RX callback that might call
+// enqueue_pcap_write*() - see callbacks.c for why.
+void ensure_pcap_queue_started(void);
 
 // Handshake tracking helpers used by adaptive capture UIs.
 uint32_t wifi_callbacks_get_handshake_count(void);
