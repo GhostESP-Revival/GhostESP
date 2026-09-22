@@ -411,7 +411,8 @@ def get_build_targets() -> List[Dict[str, str]]:
         {"name": "Cardputer ADV", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.cardputeradv", "zip_name": "CardputerADV.zip"},
         {"name": "Marauder V8", "idf_target": "esp32c5", "sdkconfig_file": "configs/sdkconfig.MarauderV8", "zip_name": "MarauderV8.zip"},
         {"name": "Marauder Pancake", "idf_target": "esp32c5", "sdkconfig_file": "configs/sdkconfig.Pancake", "zip_name": "MarauderPancake.zip"},
-        {"name": "Banshee C5", "idf_target": "esp32c5", "sdkconfig_file": "configs/sdkconfig.somethingsomething", "zip_name": "Banshee-C5.zip"}
+        {"name": "Banshee C5", "idf_target": "esp32c5", "sdkconfig_file": "configs/sdkconfig.somethingsomething", "zip_name": "Banshee-C5.zip"},
+        {"name": "Generic ESP32-S3 16MB", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.generic_esp32s3_16mb", "zip_name": "Generic_ESP32S3_16MB.zip"}
     ]
 
 def validate_project_directory() -> bool:

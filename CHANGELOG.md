@@ -6,6 +6,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 ## v2.2
 
 ### Added
+- Added a "Generic ESP32-S3 16MB" board target (`CONFIG_IS_GENERIC_ESP32S3_16MB`) - a plain ESP32-S3 DevKitC-1-style board (16MB flash, 8MB PSRAM, no display) with no SD card slot. Adds a virtual "SD card" the same way S3TWatch/AtomS3R already do: a FAT partition on internal flash mounted at `/mnt`, so capture, evil-portal, sweep, etc. just see a normal SD-shaped mount and don't know the difference. `sd vstorage info|create|resize|delete` sizes the partition at runtime, up to 80% of genuinely free flash, instead of a fixed size; `resize`/`create`/`delete` require `-y`/`--confirm` since they destroy existing partition contents and require a reboot to take effect (ESP-IDF reads the partition table once at boot). Known limitation: this chip target has no backup partition-table slot in stock ESP-IDF, so a power loss mid-write to the live sector during a resize would need `esptool` recovery - @jackjudge01-bit
 - Added a clock to the centre of the status bar, toggleable in Settings > Date & Time 
 - Added switchable analog and seven-segment clock faces to the Clock view
 - Added Meshtastic-compatible LoRa support for SX1262-family radios including BLE app support with the official Meshtastic App
