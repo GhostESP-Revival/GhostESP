@@ -386,6 +386,12 @@ esp_err_t pcap_init(void) {
     ESP_LOGI(PCAP_TAG, "PCAP buffer allocated (%d bytes)", PCAP_BUFFER_SIZE);
   }
 
+  // Warm up the writer task/queue/pool here, in whatever (safe, CLI/command)
+  // context called pcap_init() - not lazily on the first packet, which would
+  // run this same setup inline inside a WiFi/BLE driver RX callback instead.
+  // See callbacks.c's ensure_pcap_queue_started() for why that crashed.
+  ensure_pcap_queue_started();
+
   ESP_LOGI(PCAP_TAG, "PCAP initialized successfully");
   return ESP_OK;
 }
@@ -858,13 +864,18 @@ esp_err_t pcap_write_packet_to_buffer(const void *packet, size_t length,
   }
 
   if (buffer_offset + total_packet_size > PCAP_BUFFER_SIZE) {
-    esp_err_t ret = _pcap_flush_buffer_to_file_nolock();
-    if (ret != ESP_OK) {
-      s_capture_stats.packets_dropped++;
-      xSemaphoreGive(pcap_mutex);
-      ESP_LOGE(PCAP_TAG, "Buffer flush failed");
-      return ret;
-    }
+    // Deliberately NOT flushing to the SD-backed file here anymore: this
+    // function runs while WiFi/BLE RX is still active (via the pcap_writer_task
+    // queue), and flushing to SD (real or virtual) during that window is what
+    // was panicking the device. Writes are now deferred entirely to capture
+    // stop (pcap_file_close() does one full flush there, after RX is already
+    // disabled) - see PCAP_BUFFER_SIZE's comment in pcap.h. Once the buffer's
+    // full, further packets for this capture are dropped instead.
+    s_capture_stats.packets_dropped++;
+    xSemaphoreGive(pcap_mutex);
+    ESP_LOGW(PCAP_TAG, "In-RAM capture buffer full (%d bytes) - dropping packet; "
+             "SD write is deferred to capture stop.", PCAP_BUFFER_SIZE);
+    return ESP_ERR_NO_MEM;
   }
 
   // Write packet header

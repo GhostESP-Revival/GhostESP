@@ -97,7 +97,12 @@ static bool ble_wait_for_scan_stop(uint32_t timeout_ms);
 static bool ble_wait_for_callbacks_idle(uint32_t timeout_ms);
 static void pcap_flush_timer_cb(void *arg) {
     (void)arg;
-    (void)pcap_flush_buffer_to_file();
+    // No longer flushes to the SD-backed file: this timer fires every 1s (or
+    // 200ms for skimmer/airtag scans) while BLE RX is still active, and
+    // that's what was panicking the device. All flushing is now deferred to
+    // capture stop - the existing "Final flush" calls (ble_stop_skimmer_detection(),
+    // etc.) already do that. Timer left running (harmless no-op) rather than
+    // removing its create/start/stop lifecycle elsewhere in this file.
 }
 
 static bool ble_wait_for_scan_stop(uint32_t timeout_ms) {
@@ -1315,7 +1320,11 @@ static void ble_pcap_callback(struct ble_gap_event *event, size_t len) {
             }
         }
 
-        pcap_write_packet_to_buffer(hci_buffer, hci_len, PCAP_CAPTURE_BLUETOOTH);
+        // Queued, not written inline: this runs in the NimBLE host's own
+        // event-callback context, which isn't sized for the FATFS/flash
+        // write pcap_write_packet_to_buffer() can trigger when SD (real or
+        // virtual) is mounted - see callbacks.c's pcap_writer_task.
+        enqueue_pcap_write_typed(hci_buffer, hci_len, PCAP_CAPTURE_BLUETOOTH);
     }
 }
 

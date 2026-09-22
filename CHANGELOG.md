@@ -79,6 +79,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Fixed detail view info labels being cut off instead of scrolling sideways when too wide
 - Fixed T-Watch S3 RTC using the wrong I2C bus and chip address
 - Fixed RTC boot restore trusting an invalid (power-lost) oscillator time
+- Fixed a device panic when a WiFi/BLE capture command writes to a mounted SD card while RX is still active (buffer-full and periodic auto-flush both flushed to the SD-backed file mid-capture); writes are now deferred to capture stop, and the in-RAM capture buffer was sized up to make that practical - @jackjudge01-bit
 
 
 ## Revival v2.1.2

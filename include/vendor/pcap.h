@@ -31,8 +31,17 @@ typedef struct {
 
 #define MAX_FILE_NAME_LENGTH 128
 
+// Sized to hold an entire typical capture session in RAM: writes to the
+// SD-backed file are now deferred to capture-stop (see pcap_write_packet_to_buffer()
+// and pcap_writer_task() in callbacks.c) rather than happening while WiFi/BLE
+// RX is still active, which is what was panicking the device. 8192 bytes was
+// enough to fill in ~2s of real probe-request traffic, forcing an in-capture
+// flush almost immediately - this is generous enough that a typical capture
+// session shouldn't need one at all. Capture length is now bounded by this
+// buffer (PSRAM has ~8MB free on this board); once full, further packets are
+// dropped (packets_dropped stat) rather than flushed mid-capture.
 #if CONFIG_SPIRAM
-#define PCAP_BUFFER_SIZE 8192
+#define PCAP_BUFFER_SIZE (1024 * 1024)
 #else
 #define PCAP_BUFFER_SIZE 5120
 #endif

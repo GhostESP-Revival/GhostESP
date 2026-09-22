@@ -1561,19 +1561,29 @@ static void pcap_writer_task(void *arg) {
                 UBaseType_t hwm_words = uxTaskGetStackHighWaterMark(NULL);
                 glog("PCAP writer HWM (bytes): %lu\n", (unsigned long)hwm_words);
             }
-            if ((processed & 0x1F) == 0 && pcap_auto_flush_enabled()) {
-                pcap_flush_buffer_to_file();
-            }
+            // No periodic/idle auto-flush to the SD-backed file anymore: this
+            // task (and thus any flush it triggers) runs while WiFi/BLE RX is
+            // still active, and that's what was panicking the device. All
+            // flushing is now deferred to capture stop (pcap_file_close()
+            // does one full flush there, after RX is already disabled) - see
+            // PCAP_BUFFER_SIZE's comment in pcap.h.
         } else {
-            // periodic flush even if idle
-            if (pcap_auto_flush_enabled()) {
-                pcap_flush_buffer_to_file();
-            }
+            // (idle-timeout auto-flush removed for the same reason)
         }
     }
 }
 
-static inline void ensure_pcap_queue_started(void) {
+// Not static/inline: also called proactively from pcap_init() (vendor/pcap.c),
+// itself called from pcap_file_open() at capture-start time in the CLI/command
+// task context, so the queue/pool/writer task are already warm before any RX
+// callback can ever call enqueue_pcap_write*(). Without that, the FIRST-ever
+// call after boot did this whole setup (heap_caps_calloc + xQueueCreate +
+// xTaskCreate_psram) inline inside whichever driver callback happened to call
+// it first - reproduced live as the same double-exception panic even after
+// pcap_writer_task's own stack was fixed (see 05's notes). Still called
+// lazily here too, as a fallback for any capture path that doesn't call
+// pcap_init() first (see 07's notes for the ones that still don't).
+void ensure_pcap_queue_started(void) {
     if (s_pcap_q != NULL) {
         return;
     }
@@ -1584,11 +1594,21 @@ static inline void ensure_pcap_queue_started(void) {
 
     s_pcap_q = xQueueCreate(EAPOL_Q_LEN, sizeof(pcap_q_item_t));
     if (s_pcap_q != NULL && s_pcap_writer_task == NULL) {
-        xTaskCreate_psram(pcap_writer_task, "pcap_wr", 3072, NULL, 5, &s_pcap_writer_task);
+        // 3072 was not enough: the FATFS/wear-levelling/esp_partition call chain
+        // this task blocks on during _pcap_flush_buffer_to_file_nolock() (fwrite()+
+        // fflush() to the SD-backed file, real or virtual) overflowed it and took
+        // down the whole device with a double-exception panic - reproduced live
+        // against the virtual-SD-backed /mnt/ghostesp/pcaps target. See
+        // ghostesp-virtual-sd/05-fix-pcap-callback-stack-overflow-NOTES.md.
+        xTaskCreate_psram(pcap_writer_task, "pcap_wr", 8192, NULL, 5, &s_pcap_writer_task);
     }
 }
 
-static inline void enqueue_pcap_write_typed(const uint8_t *payload, uint16_t len, pcap_capture_type_t cap_type) {
+// Not static/inline: called from ble_manager.c and plugin_api_lowlevel.c too,
+// so their capture paths go through the same queued writer task instead of
+// blocking on a flash write from inside their own (unsized-for-that) callback
+// contexts. Declared in callbacks.h.
+void enqueue_pcap_write_typed(const uint8_t *payload, uint16_t len, pcap_capture_type_t cap_type) {
     if (!payload || len == 0) return;
     ensure_pcap_queue_started();
     if (!s_pcap_q) return;
@@ -1619,7 +1639,7 @@ static inline void enqueue_pcap_write_typed(const uint8_t *payload, uint16_t len
     }
 }
 
-static inline void enqueue_pcap_write(const uint8_t *payload, uint16_t len) {
+void enqueue_pcap_write(const uint8_t *payload, uint16_t len) {
     if (!s_pcap_enabled) return;
     enqueue_pcap_write_typed(payload, len, PCAP_CAPTURE_WIFI);
 }
@@ -3994,12 +4014,14 @@ void ble_skimmer_scan_callback(struct ble_gap_event *event, void *arg) {
                     memcpy(enhanced_packet + packet_len, event->disc.data, event->disc.length_data);
                     packet_len += event->disc.length_data;
 
-                    // Write to PCAP with proper BLE packet format
-                    pcap_write_packet_to_buffer(enhanced_packet, packet_len,
-                                                PCAP_CAPTURE_BLUETOOTH);
-
-                    // Force flush to ensure suspicious device is captured
-                    pcap_flush_buffer_to_file();
+                    // Write to PCAP with proper BLE packet format. Queued, not
+                    // written/flushed inline here: this runs in the NimBLE host's
+                    // own event-callback context, and forcing an immediate flush
+                    // (as this used to) blocks on the same FATFS/flash write that
+                    // overflows an undersized stack - see pcap_writer_task above.
+                    // The writer task's own periodic/threshold flush picks this up.
+                    enqueue_pcap_write_typed(enhanced_packet, packet_len,
+                                             PCAP_CAPTURE_BLUETOOTH);
                 }
                 break;
             }
@@ -4123,12 +4145,10 @@ void wifi_listen_probes_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
         last_probe_log_time_ms = now_ms;
     }
 
-    // Optionally save packet to SD if enabled
+    // Optionally save packet to SD if enabled. Queued (not written inline
+    // here) for the same reason as the other capture callbacks in this file.
     if (g_listen_probes_save_to_sd && pkt->rx_ctrl.sig_len > 0) {
-        esp_err_t ret = pcap_write_packet_to_buffer(payload, pkt->rx_ctrl.sig_len, PCAP_CAPTURE_WIFI);
-        if (ret != ESP_OK) {
-            ESP_LOGE("PROBE_LISTEN", "Failed to write packet to buffer");
-        }
+        enqueue_pcap_write(payload, pkt->rx_ctrl.sig_len);
     }
 
     // Print to console and display
