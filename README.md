@@ -46,6 +46,14 @@ GhostESP is a platform, not a bag of tools. Five things set it apart:
 ## Features
 
 <details>
+<summary><strong>Storage &amp; Virtual SD (no SD card required)</strong></summary>
+
+- **On-board capture with no physical SD card.** Boards without an SD slot can carve a FAT *virtual SD* card out of spare internal flash and mount it at `/mnt`, so every SD-backed feature — PCAP / handshake / PMKID capture, hc22000 & WiGLE export, WiFi/BLE/GPS wardriving and sweep logs, Evil Portal credential capture, and native SD apps — works exactly as it does with a real card, with no added hardware.
+- User-sizeable at runtime with `sd vstorage create|resize|delete` (up to 80% of free flash); the rest of the firmware just sees a normal SD mount and never knows it is internal flash.
+- Enabled per board with a Kconfig flag (same mechanism as S3TWatch / AtomS3R), with a ready-made target for generic 16&nbsp;MB-flash ESP32-S3 DevKitC boards.
+</details>
+
+<details>
 <summary><strong>WiFi Features</strong></summary>
 
 - Evil Portal (with custom HTML from buffer via serial)

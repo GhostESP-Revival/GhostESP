@@ -18,6 +18,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
   - Elecrow CrowPanel Advance 4.3-inch
   - Elecrow CrowPanel Advanced P4 7/9/10.1-inch (v1.1 and v1.2+, wireless Meshtastic module)
 - Added USB SD card passthrough on ESP32-S3 boards with an SD card
+- Added a **virtual SD card** for boards with no SD slot: capture and every SD-backed feature (PCAP/handshake/PMKID, hc22000 & WiGLE export, wardriving/sweep logs, Evil Portal, native SD apps) now work with no physical card by mounting a user-sizeable FAT partition carved from spare internal flash at `/mnt`, managed with `sd vstorage create|resize|delete`. Includes a ready-made generic 16 MB ESP32-S3 DevKitC target. @jackjudge01-bit
 - Added custom channel hopping setting that applies to deauth, beacon spam, AP and station scans, airspace monitor, and packet visualizer/capture hopping.
 - Added a Country selector to Settings > Wi-Fi for display UI
 - Added a Row Height setting for the options menus
