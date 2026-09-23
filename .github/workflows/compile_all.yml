@@ -98,6 +98,7 @@ jobs:
           - { name: "XIAO_C5",                 idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.xiao_esp32c5",                    zip_name: "XIAO_C5.zip" }
           - { name: "Marauder V8",             idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.MarauderV8",                      zip_name: "MarauderV8.zip" }
           - { name: "Marauder Pancake",        idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.Pancake",                         zip_name: "MarauderPancake.zip" }
+          - { name: "Generic ESP32-S3 16MB",   idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.generic_esp32s3_16mb",           zip_name: "Generic_ESP32S3_16MB.zip" }
 
     steps:
       - uses: actions/checkout@v4

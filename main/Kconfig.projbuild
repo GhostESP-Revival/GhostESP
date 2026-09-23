@@ -783,6 +783,16 @@ menu "Ghost ESP Options"
                 S3TWatch, it has no SD card slot, so the build carves out a
                 flash 'storage' partition mounted as virtual storage at /mnt.
 
+        config IS_GENERIC_ESP32S3_16MB
+            bool "Enable Generic ESP32-S3 (16MB Flash) Configuration"
+            default n
+            help
+                Enable configuration for a generic ESP32-S3 DevKitC-1-style
+                board with 16MB flash and 8MB PSRAM and no display/persona
+                hardware. Like the S3TWatch and AtomS3R, it has no SD card
+                slot, so the build carves out a flash 'storage' partition
+                mounted as virtual storage at /mnt.
+
         config HAS_DRV2605_HAPTICS
             bool "Enable DRV2605 Haptics"
             default y if IS_S3TWATCH
