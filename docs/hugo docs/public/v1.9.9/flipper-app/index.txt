@@ -1,0 +1,30 @@
+Title: Flipper Zero App
+Description: Control GhostESP from your Flipper Zero device using the official companion app.
+URL: /v1.9.9/flipper-app/
+Version: v1.9.9
+Section: GhostESP: Revival
+Keywords: flipper zero, companion app, mobile control, gui, fap
+Search index: /search-index.json
+
+# Flipper Zero App
+
+> Control GhostESP from your Flipper Zero device using the official companion app.
+
+## On this page
+
+- [Quick Links](#quick-links)
+
+---
+
+The GhostESP Flipper Zero companion app provides a comprehensive graphical interface to control and interact with your GhostESP device directly from your Flipper Zero. This app enables you to perform Wi-Fi operations, Bluetooth scanning, GPS tracking, and more without needing a computer or web browser.
+The companion app is a Flipper Application Package (.fap) that runs on Flipper Zero devices. It communicates with GhostESP firmware via serial/UART connection, providing an intuitive menu-driven interface for all major GhostESP features.
+Repository: [github.com/GhostESP-Revival/GhostESP-FlipperCompanion](https://github.com/GhostESP-Revival/GhostESP-FlipperCompanion)
+## Quick Links
+- [Installation](/v1.9.9/flipper-app/installation/) - Install the companion app on your Flipper Zero
+- [Connection Setup](/v1.9.9/flipper-app/connection/) - Hardware and software connection guide
+- [Wi-Fi Features](/v1.9.9/flipper-app/wifi-features/) - Wi-Fi scanning, capture, and attacks
+- [BLE Features](/v1.9.9/flipper-app/ble-features/) - Bluetooth scanning and attacks
+- [GPS Features](/v1.9.9/flipper-app/gps-features/) - GPS tracking and wardriving
+- [Configuration](/v1.9.9/flipper-app/configuration/) - LED, SD card, and system settings
+- [Usage Guide](/v1.9.9/flipper-app/usage/) - Common workflows and navigation
+- [Troubleshooting](/v1.9.9/flipper-app/troubleshooting/) - Solve common issues

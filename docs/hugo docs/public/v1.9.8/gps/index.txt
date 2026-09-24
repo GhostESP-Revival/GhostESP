@@ -1,0 +1,15 @@
+Title: GPS &amp; Wardriving
+Description: Overview of GhostESP&#39;s GPS and wardriving capabilities
+URL: /v1.9.8/gps/
+Version: v1.9.8
+Section: GhostESP: Revival
+Keywords: GPS, wardriving, wigle, location, mapping
+Search index: /search-index.json
+
+# GPS &amp; Wardriving
+
+> Overview of GhostESP&#39;s GPS and wardriving capabilities
+
+---
+
+GhostESP supports GPS modules for location tracking and wardriving. Capture wireless network data with GPS coordinates and upload to WiGLE for mapping and research.

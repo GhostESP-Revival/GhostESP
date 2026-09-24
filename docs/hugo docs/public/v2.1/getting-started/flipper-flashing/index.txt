@@ -1,0 +1,49 @@
+Title: Flash with Flipper Zero
+Description: Use a Flipper Zero and the GhostESP app to flash a compatible ESP32 board.
+URL: /v2.1/getting-started/flipper-flashing/
+Version: v2.1
+Section: Getting Started
+Search index: /search-index.json
+
+# Flash with Flipper Zero
+
+> Use a Flipper Zero and the GhostESP app to flash a compatible ESP32 board.
+
+## On this page
+
+- [What this does](#what-this-does)
+- [Before you start](#before-you-start)
+- [On-device steps](#on-device-steps)
+- [Expected result](#expected-result)
+- [Troubleshooting](#troubleshooting)
+- [Related tasks](#related-tasks)
+
+---
+
+## What this does
+This method uses a Flipper Zero as the programmer for a compatible ESP32 board. Use it when you prefer a portable flashing workflow.
+## Before you start
+- A Flipper Zero with an SD card.
+- The GhostESP Flipper app from the [Flipper app store](https://lab.flipper.net/apps) or [latest release](https://github.com/GhostESP-Revival/GhostESP-FlipperCompanion/releases/latest).
+- The GhostESP firmware .zip that matches the ESP32 chip.
+- A way to copy the extracted firmware files to the Flipper SD card.
+- Correct GPIO wiring between the Flipper and ESP32 board. Refer to the GhostESP Flipper app for the pinout.
+## On-device steps
+- Install the GhostESP .fap on the Flipper SD card.
+- Download and extract the matching GhostESP firmware archive.
+- Copy its three .bin files to SDCard/apps_data/esp_flasher/. Do not place them in assets/.
+- Wire the ESP32 to the Flipper GPIO pins.
+- Put the ESP32 into bootloader mode: hold BOOT, connect USB, then release BOOT.
+- Open the ESP flasher app on the Flipper and choose Manual Flash.
+- Select bootloader.bin, partitions.bin, and GhostESP.bin, then confirm the target variant.
+- Start the flash and reset the ESP32 when it completes.
+## Expected result
+GhostESP boots and exposes GhostNet. Continue with a connection method or run a first passive Wi-Fi scan.
+## Troubleshooting
+- Flashing fails: Recheck the GPIO wiring, bootloader mode, and board variant.
+- Firmware files are not shown: Confirm all three files are in SDCard/apps_data/esp_flasher/, not assets/.
+- The board does not boot: Download the release matching its ESP32 chip and flash again.
+## Related tasks
+- [Installation Guide](/v2.1/getting-started/installation-guide/)
+- [Manual USB Flashing](/v2.1/getting-started/manual-flashing/)
+- [Try your first scan](/v2.1/getting-started/first-scan/)

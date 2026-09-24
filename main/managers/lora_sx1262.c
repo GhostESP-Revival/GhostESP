@@ -10,6 +10,7 @@
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "esp_err.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -102,6 +103,13 @@ static int8_t s_ldro = -1; // -1 = auto
 static volatile bool s_ready = false;
 static volatile bool s_rx_on = false;
 static TaskHandle_t s_task = NULL;
+/* RX task stack/TCB, allocated once and reused across start/stop cycles. The
+ * stack prefers PSRAM so a running radio does not price the boot-critical
+ * internal heap out of task creation; the TCB stays internal (FreeRTOS
+ * requirement). Never freed: freeing a live task's stack after vTaskDelete
+ * races the idle task, and 8 KiB of PSRAM is cheap to hold. */
+static StackType_t *s_task_stack = NULL;
+static StaticTask_t *s_task_tcb = NULL;
 static lora_rx_cb_t s_cb = NULL;
 static void *s_ctx = NULL;
 static SemaphoreHandle_t s_mutex = NULL;
@@ -717,6 +725,51 @@ void lora_radio_deinit(void) {
 
 bool lora_radio_is_ready(void) { return s_ready && s_dev != NULL; }
 
+/* Size of the RX task stack. The RX callback (mesh decode + phone pushes +
+ * PKI + logging) runs in this task; 4096 overflowed once NodeInfo/PKI
+ * forwarding grew. The stack is allocated from PSRAM where available so a
+ * running radio does not price the boot-critical internal heap out of task
+ * creation; no-PSRAM boards keep the previous fully-internal behaviour. */
+#define RX_TASK_STACK 8192
+
+/* Create the RX task with a PSRAM-preferred stack. The stack/TCB are held for
+ * the lifetime of the boot and reused across start/stop cycles (freeing a live
+ * task's stack races vTaskDelete, and 8 KiB of PSRAM is cheap). Falls back to
+ * the plain internal-stack xTaskCreate when the PSRAM allocation fails. */
+static TaskHandle_t radio_task_start(void) {
+    TaskHandle_t handle = NULL;
+    if (!s_task_stack || !s_task_tcb) {
+        if (!s_task_stack) {
+            s_task_stack = heap_caps_malloc(RX_TASK_STACK * sizeof(StackType_t),
+                                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        }
+        if (!s_task_tcb) {
+            s_task_tcb = heap_caps_malloc(sizeof(StaticTask_t),
+                                          MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        }
+        if (!s_task_stack || !s_task_tcb) {
+            ESP_LOGW(TAG, "RX task static alloc failed; using internal stack");
+            if (s_task_stack) heap_caps_free(s_task_stack);
+            if (s_task_tcb) heap_caps_free(s_task_tcb);
+            s_task_stack = NULL;
+            s_task_tcb = NULL;
+            return xTaskCreate(radio_task, "lora_rx", RX_TASK_STACK, NULL, 10,
+                               &handle) == pdPASS ? handle : NULL;
+        }
+    }
+    handle = xTaskCreateStatic(radio_task, "lora_rx", RX_TASK_STACK, NULL, 10,
+                               s_task_stack, s_task_tcb);
+    if (handle) {
+        ESP_LOGI(TAG, "RX task stack in PSRAM: %d bytes",
+                 (int)(RX_TASK_STACK * sizeof(StackType_t)));
+        return handle;
+    }
+    ESP_LOGW(TAG, "static RX task create failed; retrying internal");
+    if (xTaskCreate(radio_task, "lora_rx", RX_TASK_STACK, NULL, 10, &handle) != pdPASS)
+        return NULL;
+    return handle;
+}
+
 int lora_radio_start_rx(lora_rx_cb_t cb, void *ctx) {
     if (!lora_radio_is_ready() || s_rx_on) {
         s_fail_step = "rx-not-ready";
@@ -742,9 +795,8 @@ int lora_radio_start_rx(lora_rx_cb_t cb, void *ctx) {
     int r = set_rx_continuous();
     unlock();
     if (r != 0) { s_fail_step = "rx-continuous"; s_rx_on = false; return -1; }
-    // 8192B: the RX callback (mesh decode + phone pushes + PKI + logging)
-    // runs in this task; 4096 overflowed once NodeInfo/PKI forwarding grew.
-    if (xTaskCreate(radio_task, "lora_rx", 8192, NULL, 10, &s_task) != pdPASS) {
+    s_task = radio_task_start();
+    if (!s_task) {
         s_fail_step = "rx-task";
         s_rx_on = false;
         return -1;

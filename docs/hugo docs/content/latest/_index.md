@@ -25,6 +25,8 @@ keywords: ["ESP32", "security testing", "WiFi", "NFC", "infrared", "penetration 
   </a>
 </div>
 
+**Stuck?** The [FAQ]({{< relref "getting-started/faq.md" >}}) covers setup, credentials, and common failures. If you are adding a module or changing pins, see [Wiring Modules and Peripherals]({{< relref "getting-started/peripheral-wiring.md" >}}).
+
 ## Explore capabilities
 
 Choose a section below when you already know what you want to do.

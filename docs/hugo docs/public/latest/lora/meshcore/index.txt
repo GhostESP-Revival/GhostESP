@@ -1,0 +1,116 @@
+Title: MeshCore Mode
+Description: Run GhostESP as a MeshCore node on the same SX1262 radio
+URL: /latest/lora/meshcore/
+Version: latest
+Section: LoRa (Meshtastic &amp; MeshCore)
+Keywords: LoRa, MeshCore, advert, contacts, Ed25519, companion, SX1262
+Search index: /search-index.json
+
+# MeshCore Mode
+
+> Run GhostESP as a MeshCore node on the same SX1262 radio
+
+## On this page
+
+- [First run](#first-run)
+- [On the device](#on-the-device)
+- [Heltec OLED page](#heltec-oled-page)
+- [Start on boot](#start-on-boot)
+- [Reference](#reference)
+- [Companion app](#companion-app)
+- [If something is off](#if-something-is-off)
+
+---
+
+GhostESP runs MeshCore as an alternative to Meshtastic on the same radio. Use it when the people you talk to are on MeshCore. Only one protocol runs at a time.
+MeshCore is an independent platform; GhostESP is an independent implementation and is not affiliated with the MeshCore project.
+mesh switch meshcore # stop Meshtastic, start MeshCore, remember the choice
+meshcore status # confirm it is running
+You can also switch with the protocol toggle in the on-device app. The remembered choice is what mesh on and boot auto-start use.
+## First run
+1. Name your node. This is what neighbours see:
+meshcore set name Ghost
+On the device it is MeshCore Settings → Node name.
+2. Announce yourself. Contacts are learned from adverts:
+meshcore advert # zero-hop: neighbours only
+meshcore advert flood # flood: the whole mesh learns your name and key
+3. Check your identity. MeshCore identifies nodes by public key, not a node number:
+meshcore pubkey # our key and one-byte node hash, e.g. !3A
+meshcore contacts # who has been heard
+4. Talk
+meshcore send hello # group message on channel 0
+meshcore ch 3 hello # group message on another channel
+meshcore dm GhostTwo hello # direct message a contact
+meshcore messages # show received messages
+Direct messages are encrypted to the contact’s full key and tracked with an ACK. On the device a DM shows Sending → Delivered, or Failed with a tap-to-retry. When the CLI picks a contact, prefer the name from meshcore contacts. A one-byte !hex prefix still works, but it is ambiguous when several contacts share a first byte.
+## On the device
+Open LoRa from the main menu. With the radio off, the first row starts the selected protocol.
+- MeshCore Contacts lists known contacts; picking one opens the conversation.
+- Conversations are kept per channel, so channel 0 and channel 3 stay separate.
+- MeshCore Settings holds the radio toggle, node name, frequency, modem, TX power and the two advert buttons.
+- On encoder boards, double-press on the status screen toggles the radio.
+## Heltec OLED page
+Press PRG to cycle pages; the compact page is reachable whether the radio is running or not.
+- Double-press PRG on that page to toggle the radio.
+- Stopped, it shows MC OFF and PRESS 2X TO START.
+- Running, it shows MESHCORE, frequency/SF, contacts/messages, TX/RX, app-link state and the last received message.
+## Start on boot
+meshcore autostart on # boot into MeshCore (also selects it as the boot protocol)
+meshcore autostart off # disable
+Equivalent: lora autostart meshcore, mesh autostart meshcore.
+## Reference
+Command |
+What it does |
+meshcore status |
+Running state, frequency, modem, TX power, contacts, counters |
+meshcore on / off |
+Start or stop (aliases of start / stop) |
+meshcore pubkey |
+Our Ed25519 public key and node hash |
+meshcore set name &lt;name&gt; |
+Advertised name (31 characters max) |
+meshcore advert [flood] |
+Send a self advert, zero-hop by default |
+meshcore regen |
+Generate a new identity keypair; peers need a new advert |
+meshcore contacts |
+Known contacts: name, key, last heard, path |
+meshcore channels |
+Configured channel slots |
+meshcore send / ch &lt;0-39&gt; |
+Group message on channel 0 or a chosen channel |
+meshcore dm &lt;name|!hex&gt; &lt;text&gt; |
+Direct message a contact |
+meshcore messages |
+Drain received messages |
+meshcore set freq &lt;mhz&gt; |
+Centre frequency, e.g. 869.525 |
+meshcore set bw &lt;khz&gt; / sf &lt;5-12&gt; / cr &lt;5-8&gt; |
+Modem settings |
+meshcore set tx &lt;dbm&gt; |
+TX power, clamped to the board limit |
+meshcore set repeat &lt;on|off&gt; |
+Forward group and advert floods (default off) |
+meshcore set latlon &lt;lat&gt; &lt;lon&gt; / loc &lt;0|1&gt; |
+Position sharing |
+meshcore ble [on|off|status] |
+Companion BLE link for the MeshCore app |
+meshcore selftest |
+Crypto known-answer tests |
+The on-device page mirrors the settings: frequency, modem, TX power (tap to cycle) and the advert buttons. Changing frequency or modem re-tunes the radio in place. Every node in a group needs the same frequency, bandwidth, spreading factor and coding rate.
+## Companion app
+meshcore ble on # MeshCore app link (Nordic-UART-style GATT)
+meshcore ble status # link state and MTU
+Only one protocol’s BLE service runs at a time, because one radio owns the SX1262.
+## If something is off
+Symptom |
+Fix |
+No contacts |
+Contacts arrive with adverts. Run meshcore advert flood, then wait |
+Start fails |
+The other protocol may still own the radio: mesh off, then retry |
+MeshCore not enabled on this board |
+The build was made without CONFIG_HAS_MESHCORE (it defaults on for LoRa builds) |
+Nothing on the expected channel |
+All nodes need the same frequency/BW/SF/CR and the same channel slot |
+See [First run](/latest/lora/getting-started/) for the Meshtastic path and [Command reference](/latest/lora/commands/) for boot and switching.

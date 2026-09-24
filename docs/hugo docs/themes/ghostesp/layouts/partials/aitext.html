@@ -1,0 +1,55 @@
+{{- /* Renders a page as clean plain text for AI agents / bot fetching.
+     Headings keep their markdown markers and a stable anchor outline,
+     links keep their targets, and the rest of the HTML is stripped. */ -}}
+{{- $page := . -}}
+
+{{- $versionIds := slice -}}
+{{- with $page.Site.Params.versioning -}}
+  {{- range .options -}}
+    {{- $versionIds = $versionIds | append .id -}}
+  {{- end -}}
+{{- end -}}
+{{- $segments := split (strings.TrimPrefix "/" $page.RelPermalink) "/" -}}
+{{- $version := "" -}}
+{{- if gt (len $segments) 0 -}}
+  {{- $first := index $segments 0 -}}
+  {{- if in $versionIds $first -}}
+    {{- $version = $first -}}
+  {{- end -}}
+{{- end -}}
+
+{{- $description := "" -}}
+{{- with $page.Params.description -}}
+  {{- $description = . | plainify | strings.TrimSpace -}}
+{{- else -}}
+  {{- $description = $page.Summary | plainify | strings.TrimSpace -}}
+{{- end -}}
+
+{{- $sectionTitle := "" -}}
+{{- with $page.Parent -}}
+  {{- $sectionTitle = .LinkTitle -}}
+{{- end -}}
+
+{{- /* Turn rendered HTML into readable text, preserving block breaks. */ -}}
+{{- $body := partial "plain-content.html" $page -}}
+
+{{- $keywords := default (slice) $page.Params.keywords -}}
+Title: {{ $page.Title }}
+Description: {{ $description }}
+URL: {{ $page.RelPermalink }}
+Version: {{ if $version }}{{ $version }}{{ else }}n/a{{ end }}
+Section: {{ $sectionTitle }}{{ if not $page.Lastmod.IsZero }}
+Last updated: {{ $page.Lastmod.Format "2006-01-02" }}{{ end }}{{ with $keywords }}
+Keywords: {{ delimit . ", " }}{{ end }}
+Search index: {{ "search-index.json" | relURL }}
+
+# {{ $page.Title }}
+
+> {{ $description }}
+{{ with $page.Fragments.Headings }}
+## On this page
+{{ partial "headings-outline.html" . }}
+{{ end }}
+---
+
+{{ $body }}

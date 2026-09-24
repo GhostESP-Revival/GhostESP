@@ -1,0 +1,14 @@
+Title: NFC
+Description: Information about GhostESP&#39;s NFC capabilities
+URL: /v1.8.1/nfc/
+Version: v1.8.1
+Section: GhostESP: Revival
+Search index: /search-index.json
+
+# NFC
+
+> Information about GhostESP&#39;s NFC capabilities
+
+---
+
+GhostESP ships with a PN532-based reader that can scan, cache, save, and rewrite ISO14443A tags.

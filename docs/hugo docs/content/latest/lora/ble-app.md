@@ -13,10 +13,12 @@ GhostESP exposes the same BLE GATT service as stock Meshtastic nodes so the offi
 - **Service:** Meshtastic BLE service UUID; LongFast channel is the default (chash `0x08`).
 - **Start:** `lora ble on` (or `lora start` if BLE bridge is set to auto). Check `lora ble status`.
 
+MeshCore runs its own companion service under `meshcore ble on` (Nordic-UART-style GATT); the two are mutually exclusive because one radio owns the SX1262. See [MeshCore Mode]({{< relref "meshcore.md" >}}).
+
 ## Pairing
 
 1. Enable location/Bluetooth on your phone and open the official Meshtastic app.
-2. Scan — select `Ghost-XXXX` when it appears.
+2. Scan, then select `Ghost-XXXX` when it appears.
 3. Wait for configuration sync to complete. The app should then show the LongFast channel, node list, and chat.
 
 ## Text flow

@@ -686,6 +686,7 @@ const CMD = {
   loraChat:        (text) => ({ cmd: text ? `lora chat ${text}` : 'lora chat', risky: false, stopFirst: false, cat: 'LoRa', desc: 'Send/list LoRa chat' }),
   loraNodes:       () => ({ cmd: 'lora nodes',       risky: false, stopFirst: false, cat: 'LoRa', desc: 'List LoRa nodes' }),
   loraDiag:        () => ({ cmd: 'lora diag',        risky: false, stopFirst: false, cat: 'LoRa', desc: 'LoRa diagnostics' }),
+  loraAutostart:   (on) => ({ cmd: on == null ? 'lora autostart' : `lora autostart ${on ? 'on' : 'off'}`, risky: false, stopFirst: false, cat: 'LoRa', desc: 'LoRa boot auto-start' }),
   loraBle:         (on) => ({ cmd: on == null ? 'lora ble' : on ? 'lora ble on' : 'lora ble off', risky: false, stopFirst: false, cat: 'LoRa', desc: 'LoRa BLE app link' }),
   loraApp:         () => ({ cmd: 'lora app',         risky: false, stopFirst: false, cat: 'LoRa', desc: 'Meshtastic app link status' }),
 
@@ -943,6 +944,9 @@ const LORA_GROUPS = {
     { label: 'Start LoRa',   factory: () => CMD.loraStart() },
     { label: 'Stop LoRa',    factory: () => CMD.loraStop() },
     { label: 'Diagnostics',  factory: () => CMD.loraDiag() },
+    { label: 'Auto-start Status', factory: () => CMD.loraAutostart() },
+    { label: 'Enable Auto-start', factory: () => CMD.loraAutostart(true) },
+    { label: 'Disable Auto-start', factory: () => CMD.loraAutostart(false) },
   ],
   'Mesh': [
     { label: 'List Messages', factory: () => CMD.loraChat() },

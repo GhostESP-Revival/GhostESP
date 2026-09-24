@@ -130,57 +130,72 @@ GhostESP runs on a variety of ESP32 boards with varying feature support. This co
 
 ## Vendor Boards
 
-The following table lists the vendor-specific boards supported by GhostESP with their corresponding build names:
+The following table lists the vendor-specific boards supported by GhostESP with their corresponding build names. Use the **Chip** column to pick the right variant in the web flasher.
 
-| Board Name | Build Name | Image |
-|---|---|---|
-| CYDMicroUSB | `CYDMicroUSB.zip` | |
-| Elecrow CrowPanel 4.2″ E-paper | `CrowPanel_4.2_Epaper.zip` | |
-| Elecrow CrowPanel 5.79″ E-paper | `CrowPanel_5.79_Epaper.zip` | |
-| Elecrow CrowPanel Advance 2.4″ | `CrowPanel_Advance_24.zip` | |
-| Elecrow CrowPanel Advance 2.8″ | `CrowPanel_Advance_28.zip` | |
-| Elecrow CrowPanel Advance 3.5″ | `CrowPanel_Advance_35.zip` | |
-| Elecrow CrowPanel Advance 4.3″ | `CrowPanel_Advance_43.zip` | |
-| Elecrow CrowPanel Advance 5″ | `CrowPanel_Advance_5.zip` | |
-| Elecrow CrowPanel Advance 7″ | `CrowPanel_Advance_7inch.zip` | |
-| Elecrow CrowPanel Advanced P4 5″ RGB | `CrowPanel_Advanced_P4_5inch.zip` | |
-| Elecrow CrowPanel Advanced P4 7/9/10.1″ (v1.2+) | `CrowPanel_Advanced_P4_7_9_10.1inch.zip` | |
-| Elecrow CrowPanel Advanced P4 7/9/10.1″ (v1.1) | `CrowPanel_Advanced_P4_7_9_10.1inch_v1.1.zip` | |
-| CYDDualUSB | `CYDDualUSB.zip` | |
-| CYD2432S028R | `CYD2432S028R.zip` | <img src="../images/CYD2432S028R.jpg" alt="CYD2432S028R"> |
-| Waveshare 7″ | `Waveshare_LCD.zip` | |
-| Crowtech 7″ | `Crowtech_LCD.zip` | |
-| Sunton 7″ | `Sunton_LCD.zip` | |
-| Cardputer | `ESP32-S3-Cardputer.zip` | <img src="../images/m5_cardputer.jpg" alt="M5 Stack Cardputer"> |
-| Cardputer ADV | `CardputerADV.zip` | |
-| MarauderV4 | `MarauderV4_FlipperHub.zip` | |
-| Marauder V8 | `MarauderV8.zip` | |
-| Marauder Pancake | `MarauderPancake.zip` | |
-| MarauderV6 & AwokDual | `MarauderV6_AwokDual.zip` | |
-| AwokMini | `AwokMini.zip` | |
-| Awok V5 | `esp32v5_awok.zip` | |
-| LilyGo T-Dongle-S3 | `LilyGo-TDongleS3.zip` | |
-| LilyGo T-Dongle-C5 | `LilyGo-TDongleC5.zip` | |
-| T-Display S3 Touch | `LilyGo-TDisplayS3-Touch.zip` | |
-| S3TWatch | `LilyGo-S3TWatch-2020.zip` | |
-| TEmbed CC1101 | `LilyGo-TEmbedC1101.zip` | <img src="../images/lilygo_tembed_cc1101.jpg" alt="Lily Go Tembed cc1101"> |
-| GhostBoard | `ghostboard.zip` | <img src="../images/rabbit_labs_ghost_board_black.jpg" alt="Black Rabbit Labs Ghost Board"> |
-| RabbitLabs Poltergeist | `Poltergeist.zip` | |
-| T-Deck | `LilyGo-T-Deck.zip` | <img src="../images/lilygo_tdeck_plus.jpg" alt="LilyGo T-Deck Plus"> |
-| JCMK DevBoardPro | `JCMK_DevBoardPro.zip` | |
-| RabbitLabs Minion | `RabbitLabs_Minion.zip` | <img src="../images/rabbit_labs_minion.jpg" alt="Rabbit Labs Minion"> |
-| RabbitLabs Phantom | `CYD2USB2.4Inch.zip` | <img src="../images/rabbit_labs_phantom.jpg" alt="Rabbit Labs Phantom"> |
-| Lolin S3 Pro | `Lolin_S3_Pro.zip` | <img src="../images/lolin_s3_pro.jpg" alt="Lolin S3 Pro"> |
-| Seeed Studio XIAO ESP32-S3 Sense | `XIAO_S3_Sense.zip` | |
-| Seeed Studio XIAO ESP32-C5 | `XIAO_C5.zip` | |
-| Flipper JCMK GPS | `Flipper_JCMK_GPS.zip` | <img src="../images/flipper_wifi_devboard.jpg" alt="Flipper Wifi Dev Board + JCMK GPS Mod"> |
-| JC3248W535EN | `JC3248W535EN_LCD.zip` | |
-| Wired Hatters ESPRocket | `esp32-generic.zip` | <img src="../images/wired_hatters_rocket.jpg" alt="Wired Hatters ESPRocket"> |
-| Wired Hatters Ultimate Marauder | Red Port: `esp32-generic.zip` and Blue Port: `MarauderV4_FlipperHub.zip` | <img src="../images/wired_hatters_ultimate_marauder.jpg" alt="Wired Hatters Ultimate Marauder"> |
-| Heltec V3 | `HeltecV3.zip` | |
-| Wired Hatters Banshee C5 | `Banshee_C5.zip` | |
-| Wired Hatters Banshee S3 | `Banshee_S3.zip` | |
-| M5Stack CoreS3-SE | `M5Stack_CoreS3-SE.zip` | |
-| M5Stack AtomS3R | `M5Stack_AtomS3R.zip` | |
+| Board Name | Chip | Build Name | Image |
+|---|---|---|---|
+| CYDMicroUSB | ESP32 | `CYDMicroUSB.zip` | |
+| CYD2USB | ESP32 | `CYD2USB.zip` | |
+| CYDDualUSB | ESP32 | `CYDDualUSB.zip` | |
+| CYD2432S028R | ESP32 | `CYD2432S028R.zip` | <img src="../images/CYD2432S028R.jpg" alt="CYD2432S028R"> |
+| CYD 2.4″ variants | ESP32 | `CYD2USB2.4Inch.zip` or `CYD2USB2.4Inch_C.zip` | |
+| Elecrow CrowPanel 4.2″ E-paper | ESP32-S3 | `CrowPanel_4.2_Epaper.zip` | |
+| Elecrow CrowPanel 5.79″ E-paper | ESP32-S3 | `CrowPanel_5.79_Epaper.zip` | |
+| Elecrow CrowPanel Advance 2.4″ | ESP32-S3 | `CrowPanel_Advance_24.zip` | |
+| Elecrow CrowPanel Advance 2.8″ | ESP32-S3 | `CrowPanel_Advance_28.zip` | |
+| Elecrow CrowPanel Advance 3.5″ | ESP32-S3 | `CrowPanel_Advance_35.zip` | |
+| Elecrow CrowPanel Advance 4.3″ | ESP32-S3 | `CrowPanel_Advance_43.zip` | |
+| Elecrow CrowPanel Advance 5″ | ESP32-S3 | `CrowPanel_Advance_5.zip` | |
+| Elecrow CrowPanel Advance 7″ | ESP32-S3 | `CrowPanel_Advance_7inch.zip` | |
+| Elecrow CrowPanel Advanced P4 5″ RGB | ESP32-P4 | `CrowPanel_Advanced_P4_5inch.zip` | |
+| Elecrow CrowPanel Advanced P4 7/9/10.1″ (v1.2+) | ESP32-P4 | `CrowPanel_Advanced_P4_7_9_10.1inch.zip` | |
+| Elecrow CrowPanel Advanced P4 7/9/10.1″ (v1.1) | ESP32-P4 | `CrowPanel_Advanced_P4_7_9_10.1inch_v1.1.zip` | |
+| Waveshare 7″ | ESP32-S3 | `Waveshare_LCD.zip` | |
+| Crowtech 7″ | ESP32-S3 | `Crowtech_LCD.zip` | |
+| Sunton 7″ | ESP32-S3 | `Sunton_LCD.zip` | |
+| JC3248W535EN | ESP32-S3 | `JC3248W535EN_LCD.zip` | |
+| Cardputer | ESP32-S3 | `ESP32-S3-Cardputer.zip` | <img src="../images/m5_cardputer.jpg" alt="M5 Stack Cardputer"> |
+| Cardputer ADV | ESP32-S3 | `CardputerADV.zip` | |
+| M5Stack CoreS3-SE | ESP32-S3 | `M5Stack_CoreS3-SE.zip` | |
+| M5Stack AtomS3R | ESP32-S3 | `M5Stack_AtomS3R.zip` | |
+| MarauderV4 | ESP32 | `MarauderV4_FlipperHub.zip` | |
+| Marauder V6 & AwokDual | ESP32 | `MarauderV6_AwokDual.zip` | |
+| Marauder V8 | ESP32-C5 | `MarauderV8.zip` | |
+| Marauder Pancake | ESP32-C5 | `MarauderPancake.zip` | |
+| AwokMini | ESP32-S2 | `AwokMini.zip` | |
+| Awok V5 | ESP32-S2 | `esp32v5_awok.zip` | |
+| LilyGo T-Dongle-S3 | ESP32-S3 | `LilyGo-TDongleS3.zip` | |
+| LilyGo T-Dongle-C5 | ESP32-C5 | `LilyGo-TDongleC5.zip` | |
+| T-Display S3 Touch | ESP32-S3 | `LilyGo-TDisplayS3-Touch.zip` | |
+| S3TWatch | ESP32-S3 | `LilyGo-S3TWatch-2020.zip` | |
+| TEmbed CC1101 | ESP32-S3 | `LilyGo-TEmbedC1101.zip` | <img src="../images/lilygo_tembed_cc1101.jpg" alt="Lily Go Tembed cc1101"> |
+| T-Deck | ESP32-S3 | `LilyGo-T-Deck.zip` | <img src="../images/lilygo_tdeck_plus.jpg" alt="LilyGo T-Deck Plus"> |
+| Lolin S3 Pro | ESP32-S3 | `Lolin_S3_Pro.zip` | <img src="../images/lolin_s3_pro.jpg" alt="Lolin S3 Pro"> |
+| Heltec V3 | ESP32-S3 | `HeltecV3.zip` | |
+| Seeed Studio XIAO ESP32-S3 | ESP32-S3 | `XIAO_S3.zip` | |
+| Seeed Studio XIAO ESP32-S3 Sense | ESP32-S3 | `XIAO_S3_Sense.zip` | |
+| Seeed Studio XIAO ESP32-C5 | ESP32-C5 | `XIAO_C5.zip` | |
+| GhostBoard | ESP32-C6 | `ghostboard.zip` | <img src="../images/rabbit_labs_ghost_board_black.jpg" alt="Black Rabbit Labs Ghost Board"> |
+| RabbitLabs Poltergeist | ESP32-C5 | `Poltergeist.zip` | |
+| RabbitLabs Minion | ESP32 | `RabbitLabs_Minion.zip` | <img src="../images/rabbit_labs_minion.jpg" alt="Rabbit Labs Minion"> |
+| RabbitLabs Phantom | ESP32 | `CYD2USB2.4Inch.zip` | <img src="../images/rabbit_labs_phantom.jpg" alt="Rabbit Labs Phantom"> |
+| JCMK DevBoardPro | ESP32 | `JCMK_DevBoardPro.zip` | |
+| Flipper JCMK GPS | ESP32-S2 | `Flipper_JCMK_GPS.zip` | <img src="../images/flipper_wifi_devboard.jpg" alt="Flipper Wifi Dev Board + JCMK GPS Mod"> |
+| Feberis Pro | ESP32 | `FeberisPro.zip` | |
+| NM-CYD-C5 | ESP32-C5 | `NM-CYD-C5.zip` | |
+| ACE C5 | ESP32-C5 | `ACE_C5.zip` | |
+| ACE S3 | ESP32-S3 | `ACE_S3.zip` | |
+| Wired Hatters Banshee C5 | ESP32-C5 | `Banshee_C5.zip` | |
+| Wired Hatters Banshee S3 | ESP32-S3 | `Banshee_S3.zip` | |
+| Wired Hatters ESPRocket | ESP32 | `esp32-generic.zip` | <img src="../images/wired_hatters_rocket.jpg" alt="Wired Hatters ESPRocket"> |
+| Wired Hatters Ultimate Marauder | ESP32 (red port) + ESP32 (blue port) | Red Port: `esp32-generic.zip` and Blue Port: `MarauderV4_FlipperHub.zip` | <img src="../images/wired_hatters_ultimate_marauder.jpg" alt="Wired Hatters Ultimate Marauder"> |
+| GhostLink P1 Core | ESP32-S3 | `GhostLink_P1_Core.zip` | |
+| GhostLink P1 Peer | ESP32-C3 | `GhostLink_P1_Peer.zip` | |
+| ESP32 (generic) | ESP32 | `esp32-generic.zip` | |
+| ESP32-S2 (generic) | ESP32-S2 | `esp32s2-generic.zip` | |
+| ESP32-S3 (generic) | ESP32-S3 | `esp32s3-generic.zip` | |
+| ESP32-C3 (generic) | ESP32-C3 | `esp32c3-generic.zip` | |
+| ESP32-C5 (generic) | ESP32-C5 | `esp32c5-generic-v01.zip` | |
+| ESP32-C6 (generic) | ESP32-C6 | `esp32c6-generic.zip` | |
 
-> **Note:** Images are being added as they become available.
+> **Note:** Chip values come from the build matrix in `build.py`. Images are being added as they become available.

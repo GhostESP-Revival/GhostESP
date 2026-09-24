@@ -1,0 +1,15 @@
+Title: NFC
+Description: Information about GhostESP&#39;s NFC capabilities
+URL: /v1.9.3/nfc/
+Version: v1.9.3
+Section: GhostESP: Revival
+Keywords: NFC, RFID, PN532, ISO14443A, tag reading, tag writing
+Search index: /search-index.json
+
+# NFC
+
+> Information about GhostESP&#39;s NFC capabilities
+
+---
+
+GhostESP ships with a PN532-based reader that can scan, cache, save, and rewrite ISO14443A tags.

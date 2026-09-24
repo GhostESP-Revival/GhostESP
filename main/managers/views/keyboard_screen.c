@@ -95,10 +95,6 @@ static inline lv_coord_t kb_radius(void) {
 
 static lv_obj_t *root = NULL;
 static lv_obj_t *input_label = NULL;
-/* Field height bounds resolved at create; the field grows between them as the
- * text wraps. Equal values mean the display has no spare room to grow into. */
-static int kb_field_base_h = 0;
-static int kb_field_max_h = 0;
 static char input_buffer[128] = {0};
 static int input_len = 0;
 static char pending_initial_text[128] = {0};
@@ -200,7 +196,6 @@ static const int num_rows = 5;
 typedef struct {
     int pad_h;
     int field_h;
-    int field_max_h;   /* upper bound for content-driven growth */
     int matrix_w;
     int matrix_h;
     int matrix_y;
@@ -256,15 +251,9 @@ static void kb_compute_metrics(kb_metrics_t *m, int sw, int sh, int status_bar_h
     /* Bottom-anchored, like the iOS keyboard. */
     m->matrix_y = bottom - need;
 
-    /* The field starts at one line and grows with the text into whatever space
-     * is left above the keys, so spare height on a large display goes to the
-     * text area instead of sitting empty between the two. */
+    /* The input bar is a single line that scrolls horizontally when the text
+     * overflows (standard bar behaviour), so the field height is fixed. */
     m->field_h = field_min;
-    int field_room = m->matrix_y - GUI_GRID - top;
-    if (field_room < field_min) field_room = field_min;
-    int field_cap = avail_total * 3 / 5;
-    if (field_cap > field_room) field_cap = field_room;
-    m->field_max_h = field_cap;
     m->font = gui_font_for_height((lv_coord_t)key_h);
 }
 
@@ -789,18 +778,6 @@ static void update_input_label() {
     } else {
         lv_label_set_text(input_label, input_buffer);
     }
-    /* Where there is spare room, size the field to the wrapped text so it grows
-     * as more is typed and shrinks again on backspace, capped at the gap above
-     * the keys. Measured by LVGL rather than predicted, so wrapping and padding
-     * are accounted for exactly. */
-    if (kb_field_max_h > kb_field_base_h) {
-        lv_obj_set_height(input_label, LV_SIZE_CONTENT);
-        lv_obj_update_layout(input_label);
-        lv_coord_t h = lv_obj_get_height(input_label);
-        if (h < kb_field_base_h) h = kb_field_base_h;
-        if (h > kb_field_max_h) h = kb_field_max_h;
-        lv_obj_set_height(input_label, h);
-    }
 }
 
 static void update_key_labels() {
@@ -1197,14 +1174,10 @@ static void keyboard_create() {
     lv_obj_set_style_border_color(input_label, text, 0);
     lv_obj_set_style_border_opa(input_label, LV_OPA_30, 0);
     lv_obj_set_pos(input_label, m.pad_h, status_bar_height + GUI_SAFEAREA_VER);
-    /* When the field can grow, wrap so more text stays visible as it expands;
-     * otherwise keep the single scrolling line. */
-    lv_label_set_long_mode(input_label,
-                           m.field_max_h > m.field_h ? LV_LABEL_LONG_WRAP
-                                                     : LV_LABEL_LONG_SCROLL_CIRCULAR);
+    /* Single line that scrolls horizontally (marquee) when the text overflows,
+     * like every other text bar. */
+    lv_label_set_long_mode(input_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_obj_set_style_text_align(input_label, LV_TEXT_ALIGN_LEFT, 0);
-    kb_field_base_h = m.field_h;
-    kb_field_max_h = m.field_max_h;
     update_input_label();
 
     // ensure styles are initialized so we can temporarily zero radius
@@ -1321,8 +1294,6 @@ static void keyboard_destroy() {
         shift_btn_id = -1;
         pressed_btn_id = -1;
         input_label = NULL;
-        kb_field_base_h = 0;
-        kb_field_max_h = 0;
         submit_callback = NULL;
         immediate_callback = NULL;
         input_len = 0;

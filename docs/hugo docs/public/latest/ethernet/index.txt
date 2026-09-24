@@ -1,0 +1,24 @@
+Title: Ethernet
+Description: Overview of GhostESP&#39;s Ethernet capabilities
+URL: /latest/ethernet/
+Version: latest
+Section: GhostESP: Revival
+Search index: /search-index.json
+
+# Ethernet
+
+> Overview of GhostESP&#39;s Ethernet capabilities
+
+## On this page
+
+- [Quick links](#quick-links)
+
+---
+
+GhostESP provides Ethernet connectivity with network scanning, device fingerprinting, and service discovery tools. Here you can find help on how to use these features.
+## Quick links
+- [Connection Management](/latest/ethernet/connection/) — bring the interface up, configure IP and MAC
+- [Scanning](/latest/ethernet/scanning/) — ping sweeps, port scans, and traceroute
+- [Fingerprinting](/latest/ethernet/fingerprinting/) — identify devices on the network
+- [HTTP](/latest/ethernet/http/) — web requests and service checks
+- [ARP Poisoning](/latest/ethernet/arp-poisoning/) — man-in-the-middle testing

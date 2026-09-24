@@ -1,0 +1,24 @@
+{{- /* Converts a page's rendered HTML into clean, readable plain text.
+     Preserves markdown heading markers, lists, tables, and link targets.
+     Context: a Page. Returns a string. */ -}}
+{{- $page := . -}}
+{{- $html := $page.Content -}}
+{{- $html = replaceRE `(?s)<a class="heading-anchor"[^>]*>.*?</a>` "" $html -}}
+{{- $html = replaceRE `(?s)<a\s+[^>]*href="([^"]*)"[^>]*>(.*?)</a>` "[${2}](${1})" $html -}}
+{{- $html = replaceRE `(?s)<h1[^>]*>\s*(.*?)\s*</h1>` "\n# ${1}\n" $html -}}
+{{- $html = replaceRE `(?s)<h2[^>]*>\s*(.*?)\s*</h2>` "\n## ${1}\n" $html -}}
+{{- $html = replaceRE `(?s)<h3[^>]*>\s*(.*?)\s*</h3>` "\n### ${1}\n" $html -}}
+{{- $html = replaceRE `(?s)<h4[^>]*>\s*(.*?)\s*</h4>` "\n#### ${1}\n" $html -}}
+{{- $html = replaceRE `(?s)<h5[^>]*>\s*(.*?)\s*</h5>` "\n##### ${1}\n" $html -}}
+{{- $html = replaceRE `(?s)<h6[^>]*>\s*(.*?)\s*</h6>` "\n###### ${1}\n" $html -}}
+{{- $html = replaceRE `(?s)<li[^>]*>(.*?)</li>` "\n- ${1}" $html -}}
+{{- $html = replaceRE `(?s)<t[dh][^>]*>(.*?)</t[dh]>` "${1} | " $html -}}
+{{- $html = replaceRE `(?s)<br\s*/?>` "\n" $html -}}
+{{- $html = replaceRE `(?s)</(p|div|section|tr|blockquote)>` "\n\n" $html -}}
+{{- $html = replaceRE `(?s)<[^>]+>` "" $html -}}
+{{- $body := $html | htmlUnescape -}}
+{{- $body = replaceRE `(?m)[ \t]+` " " $body -}}
+{{- $body = replaceRE `[ \t]+\n` "\n" $body -}}
+{{- $body = replaceRE `(?m)^\s+` "" $body -}}
+{{- $body = replaceRE `\n{3,}` "\n\n" $body -}}
+{{- return (strings.TrimSpace $body) -}}

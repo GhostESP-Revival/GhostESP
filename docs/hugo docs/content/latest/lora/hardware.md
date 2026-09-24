@@ -12,7 +12,7 @@ Ship with ESP32-S3 + SX1262 + SX1262 TCXO + OLED on the same PCB. Board configs 
 The onboard radio uses SCK GPIO9, MISO GPIO11, MOSI GPIO10, CS GPIO8, DIO1 GPIO14, BUSY GPIO13, and RESET GPIO12 on both V3 and V3.2.
 
 - **Vext / VEXT power:** GPIO drives the external 3.3 V rail for SX1262 and OLED. GhostESP asserts Vext at `lora start` and de-asserts it at `lora stop`.
-- **Heltec V3.2 notes:** same pins as V3 but with updated TCXO and corrected antenna switch. Use the `Heltec V3.2` board config; V3 config also works but may log TCXO warm-up warnings. Battery voltage divider is on a different ADC channel — fuel gauge scaling differs.
+- **Heltec V3.2 notes:** same pins as V3 but with updated TCXO and corrected antenna switch. Use the `Heltec V3.2` board config; V3 config also works but may log TCXO warm-up warnings. Battery voltage divider is on a different ADC channel, so fuel gauge scaling differs.
 
 ## SPI and optional SD on S3
 

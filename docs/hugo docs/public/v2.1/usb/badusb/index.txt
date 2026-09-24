@@ -1,0 +1,90 @@
+Title: BadUSB
+Description: Run DuckyScript over USB HID
+URL: /v2.1/usb/badusb/
+Version: v2.1
+Section: USB
+Search index: /search-index.json
+
+# BadUSB
+
+> Run DuckyScript over USB HID
+
+## On this page
+
+- [Supported Devices](#supported-devices)
+- [Supported DuckyScript Commands](#supported-duckyscript-commands)
+- [Script Files](#script-files)
+- [CLI](#cli)
+- [On-Display (Standalone)](#on-display-standalone)
+- [Remote](#remote)
+
+---
+
+BadUSB runs scripts from the SD card as a USB HID keyboard. Scripts live in /mnt/ghostesp/badusb/.
+For other USB features, see [Mouse Jiggler](/latest/usb/mouse-jiggler/) and [USB Keyboard Mode](/latest/usb/usb-keyboard-mode/).
+## Supported Devices
+Note: Configs with VSENSE support will wait for a USB connection before starting the script.
+With VSENSE support:
+- The Wired Hatter’s Banshee
+Without VSENSE support:
+- Cardputer
+- Cardputer ADV
+- LilyGo T-Deck/T-Deck Plus
+- somethingsomething2 (S3 worker paired with C5 display)
+## Supported DuckyScript Commands
+Supported DuckyScript commands:
+- REM
+- DEFAULT_DELAY / DEFAULTDELAY
+- DELAY
+- STRING
+- REPEAT
+- modifier combos like CTRL, SHIFT, ALT, GUI / WINDOWS with a key
+- named keys like ENTER, TAB, ESC, arrows, and F1-F12
+## Script Files
+- Place scripts in /mnt/ghostesp/badusb/
+- File extension: .txt (only .txt files are listed)
+- Remote streaming size limit: 64 KB per script
+- SD card must be inserted and mounted to list or run scripts
+To add your own files, create the badusb folder on the SD card and copy your .txt scripts into it.
+## CLI
+Script commands:
+badusb list
+badusb run &lt;filename&gt;
+badusb stop
+badusb exec &lt;size&gt;
+Settings (applies to the next run):
+badusb set_vid &lt;hex&gt;
+badusb set_pid &lt;hex&gt;
+badusb set_mfr &lt;text&gt;
+badusb set_prod &lt;text&gt;
+badusb set_rand &lt;0|1&gt;
+badusb set_layout &lt;n&gt;
+Mouse, keyboard, and trackpad commands:
+badusb jiggle_start
+badusb jiggle_stop
+badusb keyboard_start
+badusb keyboard_stop
+badusb type &lt;text&gt;
+badusb type_char &lt;ascii&gt;
+badusb keysend &lt;modifier&gt; &lt;keycode&gt;
+badusb trackpad_start
+badusb trackpad_stop
+badusb trackpad_move &lt;dx&gt; &lt;dy&gt;
+badusb trackpad_button &lt;mask&gt;
+badusb trackpad_wheel &lt;delta&gt;
+See [Mouse Jiggler](/latest/usb/mouse-jiggler/) and [USB Keyboard Mode](/latest/usb/usb-keyboard-mode/) for details.
+Keyboard layout values:
+- 0 = US
+- 1 = DE
+- 2 = FR
+- 3 = UK
+- 4 = ES
+## On-Display (Standalone)
+From the BadUSB view:
+- Open Settings
+- Edit VID, PID, Manufacturer, Product
+- Toggle Randomize for per-run USB details
+- Select Layout to cycle the keyboard layout
+These values are saved on the local device and used on the next run.
+## Remote
+When BadUSB is used over Dual Comm, the controller sends the current settings to the peer right before streaming the script. The peer uses those settings for that run. These remote settings apply only for that run and do not persist to NVS on the peer. For setup details, see [GhostLink](/latest/getting-started/dual-communication/).

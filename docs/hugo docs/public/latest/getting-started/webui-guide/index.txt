@@ -1,0 +1,151 @@
+Title: WebUI
+Description: Access and control GhostESP through the web interface.
+URL: /latest/getting-started/webui-guide/
+Version: latest
+Section: Getting Started
+Search index: /search-index.json
+
+# WebUI
+
+> Access and control GhostESP through the web interface.
+
+## On this page
+
+- [Connecting to the WebUI](#connecting-to-the-webui)
+- [Prerequisites](#prerequisites)
+- [Steps](#steps)
+- [Tabs and Features](#tabs-and-features)
+- [Settings](#settings)
+- [SD Card](#sd-card)
+- [Terminal](#terminal)
+- [Help](#help)
+- [GhostLink](#ghostlink)
+- [Important Limitations](#important-limitations)
+- [Wi-Fi and BLE Commands Require GhostLink](#wi-fi-and-ble-commands-require-ghostlink)
+- [Commands that work directly in WebUI:](#commands-that-work-directly-in-webui)
+- [Tips and Tricks](#tips-and-tricks)
+- [Faster File Transfers](#faster-file-transfers)
+- [Toggle Authentication When Needed](#toggle-authentication-when-needed)
+- [Troubleshooting](#troubleshooting)
+- [Can&amp;rsquo;t connect to GhostNet](#cant-connect-to-ghostnet)
+- [Can&amp;rsquo;t reach the WebUI](#cant-reach-the-webui)
+- [Login fails](#login-fails)
+- [Wi-Fi commands don&amp;rsquo;t work](#wi-fi-commands-dont-work)
+- [File manager is slow](#file-manager-is-slow)
+- [Next Steps](#next-steps)
+
+---
+
+The WebUI allows you to configure GhostESP and manage files from your browser.
+Note: Wi-Fi/BLE commands require GhostLink because the radio cannot scan and host the AP simultaneously.
+## Connecting to the WebUI
+### Prerequisites
+- GhostESP device powered on and booted
+- A computer, phone, or tablet with a web browser
+- Wi-Fi capability
+### Steps
+-
+Find the GhostNet network
+On your device, scan for Wi-Fi networks and look for GhostNet.
+- Connect to it using the password GhostNet.
+-
+Open the web interface
+Open a web browser and navigate to one of:
+ghostesp.local (requires mDNS support; works on most networks)
+- 192.168.4.1 (direct IP; always works)
+-
+Authentication (optional)
+WebUI authentication is disabled by default for faster access.
+- To enable it, run webauth on in the serial CLI or WebUI terminal.
+- When enabled, the default credentials are GhostNet / GhostNet, protected by HTTP Digest (RFC2617) with signed nonces.
+## Tabs and Features
+The WebUI has five main tabs:
+### Settings
+Configure device behavior through multiple pages:
+- Miscellaneous: General device settings
+- WiFi: Wi-Fi configuration options
+- Evil Portal: Portal settings and credential management
+- Power Printer: Power printer configuration
+- RGB: LED/RGB lighting settings
+- Watch / RTC: Real-time clock and watch settings
+- SD Card Config: SD card configuration
+### SD Card
+Browse and manage files on the SD card:
+- Navigate /mnt/ghostesp/ directory structure
+- Download PCAP captures, portal credentials, and other files
+- Delete files to free space
+- Upload custom portal HTML files
+### Terminal
+Execute commands directly from the browser:
+- Type any GhostESP command (same as serial CLI)
+- View command output in real time
+- Useful for quick diagnostics and file transfers
+Limitation: Wi-Fi and BLE commands (e.g., scanap, karma start, blescan) cannot run here because the device’s radio is hosting the access point. Running them locally temporarily suspends the AP; to keep GhostNet online, use the GhostLink tab to send these commands to a paired device instead.
+### Help
+Access built-in documentation for features and commands:
+- Wi-Fi: Scanning and attack commands
+- BLE: Bluetooth Low Energy operations
+- Communication: GhostLink dual communication setup
+- SD Card: SD card operations
+- LED / RGB: LED and RGB lighting
+- GPS: GPS functionality
+- Misc: Miscellaneous features
+- Evil Portal: Portal configuration
+- Printer: Power printer features
+- YouTube Cast: YouTube casting
+- Capture: Packet capture modes
+- Beacon: Beacon spam options
+- Attack: Attack command reference
+### GhostLink
+Manage a GhostLink connection between a paired ESP32 device:
+- View connection status
+- Send commands to the paired device
+- Monitor GhostLink link health
+## Important Limitations
+### Wi-Fi and BLE Commands Require GhostLink
+To run Wi-Fi or BLE commands from the WebUI:
+- Set up [GhostLink](/latest/getting-started/dual-communication/) with two ESP32 devices wired together.
+- One device hosts the access point (runs WebUI).
+- The other device performs attacks/scans.
+- Send commands through the WebUI using commsend &lt;command&gt;.
+Example workflow:
+- Device A (with WebUI): Hosts GhostNet AP
+- Device B (attack device): Wired to Device A via UART
+- From WebUI on Device A: commsend scanap → scans on Device B
+- From WebUI on Device A: commsend karma start → runs Karma on Device B
+### Commands that work directly in WebUI:
+- NFC commands (scanning, writing, saving)
+- Infrared commands (learning, transmitting)
+- File management
+- Device configuration
+- Help and diagnostics
+## Tips and Tricks
+### Faster File Transfers
+- Use a card reader for faster file transfers.
+- The WebUI file manager is convenient but slower over Wi-Fi.
+### Toggle Authentication When Needed
+- webauth on — enable HTTP Digest authentication for the WebUI.
+- webauth off — return to the default open-access mode.
+## Troubleshooting
+### Can’t connect to GhostNet
+- GhostNet not visible: Reboot the device. It should broadcast the AP within 10 seconds of boot.
+- Connection drops: Move closer to the device or check for interference.
+- Wrong password: Default is GhostNet (case-sensitive).
+### Can’t reach the WebUI
+- Page won’t load: Try 192.168.4.1 instead of ghostesp.local.
+- “Connection refused”: The device may still be booting. Wait 10 seconds and refresh.
+- Timeout: Check that you’re connected to the GhostNet AP, not a different network.
+### Login fails
+- Authentication prompts unexpectedly: Run webauth off to confirm the feature is disabled.
+- Credentials rejected: If you enabled auth, defaults are GhostNet / GhostNet (case-sensitive).
+- Forgot credentials: Reboot the device to reset to defaults.
+### Wi-Fi commands don’t work
+- “Command not available”: You need GhostLink. See [GhostLink](/latest/getting-started/dual-communication/) for setup.
+- Command times out: Verify the second device is wired correctly and powered on.
+### File manager is slow
+- Downloads are slow: Use a USB card reader instead.
+- Uploads fail: Ensure the SD card has free space and is properly mounted.
+## Next Steps
+- Set up [GhostLink](/latest/getting-started/dual-communication/) to run Wi-Fi and BLE attacks from the WebUI.
+- Explore the [Command Line Reference](/latest/getting-started/command-line-reference/) for available commands.
+- Review [Wi-Fi Basics](/latest/wifi/basics/) to learn about attacks and scanning.

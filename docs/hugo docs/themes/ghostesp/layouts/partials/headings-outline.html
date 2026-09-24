@@ -1,0 +1,8 @@
+{{- /* Prints a flat markdown outline (one line per heading) in document
+     order, skipping empty nodes. Context: a .Fragments.Headings slice. */ -}}
+{{- range . -}}
+{{- if .Title }}
+- [{{ .Title }}](#{{ .ID }})
+{{- end -}}
+{{- with .Headings -}}{{ partial "headings-outline.html" . }}{{- end -}}
+{{- end -}}

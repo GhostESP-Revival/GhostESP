@@ -1,0 +1,14 @@
+Title: Development
+Description: Tools and workflows for customizing GhostESP builds
+URL: /v1.9.9/development/
+Version: v1.9.9
+Section: GhostESP: Revival
+Search index: /search-index.json
+
+# Development
+
+> Tools and workflows for customizing GhostESP builds
+
+---
+
+Learn how to build GhostESP from source, adjust configurations, and contribute changes.

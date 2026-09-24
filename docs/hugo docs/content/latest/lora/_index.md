@@ -1,55 +1,60 @@
 ---
-title: "LoRa Meshtastic"
-description: "LoRa Meshtastic chat on GhostESP with BLE app link and stock radio interop"
-keywords: ["LoRa", "Meshtastic", "SX1262", "Heltec V3", "LongFast", "mesh"]
+title: "LoRa (Meshtastic & MeshCore)"
+description: "Turn GhostESP into a LoRa mesh node and talk to Meshtastic or MeshCore"
+keywords: ["LoRa", "Meshtastic", "MeshCore", "SX1262", "Heltec V3", "mesh"]
 weight: 130
 aliases:
   - "/lora/"
 ---
 
-GhostESP implements a Meshtastic-compatible LoRa mesh on SX1262 radios. Chat with stock Meshtastic nodes, bridge the mesh to the official Meshtastic phone app over BLE, and use GhostESP as a field node or sniffer.
+GhostESP turns an SX1262 radio into a mesh node. Only one of two protocols runs at a time:
 
-Stock radio interop is first-class: same sync word, channels, and wire encryption as Meshtastic firmware, so GhostESP joins existing meshes without flashing stock firmware.
+| Protocol | Talks to | Commands |
+| --- | --- | --- |
+| **Meshtastic** (default) | stock Meshtastic nodes and the official phone app | `lora` |
+| **MeshCore** | MeshCore nodes and its companion app | `meshcore` |
 
-## Hardware
+Interop is the point: GhostESP uses the same sync word, channels and wire encryption as Meshtastic firmware, so it joins an existing mesh without anything being reflashed.
 
-- **Heltec V3 / V3.2** — SX1262 + ESP32-S3 with built-in OLED, pre-wired. Use `sdkconfig.heltecv3` (or the matching release build). Primary supported boards.
-- **Elecrow CrowPanel Advance 2.4** — SX1262 wireless module. Use `sdkconfig.crowpanel_advance24`; the display stays on SPI2 and the radio uses SPI3.
-- **Elecrow CrowPanel Advance 2.8** — SX1262 wireless module. Use `sdkconfig.crowpanel_advance28`; the display stays on SPI2 and the radio uses SPI3.
-- **Elecrow CrowPanel Advance 4.3** — SX1262 Meshtastic wireless module. Use `sdkconfig.crowpanel_advance43` and set the rear switch to `01 (WM)`; SD/TF is unavailable in wireless-module mode.
-- **Generic SX1262** — any ESP32 with an SX1262 via SPI through custom board wiring; configure pins in Kconfig. See [Hardware Support]({{< relref "../getting-started/supported-hardware.md" >}}) for build matrix.
+## Where to go next
 
-See [Hardware]({{< relref "hardware.md" >}}) for Vext power sequencing and SPI/SD conflicts.
+- **[First run]({{< relref "getting-started.md" >}})**: set a region, start the radio, send your first message
+- **[MeshCore mode]({{< relref "meshcore.md" >}})**: use MeshCore instead of Meshtastic
+- **[Command reference]({{< relref "commands.md" >}})**: every `lora`, `mesh` and `meshcore` command
+- **[Phone app]({{< relref "ble-app.md" >}})**: pair the official Meshtastic app
+- **[Hardware]({{< relref "hardware.md" >}})**: supported boards and wiring
 
-## Regions and channel
+## How you'll use it
 
-- **24 regions** — LongFast-legal presets such as `anz`, `us915`, `eu868`, `eu433`, `jp`, `kr`, and `in`. Each maps to the region's frequency slot and radio settings.
-- **Default-key channel** — LongFast primary channel with the well-known default PSK (`AQ==` base64, hash `0x08`). GhostESP derives the same `chash` so stock nodes decrypt without rekeying.
-- **Duty guard** — regional duty-cycle limiter throttles TX when airtime exceeds the legal window; `lora status` shows remaining budget.
+| Where | What you do |
+| --- | --- |
+| **On the device** | Read and write messages, start/stop the radio, change settings |
+| **Phone app** | The usual Meshtastic/MeshCore app experience over BLE |
+| **CLI or WebUI** | First-time setup, boot auto-start, diagnostics, scripting |
 
-## What you can do
+## On the device
 
-- Chat on the mesh from the CLI (`lora chat`) or the official Meshtastic app over BLE.
-- Send encrypted direct messages after the two nodes exchange NodeInfo public keys.
-- On Heltec boards, the OLED shows live link, node, traffic, relay, signal, and error status. New messages briefly replace any selected animation with the sender and a three-line preview; press **PRG** to dismiss it.
-- Track nodes, routing, and link health from NodeInfo and traceroute equivalents.
-- Bridge to the companion app over Wi-Fi (`companion wifi`) or BLE (`companion ble`) when BLE radio sharing matters.
+Open **LoRa** from the main menu. It opens on a status screen without starting the radio; the first row starts the selected protocol when the radio is off.
 
-## Chatting on a screen
+| Action | Touch | Encoder / buttons |
+| --- | --- | --- |
+| Select a row | Tap | Press |
+| Move | Drag | Turn |
+| Back | Back row | Esc or left |
 
-Open **LoRa → Messages** for public chat and direct conversations. Choose **New direct message** to pick a node. Select **Write** inside a conversation to open the keyboard.
+- Conversations are grouped per channel and per contact, so channels stay separate.
+- Outgoing messages show **Sending**, **Delivered**, **Sent** or **Failed**. Tap a failed one to reopen it in the composer and retry.
+- **Encoder boards:** double-press on the status screen toggles the radio.
+- **Heltec OLED:** press **PRG** to cycle pages. On the LoRa page a double-press toggles the radio, and with the radio off the page shows `PRESS 2X TO START`.
 
-- **Touch:** tap to open, drag to read, and select the Write or Back rows.
-- **Encoder:** turn to move through messages and Back/Write; press to select.
-- **Joystick:** up/down to move, centre to select, left to go back.
-- **Keyboard:** arrows or Tab to move, Enter to select, Esc to go back; `n` opens Write inside a conversation.
+## Keep it running
 
-DM status changes from Pending to Delivered or Failed when a routing result arrives. Sent means sent locally, not confirmed delivered. Recent messages use a compact 32-entry NVS-backed history: old entries expire as it fills, and normal reboot/reflash keeps them (an erase-flash/factory reset clears them). The built-in OLED uses its compact preview instead of this full chat screen.
+Auto-start is opt in. The protocol is remembered, so you set it once:
 
-## Quick links
+```text
+lora autostart meshtastic     # or: lora autostart meshcore
+```
 
-- [Getting Started]({{< relref "getting-started.md" >}}) — first-run checklist from build flag to verified chat
-- [Commands]({{< relref "commands.md" >}}) — full `lora` CLI reference
-- [BLE App Link]({{< relref "ble-app.md" >}}) — pair the official Meshtastic app over Ghost-XXXX
-- [Mesh Details]({{< relref "mesh.md" >}}) — wire format, sync word, flood, and NodeInfo
-- [Hardware]({{< relref "hardware.md" >}}) — Vext power, SPI, and custom board Kconfig
+The radio starts a few seconds after the interface, once boot has finished. Meshtastic needs a saved region before it can transmit; MeshCore does not.
+
+See [First run]({{< relref "getting-started.md" >}}) for the step-by-step version and [Command reference]({{< relref "commands.md" >}}) for the full syntax.

@@ -1,0 +1,56 @@
+Title: Usage Guide
+Description: Basic navigation and common workflows for the Flipper Zero companion app.
+URL: /v1.9.8/flipper-app/usage/
+Version: v1.9.8
+Section: Flipper Zero App
+Keywords: usage, navigation, workflow, guide
+Search index: /search-index.json
+
+# Usage Guide
+
+> Basic navigation and common workflows for the Flipper Zero companion app.
+
+## On this page
+
+- [Basic Navigation](#basic-navigation)
+- [Common Workflows](#common-workflows)
+- [Wi-Fi Handshake Capture](#wi-fi-handshake-capture)
+- [Beacon Spam Attack](#beacon-spam-attack)
+- [BLE Device Scanning](#ble-device-scanning)
+- [GPS Wardriving](#gps-wardriving)
+- [File Management](#file-management)
+
+---
+
+## Basic Navigation
+The app uses a menu-driven interface:
+- Up/Down: Navigate through menu items
+- OK: Select item or confirm action
+- Back: Return to previous menu or cancel
+## Common Workflows
+### Wi-Fi Handshake Capture
+- Navigate to WiFi → Scanning &amp; Probing → Scan APs
+- Wait for scan to complete
+- Select target network from list
+- Go to Packet Capture → EAPOL
+- Start capture and wait for handshake
+- Export PCAP file when complete
+### Beacon Spam Attack
+- Navigate to WiFi → Beacon Spam &amp; Attacks → Beacon Spam
+- Select spam mode (List, Random, Rickroll, or Custom)
+- If using List mode, manage your beacon list first
+- Start the spam attack
+- Stop when desired
+### BLE Device Scanning
+- Navigate to Bluetooth → Scanning &amp; Detection → Scan BLE
+- Wait for scan to complete
+- View discovered devices
+- Select device for additional actions (spoof, track, etc.)
+### GPS Wardriving
+- Ensure GPS module is connected and receiving signal
+- Navigate to GPS → Wardriving → WiFi Wardriving
+- Start wardriving session
+- Drive around to collect data
+- Stop and export CSV file with GPS coordinates
+## File Management
+Use qFlipper or remove the SD card to transfer files to your computer. See [Configuration](/v1.9.8/flipper-app/configuration/#file-storage) for file storage locations.

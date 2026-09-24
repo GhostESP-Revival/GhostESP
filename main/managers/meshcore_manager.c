@@ -49,9 +49,28 @@ static void msg_index_to_slot(uint16_t index, uint16_t *slot) {
     *slot = (uint16_t)((start + index) % MC_MSG_RING);
 }
 
-uint16_t mc_manager_msg_count(void) { return s_msg_count; }
+static void expire_pending_messages(void) {
+    if (!s_msgs) return;
+    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+    for (uint16_t i = 0; i < s_msg_count; ++i) {
+        uint16_t slot;
+        msg_index_to_slot(i, &slot);
+        mc_msg_t *m = &s_msgs[slot];
+        if (m->outgoing && m->direct && m->delivery == 1 &&
+            m->delivery_deadline_ms &&
+            (int32_t)(now - m->delivery_deadline_ms) >= 0) {
+            m->delivery = 3;
+        }
+    }
+}
+
+uint16_t mc_manager_msg_count(void) {
+    expire_pending_messages();
+    return s_msg_count;
+}
 
 bool mc_manager_msg_at(uint16_t index, mc_msg_t *out) {
+    expire_pending_messages();
     if (!out || !s_msgs || index >= s_msg_count) return false;
     uint16_t slot;
     msg_index_to_slot(index, &slot);
@@ -60,6 +79,7 @@ bool mc_manager_msg_at(uint16_t index, mc_msg_t *out) {
 }
 
 bool mc_manager_latest_message(mc_msg_t *out, uint32_t *out_seq) {
+    expire_pending_messages();
     if (!out || !s_msgs || s_msg_count == 0) {
         if (out_seq) *out_seq = 0;
         return false;
@@ -72,6 +92,7 @@ bool mc_manager_latest_message(mc_msg_t *out, uint32_t *out_seq) {
 }
 
 uint16_t mc_manager_msg_since(uint32_t *io_seq, mc_msg_t *out, uint16_t max) {
+    expire_pending_messages();
     if (!io_seq || !out || !s_msgs || max == 0) return 0;
     if (*io_seq == 0) *io_seq = s_msg_seq - s_msg_count;
     uint16_t wrote = 0;
@@ -108,6 +129,7 @@ static void on_channel_message(uint8_t channel_idx, uint32_t timestamp,
         snprintf(m.text, sizeof(m.text), "%.159s", text);
     }
     m.channel = channel_idx;
+    memset(m.peer_key, 0, sizeof(m.peer_key));
     m.timestamp_ms = (uint32_t)(esp_timer_get_time() / 1000);
     m.direct = false;
     push_msg(&m);
@@ -125,6 +147,7 @@ static void on_contact_message(const mc_contact_t *from, uint32_t timestamp,
     snprintf(m.who, sizeof(m.who), "%.23s", from ? from->name : "?");
     snprintf(m.text, sizeof(m.text), "%s", text);
     m.channel = 0;
+    if (from) memcpy(m.peer_key, from->pub_key, sizeof(m.peer_key));
     m.node_hash = from ? from->pub_key[0] : 0;
     m.timestamp_ms = (uint32_t)(esp_timer_get_time() / 1000);
     m.direct = true;
@@ -142,6 +165,7 @@ static void on_signed_message(const mc_contact_t *from, uint32_t timestamp,
     snprintf(m.who, sizeof(m.who), "%.23s", from ? from->name : "?");
     snprintf(m.text, sizeof(m.text), "%s", text);
     m.channel = 0;
+    if (from) memcpy(m.peer_key, from->pub_key, sizeof(m.peer_key));
     m.node_hash = from ? from->pub_key[0] : 0;
     m.timestamp_ms = (uint32_t)(esp_timer_get_time() / 1000);
     m.direct = true;
@@ -168,6 +192,20 @@ static void on_advert(const mc_contact_t *contact, bool is_new) {
 
 static void on_ack(const mc_contact_t *from, uint32_t ack) {
     mc_companion_on_ack(from, ack);
+    if (s_msgs && from && ack) {
+        for (uint16_t i = 0; i < s_msg_count; ++i) {
+            uint16_t slot;
+            msg_index_to_slot(i, &slot);
+            mc_msg_t *m = &s_msgs[slot];
+            if (m->outgoing && m->direct && m->delivery == 1 &&
+                m->packet_id == ack &&
+                memcmp(m->peer_key, from->pub_key, sizeof(m->peer_key)) == 0) {
+                m->delivery = 2;
+                m->delivery_deadline_ms = 0;
+                break;
+            }
+        }
+    }
     glog("[MC] ack from %s\n", from ? from->name : "?");
 }
 
@@ -291,6 +329,13 @@ static void free_state(void) {
     mc_mesh_deinit();
 }
 
+static void restore_meshtastic_after_start_failure(bool restore) {
+    if (restore && !lora_manager_start()) {
+        ESP_LOGW(TAG, "could not restore Meshtastic after MeshCore start failure: %s",
+                 lora_manager_last_error());
+    }
+}
+
 // Build the SX126x profile from the current prefs, clamped to the board's TX
 // limit. Shared by start and the in-place re-tune.
 static bool build_profile(lora_hw_t *hw, lora_radio_profile_t *prof) {
@@ -322,13 +367,15 @@ bool mc_manager_start(void) {
     s_last_error = "none";
 
     // One radio: make sure Meshtastic has released it.
-    if (lora_manager_is_running()) {
+    bool restore_lora = lora_manager_is_running();
+    if (restore_lora) {
         lora_manager_stop();
     }
 
     if (!alloc_state()) {
         ESP_LOGE(TAG, "state allocation failed: %s (free internal heap %u)",
                  s_last_error, (unsigned)xPortGetFreeHeapSize());
+        restore_meshtastic_after_start_failure(restore_lora);
         return false;
     }
     install_callbacks();
@@ -338,11 +385,13 @@ bool mc_manager_start(void) {
     lora_radio_profile_t prof;
     if (!build_profile(&hw, &prof)) {
         free_state();
+        restore_meshtastic_after_start_failure(restore_lora);
         return false;
     }
     if (lora_radio_init_profile(&hw, &prof) != 0) {
         s_last_error = lora_radio_step();
         free_state();
+        restore_meshtastic_after_start_failure(restore_lora);
         return false;
     }
     s_radio_present = true;
@@ -353,6 +402,7 @@ bool mc_manager_start(void) {
         lora_radio_deinit();
         s_radio_present = false;
         free_state();
+        restore_meshtastic_after_start_failure(restore_lora);
         return false;
     }
     s_running = true;
@@ -380,9 +430,13 @@ bool mc_manager_reconfigure_radio(void) {
 
     lora_hw_t hw;
     lora_radio_profile_t prof;
-    if (!build_profile(&hw, &prof)) return false;
+    if (!build_profile(&hw, &prof)) {
+        s_running = false;
+        return false;
+    }
     if (lora_radio_init_profile(&hw, &prof) != 0) {
         s_last_error = lora_radio_step();
+        s_running = false;
         return false;
     }
     s_radio_present = true;
@@ -391,6 +445,7 @@ bool mc_manager_reconfigure_radio(void) {
         ESP_LOGE(TAG, "radio re-tune RX start failed at stage '%s'", lora_radio_step());
         lora_radio_deinit();
         s_radio_present = false;
+        s_running = false;
         return false;
     }
     ESP_LOGI(TAG, "radio re-tuned %.3fMHz BW%.1f SF%u CR4/%u",
@@ -400,7 +455,7 @@ bool mc_manager_reconfigure_radio(void) {
 }
 
 void mc_manager_stop(void) {
-    if (!s_running) return;
+    if (!s_running && !s_msgs && !s_radio_present) return;
     mc_ble_stop();
     lora_radio_stop();
     lora_radio_deinit();
@@ -442,6 +497,7 @@ bool mc_manager_send_text(const char *text) {
 
 bool mc_manager_send_channel_text(uint8_t channel, const char *text) {
     if (!s_running) { s_last_error = "not running"; return false; }
+    if (!text || !text[0]) { s_last_error = "message is empty"; return false; }
     bool ok = mc_mesh_send_group_text(channel, text, mc_mesh_now());
     if (!ok) {
         s_last_error = "channel not set";
@@ -451,7 +507,7 @@ bool mc_manager_send_channel_text(uint8_t channel, const char *text) {
     // own channel messages (Meshtastic's ring does this).
     mc_msg_t m;
     memset(&m, 0, sizeof(m));
-    snprintf(m.text, sizeof(m.text), "%s", text ? text : "");
+    snprintf(m.text, sizeof(m.text), "%s", text);
     m.channel = channel;
     m.timestamp_ms = (uint32_t)(esp_timer_get_time() / 1000);
     m.outgoing = true;
@@ -465,7 +521,7 @@ static bool parse_pubkey_prefix(const char *s, uint8_t *out, int *out_len) {
     if (!s) return false;
     if (s[0] == '!') s++;
     size_t n = strlen(s);
-    if (n < 8 || n > 64) return false;
+    if (n < 8 || n > 64 || (n & 1U) != 0) return false;
     int bytes = (int)(n / 2);
     for (int i = 0; i < bytes; ++i) {
         int hi, lo;
@@ -482,19 +538,33 @@ static bool parse_pubkey_prefix(const char *s, uint8_t *out, int *out_len) {
 }
 
 static bool send_dm_to_contact(const mc_contact_t *c, const char *text) {
+    if (!c || !text || !text[0]) {
+        s_last_error = "message is empty";
+        return false;
+    }
     uint32_t ack = 0, timeout = 0;
     int rc = mc_mesh_send_direct_text(c, mc_mesh_now(), 0, MC_TXT_TYPE_PLAIN, text, &ack, &timeout);
-    if (rc == MC_MSG_SEND_FAILED) { s_last_error = "send failed"; return false; }
     mc_msg_t m;
     memset(&m, 0, sizeof(m));
     snprintf(m.who, sizeof(m.who), "%.23s", c->name);
     snprintf(m.text, sizeof(m.text), "%s", text);
+    memcpy(m.peer_key, c->pub_key, sizeof(m.peer_key));
     m.node_hash = c->pub_key[0];
     m.timestamp_ms = (uint32_t)(esp_timer_get_time() / 1000);
+    m.packet_id = ack;
+    m.delivery_deadline_ms = ack
+                                ? m.timestamp_ms +
+                                      (timeout ? timeout : MC_PENDING_ACK_TTL_MS)
+                                : 0;
     m.direct = true;
     m.outgoing = true;
     m.read = true;
+    m.delivery = rc == MC_MSG_SEND_FAILED ? 3 : ack ? 1 : 0;
     push_msg(&m);
+    if (rc == MC_MSG_SEND_FAILED) {
+        s_last_error = "send failed";
+        return false;
+    }
     return true;
 }
 
@@ -522,6 +592,14 @@ bool mc_manager_send_dm_hash(uint8_t peer_hash, const char *text) {
     return send_dm_to_contact(c, text);
 }
 
+bool mc_manager_send_dm_key(const uint8_t peer_key[MC_PUB_KEY_SIZE], const char *text) {
+    if (!s_running) { s_last_error = "not running"; return false; }
+    if (!peer_key) { s_last_error = "contact key missing"; return false; }
+    const mc_contact_t *c = mc_mesh_find_contact_pubkey(peer_key, MC_PUB_KEY_SIZE);
+    if (!c) { s_last_error = "contact not found"; return false; }
+    return send_dm_to_contact(c, text);
+}
+
 void mc_manager_chat_read(uint32_t peer_hash) {
     if (!s_msgs) return;
     for (uint16_t i = 0; i < s_msg_count; ++i) {
@@ -530,6 +608,27 @@ void mc_manager_chat_read(uint32_t peer_hash) {
         mc_msg_t *m = &s_msgs[slot];
         bool in_conversation = peer_hash ? (m->direct && m->node_hash == peer_hash) : !m->direct;
         if (in_conversation) m->read = true;
+    }
+}
+
+void mc_manager_chat_read_key(const uint8_t peer_key[MC_PUB_KEY_SIZE]) {
+    if (!s_msgs || !peer_key) return;
+    for (uint16_t i = 0; i < s_msg_count; ++i) {
+        uint16_t slot;
+        msg_index_to_slot(i, &slot);
+        mc_msg_t *m = &s_msgs[slot];
+        if (m->direct && memcmp(m->peer_key, peer_key, MC_PUB_KEY_SIZE) == 0)
+            m->read = true;
+    }
+}
+
+void mc_manager_chat_read_channel(uint8_t channel) {
+    if (!s_msgs) return;
+    for (uint16_t i = 0; i < s_msg_count; ++i) {
+        uint16_t slot;
+        msg_index_to_slot(i, &slot);
+        mc_msg_t *m = &s_msgs[slot];
+        if (!m->direct && m->channel == channel) m->read = true;
     }
 }
 

@@ -1,0 +1,11 @@
+{{- /* Compact, site-wide search index intended for AI agents and tooling.
+     One record per docs page across every firmware version, no full text.
+     Each record links to a clean plain-text copy via "text_url". */ -}}
+{{- $pages := slice -}}
+{{- range .Site.RegularPages -}}
+  {{- $entry := partial "index-entry.html" (dict "page" . "withContent" false) -}}
+  {{- if $entry -}}
+    {{- $pages = $pages | append $entry -}}
+  {{- end -}}
+{{- end -}}
+{{- $pages | jsonify -}}

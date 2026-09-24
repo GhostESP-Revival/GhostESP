@@ -39,8 +39,9 @@ void handle_lora_cmd(int argc, char **argv) {
              "lora pkselftest      X25519/SHA-256/AES-CCM known-answer tests\n"
              "lora pktry <hex>     PKI decrypt-variant probe on a captured frame\n"
              "lora channels        Show 8 channel slots\n"
+             "lora autostart <meshtastic|meshcore|on|off>  Boot auto-start\n"
              "lora region <name>   Set region while stopped (e.g. anz)\n"
-             "lora set <preset|sf|bw|cr|tx|hop|offset|ovrfreq|chnum|txen|role|owner|companion> <value>\n"
+             "lora set <preset|sf|bw|cr|tx|hop|offset|ovrfreq|chnum|txen|role|owner|companion|autostart> <value>\n"
              "Advanced: diag, cad, reg, ble, app, setup\n"
              "Tip: `mesh` shows the active mesh and switches Meshtastic <-> MeshCore\n");
         return;
@@ -76,22 +77,84 @@ void handle_lora_cmd(int argc, char **argv) {
              lora_manager_last_error());
         return;
     }
-    if (strcmp(sub, "start") == 0) {
+    if (strcmp(sub, "autostart") == 0) {
+        const char *backend = "Meshtastic";
 #ifdef CONFIG_HAS_MESHCORE
-        // One radio: release it from MeshCore before Meshtastic claims it.
-        if (mc_manager_is_running()) {
-            mc_manager_stop();
-            glog("Stopped MeshCore (one radio: Meshtastic now owns it)\n");
+        if (mc_manager_default_backend_meshcore()) backend = "MeshCore";
+#endif
+        if (argc < 3) {
+            glog("Auto-start on boot: %s (%s)\n",
+                 lora_manager_auto_start_enabled() ? "on" : "off", backend);
+            glog("Set: lora autostart <meshtastic|meshcore|on|off>\n");
+            return;
+        }
+        const char *arg = argv[2];
+        bool on = strcmp(arg, "on") == 0 || strcmp(arg, "1") == 0 ||
+                  strcmp(arg, "true") == 0;
+        bool off = strcmp(arg, "off") == 0 || strcmp(arg, "0") == 0 ||
+                   strcmp(arg, "false") == 0;
+        bool want_mc = strcmp(arg, "meshcore") == 0 || strcmp(arg, "mc") == 0;
+        bool want_mt = strcmp(arg, "meshtastic") == 0 || strcmp(arg, "mt") == 0 ||
+                       strcmp(arg, "lora") == 0;
+        if (!on && !off && !want_mc && !want_mt) {
+            glog("Usage: lora autostart <meshtastic|meshcore|on|off>\n");
+            return;
+        }
+        if (off) {
+            glog(lora_manager_set_auto_start(false) ? "Auto-start OFF\n"
+                                                    : "auto-start save failed\n");
+            return;
+        }
+        if (on) {
+            glog(lora_manager_set_auto_start(true) ? "Auto-start ON (%s)\n"
+                                                   : "auto-start save failed\n",
+                 backend);
+            return;
+        }
+#ifndef CONFIG_HAS_MESHCORE
+        if (want_mc) {
+            glog("MeshCore not enabled on this board\n");
+            return;
         }
 #endif
+#ifdef CONFIG_HAS_MESHCORE
+        /* Naming a protocol selects which one boots, not just the flag. */
+        mc_manager_set_default_backend_meshcore(want_mc);
+#endif
+        if (want_mt && lora_manager_needs_setup()) {
+            glog("Note: no Meshtastic region saved yet, so the boot start will be\n"
+                 "      skipped. Set one with: lora set region <name>\n");
+        }
+        glog(lora_manager_set_auto_start(true) ? "Auto-start ON (%s)\n"
+                                               : "auto-start save failed\n",
+             want_mc ? "MeshCore" : "Meshtastic");
+        return;
+    }
+    if (strcmp(sub, "start") == 0) {
         if (lora_manager_needs_setup()) {
             char q[640];
             if (lora_manager_setup_text(q, sizeof(q))) glog("%s", q);
             return;
         }
+#ifdef CONFIG_HAS_MESHCORE
+        // One radio: release it from MeshCore before Meshtastic claims it.
+        bool restore_meshcore = mc_manager_is_running();
+        if (restore_meshcore) {
+            mc_manager_stop();
+            glog("Stopped MeshCore (one radio: Meshtastic now owns it)\n");
+        }
+#endif
         if (lora_manager_start()) {
+#ifdef CONFIG_HAS_MESHCORE
+            mc_manager_set_default_backend_meshcore(false);
+#endif
             glog("LoRa started\n");
         } else {
+#ifdef CONFIG_HAS_MESHCORE
+            if (restore_meshcore && !mc_manager_start())
+                glog("Meshtastic failed and MeshCore restore also failed: %s\n",
+                     mc_manager_last_error());
+#endif
             glog("LoRa start failed: %s\n", lora_manager_last_error());
         }
         return;
@@ -116,6 +179,11 @@ void handle_lora_cmd(int argc, char **argv) {
             bool ok = lora_manager_set_region((lora_region_t)code);
             glog(ok ? "LoRa region saved (takes effect on start)\n" : "set region failed: %s\n",
                  lora_manager_last_error());
+            return;
+        }
+        if (strcmp(argv[2], "autostart") == 0) {
+            char *a[] = {argv[0], "autostart", argv[3]};
+            handle_lora_cmd(3, a);
             return;
         }
         if (strcmp(argv[2], "preset") == 0) {
