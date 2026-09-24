@@ -458,6 +458,7 @@ static esp_err_t cc1101_reset(void);
 static esp_err_t cc1101_wait_for_state(uint8_t expected_state, uint32_t timeout_us, uint8_t *last_state);
 static esp_err_t cc1101_write_patable(const uint8_t *data, size_t len);
 static esp_err_t subghz_apply_preset(subghz_preset_t preset);
+static esp_err_t subghz_calibrate_after_frequency(uint32_t frequency_hz);
 static esp_err_t subghz_retune_frequency(uint32_t freq_hz);
 static int subghz_frequency_to_index(uint32_t frequency_hz);
 static bool subghz_is_tembed_c1101(void);
@@ -766,12 +767,24 @@ static esp_err_t subghz_apply_preset(subghz_preset_t preset) {
         err = cc1101_write_reg(tbl[i].reg, tbl[i].val);
     }
     if (err == ESP_OK) {
-        err = subghz_apply_tembed_freq_calibration(s_current_freq_hz);
-    }
-    if (err == ESP_OK) {
         err = cc1101_write_patable(subghz_patable_for_freq(s_current_freq_hz), 8);
     }
     return err;
+}
+
+/* Calibration must run after FREQ2/FREQ1/FREQ0 have been programmed. The
+ * T-Embed-specific routine also writes FSCTRL0/TEST0; generic boards only
+ * need the synthesizer calibration strobe here. */
+static esp_err_t subghz_calibrate_after_frequency(uint32_t frequency_hz) {
+    if (subghz_is_tembed_c1101()) {
+        return subghz_apply_tembed_freq_calibration(frequency_hz);
+    }
+
+    esp_err_t err = cc1101_strobe(CC1101_STROBE_SCAL);
+    if (err != ESP_OK) {
+        return err;
+    }
+    return cc1101_wait_for_state(0x01, 20000U, NULL);
 }
 
 static bool subghz_is_tembed_c1101(void) {
@@ -2430,6 +2443,11 @@ static esp_err_t cc1101_write_patable(const uint8_t *data, size_t len) {
     return err;
 }
 
+static esp_err_t subghz_hw_start_fail(esp_err_t err) {
+    subghz_hw_stop();
+    return err;
+}
+
 static esp_err_t subghz_hw_start(void) {
     /* Keep the system out of light sleep for the entire SubGHz session. With
      * CONFIG_PM_ENABLE + CONFIG_PM_SLP_DISABLE_GPIO + tickless idle, every
@@ -2462,7 +2480,7 @@ static esp_err_t subghz_hw_start(void) {
     esp_err_t err = gpio_config(&gdo_cfg);
     if (err != ESP_OK) {
         subghz_set_last_error("gdo config failed");
-        return err;
+        return subghz_hw_start_fail(err);
     }
 
     /* Preserve the active GDO input routing if the rest of the system sleeps. */
@@ -2481,7 +2499,7 @@ static esp_err_t subghz_hw_start(void) {
         err = esp_timer_create(&timer_args, &s_raw_timeout_timer);
         if (err != ESP_OK) {
             subghz_set_last_error("raw timer create failed");
-            return err;
+            return subghz_hw_start_fail(err);
         }
     }
 
@@ -2495,7 +2513,7 @@ static esp_err_t subghz_hw_start(void) {
         esp_err_t isr_ret = gpio_install_isr_service(ESP_INTR_FLAG_LEVEL3);
         if (isr_ret != ESP_OK && isr_ret != ESP_ERR_INVALID_STATE) {
             subghz_set_last_error("gpio isr service failed");
-            return isr_ret;
+            return subghz_hw_start_fail(isr_ret);
         }
         if (isr_ret == ESP_ERR_INVALID_STATE) {
             ESP_LOGW(TAG, "GPIO ISR service was already installed; using its existing interrupt flags");
@@ -2510,7 +2528,7 @@ static esp_err_t subghz_hw_start(void) {
                                (void *)(intptr_t)CONFIG_SUBGHZ_GDO0_PIN);
     if (err != ESP_OK) {
         subghz_set_last_error("gdo0 isr add failed");
-        return err;
+        return subghz_hw_start_fail(err);
     }
 #if CONFIG_SUBGHZ_GDO2_PIN >= 0
     if (subghz_should_watch_gdo2_capture()) {
@@ -2520,7 +2538,7 @@ static esp_err_t subghz_hw_start(void) {
                                    (void *)(intptr_t)CONFIG_SUBGHZ_GDO2_PIN);
         if (err != ESP_OK) {
             subghz_set_last_error("gdo2 isr add failed");
-            return err;
+            return subghz_hw_start_fail(err);
         }
     }
 #endif
@@ -2553,7 +2571,7 @@ static esp_err_t subghz_hw_start(void) {
         if (err != ESP_OK) {
             subghz_set_last_error("shared display spi add device failed");
             display_manager_resume_lvgl_task();
-            return err;
+            return subghz_hw_start_fail(err);
         }
         display_manager_resume_lvgl_task();
         ESP_LOGI(TAG, "Using shared display SPI bus (host=%d)", (int)s_spi_host);
@@ -2568,7 +2586,7 @@ static esp_err_t subghz_hw_start(void) {
         }
         if (err != ESP_OK) {
             subghz_set_last_error("shared sdcard spi bus init failed");
-            return err;
+            return subghz_hw_start_fail(err);
         }
         ESP_LOGI(TAG, "Using shared SD card SPI bus (host=%d)", (int)s_spi_host);
     } else if (s_bus_mode == SUBGHZ_BUS_SHARED_NRF24) {
@@ -2582,7 +2600,7 @@ static esp_err_t subghz_hw_start(void) {
         }
         if (err != ESP_OK) {
             subghz_set_last_error("shared nrf24 spi bus init failed");
-            return err;
+            return subghz_hw_start_fail(err);
         }
         ESP_LOGI(TAG, "Using shared NRF24 SPI bus (host=%d)", (int)s_spi_host);
     } else {
@@ -2595,7 +2613,7 @@ static esp_err_t subghz_hw_start(void) {
         }
         if (err != ESP_OK) {
             subghz_set_last_error("spi bus init failed");
-            return err;
+            return subghz_hw_start_fail(err);
         }
         ESP_LOGI(TAG, "Using standalone SPI bus (host=%d)", (int)s_spi_host);
     }
@@ -2609,7 +2627,7 @@ static esp_err_t subghz_hw_start(void) {
                 s_spi_bus_initialized_by_us = false;
             }
             s_spi_dev = NULL;
-            return err;
+            return subghz_hw_start_fail(err);
         }
     }
 
@@ -2617,8 +2635,7 @@ static esp_err_t subghz_hw_start(void) {
     err = cc1101_reset();
     if (err != ESP_OK) {
         subghz_set_last_error("radio reset failed");
-        subghz_hw_stop();
-        return err;
+        return subghz_hw_start_fail(err);
     }
 
     ets_delay_us(1000);
@@ -2636,13 +2653,11 @@ static esp_err_t subghz_hw_start(void) {
     if (cc1101_read_status(CC1101_STATUS_VERSION, &version) != ESP_OK ||
         cc1101_read_status(CC1101_STATUS_PARTNUM, &partnum) != ESP_OK) {
         subghz_set_last_error("radio version read failed");
-        subghz_hw_stop();
-        return ESP_FAIL;
+        return subghz_hw_start_fail(ESP_FAIL);
     }
     if ((version == 0x00 || version == 0xFF) && (partnum == 0x00 || partnum == 0xFF)) {
         subghz_set_last_error("cc1101 not detected");
-        subghz_hw_stop();
-        return ESP_FAIL;
+        return subghz_hw_start_fail(ESP_FAIL);
     }
 
     s_current_freq_hz = (uint32_t)((uint64_t)CONFIG_SUBGHZ_BASE_FREQ_MHZ * 10000ULL);
@@ -2657,7 +2672,7 @@ static esp_err_t subghz_hw_start(void) {
     if (err == ESP_OK) err = cc1101_write_reg(CC1101_REG_FREQ2, (uint8_t)((freq_word >> 16) & 0xFF));
     if (err == ESP_OK) err = cc1101_write_reg(CC1101_REG_FREQ1, (uint8_t)((freq_word >> 8) & 0xFF));
     if (err == ESP_OK) err = cc1101_write_reg(CC1101_REG_FREQ0, (uint8_t)(freq_word & 0xFF));
-    if (err == ESP_OK) err = subghz_apply_tembed_freq_calibration(s_current_freq_hz);
+    if (err == ESP_OK) err = subghz_calibrate_after_frequency(s_current_freq_hz);
 
     if (err == ESP_OK) {
         esp_err_t verify_err = subghz_verify_cc1101_register_readback(s_current_freq_hz, "init");
@@ -2678,7 +2693,7 @@ static esp_err_t subghz_hw_start(void) {
             if (err == ESP_OK) err = cc1101_write_reg(CC1101_REG_FREQ2, (uint8_t)((freq_word >> 16) & 0xFF));
             if (err == ESP_OK) err = cc1101_write_reg(CC1101_REG_FREQ1, (uint8_t)((freq_word >> 8) & 0xFF));
             if (err == ESP_OK) err = cc1101_write_reg(CC1101_REG_FREQ0, (uint8_t)(freq_word & 0xFF));
-            if (err == ESP_OK) err = subghz_apply_tembed_freq_calibration(s_current_freq_hz);
+            if (err == ESP_OK) err = subghz_calibrate_after_frequency(s_current_freq_hz);
             if (err == ESP_OK) err = subghz_verify_cc1101_register_readback(s_current_freq_hz, "init-retry");
         }
     }
@@ -2687,11 +2702,20 @@ static esp_err_t subghz_hw_start(void) {
         err = cc1101_strobe(CC1101_STROBE_SIDLE);
         if (err == ESP_OK) err = cc1101_strobe(CC1101_STROBE_SRX);
     }
+    if (err == ESP_OK) {
+        uint8_t state = 0;
+        err = cc1101_wait_for_state(0x0D, 10000U, &state);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG,
+                     "CC1101 failed to enter RX after init: state=0x%02X (%s)",
+                     state,
+                     esp_err_to_name(err));
+        }
+    }
 
     if (err != ESP_OK) {
         subghz_set_last_error("radio init sequence failed");
-        subghz_hw_stop();
-        return err;
+        return subghz_hw_start_fail(err);
     }
 
     /* Detection already ran in IDLE above (before SRX); version/partnum hold
@@ -2749,7 +2773,7 @@ static esp_err_t subghz_retune_frequency(uint32_t freq_hz) {
     }
     if (err == ESP_OK) {
         step = "CALCFG";
-        err = subghz_apply_tembed_freq_calibration(freq_hz);
+        err = subghz_calibrate_after_frequency(freq_hz);
     }
     if (err == ESP_OK) {
         step = "VERIFY";
@@ -2760,17 +2784,14 @@ static esp_err_t subghz_retune_frequency(uint32_t freq_hz) {
         err = cc1101_strobe(CC1101_STROBE_SRX);
     }
     if (err == ESP_OK) {
-        /* NOTE: MARCSTATE reads during RX are unreliable on this board (they
-         * return 0x00 even when the chip is verifiably in RX -- the diag
-         * probe sees 0x00 for seconds before a real 0x0D read lands). The old
-         * retry treated 0x00 as "not in RX" and strobed SFRX + SRX ~10ms
-         * after entering RX. SFRX is only spec'd for IDLE/RXFIFO_OVERFLOW;
-         * firing it into an actively-demodulating receiver killed the RX
-         * chain within ~15ms of every capture arm (probe, which never does
-         * this, receives continuously). Log the wait result only. */
+        step = "RXSTATE";
         uint8_t state = 0;
-        if (cc1101_wait_for_state(0x0D, 10000U, &state) != ESP_OK) {
-            ESP_LOGW(TAG, "retune RX wait: state=0x%02X (0x00 reads are a known artifact, RX likely fine)", state);
+        err = cc1101_wait_for_state(0x0D, 10000U, &state);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG,
+                     "CC1101 failed to enter RX after retune: state=0x%02X (%s)",
+                     state,
+                     esp_err_to_name(err));
         }
     }
 
@@ -3772,7 +3793,7 @@ void subghz_remote_manager_diag_probe(void) {
     (void)cc1101_write_reg(CC1101_REG_FREQ2, (uint8_t)((c_freq_word >> 16) & 0xFF));
     (void)cc1101_write_reg(CC1101_REG_FREQ1, (uint8_t)((c_freq_word >> 8) & 0xFF));
     (void)cc1101_write_reg(CC1101_REG_FREQ0, (uint8_t)(c_freq_word & 0xFF));
-    (void)subghz_apply_tembed_freq_calibration(s_current_freq_hz);
+    (void)subghz_calibrate_after_frequency(s_current_freq_hz);
     (void)cc1101_read_status(CC1101_STATUS_VERSION, &cver);
     ESP_LOGI(TAG, "  C after freq_cal:        VER=0x%02X", cver);
 
@@ -4213,12 +4234,13 @@ bool subghz_remote_manager_transmit_raw(const int32_t *durations, size_t count, 
     err = subghz_apply_preset(preset);
 
     subghz_apply_board_rf_switch(frequency_hz);
-    if (err == ESP_OK) err = subghz_apply_tembed_freq_calibration(frequency_hz);
     uint64_t f_hz = (uint64_t)frequency_hz;
     uint32_t freq_word = (uint32_t)((f_hz * 65536ULL) / 26000000ULL);
     if (err == ESP_OK) err = cc1101_write_reg(CC1101_REG_FREQ2, (uint8_t)((freq_word >> 16) & 0xFF));
     if (err == ESP_OK) err = cc1101_write_reg(CC1101_REG_FREQ1, (uint8_t)((freq_word >> 8) & 0xFF));
     if (err == ESP_OK) err = cc1101_write_reg(CC1101_REG_FREQ0, (uint8_t)(freq_word & 0xFF));
+    /* The synthesizer calibration/SCAL must follow the new FREQ word. */
+    if (err == ESP_OK) err = subghz_calibrate_after_frequency(frequency_hz);
     if (err == ESP_OK) err = cc1101_write_reg(0x0A, 0x00);
 
     if (err != ESP_OK) {

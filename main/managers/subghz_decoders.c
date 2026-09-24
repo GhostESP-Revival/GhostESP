@@ -881,41 +881,14 @@ bool subghz_decode_gate_tx(const int32_t *dur, size_t count, uint64_t *out_code,
     return false;
 }
 
+/* Compatibility entry point for callers that used the original PR helper.
+ * Keep it routed through the polarity-tolerant decoder below rather than
+ * retaining the old fixed-offset, one-polarity implementation. */
 bool subghz_decode_keeloq_rcswitch23(const int32_t *dur,
                                      size_t count,
                                      uint64_t *out_code,
                                      int *out_bits) {
-    if (!dur || !out_code || !out_bits || count <= 26) {
-        return false;
-    }
-
-    const int32_t delay = 400;
-    const int32_t tolerance = delay * 60 / 100;
-    uint64_t code = 0;
-    int bits = 0;
-
-    for (size_t i = 25; i + 1 < count && bits < 64; i += 2) {
-        int32_t first = DUR_ABS(dur[i]);
-        int32_t second = DUR_ABS(dur[i + 1]);
-        code <<= 1;
-        if (DURATION_DIFF(first, delay * 2) < tolerance &&
-            DURATION_DIFF(second, delay) < tolerance) {
-            /* zero */
-        } else if (DURATION_DIFF(first, delay) < tolerance &&
-                   DURATION_DIFF(second, delay * 2) < tolerance) {
-            code |= 1;
-        } else {
-            return false;
-        }
-        bits++;
-    }
-
-    if (count > 7 && bits > 0) {
-        *out_code = code;
-        *out_bits = bits;
-        return true;
-    }
-    return false;
+    return subghz_decode_keeloq(dur, count, out_code, out_bits);
 }
 
 /*
@@ -928,9 +901,10 @@ bool subghz_decode_keeloq_rcswitch23(const int32_t *dur,
  * the shifted pairs. Two-stage robust decode:
  *   1. Deglitch: fold every segment shorter than 200us (half a KeeLoq TE, so
  *      it can never be a legit KeeLoq pulse) into its same-level neighbours.
- *   2. Sync scan: every long LOW (>=3ms: the 4ms header or an 11-25ms
- *      inter-word gap) is a candidate; decode 64 PWM pairs after it with
- *      protocol-23 polarity: (TE,2TE)=1, (2TE,TE)=0, tolerance 60%.
+ *   2. Sync scan: every long interval (>=3ms: the 4ms header or an 11-25ms
+ *      inter-word gap), regardless of polarity, is a candidate; decode 64 PWM
+ *      pairs after it with protocol-23 polarity: (TE,2TE)=1, (2TE,TE)=0,
+ *      tolerance 60%.
  */
 #define SUBGHZ_KEELOQ_DEGLITCH_CAP 384U
 
@@ -976,7 +950,11 @@ bool subghz_decode_keeloq(const int32_t *dur, size_t count, uint64_t *out_code, 
     const int32_t tol = te * 60 / 100;
 
     for (size_t s = 0; s < n; s++) {
-        if (clean[s] > -3000) continue; /* sync candidates are long LOWs */
+        /* GDO0 polarity can be inverted by the CC1101 wiring, the RMT
+         * convention, or the first edge selected after a noisy preamble.
+         * KeeLoq timing is polarity-independent, so accept either long
+         * interval as the sync candidate instead of assuming LOW. */
+        if (DUR_ABS(clean[s]) < 3000) continue;
         uint64_t code = 0;
         int bits = 0;
         size_t i = s + 1;
