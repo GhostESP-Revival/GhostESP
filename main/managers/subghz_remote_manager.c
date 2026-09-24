@@ -481,6 +481,7 @@ static void subghz_log_raw_preview(const int32_t *durations, size_t count, int g
 static void subghz_reset_capture_buffers(void);
 static void subghz_finalize_raw_capture(bool allow_short_capture);
 static void subghz_reset_local_rcswitch_state(void);
+static void subghz_local_rcswitch_handle_duration(uint32_t duration);
 static void subghz_poll_local_rcswitch_decode(void);
 static void subghz_poll_raw_timeout(void);
 static void subghz_prepare_raw_capture_for_stream(void);
@@ -683,56 +684,21 @@ static void subghz_rmt_poll_local_decode(void)
             ESP_LOGI(TAG, "%s", dbuf);
         }
 
-        if (count < 6) {
-            continue;
+        /* The RMT peripheral completes a receive event at each short hardware
+         * burst, not once per remote frame. Feed every silicon-captured
+         * interval into the same RCSwitch accumulator used by the GPIO path;
+         * it will split only on a real >4.3ms inter-symbol gap and can then
+         * assemble the complete KeeLoq frame. Decoding each 3-9 timing event
+         * independently can never reach the 64-bit frame length. */
+        for (size_t i = 0; i < count; i++) {
+            int64_t value = durations[i];
+            uint32_t duration_us = value < 0 ? (uint32_t)(-value) : (uint32_t)value;
+            subghz_local_rcswitch_handle_duration(duration_us);
         }
+        s_capture_isr_accepted += count;
 
-        subghz_log_raw_preview(durations, count, CONFIG_SUBGHZ_GDO0_PIN);
-
-        s_raw_capture_gpio = CONFIG_SUBGHZ_GDO0_PIN;
-        s_raw_local_signal_seen = true;
-
-        subghz_decoded_signal_t decoded;
-        memset(&decoded, 0, sizeof(decoded));
-        uint64_t keeloq_code = 0;
-        int keeloq_bits = 0;
-
-        if (subghz_decode_keeloq(durations, count,
-                                 &keeloq_code, &keeloq_bits)) {
-            decoded.decoded = true;
-            decoded.code = keeloq_code;
-            decoded.bits = keeloq_bits;
-            decoded.te = 400;
-            snprintf(decoded.protocol, sizeof(decoded.protocol), "KeeLoq");
-            snprintf(decoded.info, sizeof(decoded.info),
-                     "KeeLoq %dbit\nCode:0x%016llX",
-                     keeloq_bits, (unsigned long long)keeloq_code);
-        } else if (!subghz_decode_signal(durations, count, &decoded) || !decoded.decoded) {
-            ESP_LOGI(TAG, "RMT RX: no decode from %lu durations", (unsigned long)count);
-
-            if (count <= SUBGHZ_RAW_MAX_DURATIONS) {
-                memcpy(s_shared_buf, durations, count * sizeof(int32_t));
-                s_raw_stream_ptr = s_shared_buf;
-                s_raw_stream_count = count;
-                s_raw_capture_pending = true;
-            }
-            continue;
-        }
-
-        decoded.frequency_hz = (int)s_current_freq_hz;
-        s_local_decode_result = decoded;
-        s_local_decode_result_ready = true;
-        ESP_LOGI(TAG, "RMT RX decode: %s %dbit from %lu durations",
-                 s_local_decode_result.protocol,
-                 s_local_decode_result.bits,
-                 (unsigned long)count);
-
-        if (count <= SUBGHZ_RAW_MAX_DURATIONS) {
-            memcpy(s_shared_buf, durations, count * sizeof(int32_t));
-            s_raw_stream_ptr = s_shared_buf;
-            s_raw_stream_count = count;
-            s_raw_capture_pending = true;
-        }
+        /* The local RCSwitch accumulator publishes the assembled frame after
+         * a real inter-symbol gap; no per-burst decode is attempted here. */
     }
 
     /* Wedge detector: done events stopped for 250ms. If the pin is STILL
