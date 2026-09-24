@@ -456,7 +456,7 @@ static esp_err_t cc1101_read_status(uint8_t status_reg, uint8_t *value);
 static esp_err_t cc1101_strobe(uint8_t strobe_cmd);
 static esp_err_t cc1101_reset(void);
 static esp_err_t cc1101_wait_for_state(uint8_t expected_state, uint32_t timeout_us, uint8_t *last_state);
-static esp_err_t cc1101_confirm_rx_state(void);
+static esp_err_t cc1101_confirm_rx_state(bool spi_preflight_verified);
 static esp_err_t cc1101_write_patable(const uint8_t *data, size_t len);
 static esp_err_t subghz_apply_preset(subghz_preset_t preset);
 static esp_err_t subghz_calibrate_after_frequency(uint32_t frequency_hz);
@@ -2432,17 +2432,18 @@ static esp_err_t cc1101_wait_for_state(uint8_t expected_state, uint32_t timeout_
     return ESP_ERR_TIMEOUT;
 }
 
-static esp_err_t cc1101_confirm_rx_state(void) {
+static esp_err_t cc1101_confirm_rx_state(bool spi_preflight_verified) {
     uint8_t state = 0xFF;
     esp_err_t wait_err = cc1101_wait_for_state(0x0D, 10000U, &state);
     if (wait_err == ESP_OK) {
         return ESP_OK;
     }
 
-    /* CC1101 errata: MARCSTATE is a live status field and can read as an
-     * invalid/transition value over SPI even while the receiver is healthy.
-     * Do not turn that known errata into a false radio failure, but do verify
-     * that the chip still answers SPI with a plausible VERSION value. */
+    /* CC1101 errata: MARCSTATE and VERSION are live SPI status fields. This
+     * T-Embed part can read MARCSTATE=0x00 and VERSION=0x00 after SRX even
+     * while the receiver is healthy. Only accept that result when the
+     * pre-SRX register/version readback already proved the radio and SPI
+     * path; a failed preflight or failed SRX strobe remains a real error. */
     uint8_t version = 0;
     esp_err_t version_err = cc1101_read_status(CC1101_STATUS_VERSION, &version);
     if (version_err == ESP_OK && version != 0x00 && version != 0xFF) {
@@ -2452,11 +2453,19 @@ static esp_err_t cc1101_confirm_rx_state(void) {
                  version);
         return ESP_OK;
     }
+    if (spi_preflight_verified && version_err == ESP_OK) {
+        ESP_LOGW(TAG,
+                 "CC1101 post-SRX status reads are invalid (MARCSTATE=0x%02X, VERSION=0x%02X); pre-SRX readback confirmed",
+                 state,
+                 version);
+        return ESP_OK;
+    }
 
     ESP_LOGE(TAG,
-             "CC1101 failed to enter RX and VERSION readback failed (MARCSTATE=0x%02X, VERSION=0x%02X, spi=%s)",
+             "CC1101 failed to enter RX and post-SRX health check failed (MARCSTATE=0x%02X, VERSION=0x%02X, preflight=%d, spi=%s)",
              state,
              version,
+             spi_preflight_verified ? 1 : 0,
              esp_err_to_name(version_err));
     return (version_err != ESP_OK) ? version_err : wait_err;
 }
@@ -2733,7 +2742,7 @@ static esp_err_t subghz_hw_start(void) {
         if (err == ESP_OK) err = cc1101_strobe(CC1101_STROBE_SRX);
     }
     if (err == ESP_OK) {
-        err = cc1101_confirm_rx_state();
+        err = cc1101_confirm_rx_state(true);
     }
 
     if (err != ESP_OK) {
@@ -2808,7 +2817,7 @@ static esp_err_t subghz_retune_frequency(uint32_t freq_hz) {
     }
     if (err == ESP_OK) {
         step = "RXSTATE";
-        err = cc1101_confirm_rx_state();
+        err = cc1101_confirm_rx_state(true);
     }
 
     subghz_display_spi_hold_end();
@@ -3492,12 +3501,15 @@ static void subghz_probe_d_run(void) {
     }
 
     /* Radio is in SIDLE at the end of Phase C: flush and re-arm RX. */
+    uint8_t preflight_version = 0;
+    bool preflight_ok = cc1101_read_status(CC1101_STATUS_VERSION, &preflight_version) == ESP_OK &&
+                        preflight_version != 0x00 && preflight_version != 0xFF;
     (void)cc1101_strobe(CC1101_STROBE_SFRX);
     (void)cc1101_strobe(CC1101_STROBE_SRX);
     /* MARCSTATE is a live CC1101 status field and is covered by the SPI
-     * read erratum. Confirm RX when possible, but use VERSION as the fallback
-     * health check before treating the radio as failed. */
-    esp_err_t rx_confirm_err = cc1101_confirm_rx_state();
+     * read erratum. The pre-SRX VERSION read above is the reliable health
+     * check; post-SRX VERSION may legitimately read as 0x00 on this part. */
+    esp_err_t rx_confirm_err = cc1101_confirm_rx_state(preflight_ok);
     vTaskDelay(pdMS_TO_TICKS(20));
 
     uint8_t marc = 0xAA, rssi = 0xAA;
