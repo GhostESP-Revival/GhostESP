@@ -95,6 +95,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Fixed active Wi-Fi TX paths to exclude DFS and invalid target channels
 - Fixed ESP-IDF 6.1 C5 bandwidth setup to use the dual-band APIs
 - Fixed DFS/passive-scan and C5 monitor-bandwidth handling
+- Fixed AP/STA result rows rendering beneath the bottom touch bar
 
 
 ## Revival v2.1.2

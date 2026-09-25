@@ -593,14 +593,11 @@ static int compute_visible_rows(const options_view_t *ov) {
     lv_coord_t row_h = ov->btn_h > 0 ? ov->btn_h : 1;
     if (gap < 0) gap = 0;
 
-    /* Round UP so the pool includes the partially visible row at the bottom of
-     * the viewport. Sizing to whole rows only would end the list short and
-     * leave dead space below it; a scrolling list clips that last row at the
-     * viewport edge instead, and the row pool has to do the same to look right.
-     * The extra row costs one more LVGL object, never more, so the object count
-     * stays constant in the number of items. */
+    /* Keep only whole rows in the virtual pool. The options list is shortened
+     * for the bottom touch bar, and a rounded-up pool would place its last row
+     * underneath that bar on AP/STA and other windowed lists. */
     lv_coord_t stride = row_h + gap;
-    int rows = (avail <= 0) ? 1 : (int)((avail - 1) / stride) + 1;
+    int rows = (avail <= 0 || stride <= 0) ? 1 : (int)(avail / stride);
     if (rows < 1) rows = 1;
     return rows;
 }
