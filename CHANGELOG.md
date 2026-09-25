@@ -38,6 +38,13 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
   - Hearing aids. Adapted from [Android docs](https://source.android.com/docs/core/connect/bluetooth/asha)
   - Exposure beacons. Adapted from [Theengs](https://github.com/theengs/decoder/blob/development/src/devices/GAEN_json.h)
   - Chameleon Ultra. Adapted from `chameleon_manager.c` and [Nordic docs](https://docs.nordicsemi.com/bundle/ncs-latest/page/nrf/libraries/bluetooth_services/services/nus.html)
+- Added a Game Boy / Game Boy Color emulator app (`.gapp`) with save states and battery saves
+- Added batched plugin UI calls: `ui_obj_get_rects` and `ui_obj_apply_props`
+- Added an embeddable native options list to the plugin API: `ui_options_create_ex`, `item_at`, `get_item_count`, `update_item_text`
+- Added widget rects, native design metrics and a page stack to the plugin API
+- Added raw touch state to the plugin input snapshot via `input_snapshot_ex`
+- Added a `forward_back` manifest option so plugin apps can handle BACK themselves
+- Added `GHOSTESP_API_HAS()` for feature-gating plugin API fields
 
 ### Changed
 - Improved encoder navigation in grid app menus
@@ -56,6 +63,8 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Restyled the on-screen keyboard with a standard iOS-style layout
 - Wi-Fi and Bluetooth scan result menus now scroll as a single list instead of paging through `< Prev` / `Next >` rows
 - Raised the Banshee GhostLink UART to 921600 baud and enlarged the UART receive buffer to 2048 bytes so the higher rate does not increase receive loss
+- Plugin UI calls no longer allocate and free a semaphore per call, cutting menu open latency and heap churn in every app
+- Plugin canvas scaling uses fixed-point stepping, removing a per-pixel 64-bit divide that dominated frame time on C5/P4
 
 ### Fixed
 - Fixed touch-bar row passthrough
@@ -79,6 +88,13 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Fixed detail view info labels being cut off instead of scrolling sideways when too wide
 - Fixed T-Watch S3 RTC using the wrong I2C bus and chip address
 - Fixed RTC boot restore trusting an invalid (power-lost) oscillator time
+- Fixed stuck on-screen buttons and swallowed touch releases in canvas-based plugin apps on non-P4 targets
+- Fixed C5 station-scan startup across AP/STA-to-promiscuous transitions
+- Fixed C5 monitor plans to include country-allowed 2.4/5 GHz channels, including passive DFS
+- Fixed country channel handling to honor ESP-IDF schan/nchan and reject unsupported channels
+- Fixed active Wi-Fi TX paths to exclude DFS and invalid target channels
+- Fixed ESP-IDF 6.1 C5 bandwidth setup to use the dual-band APIs
+- Fixed DFS/passive-scan and C5 monitor-bandwidth handling
 
 
 ## Revival v2.1.2

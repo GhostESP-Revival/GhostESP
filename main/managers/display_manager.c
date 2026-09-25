@@ -5095,6 +5095,14 @@ void hardware_input_task(void *pvParameters) {
     touch_driver_read(&touch_driver, &touch_data);
 #endif
 
+    /* Publish the raw panel state before any of the routing below. A canvas
+       app reads this through input_snapshot_ex() to clear its own held virtual
+       buttons on finger-up, so it has to reflect the panel even when this
+       press is swallowed (wake-from-dim, control-center pull) or the matching
+       release is later dropped. */
+    plugin_api_record_touch_state(touch_data.state == LV_INDEV_STATE_PR,
+                                  (int)touch_data.point.x, (int)touch_data.point.y);
+
     if (touch_data.state == LV_INDEV_STATE_PR && !touch_active) {
       bool skip_event = false;
       last_touch_time = xTaskGetTickCount();

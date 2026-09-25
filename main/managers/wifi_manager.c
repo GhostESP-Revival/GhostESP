@@ -2183,7 +2183,15 @@ esp_err_t wifi_manager_start_evil_portal(const char *URLorFilePath, const char *
     esp_wifi_set_ps(WIFI_PS_NONE);
 
     // be conservative for client compatibility (2.4GHz only, HT20 for max compatibility)
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+    wifi_bandwidths_t bandwidths = {
+        .ghz_2g = WIFI_BW20,
+        .ghz_5g = WIFI_BW20,
+    };
+    (void)esp_wifi_set_bandwidths(WIFI_IF_AP, &bandwidths);
+#else
     (void)esp_wifi_set_bandwidth(WIFI_IF_AP, WIFI_BW20);
+#endif
     (void)esp_wifi_set_protocol(WIFI_IF_AP, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
     dnsserver.ip.u_addr.ip4.addr = esp_ip4addr_aton("192.168.4.1");
     dnsserver.ip.type = ESP_IPADDR_TYPE_V4;
@@ -2338,6 +2346,23 @@ void wifi_manager_start_monitor_mode(wifi_promiscuous_cb_t_t callback) {
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_start());
+
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+    // C5 AUTO band mode requires the multi-band APIs. Keep monitor PHY
+    // settings valid for both 2.4 GHz and 5 GHz receive-only capture.
+    wifi_bandwidths_t monitor_bandwidths = {
+        .ghz_2g = WIFI_BW20,
+        .ghz_5g = WIFI_BW20,
+    };
+    ESP_ERROR_CHECK(esp_wifi_set_bandwidths(WIFI_IF_STA, &monitor_bandwidths));
+    wifi_protocols_t monitor_protocols = {
+        .ghz_2g = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N |
+                  WIFI_PROTOCOL_LR,
+        .ghz_5g = WIFI_PROTOCOL_11A | WIFI_PROTOCOL_11N |
+                  WIFI_PROTOCOL_11AC | WIFI_PROTOCOL_11AX,
+    };
+    ESP_ERROR_CHECK(esp_wifi_set_protocols(WIFI_IF_STA, &monitor_protocols));
+#endif
 
     // Disconnect STA if connected — an associated STA locks the radio to the
     // AP's channel, causing esp_wifi_set_channel() to fail (ESP_FAIL) and
@@ -3634,7 +3659,11 @@ static esp_err_t start_live_ap_channel_hopping(void) {
 
     // User hop profile overrides the compile-time live AP table.
     size_t profile_count = 0;
-    hop_profile_resolve(live_ap_profile_channels, WIFI_CHANNELS_MAX, &profile_count);
+    hop_profile_resolve_monitor(live_ap_profile_channels, WIFI_CHANNELS_MAX, &profile_count);
+    if (profile_count == 0) {
+        profile_count = wifi_channels_build_country_list(
+            live_ap_profile_channels, WIFI_CHANNELS_MAX);
+    }
     if (profile_count > 0) {
         live_ap_active_channels = live_ap_profile_channels;
         live_ap_active_channels_len = profile_count;
@@ -3644,7 +3673,11 @@ static esp_err_t start_live_ap_channel_hopping(void) {
     }
 
     live_ap_channel_index = 0;
-    esp_wifi_set_channel(live_ap_active_channels[live_ap_channel_index], WIFI_SECOND_CHAN_NONE);
+    esp_err_t channel_err = esp_wifi_set_channel(
+        live_ap_active_channels[live_ap_channel_index], WIFI_SECOND_CHAN_NONE);
+    if (channel_err != ESP_OK) {
+        return channel_err;
+    }
     esp_timer_create_args_t timer_args = {
         .callback = live_ap_channel_hop_timer_callback,
         .name = "live_ap_hop"
@@ -4230,7 +4263,7 @@ esp_err_t wifi_manager_start_scan_with_time(int seconds) {
     // of the driver's all-country-channel sweep.
     uint8_t profile_channels[WIFI_CHANNELS_MAX];
     size_t profile_count = 0;
-    hop_profile_resolve(profile_channels, WIFI_CHANNELS_MAX, &profile_count);
+    hop_profile_resolve_monitor(profile_channels, WIFI_CHANNELS_MAX, &profile_count);
     if (profile_count > 0) {
         printf("WiFi Scan started (%u channels)\n", (unsigned)profile_count);
         TERMINAL_VIEW_ADD_TEXT("WiFi Scan started\n");
@@ -4283,17 +4316,13 @@ static void wireshark_channel_hop_timer_callback(void *arg) {
     wireshark_channel_index = (wireshark_channel_index + 1) % wireshark_channels_count;
     uint8_t channel = wireshark_channels[wireshark_channel_index];
     
-    // determine if 5ghz or 2.4ghz
+    // Monitor mode is configured at 20 MHz for the C5; never request HT40 here.
     wifi_second_chan_t second = WIFI_SECOND_CHAN_NONE;
-    
-    #if defined(CONFIG_IDF_TARGET_ESP32C5)
-    if (channel > 14) {
-        // 5ghz channel - use ht40
-        second = WIFI_SECOND_CHAN_ABOVE;
+    esp_err_t channel_err = esp_wifi_set_channel(channel, second);
+    if (channel_err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to hop Wireshark channel %u: %s",
+                 (unsigned)channel, esp_err_to_name(channel_err));
     }
-    #endif
-    
-    esp_wifi_set_channel(channel, second);
 }
 
 static bool callback_uses_selected_ap_capture_plan(wifi_promiscuous_cb_t_t callback) {
@@ -4339,7 +4368,7 @@ static void apply_selected_ap_capture_channel_plan(wifi_promiscuous_cb_t_t callb
     int unique_count = 0;
     for (int i = 0; i < selected_ap_count && unique_count < (int)(sizeof(unique_channels) / sizeof(unique_channels[0])); i++) {
         uint8_t channel = selected_aps[i].primary;
-        if (channel == 0) {
+        if (!wifi_channels_is_monitor_channel(channel)) {
             continue;
         }
 
@@ -4374,13 +4403,16 @@ static void apply_selected_ap_capture_channel_plan(wifi_promiscuous_cb_t_t callb
     wireshark_channels_count = (size_t)unique_count;
     wireshark_channel_index = 0;
 
+    // Monitor mode is configured at 20 MHz for the C5; never request HT40.
     wifi_second_chan_t second = WIFI_SECOND_CHAN_NONE;
-#if defined(CONFIG_IDF_TARGET_ESP32C5)
-    if (wireshark_channels[0] > 14) {
-        second = WIFI_SECOND_CHAN_ABOVE;
+    esp_err_t selected_channel_err = esp_wifi_set_channel(
+        wireshark_channels[0], second);
+    if (selected_channel_err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set selected capture channel %u: %s",
+                 (unsigned)wireshark_channels[0],
+                 esp_err_to_name(selected_channel_err));
+        return;
     }
-#endif
-    esp_wifi_set_channel(wireshark_channels[0], second);
 
     esp_timer_create_args_t timer_args = {
         .callback = wireshark_channel_hop_timer_callback,
@@ -4415,7 +4447,7 @@ esp_err_t wifi_manager_start_wireshark_channel_list(const uint8_t *channels, siz
     uint8_t unique[sizeof(wireshark_channels)] = {0};
     size_t unique_count = 0;
     for (size_t i = 0; i < count; i++) {
-        if (channels[i] < 1 || channels[i] > MAX_WIFI_CHANNEL) return ESP_ERR_INVALID_ARG;
+        if (!wifi_channels_is_monitor_channel(channels[i])) return ESP_ERR_INVALID_ARG;
         bool seen = false;
         for (size_t j = 0; j < unique_count; j++) {
             if (unique[j] == channels[i]) {
@@ -4438,10 +4470,8 @@ esp_err_t wifi_manager_start_wireshark_channel_list(const uint8_t *channels, siz
     wireshark_channels_count = unique_count;
     wireshark_channel_index = 0;
 
+    // Monitor mode is configured at 20 MHz for the C5; never request HT40.
     wifi_second_chan_t second = WIFI_SECOND_CHAN_NONE;
-#if defined(CONFIG_IDF_TARGET_ESP32C5)
-    if (wireshark_channels[0] > 14) second = WIFI_SECOND_CHAN_ABOVE;
-#endif
     esp_err_t err = esp_wifi_set_channel(wireshark_channels[0], second);
     if (err != ESP_OK) return err;
 
@@ -4469,7 +4499,7 @@ void wifi_manager_start_wireshark_channel_hop(void) {
 
     // Use the user hop profile when one is selected; otherwise keep the
     // historical country-appropriate channel list.
-    hop_profile_resolve(channels, sizeof(channels), &count);
+    hop_profile_resolve_monitor(channels, sizeof(channels), &count);
     if (count == 0) {
         // HOP_MODE_DEFAULT (or nothing configured): country list.
         count = wifi_channels_build_country_list(channels, sizeof(channels));
@@ -4494,11 +4524,8 @@ void wifi_manager_stop_wireshark_channel_hop(void) {
 }
 
 esp_err_t wifi_manager_set_wireshark_fixed_channel(uint8_t channel) {
-    // Validate channel range based on target
-    uint8_t max_channel = MAX_WIFI_CHANNEL;
-
-    if (channel < 1 || channel > max_channel) {
-        ESP_LOGE(TAG, "Invalid channel %d. Must be between 1 and %d", channel, max_channel);
+    if (!wifi_channels_is_monitor_channel(channel)) {
+        ESP_LOGE(TAG, "Invalid or country-disallowed monitor channel %d", channel);
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -4517,11 +4544,8 @@ esp_err_t wifi_manager_set_wireshark_fixed_channel(uint8_t channel) {
 }
 
 esp_err_t wifi_manager_set_capture_channel_lock(uint8_t channel) {
-    // Validate channel range based on target
-    uint8_t max_channel = MAX_WIFI_CHANNEL;
-
-    if (channel < 1 || channel > max_channel) {
-        ESP_LOGE(TAG, "Invalid capture channel %d. Must be between 1 and %d", channel, max_channel);
+    if (!wifi_channels_is_monitor_channel(channel)) {
+        ESP_LOGE(TAG, "Invalid or country-disallowed capture channel %d", channel);
         return ESP_ERR_INVALID_ARG;
     }
 

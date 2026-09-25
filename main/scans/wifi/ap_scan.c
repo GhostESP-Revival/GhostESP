@@ -230,6 +230,9 @@ esp_err_t ap_scan_scan_channels(const uint8_t *channels, size_t count) {
 
     for (size_t i = 0; i < count; i++) {
         scan_config.channel = channels[i];
+        scan_config.scan_type = wifi_channels_requires_passive_scan(channels[i])
+            ? WIFI_SCAN_TYPE_PASSIVE
+            : WIFI_SCAN_TYPE_ACTIVE;
         esp_err_t err = esp_wifi_scan_start(&scan_config, true);
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "Channel %u scan failed: %s",
@@ -369,7 +372,7 @@ void ap_scan_start(void) {
     // of the driver's all-country-channel sweep.
     uint8_t profile_channels[WIFI_CHANNELS_MAX];
     size_t profile_count = 0;
-    hop_profile_resolve(profile_channels, WIFI_CHANNELS_MAX, &profile_count);
+    hop_profile_resolve_monitor(profile_channels, WIFI_CHANNELS_MAX, &profile_count);
     if (profile_count > 0) {
         printf("WiFi Scan started (%u channels)\n", (unsigned)profile_count);
         TERMINAL_VIEW_ADD_TEXT("WiFi Scan started\n");
@@ -507,7 +510,7 @@ esp_err_t ap_scan_start_async(void) {
     // merged results, then let the normal async completion flow collect them.
     uint8_t profile_channels[WIFI_CHANNELS_MAX];
     size_t profile_count = 0;
-    hop_profile_resolve(profile_channels, WIFI_CHANNELS_MAX, &profile_count);
+    hop_profile_resolve_monitor(profile_channels, WIFI_CHANNELS_MAX, &profile_count);
     if (profile_count > 0) {
         printf("WiFi Scan started (%u channels)\n", (unsigned)profile_count);
         TERMINAL_VIEW_ADD_TEXT("WiFi Scan started\n");

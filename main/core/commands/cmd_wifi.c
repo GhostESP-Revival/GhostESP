@@ -173,7 +173,7 @@ static void hop_print_mode(const char *verb) {
 
     uint8_t channels[WIFI_CHANNELS_MAX] = {0};
     size_t count = 0;
-    hop_profile_resolve(channels, sizeof(channels), &count);
+    hop_profile_resolve_monitor(channels, sizeof(channels), &count);
     glog(" -> %u channel", (unsigned)count);
     if (count != 1) glog("s");
     glog(": ");
@@ -214,7 +214,7 @@ void handle_hop_cmd(int argc, char **argv) {
             return;
         }
         if (!hop_profile_set_custom_from_string(argv[2])) {
-            glog("Invalid channel list '%s'. Use e.g. 1,6,11 (1-14, 36-48, 149-165)\n", argv[2]);
+            glog("Invalid channel list '%s'. Use channels supported by this target and country\n", argv[2]);
             return;
         }
         hop_profile_set_mode(HOP_MODE_CUSTOM);
@@ -223,7 +223,7 @@ void handle_hop_cmd(int argc, char **argv) {
         // Treat the argument as a bare channel list.
         if (!hop_profile_set_custom_from_string(argv[1])) {
             glog("Usage: hop [auto|all|basic|custom <1,2,3>|1,2,3]\n");
-            glog("Invalid channel list '%s'. Use e.g. 1,6,11 (1-14, 36-48, 149-165)\n", argv[1]);
+            glog("Invalid channel list '%s'. Use channels supported by this target and country\n", argv[1]);
             return;
         }
         hop_profile_set_mode(HOP_MODE_CUSTOM);

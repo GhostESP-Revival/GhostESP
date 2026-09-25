@@ -184,11 +184,16 @@ static void apply_selected_style(options_view_t *ov, lv_obj_t *item, bool on) {
 }
 
 static options_view_t *options_view_create_internal(lv_obj_t *parent, const char *title,
-                                                     bool use_asset_pack_background) {
+                                                     bool use_asset_pack_background,
+                                                     bool transparent) {
+    /* A real parent widget means the list is embedded, not a full screen. That
+       has to be decided before the NULL fallback, otherwise every caller would
+       look like it was parented to the screen. */
+    bool parented = parent && parent != lv_scr_act();
     if (!parent) parent = lv_scr_act();
     options_view_t *ov = (options_view_t *)calloc(1, sizeof(options_view_t));
     if (!ov) return NULL;
-    ov->use_asset_pack_background = use_asset_pack_background;
+    ov->use_asset_pack_background = use_asset_pack_background && !transparent;
 
     int h = LV_VER_RES;
     int status_bar_h = GUI_STATUS_BAR_H;
@@ -199,17 +204,28 @@ static options_view_t *options_view_create_internal(lv_obj_t *parent, const char
 
     ov->list = lv_list_create(parent);
     int list_w = GUI_OPTIONS_LIST_WIDTH;
-    lv_obj_set_size(ov->list, list_w, h - status_bar_h);
-    lv_obj_align(ov->list, LV_ALIGN_TOP_MID, 0, status_bar_h);
+    if (parented) {
+        /* Fill the host widget. The caller's card already owns the margins and
+           the bottom safe area, so re-applying them here would double them. */
+        lv_obj_set_size(ov->list, lv_obj_get_content_width(parent),
+                        lv_obj_get_content_height(parent));
+        lv_obj_align(ov->list, LV_ALIGN_TOP_MID, 0, 0);
+    } else {
+        lv_obj_set_size(ov->list, list_w, h - status_bar_h);
+        lv_obj_align(ov->list, LV_ALIGN_TOP_MID, 0, status_bar_h);
+    }
     lv_obj_set_style_bg_color(ov->list, bg, 0);
     lv_obj_set_style_bg_opa(ov->list,
-                            ov->use_asset_pack_background && asset_pack_get_background_tile()
-                                ? LV_OPA_TRANSP : LV_OPA_COVER,
+                            transparent ? LV_OPA_TRANSP
+                                        : (ov->use_asset_pack_background &&
+                                           asset_pack_get_background_tile()
+                                               ? LV_OPA_TRANSP
+                                               : LV_OPA_COVER),
                             0);
     lv_obj_set_style_pad_left(ov->list, GUI_OPTIONS_LIST_PAD_HOR, 0);
     lv_obj_set_style_pad_right(ov->list, GUI_OPTIONS_LIST_PAD_HOR, 0);
-    lv_obj_set_style_pad_top(ov->list, GUI_SAFEAREA_VER, 0);
-    lv_obj_set_style_pad_bottom(ov->list, GUI_SAFEAREA_VER + GUI_HOME_SAFE_H, 0);
+    lv_obj_set_style_pad_top(ov->list, parented ? 0 : GUI_SAFEAREA_VER, 0);
+    lv_obj_set_style_pad_bottom(ov->list, parented ? 0 : GUI_SAFEAREA_VER + GUI_HOME_SAFE_H, 0);
     lv_obj_set_style_border_width(ov->list, 0, 0);
     lv_obj_set_style_radius(ov->list, 0, 0);
 
@@ -274,11 +290,32 @@ static options_view_t *options_view_create_internal(lv_obj_t *parent, const char
 }
 
 options_view_t *options_view_create(lv_obj_t *parent, const char *title) {
-    return options_view_create_internal(parent, title, true);
+    return options_view_create_internal(parent, title, true, false);
 }
 
 options_view_t *options_view_create_no_bg(lv_obj_t *parent, const char *title) {
-    return options_view_create_internal(parent, title, false);
+    return options_view_create_internal(parent, title, false, false);
+}
+
+options_view_t *options_view_create_flags(lv_obj_t *parent, const char *title, bool transparent) {
+    return options_view_create_internal(parent, title, !transparent, transparent);
+}
+
+int options_view_item_at(const options_view_t *ov, int32_t x, int32_t y) {
+    if (!ov || !ov->items) return -1;
+    /* ov->items already tracks every added row, so hit testing costs no extra
+       allocation. lv_obj_get_coords returns post-scroll coordinates, which is
+       what a touch point is expressed in. */
+    for (int i = 0; i < ov->count; i++) {
+        lv_obj_t *item = ov->items[i];
+        if (!item || !lv_obj_is_valid(item)) continue;
+        if (lv_obj_has_flag(item, LV_OBJ_FLAG_HIDDEN)) continue;
+        lv_area_t a;
+        lv_obj_get_coords(item, &a);
+        if (x < a.x1 || x > a.x2 || y < a.y1 || y > a.y2) continue;
+        return i;
+    }
+    return -1;
 }
 
 void options_view_destroy(options_view_t *ov) {

@@ -1,5 +1,6 @@
 #include "scans/wifi/wardrive_scan.h"
 #include "scans/wifi/wardrive_policy.h"
+#include "scans/wifi/wifi_channels.h"
 #include "esp_event.h"
 #include "esp_timer.h"
 #include "esp_log.h"
@@ -61,7 +62,7 @@ static void scan_task(void *arg) {
         config.scan_time.active.max = max_ms;
         // Passive scan on DFS channels; the driver remains responsible for
         // additional country restrictions and probing policy.
-        if (ch >= 52 && ch <= 144) {
+        if (wifi_channels_requires_passive_scan(ch)) {
             config.scan_type = WIFI_SCAN_TYPE_PASSIVE;
             config.scan_time.passive = max_ms;
         }
@@ -116,10 +117,18 @@ static void scan_task(void *arg) {
 }
 
 void wardrive_scan_set_plan(const uint8_t *channels, size_t count, uint16_t dwell_ms) {
-    if (count > WD_PLAN_MAX) count = WD_PLAN_MAX;
+    uint8_t filtered[WD_PLAN_MAX];
+    size_t filtered_count = 0;
+    if (channels) {
+        for (size_t i = 0; i < count && filtered_count < WD_PLAN_MAX; i++) {
+            if (wifi_channels_is_monitor_channel(channels[i])) {
+                filtered[filtered_count++] = channels[i];
+            }
+        }
+    }
     portENTER_CRITICAL(&mux);
-    if (count) memcpy(plan, channels, count);
-    plan_count = count;
+    if (filtered_count) memcpy(plan, filtered, filtered_count);
+    plan_count = filtered_count;
     dwell = dwell_ms < 40 ? 40 : (dwell_ms > 1000 ? 1000 : dwell_ms);
     generation++;
     portEXIT_CRITICAL(&mux);

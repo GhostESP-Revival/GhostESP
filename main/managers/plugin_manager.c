@@ -467,6 +467,7 @@ static bool parse_manifest(const char *base_path, plugin_app_manifest_t *out) {
     out->icon_width = (uint16_t)copy_json_u32(root, "icon_width", 0);
     out->icon_height = (uint16_t)copy_json_u32(root, "icon_height", 0);
     out->requires_psram = copy_json_bool(root, "requires_psram", false);
+    out->forward_back = copy_json_bool(root, "forward_back", false);
 
     cJSON *permissions = cJSON_GetObjectItemCaseSensitive(root, "permissions");
     if (cJSON_IsArray(permissions)) {

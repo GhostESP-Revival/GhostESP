@@ -9,10 +9,12 @@
 // Copyright (c) 2025 jbohack, Licensed under MIT
 //
 #include "managers/aerial_detector_manager.h"
+#include "managers/wifi_manager.h"
 #include "managers/ap_manager.h"
 #include "managers/ble_manager.h"
 #include "managers/ghostchi_manager.h"
 #include "scans/wifi/hop_profile.h"
+#include "scans/wifi/wifi_channels.h"
 #include "core/glog.h"
 #include "esp_log.h"
 #include "esp_wifi.h"
@@ -225,101 +227,20 @@ void aerial_detector_deinit(void) {
 static void build_allowed_channels_list(void) {
     allowed_channel_count = 0;
 
-    // A user hop profile overrides the country-based channel plan.
     size_t profile_count = 0;
-    hop_profile_resolve(allowed_channels, sizeof(allowed_channels), &profile_count);
-    if (profile_count > 0) {
-        allowed_channel_count = (uint8_t)profile_count;
-        ESP_LOGI(TAG, "using hop profile with %d channels", allowed_channel_count);
-        return;
+    hop_profile_resolve_monitor(allowed_channels, sizeof(allowed_channels),
+                                 &profile_count);
+    if (profile_count == 0) {
+        profile_count = wifi_channels_build_country_list(
+            allowed_channels, sizeof(allowed_channels));
+    }
+    if (profile_count == 0) {
+        allowed_channels[0] = 1;
+        profile_count = 1;
     }
 
-    // get current wifi country configuration
-    wifi_country_t country;
-    esp_err_t ret = esp_wifi_get_country(&country);
-    if (ret != ESP_OK) {
-        // default to common channels if country not set
-        ESP_LOGW(TAG, "wifi country not set, using default channels");
-        // 2.4ghz: channels 1, 6, 11 (common worldwide)
-        allowed_channels[allowed_channel_count++] = 1;
-        allowed_channels[allowed_channel_count++] = 6;
-        allowed_channels[allowed_channel_count++] = 11;
-        
-        #ifdef CONFIG_IDF_TARGET_ESP32C5
-        // 5ghz: common unii-1 channels
-        allowed_channels[allowed_channel_count++] = 36;
-        allowed_channels[allowed_channel_count++] = 40;
-        allowed_channels[allowed_channel_count++] = 44;
-        allowed_channels[allowed_channel_count++] = 48;
-        #endif
-        
-        ESP_LOGI(TAG, "using %d default channels", allowed_channel_count);
-        return;
-    }
-    
-    // build channel list based on country regulations
-    // 2.4ghz band: channels 1-14 (varies by country)
-    uint8_t max_24ghz_channel = country.nchan;
-    if (max_24ghz_channel > 14) max_24ghz_channel = 14;
-    
-    // add 2.4ghz channels (prioritize 1, 6, 11 for non-overlapping)
-    for (uint8_t ch = 1; ch <= max_24ghz_channel; ch++) {
-        // add non-overlapping channels first
-        if (ch == 1 || ch == 6 || ch == 11) {
-            allowed_channels[allowed_channel_count++] = ch;
-        }
-    }
-    
-    // add overlapping 2.4ghz channels if needed
-    for (uint8_t ch = 2; ch <= max_24ghz_channel; ch++) {
-        if (ch != 1 && ch != 6 && ch != 11 && allowed_channel_count < 45) {
-            allowed_channels[allowed_channel_count++] = ch;
-        }
-    }
-    
-    #ifdef CONFIG_IDF_TARGET_ESP32C5
-    // 5ghz band support for esp32-c5
-    // add channels based on country code
-    // unii-1 (5.15-5.25 ghz): channels 36, 40, 44, 48
-    // unii-2a (5.25-5.35 ghz): channels 52, 56, 60, 64
-    // unii-2c (5.47-5.725 ghz): channels 100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140, 144
-    // unii-3 (5.725-5.85 ghz): channels 149, 153, 157, 161, 165
-    
-    if (strcmp(country.cc, "US") == 0 || strcmp(country.cc, "CA") == 0) {
-        // north america: all bands allowed
-        uint8_t us_5ghz[] = {36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140, 144, 149, 153, 157, 161, 165};
-        for (int i = 0; i < sizeof(us_5ghz) && allowed_channel_count < 50; i++) {
-            allowed_channels[allowed_channel_count++] = us_5ghz[i];
-        }
-    } else if (strcmp(country.cc, "JP") == 0) {
-        // japan: all bands with restrictions
-        uint8_t jp_5ghz[] = {36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140};
-        for (int i = 0; i < sizeof(jp_5ghz) && allowed_channel_count < 50; i++) {
-            allowed_channels[allowed_channel_count++] = jp_5ghz[i];
-        }
-    } else if (strcmp(country.cc, "CN") == 0) {
-        // china: limited 5ghz
-        uint8_t cn_5ghz[] = {36, 40, 44, 48, 52, 56, 60, 64, 149, 153, 157, 161, 165};
-        for (int i = 0; i < sizeof(cn_5ghz) && allowed_channel_count < 50; i++) {
-            allowed_channels[allowed_channel_count++] = cn_5ghz[i];
-        }
-    } else if (strcmp(country.cc, "EU") == 0 || strcmp(country.cc, "GB") == 0 || 
-               strcmp(country.cc, "DE") == 0 || strcmp(country.cc, "FR") == 0) {
-        // europe: unii-1 and unii-2
-        uint8_t eu_5ghz[] = {36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140};
-        for (int i = 0; i < sizeof(eu_5ghz) && allowed_channel_count < 50; i++) {
-            allowed_channels[allowed_channel_count++] = eu_5ghz[i];
-        }
-    } else {
-        // default: unii-1 only (most permissive worldwide)
-        uint8_t default_5ghz[] = {36, 40, 44, 48};
-        for (int i = 0; i < sizeof(default_5ghz) && allowed_channel_count < 50; i++) {
-            allowed_channels[allowed_channel_count++] = default_5ghz[i];
-        }
-    }
-    #endif
-    
-    ESP_LOGI(TAG, "country %s: using %d channels (2.4ghz + 5ghz)", country.cc, allowed_channel_count);
+    allowed_channel_count = (uint8_t)profile_count;
+    ESP_LOGI(TAG, "using %u country/profile channels", (unsigned)allowed_channel_count);
 }
 
 static void channel_hop_callback(void *arg) {
@@ -329,18 +250,14 @@ static void channel_hop_callback(void *arg) {
     current_channel_index = (current_channel_index + 1) % allowed_channel_count;
     uint8_t channel = allowed_channels[current_channel_index];
     
-    // determine if 5ghz or 2.4ghz
+    // Monitor mode is configured at 20 MHz for the C5; do not request HT40.
     wifi_second_chan_t second = WIFI_SECOND_CHAN_NONE;
-    
-    #ifdef CONFIG_IDF_TARGET_ESP32C5
-    if (channel > 14) {
-        // 5ghz channel - use ht40
-        // for 5ghz, channels are spaced 4 apart, so we can use ht40
-        second = WIFI_SECOND_CHAN_ABOVE;
+    esp_err_t channel_err = esp_wifi_set_channel(channel, second);
+    if (channel_err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to hop aerial detector channel %u: %s",
+                 (unsigned)channel, esp_err_to_name(channel_err));
+        return;
     }
-    #endif
-    
-    esp_wifi_set_channel(channel, second);
     ESP_LOGD(TAG, "hopped to channel %d", channel);
 }
 
@@ -350,24 +267,9 @@ static void start_wifi_phase(void) {
     
     glog("Phase 1: WiFi Scan\n");
     
-    // wifi already running, just enable promiscuous mode
-    wifi_mode_t current_mode;
-    esp_err_t ret = esp_wifi_get_mode(&current_mode);
-    if (ret != ESP_OK) {
-        if (ap_manager_ensure_wifi_init() != ESP_OK) {
-            ESP_LOGW(TAG, "wifi driver init failed for scan phase");
-        }
-        esp_wifi_set_mode(WIFI_MODE_STA);
-        esp_wifi_start();
-    }
-    
-    esp_wifi_set_promiscuous(true);
-    esp_wifi_set_promiscuous_rx_cb(&wifi_sniffer_callback);
-    
-    wifi_promiscuous_filter_t filter = {
-        .filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT | WIFI_PROMIS_FILTER_MASK_DATA
-    };
-    esp_wifi_set_promiscuous_filter(&filter);
+    // Use the shared monitor setup so C5 gets the correct dual-band PHY
+    // configuration and receive-only channel policy.
+    wifi_manager_start_monitor_mode(wifi_sniffer_callback);
     
     // start on first channel
     current_channel_index = 0;
@@ -399,9 +301,7 @@ static void stop_wifi_phase(void) {
         channel_hop_timer = NULL;
     }
     
-    esp_wifi_set_promiscuous(false);
-    esp_wifi_stop();
-    esp_wifi_deinit();
+    wifi_manager_stop_monitor_mode();
     wifi_scan_phase = false;
     
     ESP_LOGI(TAG, "wifi scan phase stopped");

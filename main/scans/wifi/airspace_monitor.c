@@ -37,12 +37,6 @@
 #define AIRSPACE_SEC_OWE         0x40U
 #define AIRSPACE_SEC_PMF_REQUIRED 0x80U
 
-#if defined(CONFIG_IDF_TARGET_ESP32C5)
-#define AIRSPACE_MAX_WIFI_CHANNEL 165
-#else
-#define AIRSPACE_MAX_WIFI_CHANNEL 13
-#endif
-
 typedef struct {
     bool used;
     uint8_t mac[6];
@@ -554,23 +548,15 @@ static void build_channel_list(void) {
     // User hop profile takes priority; otherwise build the country-appropriate
     // list (with the legacy fallback if the country query comes up empty).
     size_t profile_count = 0;
-    hop_profile_resolve(candidates, WIFI_CHANNELS_MAX, &profile_count);
+    hop_profile_resolve_monitor(candidates, WIFI_CHANNELS_MAX, &profile_count);
     uint8_t candidate_count;
     if (profile_count > 0) {
         candidate_count = (uint8_t)profile_count;
     } else {
         candidate_count = wifi_channels_build_country_list(candidates, WIFI_CHANNELS_MAX);
         if (candidate_count == 0) {
-            static const uint8_t fallback[] = {
-                1,2,3,4,5,6,7,8,9,10,11,12,13,
-                36,40,44,48,149,153,157,161,165
-            };
-            candidate_count = 0;
-            for (size_t i = 0; i < sizeof(fallback) && candidate_count < WIFI_CHANNELS_MAX; i++) {
-                if (fallback[i] <= AIRSPACE_MAX_WIFI_CHANNEL) {
-                    candidates[candidate_count++] = fallback[i];
-                }
-            }
+            candidates[0] = 1;
+            candidate_count = 1;
         }
     }
 
@@ -587,8 +573,8 @@ static void build_channel_list(void) {
         if (duplicate) {
             continue;
         }
-        if (!wifi_channels_is_safe_monitor_channel(ch)) {
-            ESP_LOGD(TAG, "Skipping DFS/unsafe monitor channel %u", (unsigned)ch);
+        if (!wifi_channels_is_monitor_channel(ch)) {
+            ESP_LOGD(TAG, "Skipping country/unsupported monitor channel %u", (unsigned)ch);
             continue;
         }
 
@@ -646,7 +632,7 @@ static void hop_timer_cb(void *arg) {
         portEXIT_CRITICAL(&s_lock);
         attempts_made++;
 
-        if (!wifi_channels_is_safe_monitor_channel(channel)) {
+        if (!wifi_channels_is_monitor_channel(channel)) {
             portENTER_CRITICAL(&s_lock);
             s_hop_fail++;
             portEXIT_CRITICAL(&s_lock);

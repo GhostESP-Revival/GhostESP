@@ -10,13 +10,13 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "managers/ap_manager.h"
 #include "managers/ble_manager.h"
 #include "managers/gps_manager.h"
 #include "managers/sd_card_manager.h"
 #include "managers/status_display_manager.h"
 #include "managers/wifi_manager.h"
 #include "managers/zigbee_manager.h"
+#include "scans/wifi/station_scan.h"
 #include "sdkconfig.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -279,7 +279,7 @@ static void sweep_run_internal(void) {
         glog("\nReport saved to: %s\n", report_path);
     }
 
-    (void)ap_manager_restore_after_attack("sweep");
+    // station_scan_stop() owns AP/STA restoration after the station phase.
     glog("\n=== Sweep Complete ===\n");
     glog("WiFi: %d APs, %d stations | Security: %d open, %d weak, %d secure\n",
          ap_cnt, station_count, open_networks, weak_networks, secure_networks);
@@ -336,13 +336,32 @@ void handle_scanall(int argc, char **argv) {
 
     // 1. Perform AP Scan
     glog("--- Starting AP Scan (%d seconds) ---\n", ap_scan_seconds);
-    wifi_manager_start_scan_with_time(ap_scan_seconds);
+    esp_err_t ap_scan_err = wifi_manager_start_scan_with_time(ap_scan_seconds);
+    if (ap_scan_err != ESP_OK) {
+        glog("AP scan failed: %s\n", esp_err_to_name(ap_scan_err));
+        status_display_show_status("Scan Failed");
+        return;
+    }
     // Results are now in scanned_aps and ap_count
+
+    uint16_t ap_count = 0;
+    wifi_ap_record_t *aps = NULL;
+    wifi_manager_get_scan_results_data(&ap_count, &aps);
+    if (ap_count == 0 || aps == NULL) {
+        glog("No AP results available for station scan.\n");
+        status_display_show_status("Scan Failed");
+        return;
+    }
 
     // 2. Perform Station Scan
     glog("--- Starting Station Scan (%d seconds) ---\n", sta_scan_seconds);
     station_count = 0; // Reset station list before new scan
     wifi_manager_start_station_scan(); // Starts monitor mode + channel hopping
+    if (!station_scan_is_active()) {
+        glog("Station scan failed to start.\n");
+        status_display_show_status("Scan Failed");
+        return;
+    }
     glog("Station scan running for %d seconds...\n", sta_scan_seconds);
     vTaskDelay(pdMS_TO_TICKS(sta_scan_seconds * 1000));
     wifi_manager_stop_monitor_mode(); // Stops monitor mode + channel hopping
@@ -353,7 +372,7 @@ void handle_scanall(int argc, char **argv) {
     // 3. Print Combined Results
     wifi_manager_scanall_chart();
 
-    (void)ap_manager_restore_after_attack("scanall");
+    // station_scan_stop() restores GhostNet after the station phase.
     status_display_show_status("ScanAll Done");
 }
 

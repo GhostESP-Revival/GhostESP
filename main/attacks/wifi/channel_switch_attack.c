@@ -4,6 +4,7 @@
 #include "managers/rgb_manager.h"
 #include "managers/status_display_manager.h"
 #include "scans/wifi/ap_scan.h"
+#include "scans/wifi/wifi_channels.h"
 #include "core/glog.h"
 #include "core/system_manager.h"
 #include "esp_wifi.h"
@@ -23,15 +24,23 @@ static TaskHandle_t csa_task_handle = NULL;
 static volatile bool csa_stop_requested = false;
 
 static uint8_t get_different_channel(int ap_channel) {
-    uint8_t new_channel;
-    do {
-#if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
-        new_channel = 1 + (esp_random() % 13);
-#else
-        new_channel = 1 + (esp_random() % MAX_WIFI_CHANNEL);
-#endif
-    } while (new_channel == ap_channel);
-    return new_channel;
+    uint8_t channels[WIFI_CHANNELS_MAX] = {0};
+    uint8_t count = wifi_channels_build_country_list(channels,
+                                                       sizeof(channels));
+    uint8_t candidates[WIFI_CHANNELS_MAX];
+    uint8_t candidate_count = 0;
+    bool ap_is_5ghz = wifi_channels_is_5ghz((uint8_t)ap_channel);
+
+    for (uint8_t i = 0; i < count; i++) {
+        if (wifi_channels_is_5ghz(channels[i]) != ap_is_5ghz ||
+            channels[i] == ap_channel ||
+            !wifi_channels_is_tx_channel(channels[i])) {
+            continue;
+        }
+        candidates[candidate_count++] = channels[i];
+    }
+    if (candidate_count == 0) return 0;
+    return candidates[esp_random() % candidate_count];
 }
 
 static void build_csa_beacon(uint8_t *beacon, size_t *beacon_len, 
@@ -102,14 +111,24 @@ static void csa_attack_task(void *param) {
     while (!csa_stop_requested) {
         for (int i = 0; i < selected_ap_count && !csa_stop_requested; i++) {
             int ap_channel = selected_aps[i].primary;
-            if (ap_channel < 1 || ap_channel > MAX_WIFI_CHANNEL) {
-                ap_channel = 1;
+            if (!wifi_channels_is_tx_channel((uint8_t)ap_channel)) {
+                glog("CSA: skipping unsupported AP channel %d\n", ap_channel);
+                continue;
             }
-            
+
             uint8_t new_channel = get_different_channel(ap_channel);
-            
+            if (new_channel == 0) {
+                glog("CSA: no legal same-band channel for AP channel %d\n", ap_channel);
+                continue;
+            }
+
             wifi_second_chan_t second = WIFI_SECOND_CHAN_NONE;
-            esp_wifi_set_channel(ap_channel, second);
+            esp_err_t channel_err = esp_wifi_set_channel((uint8_t)ap_channel, second);
+            if (channel_err != ESP_OK) {
+                glog("CSA: failed to set AP channel %d: %s\n",
+                     ap_channel, esp_err_to_name(channel_err));
+                continue;
+            }
             vTaskDelay(pdMS_TO_TICKS(1));
             
             uint8_t ssid_len = strnlen((char *)selected_aps[i].ssid, 32);
@@ -126,7 +145,11 @@ static void csa_attack_task(void *param) {
                 vTaskDelay(pdMS_TO_TICKS(2));
             }
             
-            esp_wifi_set_channel(new_channel, second);
+            channel_err = esp_wifi_set_channel(new_channel, second);
+            if (channel_err != ESP_OK) {
+                glog("CSA: failed to set new channel %u: %s\n",
+                     (unsigned)new_channel, esp_err_to_name(channel_err));
+            }
         }
         
         vTaskDelay(pdMS_TO_TICKS(100));

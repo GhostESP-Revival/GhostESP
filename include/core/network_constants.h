@@ -55,7 +55,7 @@ bool is_file_sharing_port(uint16_t port);
 extern const uint8_t LIVE_AP_CHANNELS_2GHZ[];
 extern const size_t LIVE_AP_CHANNELS_2GHZ_COUNT;
 
-// WiFi channels for 2.4 GHz + 5 GHz (ESP32C5/C6 only)
+// WiFi channels for 2.4 GHz + 5 GHz (ESP32C5 only; C6 is 2.4 GHz-only)
 extern const uint8_t LIVE_AP_CHANNELS_DUAL[];
 extern const size_t LIVE_AP_CHANNELS_DUAL_COUNT;
 
@@ -94,9 +94,9 @@ extern const uint8_t NAN_DEST_MAC[6];
 // Maximum WiFi channel based on target
 #if !defined(MAX_WIFI_CHANNEL)
 #if defined(CONFIG_IDF_TARGET_ESP32C5)
-#define MAX_WIFI_CHANNEL 165
+#define MAX_WIFI_CHANNEL 177
 #else
-#define MAX_WIFI_CHANNEL 13
+#define MAX_WIFI_CHANNEL 14
 #endif
 #endif
 

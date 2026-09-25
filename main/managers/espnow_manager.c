@@ -2,6 +2,7 @@
 
 #include "core/ghostchi_identity.h"
 #include "managers/wifi_manager.h"
+#include "scans/wifi/wifi_channels.h"
 
 #include "esp_err.h"
 #include "esp_heap_caps.h"
@@ -223,8 +224,10 @@ static void espnow_recv_cb(const esp_now_recv_info_t *info, const uint8_t *data,
 
 bool espnow_manager_start(uint8_t channel) {
     if (s_active) return true;
-    if (channel < 1 || channel > 14) {
-        set_error("Choose a 2.4 GHz channel (1-14)");
+    if (channel < 1 || channel > 14 ||
+        wifi_channels_is_5ghz(channel) ||
+        !wifi_channels_is_tx_channel(channel)) {
+        set_error("Choose a country-valid 2.4 GHz channel");
         return false;
     }
 

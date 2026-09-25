@@ -34,11 +34,13 @@ bool hop_profile_set_custom_from_string(const char *text);
 // The stored custom list, always normalized to "a,b,c".
 const char *hop_profile_get_custom_str(void);
 
-// Resolve the currently selected mode into a concrete channel list. On
-// HOP_MODE_DEFAULT writes nothing into out/out_count so the caller can fall
-// back to its own feature-specific list. HOP_MODE_ALL reuses the country-aware
-// builder, HOP_MODE_CUSTOM lists are validated against
-// wifi_channels_is_safe_monitor_channel() and deduped.
+// Resolve the currently selected mode for transmit-capable features. DFS
+// channels are omitted because active radar/CAC transmit handling is not
+// implemented. On HOP_MODE_DEFAULT writes nothing into out/out_count.
 void hop_profile_resolve(uint8_t *out, size_t out_cap, size_t *out_count);
+
+// Resolve the selected profile for receive-only monitoring. This keeps all
+// target- and country-allowed C5 DFS channels.
+void hop_profile_resolve_monitor(uint8_t *out, size_t out_cap, size_t *out_count);
 
 #endif // HOP_PROFILE_H

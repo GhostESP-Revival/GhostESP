@@ -17,6 +17,7 @@
 #include "managers/ghostscript_runtime.h"
 #include "core/system_manager.h"
 #include "core/glog.h"
+#include "scans/wifi/wifi_channels.h"
 #include "esp_wifi.h"
 #include "esp_random.h"
 #include "freertos/task.h"
@@ -97,8 +98,13 @@ static void probe_flood_task(void *param) {
             // Flood probe requests for every selected AP on its own channel
             for (int i = 0; i < selected_ap_count; i++) {
                 if (!probe_flood_running) break;
+                if (!wifi_channels_is_tx_channel(selected_aps[i].primary)) {
+                    continue;
+                }
                 uint8_t ssid_len = (uint8_t)strnlen((const char *)selected_aps[i].ssid, 32);
-                esp_wifi_set_channel(selected_aps[i].primary, WIFI_SECOND_CHAN_NONE);
+                esp_err_t channel_err = esp_wifi_set_channel(selected_aps[i].primary,
+                                                             WIFI_SECOND_CHAN_NONE);
+                if (channel_err != ESP_OK) continue;
                 uint16_t len = build_probe_request(frame, selected_aps[i].ssid, ssid_len);
                 for (int burst = 0; burst < 10 && probe_flood_running; burst++) {
                     if (esp_wifi_80211_tx(ap_manager_get_tx_iface(), frame, len, false) == ESP_OK) {
@@ -109,8 +115,17 @@ static void probe_flood_task(void *param) {
             }
         } else if (strlen((const char *)selected_ap.ssid) > 0) {
             // Flood the single selected AP's SSID
+            if (!wifi_channels_is_tx_channel(selected_ap.primary)) {
+                probe_flood_running = false;
+                break;
+            }
             uint8_t ssid_len = (uint8_t)strnlen((const char *)selected_ap.ssid, 32);
-            esp_wifi_set_channel(selected_ap.primary, WIFI_SECOND_CHAN_NONE);
+            esp_err_t channel_err = esp_wifi_set_channel(selected_ap.primary,
+                                                         WIFI_SECOND_CHAN_NONE);
+            if (channel_err != ESP_OK) {
+                probe_flood_running = false;
+                break;
+            }
             uint16_t len = build_probe_request(frame, selected_ap.ssid, ssid_len);
             for (int burst = 0; burst < 10 && probe_flood_running; burst++) {
                 if (esp_wifi_80211_tx(ap_manager_get_tx_iface(), frame, len, false) == ESP_OK) {

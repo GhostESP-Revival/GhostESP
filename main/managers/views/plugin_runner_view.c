@@ -2,11 +2,10 @@
 
 #include "gui/lvgl_safe.h"
 #include "gui/screen_layout.h"
-#if defined(CONFIG_IDF_TARGET_ESP32P4)
 #include "gui/native_canvas_touch.h"
-#endif
 #include "managers/plugin_api.h"
 #include "managers/plugin_loader.h"
+#include "managers/display_manager.h"
 #include "managers/sd_card_manager.h"
 #include "managers/views/app_gallery_screen.h"
 #include "managers/views/error_popup.h"
@@ -38,9 +37,10 @@ static lv_timer_t *s_launch_timer = NULL;
 #define PLUGIN_RUNNER_OUTPUT_BUF_SIZE 2048
 static char *s_output_buf = NULL;
 static bool s_touch_started = false;
-#if defined(CONFIG_IDF_TARGET_ESP32P4)
+/* Set when the gesture began on a non-scrolling canvas of a running app: the
+ * app owns the whole press/move/release sequence (see
+ * gui/native_canvas_touch.h). Needed on every target, not just P4. */
 static bool s_touch_raw_canvas = false;
-#endif
 static bool s_touch_scrolling = false;
 static lv_point_t s_touch_start = {0};
 static lv_point_t s_touch_last = {0};
@@ -169,6 +169,7 @@ static void runner_show_load_error_toast(esp_err_t err) {
 
 static bool s_sd_eject_detected = false;
 static volatile bool s_exit_queued = false;
+static lv_timer_t *s_exit_defer_timer = NULL;
 #if defined(CONFIG_IDF_TARGET_ESP32P4)
 static lv_timer_t *s_home_exit_timer = NULL;
 #endif
@@ -222,10 +223,20 @@ bool plugin_runner_request_home_exit(void) {
 static void plugin_runner_go_back_async(void *arg) {
     (void)arg;
     if (display_manager_get_current_view() != &plugin_runner_view) {
+        /* Nothing to leave. s_exit_queued must still be released, or every
+         * later exit request short-circuits on it and the app can never be
+         * closed again. */
+        s_exit_queued = false;
         return;
     }
     s_exit_queued = false;
     display_manager_go_back();
+}
+
+static void plugin_runner_exit_deferred_cb(lv_timer_t *timer) {
+    lv_timer_del(timer);
+    s_exit_defer_timer = NULL;
+    plugin_runner_go_back_async(NULL);
 }
 
 void plugin_runner_request_exit(void) {
@@ -233,6 +244,25 @@ void plugin_runner_request_exit(void) {
         return;
     }
     s_exit_queued = true;
+    /* An app can request exit from a UI callback - the shared touch bar's back
+     * button is the common case - and that callback is dispatched by the very
+     * widget tree we are about to destroy. run_on_lvgl executes inline when the
+     * caller is already the UI task, so going back here would tear the view
+     * down re-entrantly, inside the button's own LV_EVENT_CLICKED dispatch, and
+     * the app would appear to ignore Back. Defer to a zero-delay timer so the
+     * switch happens after the event has unwound. */
+    if (display_manager_is_lvgl_task()) {
+        if (!s_exit_defer_timer) {
+            s_exit_defer_timer = lv_timer_create(plugin_runner_exit_deferred_cb, 0, NULL);
+            if (!s_exit_defer_timer) {
+                s_exit_queued = false;
+                return;
+            }
+        } else {
+            lv_timer_ready(s_exit_defer_timer);
+        }
+        return;
+    }
     display_manager_run_on_lvgl(plugin_runner_go_back_async, NULL);
 }
 
@@ -448,17 +478,20 @@ static bool plugin_runner_handle_touch(const InputEvent *event) {
             s_touch_start = data->point;
             s_touch_last = data->point;
             s_touch_scroll_target = NULL;
-#if defined(CONFIG_IDF_TARGET_ESP32P4)
-            plugin_loaded_app_t *loaded = plugin_loader_current();
-            s_touch_raw_canvas = loaded && loaded->running && loaded->app &&
-                loaded->app->on_input &&
-                native_canvas_touch_target(find_deepest_at(s_root, &data->point), s_root);
-#endif
+            /* A non-scrolling canvas belongs to the app for the whole gesture
+             * on every target, not just P4. LVGL makes a canvas clickable, so
+             * without this the generic bridge turns the release into a click on
+             * the canvas and the app never sees it - which leaves the app's
+             * held controls (d-pad directions, held buttons) stuck on. */
+            {
+                plugin_loaded_app_t *loaded = plugin_loader_current();
+                s_touch_raw_canvas = loaded && loaded->running && loaded->app &&
+                    loaded->app->on_input &&
+                    native_canvas_touch_target(find_deepest_at(s_root, &data->point), s_root);
+            }
             return false;
         }
-#if defined(CONFIG_IDF_TARGET_ESP32P4)
         if (s_touch_raw_canvas) return false;
-#endif
         int total_dx = data->point.x - s_touch_start.x;
         int total_dy = data->point.y - s_touch_start.y;
         int dy = data->point.y - s_touch_last.y;
@@ -478,12 +511,10 @@ static bool plugin_runner_handle_touch(const InputEvent *event) {
     if (data->state != LV_INDEV_STATE_REL || !s_touch_started) return false;
     s_touch_started = false;
     s_touch_scroll_target = NULL;
-#if defined(CONFIG_IDF_TARGET_ESP32P4)
     if (s_touch_raw_canvas) {
         s_touch_raw_canvas = false;
         return false;
     }
-#endif
     if (s_touch_scrolling) {
         s_touch_scrolling = false;
         return true;
@@ -527,8 +558,15 @@ static void plugin_runner_event_handler(InputEvent *event) {
         }
     }
     if (app_event.type == GHOSTESP_INPUT_BACK) {
-        plugin_runner_request_exit();
-        return;
+        plugin_loaded_app_t *back_app = plugin_loader_current();
+        /* Apps that opt in with "forward_back" receive BACK and decide
+         * themselves whether it pops a page or leaves (native view
+         * semantics). Everything else keeps 'back exits the app'. */
+        if (!(back_app && back_app->manifest && back_app->manifest->forward_back &&
+              back_app->running)) {
+            plugin_runner_request_exit();
+            return;
+        }
     }
     plugin_loaded_app_t *loaded = plugin_loader_current();
     if (!loaded || !loaded->running) {
@@ -716,6 +754,10 @@ void plugin_runner_view_destroy(void) {
 #if defined(CONFIG_IDF_TARGET_ESP32P4)
     plugin_runner_cancel_home_exit();
 #endif
+    if (s_exit_defer_timer) {
+        lv_timer_del(s_exit_defer_timer);
+        s_exit_defer_timer = NULL;
+    }
     if (s_launch_timer) {
         lv_timer_del(s_launch_timer);
         s_launch_timer = NULL;

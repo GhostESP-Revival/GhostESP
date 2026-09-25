@@ -19,6 +19,7 @@
 #include "core/system_manager.h"
 #include "core/glog.h"
 #include "core/network_constants.h"
+#include "scans/wifi/wifi_channels.h"
 #include "esp_wifi.h"
 #include "esp_random.h"
 #include "freertos/task.h"
@@ -121,7 +122,10 @@ static uint16_t build_bad_msg_frame(uint8_t *frame, const uint8_t *ap_bssid, con
 static void bad_msg_burst(const uint8_t *ap_bssid, int channel, const uint8_t *sta_mac) {
     // Static frame buffer: single task instance, no per-call stack cost
     static uint8_t frame[BAD_MSG_FRAME_LEN];
-    esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
+    if (!wifi_channels_is_tx_channel((uint8_t)channel) ||
+        esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE) != ESP_OK) {
+        return;
+    }
     uint16_t len = build_bad_msg_frame(frame, ap_bssid, sta_mac);
     for (int burst = 0; burst < 10 && bad_msg_running; burst++) {
         if (esp_wifi_80211_tx(ap_manager_get_tx_iface(), frame, len, false) == ESP_OK) {
@@ -133,6 +137,7 @@ static void bad_msg_burst(const uint8_t *ap_bssid, int channel, const uint8_t *s
 // Attack all known stations on one AP; fall back to broadcast when no
 // stations have been discovered for it.
 static void bad_msg_attack_ap(const uint8_t *ap_bssid, int channel) {
+    if (!wifi_channels_is_tx_channel((uint8_t)channel)) return;
     bool sent_any = false;
     for (int j = 0; j < station_count; j++) {
         if (memcmp(station_ap_list[j].ap_bssid, ap_bssid, 6) == 0) {
@@ -161,12 +166,16 @@ static void bad_msg_task(void *param) {
     while (bad_msg_running) {
         if (station_selected) {
             // Target the selected station's AP only
-            int ch = 1;
+            int ch = 0;
             for (int i = 0; i < ap_count; i++) {
                 if (memcmp(scanned_aps[i].bssid, selected_station.ap_bssid, 6) == 0) {
                     ch = scanned_aps[i].primary;
                     break;
                 }
+            }
+            if (ch == 0) {
+                bad_msg_running = false;
+                break;
             }
             bad_msg_burst(selected_station.ap_bssid, ch, selected_station.station_mac);
             vTaskDelay(pdMS_TO_TICKS(10));
