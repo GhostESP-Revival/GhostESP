@@ -91,7 +91,7 @@ void handle_help(int argc, char **argv) {
         glog("    Description: Stop ongoing beacon spam.\n");
         glog("    Usage: stopspam\n\n");
         glog("hop\n");
-        glog("    Description: Set the channel plan used by WiFi hopping features (deauth, beacon spam, scans, monitors).\n");
+        glog("    Description: Set the country-aware channel plan for scans and monitors.\n");
         glog("    Usage: hop [auto | all | basic | custom <channels> | <channels>]\n");
         glog("    Examples:\n");
         glog("        hop             : Show current hop mode and channel plan\n");
@@ -179,13 +179,12 @@ void handle_help(int argc, char **argv) {
         glog("    Usage: tracksta\n");
         glog("    Note: select a station first with 'select -s <index>'\n\n");
         glog("setcountry\n");
-        glog("    Description: Set the Wi-Fi country code. 2.4 GHz-only targets use the full\n");
-        glog("                 1-13 channel range regardless of the code; the C5 applies the real\n");
-        glog("                 regulatory range.\n");
+        glog("    Description: Set the Wi-Fi country code. Channel plans follow the active\n");
+        glog("                 country rules; channel 14 is used only where allowed.\n");
         glog("    Usage: setcountry <CC>\n");
         glog("    Arguments:\n");
         glog("        <CC> : Country code (\"01\" world-safe) or two-letter ISO (e.g., US)\n");
-        glog("    Persisted across reboots: US, GB, JP, AU, CN, 01\n");
+        glog("    Persisted UI values: US, GB, JP, AU, CN, 01; other ISO codes apply until reboot\n");
         glog("    Supported: 01, AT, AU, BE, BG, BR, CA, CH, CN, CY, CZ, DE, DK, EE, ES, FI, FR, GB, GR, HK, HR, HU,\n");
         glog("               IE, IN, IS, IT, JP, KR, LI, LT, LU, LV, MT, MX, NL, NO, NZ, PL, PT, RO, SE, SI, SK, TW, US\n\n");
         return;
@@ -580,7 +579,7 @@ void handle_help(int argc, char **argv) {
         glog("                    Usage: capture -export <pcap-file>\n");
         glog("        -wireshark : Stream raw PCAP to USB/UART for Wireshark\n");
         glog("                    Usage: capture -wireshark [-c <channel>|-channel <channel>]\n");
-        glog("                    -channel <n>: Lock to specific channel (1-%d)\n", MAX_WIFI_CHANNEL);
+        glog("                    -channel <n>: Lock to a target/country-valid channel\n");
         glog("        -wiresharkble : Stream BLE PCAP to USB/UART for Wireshark\n");
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
         glog("        -ble       : Start BLE packet capture\n");

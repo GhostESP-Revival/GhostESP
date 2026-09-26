@@ -69,9 +69,9 @@ static void *mon_tbl_calloc(size_t n, size_t size) {
 #define MAX_SSIDS_PER_BSSID 10
 #if !defined(MAX_WIFI_CHANNEL)
 #if defined(CONFIG_IDF_TARGET_ESP32C5)
-#define MAX_WIFI_CHANNEL 165
+#define MAX_WIFI_CHANNEL 177
 #else
-#define MAX_WIFI_CHANNEL 13
+#define MAX_WIFI_CHANNEL 14
 #endif
 #endif
 #define CHANNEL_HOP_INTERVAL_MS 100
@@ -1124,25 +1124,15 @@ static void wardrive_apply_hop_interval(void) {
 }
 
 static uint8_t wardrive_build_full_channel_list(uint8_t *full_channels) {
-    if (!full_channels) {
-        return 0;
-    }
+    if (!full_channels) return 0;
 
-    uint8_t full_count = wifi_channels_build_country_list(full_channels, WIFI_CHANNELS_MAX);
-    if (full_count == 0) {
-        uint8_t fallback[] = {1,2,3,4,5,6,7,8,9,10,11,12,13,
-#if defined(CONFIG_IDF_TARGET_ESP32C5)
-            36,40,44,48,52,56,60,64,100,104,108,112,116,120,124,128,132,136,140,144,149,153,157,161,165};
-#else
-        };
-#endif
-        uint8_t count = sizeof(fallback);
-        if (count > WIFI_CHANNELS_MAX) count = WIFI_CHANNELS_MAX;
-        memcpy(full_channels, fallback, count);
-        full_count = count;
+    uint8_t count = wifi_channels_build_country_list(full_channels,
+                                                       WIFI_CHANNELS_MAX);
+    if (count == 0) {
+        full_channels[0] = 1;
+        count = 1;
     }
-
-    return full_count;
+    return count;
 }
 
 static bool wardrive_is_common_5g_channel(uint8_t ch) {
@@ -1152,7 +1142,7 @@ static bool wardrive_is_common_5g_channel(uint8_t ch) {
 static void wardrive_build_channel_list(void) {
     uint8_t full[WIFI_CHANNELS_MAX] = {0}, base[WIFI_CHANNELS_MAX] = {0};
     size_t profile_count = 0;
-    hop_profile_resolve(full, sizeof(full), &profile_count);
+    hop_profile_resolve_monitor(full, sizeof(full), &profile_count);
     uint8_t full_count = profile_count ? (uint8_t)profile_count : wardrive_build_full_channel_list(full);
     uint8_t count = 0;
     if (wardrive_role == WARDRIVE_ROLE_HELPER && wardrive_primary_channel_count) {
@@ -2065,9 +2055,12 @@ static void wardrive_hop_timer_callback(void *arg) {
         return;
     }
     
-    // Send probe request to trigger AP responses
-    wardrive_send_probe_request();
-    
+    // The active backend sends probe requests itself. Monitor mode is
+    // receive-only and must not transmit on DFS channels.
+    if (wardrive_active_scan_enabled) {
+        wardrive_send_probe_request();
+    }
+
     hop_count++;
     if (hop_count % 200 == 0) {
         ESP_LOGI(TAG, "Wardrive hopped to channel %d (hop #%d)", wardrive_channel, hop_count);
@@ -2840,7 +2833,7 @@ bool wardriving_start_peer_helper(void) {
     if (!esp_comm_manager_is_connected()) return false;
     uint8_t channels[WIFI_CHANNELS_MAX];
     size_t count = 0;
-    hop_profile_resolve(channels, sizeof(channels), &count);
+    hop_profile_resolve_monitor(channels, sizeof(channels), &count);
     if (!count) count = wardrive_build_full_channel_list(channels);
     char primary[192] = {0}, fallback[192] = {0}, command[251];
     size_t pos = 0;

@@ -28,6 +28,13 @@ void gui_router_replace(const gui_route_t *route);
 void gui_router_back(void);
 void gui_router_reset(const gui_route_t *route);
 
+/* Rebuild the view on top of the stack without touching the stack. Views that
+ * are one view with several steps (the setup wizard) keep the step in module
+ * state and rebuild themselves to show it; re-routing the same view is a no-op
+ * because the route equals the one already on top. Always deferred, so it is
+ * safe to call from inside the view's own event callbacks. */
+void gui_router_refresh(void);
+
 /* These immediate variants are for display-manager callbacks already running
  * on the LVGL task. Normal callers should use the operations above. */
 void gui_router_navigate_immediate(const gui_route_t *route);

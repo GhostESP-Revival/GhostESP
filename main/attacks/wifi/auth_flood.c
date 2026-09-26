@@ -23,6 +23,7 @@
 #include "managers/ghostscript_runtime.h"
 #include "core/system_manager.h"
 #include "core/glog.h"
+#include "scans/wifi/wifi_channels.h"
 #include "esp_wifi.h"
 #include "esp_random.h"
 #include "esp_timer.h"
@@ -147,7 +148,10 @@ static void auth_flood_task(void *param) {
             // Flood auth frames at every selected AP on its own channel
             for (int i = 0; i < selected_ap_count; i++) {
                 if (!auth_flood_running) break;
-                esp_wifi_set_channel(selected_aps[i].primary, WIFI_SECOND_CHAN_NONE);
+                if (!wifi_channels_is_tx_channel(selected_aps[i].primary) ||
+                    esp_wifi_set_channel(selected_aps[i].primary, WIFI_SECOND_CHAN_NONE) != ESP_OK) {
+                    continue;
+                }
                 uint16_t len = build_auth_frame(frame, selected_aps[i].bssid);
                 int burst = AUTH_FLOOD_MIN_BURST + (int)(esp_random() % (AUTH_FLOOD_MAX_BURST - AUTH_FLOOD_MIN_BURST + 1));
                 for (int n = 0; n < burst && auth_flood_running; n++) {
@@ -161,7 +165,11 @@ static void auth_flood_task(void *param) {
             }
         } else if (strlen((const char *)selected_ap.ssid) > 0) {
             // Flood the single selected AP
-            esp_wifi_set_channel(selected_ap.primary, WIFI_SECOND_CHAN_NONE);
+            if (!wifi_channels_is_tx_channel(selected_ap.primary) ||
+                esp_wifi_set_channel(selected_ap.primary, WIFI_SECOND_CHAN_NONE) != ESP_OK) {
+                auth_flood_running = false;
+                break;
+            }
             uint16_t len = build_auth_frame(frame, selected_ap.bssid);
             int burst = AUTH_FLOOD_MIN_BURST + (int)(esp_random() % (AUTH_FLOOD_MAX_BURST - AUTH_FLOOD_MIN_BURST + 1));
             for (int n = 0; n < burst && auth_flood_running; n++) {

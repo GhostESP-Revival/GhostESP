@@ -7,6 +7,7 @@
 #include "core/memory_debug.h"
 #include "gui/design_tokens.h"
 #include "gui/theme_palette_api.h"
+#include "gui/options_view.h"
 #include "managers/settings_manager.h"
 #include "gui/screen_layout.h"
 #include "managers/badusb_manager.h"
@@ -79,6 +80,21 @@ static uint32_t s_input_held;
 static uint32_t s_input_pressed;
 static uint32_t s_input_released;
 static uint32_t s_input_last_change_ms;
+static bool s_touch_active;
+static int32_t s_touch_x;
+static int32_t s_touch_y;
+
+/* One reset point for every input field, used on both load and unload so a
+   fresh app never inherits a stuck button or a phantom finger. */
+static void plugin_api_input_reset_locked(void) {
+    s_input_held = 0;
+    s_input_pressed = 0;
+    s_input_released = 0;
+    s_input_last_change_ms = 0;
+    s_touch_active = false;
+    s_touch_x = 0;
+    s_touch_y = 0;
+}
 
 /* Assets an app's materialize pass chose to leave inside its .gapp archive
    rather than extract to the SD cache (see plugin_installer.c's ".direct_index"
@@ -409,7 +425,7 @@ static bool plugin_api_has_ui_permission(void) {
 static void plugin_ui_sync_apply(void *arg) {
     plugin_ui_sync_call_t *call = (plugin_ui_sync_call_t *)arg;
     if (call && call->fn) call->fn(call->ctx);
-    if (call && call->done) xSemaphoreGive(call->done);
+    if (call && call->task) xTaskNotifyGive(call->task);
 }
 
 static bool plugin_ui_run_sync(void (*fn)(void *ctx), void *ctx) {
@@ -418,20 +434,23 @@ static bool plugin_ui_run_sync(void (*fn)(void *ctx), void *ctx) {
         fn(ctx);
         return true;
     }
-    SemaphoreHandle_t done = xSemaphoreCreateBinary();
-    if (!done) return false;
     plugin_ui_sync_call_t call = {
         .fn = fn,
         .ctx = ctx,
-        .done = done,
+        .task = xTaskGetCurrentTaskHandle(),
     };
+    if (!call.task) return false;
     display_manager_run_on_lvgl(plugin_ui_sync_apply, &call);
     /* The queued call borrows both call and ctx. They must remain alive until
        LVGL has completed the callback; there is no safe timeout without queue
-       cancellation support from display_manager_run_on_lvgl(). */
-    bool ok = xSemaphoreTake(done, portMAX_DELAY) == pdTRUE;
-    vSemaphoreDelete(done);
-    return ok;
+       cancellation support from display_manager_run_on_lvgl().
+
+       The wait is a direct task notification rather than a per-call binary
+       semaphore: the notification state lives in this task's TCB, so nothing
+       is allocated per call. Exactly one notification is given per queued call
+       and the wait never times out, so a leftover count cannot short-circuit a
+       later call. */
+    return ulTaskNotifyTake(pdTRUE, portMAX_DELAY) == pdTRUE;
 }
 
 static lv_obj_t *plugin_ui_parent_or_current(ghostesp_ui_obj_t parent) {
@@ -571,11 +590,29 @@ static void plugin_api_ui_show_text(const char *title, const char *text) {
     plugin_api_ui_print(text);
 }
 
+/* Page stack for ui_page_push/ui_page_pop (see the v2 block further down):
+ * pushed pages are hidden rather than destroyed, so returning to one restores
+ * its widget state like the native view stack. */
+#define PLUGIN_PAGE_STACK_MAX 4
+
+typedef struct {
+    lv_obj_t *content;
+    char title[32];
+} plugin_page_slot_t;
+
+static plugin_page_slot_t s_page_stack[PLUGIN_PAGE_STACK_MAX];
+static int s_page_depth;
+static lv_obj_t *s_current_content;
+static char s_current_title[32];
+
 static void plugin_api_ui_screen_create_now(void *arg) {
     plugin_ui_create_ctx_t *ctx = (plugin_ui_create_ctx_t *)arg;
     lv_obj_t *root = plugin_ui_parent_or_current(NULL);
     if (!root) return;
 
+    /* A full screen replace invalidates any pushed pages. */
+    s_page_depth = 0;
+    s_current_content = NULL;
     lv_obj_clean(root);
     uint8_t theme = settings_get_menu_theme(&G_Settings);
     lv_obj_set_style_bg_color(root, lv_color_hex(theme_palette_get_background(theme)), LV_PART_MAIN);
@@ -589,12 +626,254 @@ static void plugin_api_ui_screen_create_now(void *arg) {
     lv_obj_set_flex_align(content, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_set_style_pad_row(content, GUI_GRID * 2, LV_PART_MAIN);
     ctx->result = content;
+
+    /* Track the current page so ui_page_push/ui_page_pop can stack over it. */
+    s_current_content = content;
+    snprintf(s_current_title, sizeof(s_current_title), "%s",
+             ctx->title && ctx->title[0] ? ctx->title : "SD App");
 }
 
 static ghostesp_ui_obj_t plugin_api_ui_screen_create(const char *title) {
     if (!plugin_api_has_ui_permission()) return NULL;
     plugin_ui_create_ctx_t ctx = { .title = title };
     return plugin_ui_run_sync(plugin_api_ui_screen_create_now, &ctx) ? ctx.result : NULL;
+}
+
+/* ------------------------------------------------------------------ *
+ * v2 UI primitives: absolute widget rects, native design metrics, and *
+ * a page stack mirroring the native view stack.                       *
+ * ------------------------------------------------------------------ */
+
+typedef struct {
+    lv_obj_t *obj;
+    int32_t x, y, w, h;
+} plugin_ui_rect_ctx_t;
+
+static void plugin_api_ui_obj_get_rect_now(void *arg) {
+    plugin_ui_rect_ctx_t *ctx = (plugin_ui_rect_ctx_t *)arg;
+    if (!ctx->obj || !lv_obj_is_valid(ctx->obj)) return;
+    lv_area_t a;
+    lv_obj_get_coords(ctx->obj, &a);
+    ctx->x = a.x1;
+    ctx->y = a.y1;
+    ctx->w = a.x2 - a.x1 + 1;
+    ctx->h = a.y2 - a.y1 + 1;
+}
+
+void plugin_api_ui_obj_get_rect(ghostesp_ui_obj_t obj, int32_t *x, int32_t *y,
+                                int32_t *w, int32_t *h) {
+    plugin_ui_rect_ctx_t ctx = { .obj = obj };
+    if (plugin_api_has_ui_permission())
+        plugin_ui_run_sync(plugin_api_ui_obj_get_rect_now, &ctx);
+    if (x) *x = ctx.x;
+    if (y) *y = ctx.y;
+    if (w) *w = ctx.w;
+    if (h) *h = ctx.h;
+}
+
+typedef struct {
+    const ghostesp_ui_obj_t *objs;
+    int32_t count;
+    int32_t *out;
+} plugin_ui_rects_ctx_t;
+
+static void plugin_api_ui_obj_get_rects_now(void *arg) {
+    plugin_ui_rects_ctx_t *ctx = (plugin_ui_rects_ctx_t *)arg;
+    for (int32_t i = 0; i < ctx->count; i++) {
+        int32_t *o = &ctx->out[i * 4];
+        o[0] = 0;
+        o[1] = 0;
+        o[2] = 0;
+        o[3] = 0;
+        lv_obj_t *obj = (lv_obj_t *)ctx->objs[i];
+        if (!obj || !lv_obj_is_valid(obj)) continue;
+        lv_area_t a;
+        lv_obj_get_coords(obj, &a);
+        o[0] = a.x1;
+        o[1] = a.y1;
+        o[2] = a.x2 - a.x1 + 1;
+        o[3] = a.y2 - a.y1 + 1;
+    }
+}
+
+int32_t plugin_api_ui_obj_get_rects(const ghostesp_ui_obj_t *objs, int32_t count,
+                                    int32_t *out) {
+    if (!objs || !out || count <= 0) return 0;
+    if (count > GHOSTESP_UI_BATCH_MAX) count = GHOSTESP_UI_BATCH_MAX;
+    if (!plugin_api_has_ui_permission()) return 0;
+    plugin_ui_rects_ctx_t ctx = { .objs = objs, .count = count, .out = out };
+    return plugin_ui_run_sync(plugin_api_ui_obj_get_rects_now, &ctx) ? count : 0;
+}
+
+typedef struct {
+    const ghostesp_ui_prop_set_t *sets;
+    int32_t count;
+    int32_t applied;
+} plugin_ui_props_ctx_t;
+
+static void plugin_api_ui_obj_apply_props_now(void *arg) {
+    plugin_ui_props_ctx_t *ctx = (plugin_ui_props_ctx_t *)arg;
+    for (int32_t i = 0; i < ctx->count; i++) {
+        const ghostesp_ui_prop_set_t *s = &ctx->sets[i];
+        lv_obj_t *obj = (lv_obj_t *)s->obj;
+        /* A stale object is skipped rather than fatal: one dead widget should
+           not cost the rest of the batch its updates. */
+        if (!obj || !lv_obj_is_valid(obj)) continue;
+        switch (s->prop) {
+            case GHOSTESP_UI_PROP_POS:
+                lv_obj_set_pos(obj, s->a, s->b);
+                break;
+            case GHOSTESP_UI_PROP_SIZE:
+                lv_obj_set_size(obj, s->a, s->b);
+                break;
+            case GHOSTESP_UI_PROP_WIDTH:
+                lv_obj_set_width(obj, s->a);
+                break;
+            case GHOSTESP_UI_PROP_HEIGHT:
+                lv_obj_set_height(obj, s->a);
+                break;
+            case GHOSTESP_UI_PROP_PAD:
+                lv_obj_set_style_pad_left(obj, s->a, LV_PART_MAIN);
+                lv_obj_set_style_pad_right(obj, s->b, LV_PART_MAIN);
+                lv_obj_set_style_pad_top(obj, s->c, LV_PART_MAIN);
+                lv_obj_set_style_pad_bottom(obj, s->d, LV_PART_MAIN);
+                break;
+            case GHOSTESP_UI_PROP_SCROLLABLE:
+                if (s->a) lv_obj_add_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
+                else lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
+                break;
+            case GHOSTESP_UI_PROP_FLEX_ALIGN:
+                lv_obj_set_flex_align(obj,
+                                      ghostesp_flex_align_to_lvgl((ghostesp_flex_align_t)s->a),
+                                      ghostesp_flex_align_to_lvgl((ghostesp_flex_align_t)s->b),
+                                      ghostesp_flex_align_to_lvgl((ghostesp_flex_align_t)s->c));
+                break;
+            case GHOSTESP_UI_PROP_BG_COLOR:
+                lv_obj_set_style_bg_color(obj, lv_color_hex((uint32_t)s->a), LV_PART_MAIN);
+                lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, LV_PART_MAIN);
+                break;
+            case GHOSTESP_UI_PROP_TEXT_COLOR:
+                lv_obj_set_style_text_color(obj, lv_color_hex((uint32_t)s->a), LV_PART_MAIN);
+                break;
+            case GHOSTESP_UI_PROP_OPA:
+                lv_obj_set_style_opa(obj, (lv_opa_t)s->a, LV_PART_MAIN);
+                break;
+            case GHOSTESP_UI_PROP_RADIUS:
+                lv_obj_set_style_radius(obj, s->a, LV_PART_MAIN);
+                break;
+            case GHOSTESP_UI_PROP_HIDDEN:
+                if (s->a) lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
+                else lv_obj_clear_flag(obj, LV_OBJ_FLAG_HIDDEN);
+                break;
+            case GHOSTESP_UI_PROP_ALIGN:
+                lv_obj_align(obj, ghostesp_align_to_lvgl((ghostesp_align_t)s->a), s->b, s->c);
+                break;
+            default:
+                /* A property this firmware predates. Skipped so a newer app
+                   still gets the rest of its batch applied. */
+                continue;
+        }
+        ctx->applied++;
+    }
+}
+
+int32_t plugin_api_ui_obj_apply_props(const ghostesp_ui_prop_set_t *sets, int32_t count) {
+    if (!sets || count <= 0) return 0;
+    if (count > GHOSTESP_UI_BATCH_MAX) count = GHOSTESP_UI_BATCH_MAX;
+    if (!plugin_api_has_ui_permission()) return 0;
+    plugin_ui_props_ctx_t ctx = { .sets = sets, .count = count };
+    if (!plugin_ui_run_sync(plugin_api_ui_obj_apply_props_now, &ctx)) return 0;
+    return ctx.applied;
+}
+
+static void plugin_api_ui_metrics_now(void *arg) {
+    ghostesp_ui_metrics_t *out = (ghostesp_ui_metrics_t *)arg;
+    int32_t row;
+#if GUI_LARGE_SCREEN
+    row = options_view_scale_row_height(GUI_CONTROL_H);
+#elif defined(CONFIG_IS_ATOMS3R)
+    row = options_view_scale_row_height(32);
+#else
+    int32_t w = LV_HOR_RES, h = LV_VER_RES;
+    row = options_view_scale_row_height((w <= 240 || h <= 240) ? 40 : 55);
+#endif
+    out->row_height = row;
+    out->grid = GUI_GRID;
+    out->pad_row = GUI_GRID;
+    out->safe_area_hor = GUI_SAFEAREA_HOR;
+    out->safe_area_ver = GUI_SAFEAREA_VER;
+    out->status_bar_h = GUI_STATUS_BAR_H;
+    out->home_safe_h = GUI_HOME_SAFE_H;
+}
+
+void plugin_api_ui_metrics(ghostesp_ui_metrics_t *out) {
+    if (!out || !plugin_api_has_ui_permission()) return;
+    plugin_ui_run_sync(plugin_api_ui_metrics_now, out);
+}
+
+typedef struct {
+    const char *title;
+    lv_obj_t *result;
+} plugin_page_push_ctx_t;
+
+static void plugin_api_ui_page_push_now(void *arg) {
+    plugin_page_push_ctx_t *ctx = (plugin_page_push_ctx_t *)arg;
+    lv_obj_t *root = plugin_ui_parent_or_current(NULL);
+    if (!root || s_page_depth >= PLUGIN_PAGE_STACK_MAX) return;
+
+    /* Hide the current page instead of cleaning the root: unlike
+       ui_screen_create, the page below keeps its widget state so returning
+       to it restores the previous screen exactly, like a native view stack. */
+    if (s_current_content && lv_obj_is_valid(s_current_content)) {
+        lv_obj_add_flag(s_current_content, LV_OBJ_FLAG_HIDDEN);
+        s_page_stack[s_page_depth].content = s_current_content;
+        snprintf(s_page_stack[s_page_depth].title,
+                 sizeof(s_page_stack[s_page_depth].title), "%s", s_current_title);
+        s_page_depth++;
+    }
+
+    display_manager_add_status_bar(ctx->title && ctx->title[0] ? ctx->title : "SD App");
+    lv_obj_t *content = gui_screen_create_content(root, GUI_STATUS_BAR_HEIGHT);
+    if (!content) return;
+    lv_obj_set_style_bg_color(content, lv_color_hex(theme_palette_get_background(
+        settings_get_menu_theme(&G_Settings))), LV_PART_MAIN);
+    lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(content, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    s_current_content = content;
+    snprintf(s_current_title, sizeof(s_current_title), "%s",
+             ctx->title && ctx->title[0] ? ctx->title : "SD App");
+    ctx->result = content;
+}
+
+static void plugin_api_ui_page_pop_now(void *arg) {
+    plugin_ui_create_ctx_t *ctx = (plugin_ui_create_ctx_t *)arg;
+    if (s_page_depth <= 0) return;
+    if (s_current_content && lv_obj_is_valid(s_current_content)) {
+        lv_obj_del(s_current_content);
+    }
+    s_current_content = NULL;
+    s_page_depth--;
+    plugin_page_slot_t *slot = &s_page_stack[s_page_depth];
+    if (slot->content && lv_obj_is_valid(slot->content)) {
+        lv_obj_clear_flag(slot->content, LV_OBJ_FLAG_HIDDEN);
+        s_current_content = slot->content;
+        snprintf(s_current_title, sizeof(s_current_title), "%s", slot->title);
+        display_manager_add_status_bar(slot->title);
+    }
+    slot->content = NULL;
+    ctx->result = s_current_content;
+}
+
+ghostesp_ui_obj_t plugin_api_ui_page_push(const char *title) {
+    if (!plugin_api_has_ui_permission()) return NULL;
+    plugin_page_push_ctx_t ctx = { .title = title };
+    return plugin_ui_run_sync(plugin_api_ui_page_push_now, &ctx) ? ctx.result : NULL;
+}
+
+bool plugin_api_ui_page_pop(void) {
+    if (!plugin_api_has_ui_permission()) return false;
+    plugin_ui_create_ctx_t ctx = { 0 };
+    return plugin_ui_run_sync(plugin_api_ui_page_pop_now, &ctx) && ctx.result != NULL;
 }
 
 static void plugin_api_ui_card_create_now(void *arg) {
@@ -646,7 +925,11 @@ static void plugin_api_ui_button_create_now(void *arg) {
 
     lv_obj_t *label = lv_label_create(button);
     lv_label_set_text(label, ctx->text ? ctx->text : "");
-    lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+    /* Constrain the label to the button and let it marquee when it does not
+     * fit: without an explicit width LV_LABEL_LONG_DOT never truncates, so
+     * long labels (e.g. ROM names) overflowed the row instead of scrolling. */
+    lv_obj_set_width(label, LV_PCT(92));
+    lv_label_set_long_mode(label, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_obj_center(label);
     uint8_t theme = settings_get_menu_theme(&G_Settings);
     lv_obj_set_style_text_color(label, lv_color_hex(theme_palette_get_text(theme)), LV_PART_MAIN);
@@ -1016,6 +1299,17 @@ void plugin_api_record_joystick_state(unsigned int index, bool pressed) {
     portEXIT_CRITICAL(&s_input_snapshot_mux);
 }
 
+void plugin_api_record_touch_state(bool active, int x, int y) {
+    if (!s_api_active) return;
+    portENTER_CRITICAL(&s_input_snapshot_mux);
+    s_touch_active = active;
+    if (active) {
+        s_touch_x = x;
+        s_touch_y = y;
+    }
+    portEXIT_CRITICAL(&s_input_snapshot_mux);
+}
+
 static bool plugin_api_input_snapshot(ghostesp_input_snapshot_t *out) {
     if (!out || !s_api_active || !plugin_api_has_permission(PLUGIN_PERMISSION_INPUT)) return false;
     portENTER_CRITICAL(&s_input_snapshot_mux);
@@ -1027,6 +1321,30 @@ static bool plugin_api_input_snapshot(ghostesp_input_snapshot_t *out) {
     s_input_released = 0;
     portEXIT_CRITICAL(&s_input_snapshot_mux);
     return true;
+}
+
+static int32_t plugin_api_input_snapshot_ex(ghostesp_input_snapshot_v2_t *out, size_t out_size) {
+    if (!out || !s_api_active || !plugin_api_has_permission(PLUGIN_PERMISSION_INPUT)) return 0;
+    const size_t base_size = offsetof(ghostesp_input_snapshot_v2_t, touch_active);
+    if (out_size < base_size) return 0;
+    portENTER_CRITICAL(&s_input_snapshot_mux);
+    out->held = s_input_held;
+    out->pressed = s_input_pressed;
+    out->released = s_input_released;
+    out->last_change_ms = s_input_last_change_ms;
+    s_input_pressed = 0;
+    s_input_released = 0;
+    /* The touch block is written only when the caller's buffer is large enough
+       to hold all of it. A partial write would leave touch_x/touch_y holding
+       whatever the app last put there, which is worse than not reporting touch
+       at all. */
+    if (out_size >= sizeof(*out)) {
+        out->touch_active = s_touch_active;
+        out->touch_x = s_touch_x;
+        out->touch_y = s_touch_y;
+    }
+    portEXIT_CRITICAL(&s_input_snapshot_mux);
+    return (int32_t)(out_size < sizeof(*out) ? out_size : sizeof(*out));
 }
 
 static bool plugin_api_app_storage_write(const char *path, const void *data, size_t len) {
@@ -1882,6 +2200,12 @@ extern void plugin_api_ui_options_move_selection(ghostesp_options_t opts, int de
 extern int plugin_api_ui_options_get_selected(ghostesp_options_t opts);
 extern void plugin_api_ui_options_clear(ghostesp_options_t opts);
 extern void plugin_api_ui_options_destroy(ghostesp_options_t opts);
+extern ghostesp_options_t plugin_api_ui_options_create_ex(ghostesp_ui_obj_t parent, const char *title,
+                                                           uint32_t flags);
+extern int32_t plugin_api_ui_options_item_at(ghostesp_options_t opts, int32_t x, int32_t y);
+extern int32_t plugin_api_ui_options_get_item_count(ghostesp_options_t opts);
+extern void plugin_api_ui_options_update_item_text(ghostesp_options_t opts, int32_t index,
+                                                   const char *text);
 
 extern ghostesp_detail_t plugin_api_ui_detail_create(const char *title);
 extern void plugin_api_ui_detail_add_info(ghostesp_detail_t dv, const char *label, const char *value);
@@ -2466,6 +2790,22 @@ static ghostesp_api_t s_api = {
     .espnow_receive = plugin_api_espnow_receive,
     .psram_malloc = plugin_api_psram_malloc,
     .psram_free = plugin_api_psram_free,
+
+    /* v2 additions: native geometry/metrics and page push/pop. */
+    .ui_obj_get_rect = plugin_api_ui_obj_get_rect,
+    .ui_metrics = plugin_api_ui_metrics,
+    .ui_page_push = plugin_api_ui_page_push,
+    .ui_page_pop = plugin_api_ui_page_pop,
+
+    /* v3 additions: batched layout, the embeddable native list, and touch in
+       the input snapshot. See the v3 block in plugin_api.h. */
+    .ui_obj_get_rects = plugin_api_ui_obj_get_rects,
+    .ui_obj_apply_props = plugin_api_ui_obj_apply_props,
+    .ui_options_create_ex = plugin_api_ui_options_create_ex,
+    .ui_options_item_at = plugin_api_ui_options_item_at,
+    .ui_options_get_item_count = plugin_api_ui_options_get_item_count,
+    .ui_options_update_item_text = plugin_api_ui_options_update_item_text,
+    .input_snapshot_ex = plugin_api_input_snapshot_ex,
 };
 
 const ghostesp_api_t *plugin_api_get(const char *app_id,
@@ -2493,10 +2833,7 @@ const ghostesp_api_t *plugin_api_get(const char *app_id,
     s_plugin_ble_started = false;
     s_plugin_espnow_started = false;
     portENTER_CRITICAL(&s_input_snapshot_mux);
-    s_input_held = 0;
-    s_input_pressed = 0;
-    s_input_released = 0;
-    s_input_last_change_ms = 0;
+    plugin_api_input_reset_locked();
     portEXIT_CRITICAL(&s_input_snapshot_mux);
     if (app_id) {
         for (const char *p = app_id; *p; ++p) {
@@ -2600,10 +2937,7 @@ void plugin_api_release(void) {
        file handle behind for the next app that loads. */
     plugin_api_read_cache_close();
     portENTER_CRITICAL(&s_input_snapshot_mux);
-    s_input_held = 0;
-    s_input_pressed = 0;
-    s_input_released = 0;
-    s_input_last_change_ms = 0;
+    plugin_api_input_reset_locked();
     portEXIT_CRITICAL(&s_input_snapshot_mux);
 
     if (!s_api_swapped) {

@@ -9,6 +9,7 @@
 #include "managers/sd_card_manager.h"
 #include "managers/status_display_manager.h"
 #include "managers/wifi_manager.h"
+#include "scans/wifi/wifi_channels.h"
 #include "managers/zigbee_manager.h"
 #include "sdkconfig.h"
 #include "vendor/pcap.h"
@@ -125,7 +126,14 @@ void handle_capture_scan(int argc, char **argv) {
     int parsed_fixed_channel = 0;
     for (int i = 2; i + 1 < argc; i++) {
         if (strcmp(argv[i], "-channel") == 0 || strcmp(argv[i], "-c") == 0) {
-            parsed_fixed_channel = atoi(argv[i + 1]);
+            char *end = NULL;
+            long parsed = strtol(argv[i + 1], &end, 10);
+            if (end == argv[i + 1] || *end != '\0' || parsed < 1 || parsed > 177) {
+                glog("Error: Invalid channel '%s'\n", argv[i + 1]);
+                status_display_show_status("Invalid Channel");
+                return;
+            }
+            parsed_fixed_channel = (int)parsed;
             fixed_channel_set = true;
             break;
         }
@@ -151,9 +159,9 @@ void handle_capture_scan(int argc, char **argv) {
         strcmp(capturetype, "-list") == 0 || strcmp(capturetype, "-export") == 0;
 
     if (fixed_channel_set && wifi_channel_lock_mode) {
-        if (parsed_fixed_channel < 1 || parsed_fixed_channel > MAX_WIFI_CHANNEL) {
-            glog("Error: Invalid channel %d. Must be between 1 and %d\n",
-                 parsed_fixed_channel, MAX_WIFI_CHANNEL);
+        if (!wifi_channels_is_monitor_channel((uint8_t)parsed_fixed_channel)) {
+            glog("Error: Invalid or country-disallowed Wi-Fi channel %d\n",
+                 parsed_fixed_channel);
             status_display_show_status("Invalid Channel");
             return;
         }

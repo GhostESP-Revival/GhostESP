@@ -25,9 +25,9 @@
 #define PACKET_HOP_DWELL_MS 150
 
 #if defined(CONFIG_IDF_TARGET_ESP32C5)
-#define PACKET_MONITOR_MAX_CHANNEL 165
+#define PACKET_MONITOR_MAX_CHANNEL 177
 #else
-#define PACKET_MONITOR_MAX_CHANNEL 13
+#define PACKET_MONITOR_MAX_CHANNEL 14
 #endif
 
 typedef enum {
@@ -138,7 +138,10 @@ static bool parse_channels(const char *text, uint8_t *channels, size_t *count) {
 
         char *end = NULL;
         long channel = strtol(cursor, &end, 10);
-        if (end == cursor || channel < 1 || channel > PACKET_MONITOR_MAX_CHANNEL) return false;
+        if (end == cursor || channel < 1 || channel > 177 ||
+            !wifi_channels_is_monitor_channel((uint8_t)channel)) {
+            return false;
+        }
 
         bool seen = false;
         for (size_t i = 0; i < parsed; i++) {

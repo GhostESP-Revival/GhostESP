@@ -18,6 +18,22 @@ options_view_t *options_view_create(lv_obj_t *parent, const char *title);
 // Create an opaque options list that does not load or display an asset-pack background.
 options_view_t *options_view_create_no_bg(lv_obj_t *parent, const char *title);
 
+/* Create an options list with explicit behaviour.
+ * - transparent: drop the list background entirely, so a canvas or card art
+ *   underneath stays visible. Implies no asset-pack background.
+ * - When `parent` is a real widget rather than NULL/screen, the list is sized
+ *   to that parent's content area instead of the full screen below the status
+ *   bar. That is what lets a list live inside a card or overlay without the
+ *   caller having to re-measure and reposition it.
+ * - Pass a NULL or empty `title` to skip the status bar.
+ * Existing create variants are unaffected; they route through here unchanged. */
+options_view_t *options_view_create_flags(lv_obj_t *parent, const char *title, bool transparent);
+
+// Index of the row whose bounds contain the screen point, or -1 if none.
+// Uses each row's post-scroll coordinates, so it stays correct for a list
+// taller than its viewport.
+int options_view_item_at(const options_view_t *ov, int32_t x, int32_t y);
+
 // Destroy the options view and its internal objects.
 void options_view_destroy(options_view_t *ov);
 

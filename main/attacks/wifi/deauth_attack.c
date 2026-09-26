@@ -141,7 +141,10 @@ static void handshake_deauth_task(void *param);
 // gone by the time any attack task runs. This helper just handles transient
 // channel-set failures with one quick retry.
 static esp_err_t deauth_set_channel_robust(int channel) {
-    if (channel < 1 || channel > MAX_WIFI_CHANNEL) return ESP_ERR_INVALID_ARG;
+    if (channel < 1 || channel > 255 ||
+        !wifi_channels_is_tx_channel((uint8_t)channel)) {
+        return ESP_ERR_INVALID_ARG;
+    }
     uint8_t cur_ch = 0;
     wifi_second_chan_t cur_sec = WIFI_SECOND_CHAN_NONE;
     if (esp_wifi_get_channel(&cur_ch, &cur_sec) == ESP_OK && cur_ch == (uint8_t)channel) {
@@ -173,8 +176,7 @@ esp_err_t deauth_attack_broadcast(uint8_t bssid[6], int channel, uint8_t mac[6])
     esp_err_t err = deauth_set_channel_robust(channel);
     if (err != ESP_OK) {
         deauth_log_channel_error_throttled(channel, err);
-        // Don't abort TX: still try to inject on current channel (may still affect co-channel targets)
-        // But if channel mismatch, effectiveness will be reduced
+        return err;
     }
 
     // Create packets from templates
@@ -518,22 +520,28 @@ void deauth_attack_start_station(void) {
 // Background task for deauthenticating a selected station and logging packet rate
 static void deauth_station_task(void *param) {
     // Get the channel from the scanned AP that matches the target BSSID
-    int deauth_channel = 1;
+    int deauth_channel = 0;
     for (int i = 0; i < ap_count; i++) {
         if (memcmp(scanned_aps[i].bssid, selected_station_local.ap_bssid, 6) == 0) {
             deauth_channel = scanned_aps[i].primary;
             break;
         }
     }
-    
-    // Validate channel is within allowed range
-    if (deauth_channel < 1 || deauth_channel > MAX_WIFI_CHANNEL) {
-        deauth_channel = 1; // fallback channel
+
+    if (deauth_channel < 1 ||
+        !wifi_channels_is_tx_channel((uint8_t)deauth_channel)) {
+        glog("Unable to find a legal TX channel for selected station\n");
+        station_selected_local = false;
+        deauth_station_stop_requested = true;
+        return;
     }
     // Initial channel set with retry and throttled error logging
     esp_err_t init_ch_err = deauth_set_channel_robust(deauth_channel);
     if (init_ch_err != ESP_OK) {
         deauth_log_channel_error_throttled(deauth_channel, init_ch_err);
+        station_selected_local = false;
+        deauth_station_stop_requested = true;
+        return;
     }
     uint32_t last_log = xTaskGetTickCount() * portTICK_PERIOD_MS;
     while (!deauth_station_stop_requested) {

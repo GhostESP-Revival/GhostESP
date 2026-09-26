@@ -817,7 +817,18 @@ wifi_interface_t ap_manager_get_tx_iface(void) {
 
 esp_err_t ap_manager_apply_normal_ap_profile(void) {
     // be conservative for client compatibility (2.4GHz only, HT20)
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+    // IDF 6.x uses WIFI_BAND_MODE_AUTO on the C5. The singular
+    // esp_wifi_set_bandwidth() API rejects that mode, so configure both bands
+    // through the multi-band API instead.
+    wifi_bandwidths_t bandwidths = {
+        .ghz_2g = WIFI_BW20,
+        .ghz_5g = WIFI_BW20,
+    };
+    (void)esp_wifi_set_bandwidths(WIFI_IF_AP, &bandwidths);
+#else
     (void)esp_wifi_set_bandwidth(WIFI_IF_AP, WIFI_BW20);
+#endif
 
 #if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
     // No LR anywhere in the normal profile; a persisted LR config makes AP

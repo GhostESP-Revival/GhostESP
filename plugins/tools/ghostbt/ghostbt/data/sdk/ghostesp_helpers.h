@@ -185,6 +185,7 @@ static inline ghostesp_input_type_t gh_touch_update(
     }
 }
 
+/* Emit one direction as soon as a live drag crosses the swipe threshold. */
 static inline ghostesp_input_type_t gh_touch_update_live(
     ghostesp_touch_state_t *ts, const ghostesp_input_event_t *event)
 {
@@ -750,7 +751,7 @@ static inline void gh_page_clear(int *depth) {
     const ghostesp_app_t *ghostesp_app_init(const ghostesp_api_t *ha) {    \
         if (!ha || ha->api_version != GHOSTESP_APP_API_VERSION) return 0;  \
         if (ha->struct_size < (min_api_size)) {                            \
-            if (ha->log) ha->log(app_id_str " requires newer API");      \
+            if (ha->log) ha->log(app_id_str " requires newer API");        \
             return 0;                                                      \
         }                                                                  \
         return &(app_var);                                                 \
@@ -763,7 +764,7 @@ static inline void gh_page_clear(int *depth) {
     const ghostesp_app_t *ghostesp_app_init(const ghostesp_api_t *ha) {        \
         if (!ha || ha->api_version != GHOSTESP_APP_API_VERSION) return 0;      \
         if (ha->struct_size < (min_api_size)) {                                \
-            if (ha->log) ha->log(app_id_str " requires newer API");          \
+            if (ha->log) ha->log(app_id_str " requires newer API");            \
             return 0;                                                          \
         }                                                                      \
         (api_ptr) = ha;                                                        \

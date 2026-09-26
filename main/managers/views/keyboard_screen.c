@@ -196,13 +196,18 @@ static const int num_rows = 5;
 typedef struct {
     int pad_h;
     int field_h;
+    int field_pad_v;
     int matrix_w;
     int matrix_h;
     int matrix_y;
     int key_h;
     int gap;
+    const lv_font_t *field_font;
     const lv_font_t *font;
 } kb_metrics_t;
+
+/* Border width of the input field; part of its one-line height budget. */
+#define KB_FIELD_BORDER 1
 
 static void kb_compute_metrics(kb_metrics_t *m, int sw, int sh, int status_bar_h) {
     m->pad_h = kb_pad_h(sw);
@@ -221,7 +226,20 @@ static void kb_compute_metrics(kb_metrics_t *m, int sw, int sh, int status_bar_h
     int field_min = GUI_CONTROL_H / 2;
     int field_min_prop = sh / 12;
     if (field_min_prop > field_min) field_min = field_min_prop;
-    int avail_for_keys = avail_total - field_min;
+
+    /* The input bar is a single line that scrolls horizontally (marquee) when
+     * the text overflows, so its height is fixed. It must be tall enough to
+     * hold that one line: LV_LABEL_LONG_SCROLL_CIRCULAR only scrolls sideways
+     * while the text is wider than the box, and as soon as the text fits it
+     * falls back to scrolling *vertically* (plus a second copy drawn below for
+     * the wrap-around), which walks the text out of the field. */
+    m->field_pad_v = kb_clamp_int(field_min / 6, 2, GUI_SAFEAREA_VER);
+    m->field_font = accessibility_get_font_body();
+    m->field_h = lv_font_get_line_height(m->field_font) +
+                 2 * m->field_pad_v + 2 * KB_FIELD_BORDER;
+    if (m->field_h < field_min) m->field_h = field_min;
+
+    int avail_for_keys = avail_total - m->field_h;
     if (avail_for_keys < KB_IOS_ROWS) avail_for_keys = KB_IOS_ROWS;
 
     /* iOS keys are ~31.5 x 42 pt, so drive the height from the key width rather
@@ -237,7 +255,7 @@ static void kb_compute_metrics(kb_metrics_t *m, int sw, int sh, int status_bar_h
         key_h = (avail_for_keys - (KB_IOS_ROWS - 1) * gap) / KB_IOS_ROWS;
         if (key_h < 14) key_h = 14;
         need = KB_IOS_ROWS * key_h + (KB_IOS_ROWS - 1) * gap;
-        if (need > avail_total - field_min) need = avail_total - field_min;
+        if (need > avail_total - m->field_h) need = avail_total - m->field_h;
     } else {
         int grow = (avail_for_keys - (KB_IOS_ROWS - 1) * gap) / KB_IOS_ROWS;
         if (grow > key_h_max) grow = key_h_max;
@@ -250,10 +268,6 @@ static void kb_compute_metrics(kb_metrics_t *m, int sw, int sh, int status_bar_h
     m->matrix_h = need;
     /* Bottom-anchored, like the iOS keyboard. */
     m->matrix_y = bottom - need;
-
-    /* The input bar is a single line that scrolls horizontally when the text
-     * overflows (standard bar behaviour), so the field height is fixed. */
-    m->field_h = field_min;
     m->font = gui_font_for_height((lv_coord_t)key_h);
 }
 
@@ -1167,10 +1181,13 @@ static void keyboard_create() {
     lv_obj_set_style_bg_color(input_label, surface, 0);
     lv_obj_set_style_bg_opa(input_label, LV_OPA_COVER, 0);
     lv_obj_set_style_text_color(input_label, text, 0);
+    /* Pinned to the font the field height was measured against, so the one line
+     * always fits regardless of the theme default or the accessibility size. */
+    lv_obj_set_style_text_font(input_label, m.field_font, 0);
     lv_obj_set_style_pad_hor(input_label, m.pad_h, 0);
-    lv_obj_set_style_pad_ver(input_label, kb_clamp_int(m.field_h / 6, 2, GUI_SAFEAREA_VER), 0);
+    lv_obj_set_style_pad_ver(input_label, m.field_pad_v, 0);
     lv_obj_set_style_radius(input_label, radius, 0);
-    lv_obj_set_style_border_width(input_label, 1, 0);
+    lv_obj_set_style_border_width(input_label, KB_FIELD_BORDER, 0);
     lv_obj_set_style_border_color(input_label, text, 0);
     lv_obj_set_style_border_opa(input_label, LV_OPA_30, 0);
     lv_obj_set_pos(input_label, m.pad_h, status_bar_height + GUI_SAFEAREA_VER);

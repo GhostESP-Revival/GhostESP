@@ -16,6 +16,7 @@
 #include "core/system_manager.h"
 #include "managers/views/terminal_screen.h"
 #include "core/glog.h"
+#include "scans/wifi/wifi_channels.h"
 #include "esp_wifi.h"
 #include "esp_random.h"
 #include "esp_log.h"
@@ -740,6 +741,11 @@ void sae_flood_start(const char *password) {
     if (!supports_wpa3) {
         glog("Selected AP does not support WPA3/SAE authentication\n");
         glog("AP Auth Mode: %d (WPA3 required)\n", selected_ap.authmode);
+        return;
+    }
+
+    if (!wifi_channels_is_tx_channel(selected_ap.primary)) {
+        glog("Selected AP channel is unsupported or not legal for TX\n");
         return;
     }
 

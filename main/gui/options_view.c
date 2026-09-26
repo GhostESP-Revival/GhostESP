@@ -30,6 +30,12 @@ typedef struct options_view_t {
     int capacity;
     int selected;
     int btn_h;
+    /* Vertical insets the list was built with. A full-screen list owns the space
+     * between the status bar and the screen edge itself, so it has none; keeping
+     * them stops a later theme/row-height refresh from adding an inset back and
+     * leaving a gap under the last row. */
+    lv_coord_t pad_top;
+    lv_coord_t pad_bottom;
     bool use_asset_pack_background;
 
     /* Virtual (windowed) list state. When virtual_mode is set, `items` holds a
@@ -184,11 +190,16 @@ static void apply_selected_style(options_view_t *ov, lv_obj_t *item, bool on) {
 }
 
 static options_view_t *options_view_create_internal(lv_obj_t *parent, const char *title,
-                                                     bool use_asset_pack_background) {
+                                                     bool use_asset_pack_background,
+                                                     bool transparent) {
+    /* A real parent widget means the list is embedded, not a full screen. That
+       has to be decided before the NULL fallback, otherwise every caller would
+       look like it was parented to the screen. */
+    bool parented = parent && parent != lv_scr_act();
     if (!parent) parent = lv_scr_act();
     options_view_t *ov = (options_view_t *)calloc(1, sizeof(options_view_t));
     if (!ov) return NULL;
-    ov->use_asset_pack_background = use_asset_pack_background;
+    ov->use_asset_pack_background = use_asset_pack_background && !transparent;
 
     int h = LV_VER_RES;
     int status_bar_h = GUI_STATUS_BAR_H;
@@ -199,17 +210,45 @@ static options_view_t *options_view_create_internal(lv_obj_t *parent, const char
 
     ov->list = lv_list_create(parent);
     int list_w = GUI_OPTIONS_LIST_WIDTH;
-    lv_obj_set_size(ov->list, list_w, h - status_bar_h);
-    lv_obj_align(ov->list, LV_ALIGN_TOP_MID, 0, status_bar_h);
+    if (parented) {
+        /* lv_obj_get_content_width/height() read the parent's coords, which are
+           only valid after a layout pass. Every view creates its host in the same
+           create() call that builds this list, so those coords are still the
+           post-constructor placeholder (0x0 -- lv_obj.c leaves y2 = y1 - 1) and
+           sizing from them produced an invisible 0x0 list. Measure after a
+           layout instead. */
+        lv_obj_update_layout(parent);
+        lv_coord_t host_w = lv_obj_get_content_width(parent);
+        lv_coord_t host_h = lv_obj_get_content_height(parent);
+        /* A full-screen host is not a content card: it has no margins or bottom
+           safe area of its own, so the list still takes the screen geometry and
+           leaves the status bar alone, which is what every caller relied on.
+           Only a genuinely inset host gets filled edge to edge. */
+        if (host_h >= h - status_bar_h || host_w <= 0 || host_h <= 0) {
+            lv_obj_set_size(ov->list, list_w, h - status_bar_h);
+            lv_obj_align(ov->list, LV_ALIGN_TOP_MID, 0, status_bar_h);
+        } else {
+            lv_obj_set_size(ov->list, host_w, host_h);
+            lv_obj_align(ov->list, LV_ALIGN_TOP_MID, 0, 0);
+        }
+    } else {
+        lv_obj_set_size(ov->list, list_w, h - status_bar_h);
+        lv_obj_align(ov->list, LV_ALIGN_TOP_MID, 0, status_bar_h);
+    }
     lv_obj_set_style_bg_color(ov->list, bg, 0);
     lv_obj_set_style_bg_opa(ov->list,
-                            ov->use_asset_pack_background && asset_pack_get_background_tile()
-                                ? LV_OPA_TRANSP : LV_OPA_COVER,
+                            transparent ? LV_OPA_TRANSP
+                                        : (ov->use_asset_pack_background &&
+                                           asset_pack_get_background_tile()
+                                               ? LV_OPA_TRANSP
+                                               : LV_OPA_COVER),
                             0);
     lv_obj_set_style_pad_left(ov->list, GUI_OPTIONS_LIST_PAD_HOR, 0);
     lv_obj_set_style_pad_right(ov->list, GUI_OPTIONS_LIST_PAD_HOR, 0);
-    lv_obj_set_style_pad_top(ov->list, GUI_SAFEAREA_VER, 0);
-    lv_obj_set_style_pad_bottom(ov->list, GUI_SAFEAREA_VER + GUI_HOME_SAFE_H, 0);
+    ov->pad_top = parented ? 0 : GUI_SAFEAREA_VER;
+    ov->pad_bottom = parented ? 0 : GUI_SAFEAREA_VER + GUI_HOME_SAFE_H;
+    lv_obj_set_style_pad_top(ov->list, ov->pad_top, 0);
+    lv_obj_set_style_pad_bottom(ov->list, ov->pad_bottom, 0);
     lv_obj_set_style_border_width(ov->list, 0, 0);
     lv_obj_set_style_radius(ov->list, 0, 0);
 
@@ -274,11 +313,32 @@ static options_view_t *options_view_create_internal(lv_obj_t *parent, const char
 }
 
 options_view_t *options_view_create(lv_obj_t *parent, const char *title) {
-    return options_view_create_internal(parent, title, true);
+    return options_view_create_internal(parent, title, true, false);
 }
 
 options_view_t *options_view_create_no_bg(lv_obj_t *parent, const char *title) {
-    return options_view_create_internal(parent, title, false);
+    return options_view_create_internal(parent, title, false, false);
+}
+
+options_view_t *options_view_create_flags(lv_obj_t *parent, const char *title, bool transparent) {
+    return options_view_create_internal(parent, title, !transparent, transparent);
+}
+
+int options_view_item_at(const options_view_t *ov, int32_t x, int32_t y) {
+    if (!ov || !ov->items) return -1;
+    /* ov->items already tracks every added row, so hit testing costs no extra
+       allocation. lv_obj_get_coords returns post-scroll coordinates, which is
+       what a touch point is expressed in. */
+    for (int i = 0; i < ov->count; i++) {
+        lv_obj_t *item = ov->items[i];
+        if (!item || !lv_obj_is_valid(item)) continue;
+        if (lv_obj_has_flag(item, LV_OBJ_FLAG_HIDDEN)) continue;
+        lv_area_t a;
+        lv_obj_get_coords(item, &a);
+        if (x < a.x1 || x > a.x2 || y < a.y1 || y > a.y2) continue;
+        return i;
+    }
+    return -1;
 }
 
 void options_view_destroy(options_view_t *ov) {
@@ -364,11 +424,28 @@ void options_view_set_item_height(options_view_t *ov, int height) {
     ov->btn_h = height;
     lv_style_set_height(&ov->style_row, height);
     lv_style_set_text_font(&ov->style_label, get_item_font(ov));
+    /* A new height changes the visible row count, so the pool is re-cut to
+     * match: surplus pool rows are hidden, and previously hidden ones are
+     * revealed before allocating new ones. Rows stay exactly the configured
+     * height either way. */
+    if (ov->virtual_mode) {
+        ov->visible_rows = compute_visible_rows(ov);
+        for (int i = 0; i < ov->count; ++i) {
+            lv_obj_t *item = ov->items[i];
+            if (!item || !lv_obj_is_valid(item)) continue;
+            if (i < ov->visible_rows) lv_obj_clear_flag(item, LV_OBJ_FLAG_HIDDEN);
+            else lv_obj_add_flag(item, LV_OBJ_FLAG_HIDDEN);
+        }
+        for (int i = ov->count; i < ov->visible_rows; ++i) {
+            if (!options_view_add_item(ov, "", virtual_row_event_cb, ov)) break;
+        }
+    }
     for (int i = 0; i < ov->count; ++i) {
         lv_obj_t *item = ov->items[i];
         if (!item || !lv_obj_is_valid(item)) continue;
         lv_obj_set_height(item, height);
     }
+    if (ov->virtual_mode) options_view_virtual_refresh(ov);
     lv_obj_report_style_change(&ov->style_row);
     lv_obj_report_style_change(&ov->style_label);
 }
@@ -440,8 +517,11 @@ void options_view_refresh_styles(options_view_t *ov) {
         lv_obj_set_style_pad_row(ov->list, GUI_GRID, 0);
         lv_obj_set_style_pad_left(ov->list, GUI_OPTIONS_LIST_PAD_HOR, 0);
         lv_obj_set_style_pad_right(ov->list, GUI_OPTIONS_LIST_PAD_HOR, 0);
-        lv_obj_set_style_pad_top(ov->list, GUI_SAFEAREA_VER, 0);
-        lv_obj_set_style_pad_bottom(ov->list, GUI_SAFEAREA_VER, 0);
+        /* Same insets the list was built with, not a fresh guess: a full-screen
+         * list has none, and re-adding one would shorten the rows' area and
+         * open a gap under the last row. */
+        lv_obj_set_style_pad_top(ov->list, ov->pad_top, 0);
+        lv_obj_set_style_pad_bottom(ov->list, ov->pad_bottom, 0);
     }
 
     lv_style_set_bg_color(&ov->style_item, surface);
@@ -535,9 +615,15 @@ static void virtual_apply_row_style(options_view_t *ov, lv_obj_t *row, int index
                      LV_STATE_PRESSED);
 }
 
-/* How many rows the list can show at once. Derived from the list geometry and
- * the current row height so it tracks the Row Height setting and panel size
- * instead of a per-menu constant. */
+/* How many pool rows the list needs. Derived from the list geometry and the
+ * current row height so it tracks the Row Height setting and the panel size,
+ * not a per-menu constant.
+ *
+ * The pool covers the viewport like a normal list: rows stay exactly the
+ * configured height, and a row that only partly fits is still included, clipped
+ * by the viewport edge with its top visible -- the same look as every
+ * non-virtualised menu. n rows start inside the viewport while
+ * (n-1)*(row_h+gap) < avail, i.e. n = ceil((avail+gap)/(row_h+gap)). */
 static int compute_visible_rows(const options_view_t *ov) {
     if (!ov || !ov->list || !lv_obj_is_valid(ov->list)) return 1;
 
@@ -556,14 +642,10 @@ static int compute_visible_rows(const options_view_t *ov) {
     lv_coord_t row_h = ov->btn_h > 0 ? ov->btn_h : 1;
     if (gap < 0) gap = 0;
 
-    /* Round UP so the pool includes the partially visible row at the bottom of
-     * the viewport. Sizing to whole rows only would end the list short and
-     * leave dead space below it; a scrolling list clips that last row at the
-     * viewport edge instead, and the row pool has to do the same to look right.
-     * The extra row costs one more LVGL object, never more, so the object count
-     * stays constant in the number of items. */
     lv_coord_t stride = row_h + gap;
-    int rows = (avail <= 0) ? 1 : (int)((avail - 1) / stride) + 1;
+    if (stride <= 0) return 1;
+    if (avail + gap <= 0) return 1;
+    int rows = (int)((avail + gap + stride - 1) / stride);
     if (rows < 1) rows = 1;
     return rows;
 }

@@ -548,14 +548,22 @@ static void plugin_api_ui_canvas_blit_rgb565_now(void *arg) {
                                  ctx->src_stride >= 320 && ctx->dst_x == 0 &&
                                  ctx->dst_width == 240 && same_height;
 #endif
-    for (int32_t y = top; y < bottom; y++) {
+    /* Fixed-point axis stepping: identical nearest-neighbour sampling to
+       source = (dst - dst_origin) * src_size / dst_size, but computed with one
+       32-bit division per axis instead of a 64-bit division (__divdi3) per
+       pixel. The per-pixel 64-bit divides dominated frame time on RISC-V
+       targets whenever a non-integer scale was used. */
+    const uint32_t x_step = ((uint32_t)ctx->src_width << 16) / (uint32_t)ctx->dst_width;
+    const uint32_t y_step = ((uint32_t)ctx->src_height << 16) / (uint32_t)ctx->dst_height;
+    uint32_t y_frac = (uint32_t)(top - ctx->dst_y) * y_step;
+    for (int32_t y = top; y < bottom; y++, y_frac += y_step) {
+        int32_t source_y;
 #if defined(CONFIG_USE_C5_PARLIO_DISPLAY)
-        int32_t source_y = same_height
-                               ? y - ctx->dst_y
-                               : (int32_t)(((int64_t)y - ctx->dst_y) * ctx->src_height / ctx->dst_height);
+        source_y = same_height ? y - ctx->dst_y : (int32_t)(y_frac >> 16);
 #else
-        int32_t source_y = (int32_t)(((int64_t)y - ctx->dst_y) * ctx->src_height / ctx->dst_height);
+        source_y = (int32_t)(y_frac >> 16);
 #endif
+        if (source_y >= ctx->src_height) source_y = ctx->src_height - 1;
         const uint16_t *source_row = ctx->pixels + (size_t)source_y * (size_t)ctx->src_stride;
         uint16_t *destination_row = destination + (size_t)y * (size_t)canvas_width;
         if (copy_rows) {
@@ -605,8 +613,10 @@ static void plugin_api_ui_canvas_blit_rgb565_now(void *arg) {
             continue;
         }
 #endif
-        for (int32_t x = left; x < right; x++) {
-            int32_t source_x = (int32_t)(((int64_t)x - ctx->dst_x) * ctx->src_width / ctx->dst_width);
+        uint32_t x_frac = (uint32_t)(left - ctx->dst_x) * x_step;
+        for (int32_t x = left; x < right; x++, x_frac += x_step) {
+            int32_t source_x = (int32_t)(x_frac >> 16);
+            if (source_x >= ctx->src_width) source_x = ctx->src_width - 1;
 #if LV_COLOR_16_SWAP
             uint16_t pixel = source_row[source_x];
             destination_row[x] = (uint16_t)(pixel << 8 | pixel >> 8);
