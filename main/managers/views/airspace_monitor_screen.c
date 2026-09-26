@@ -168,7 +168,7 @@ static void update_display_cb(lv_timer_t *timer) {
         lv_coord_t w = lv_obj_get_content_width(pps_line);
         lv_coord_t h = lv_obj_get_height(pps_line);
         if (w < 8) w = LV_HOR_RES - 16;  // layout not settled yet on first tick
-        if (h < 6) h = compact_layout() ? 24 : 40;
+        if (h < 6) h = tiny_layout() ? 20 : (compact_layout() ? 24 : 40);
         uint16_t maxv = snap.pps_history_max;
         if (maxv < 10) maxv = 10;  // floor so a quiet line stays near the bottom
         int32_t pad = (int32_t)AIRSPACE_PPS_HISTORY - (int32_t)snap.pps_history_count;
@@ -358,23 +358,21 @@ void airspace_monitor_view_create(void) {
         lv_label_set_long_mode(lbl_counts_2, LV_LABEL_LONG_SCROLL_CIRCULAR);
     }
 
-    if (!tiny_layout()) {
-        pps_points = malloc(sizeof(lv_point_t) * AIRSPACE_PPS_HISTORY);
-        if (pps_points) {
-            memset(pps_points, 0, sizeof(lv_point_t) * AIRSPACE_PPS_HISTORY);
-            lv_obj_t *chart_card = create_card(content, 100);
-            if (!compact_layout()) {
-                create_card_title(chart_card, "Activity (pkt/s)");
-            }
-            pps_line = lv_line_create(chart_card);
-            lv_obj_set_width(pps_line, LV_PCT(100));
-            lv_obj_set_height(pps_line, compact_layout() ? 24 : 40);
-            lv_obj_set_style_line_width(pps_line, 2, 0);
-            lv_obj_set_style_line_color(pps_line, lv_color_hex(accent_color), 0);
-            lv_obj_set_style_line_rounded(pps_line, false, 0);
-            lv_obj_clear_flag(pps_line, LV_OBJ_FLAG_SCROLLABLE);
-            lv_line_set_points(pps_line, pps_points, AIRSPACE_PPS_HISTORY);
+    pps_points = malloc(sizeof(lv_point_t) * AIRSPACE_PPS_HISTORY);
+    if (pps_points) {
+        memset(pps_points, 0, sizeof(lv_point_t) * AIRSPACE_PPS_HISTORY);
+        lv_obj_t *chart_card = create_card(content, 100);
+        if (!compact_layout()) {
+            create_card_title(chart_card, "Activity (pkt/s)");
         }
+        pps_line = lv_line_create(chart_card);
+        lv_obj_set_width(pps_line, LV_PCT(100));
+        lv_obj_set_height(pps_line, tiny_layout() ? 20 : (compact_layout() ? 24 : 40));
+        lv_obj_set_style_line_width(pps_line, 2, 0);
+        lv_obj_set_style_line_color(pps_line, lv_color_hex(accent_color), 0);
+        lv_obj_set_style_line_rounded(pps_line, false, 0);
+        lv_obj_clear_flag(pps_line, LV_OBJ_FLAG_SCROLLABLE);
+        lv_line_set_points(pps_line, pps_points, AIRSPACE_PPS_HISTORY);
     }
 
     lv_obj_t *insight_card = create_card(content, 100);

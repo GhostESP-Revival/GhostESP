@@ -663,6 +663,29 @@ static void kb_repeat_stop(void) {
     }
 }
 
+// A key held across a view switch must not keep repeating into the new view:
+// e.g. Enter held to activate an option would otherwise submit empty lines in
+// the terminal that option just opened. Worse, if the LVGL task was blocked
+// (scan, delay) while held, repeats pile up in the queue and flood the new
+// view once it unblocks. Runs on the LVGL task, same as the queue consumer.
+static void kb_repeat_cancel_for_view_switch(void) {
+    kb_repeat_stop();
+    if (!input_queue) return;
+    InputEvent ev;
+    InputEvent kept[32];
+    int n = 0;
+    int guard = 0;
+    while (guard++ < 64 && xQueueReceive(input_queue, &ev, 0) == pdTRUE) {
+        if (ev.type == INPUT_TYPE_KEYBOARD && ev.is_repeat) continue;
+        if (n < 32) kept[n++] = ev;
+        /* The queue itself is 32 deep; anything beyond that is concurrent
+         * arrivals, left queued rather than risking a non-terminating loop. */
+    }
+    for (int i = 0; i < n; i++) {
+        xQueueSend(input_queue, &kept[i], 0);
+    }
+}
+
 // Called after initial delay fires — switch to periodic repeat
 static void kb_repeat_initial_cb(void *arg) {
     (void)arg;
@@ -3441,6 +3464,7 @@ void display_manager_render_view(View *view) {
 #endif
   if (xSemaphoreTake(dm.mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) == pdTRUE) {
     ESP_LOGD(TAG, "Switching view from %s to %s", dm.current_view ? dm.current_view->name : "NULL", view->name);
+    kb_repeat_cancel_for_view_switch();
     if (view == &lockscreen_view) {
       display_manager_run_freeze_pre_lock();
     }

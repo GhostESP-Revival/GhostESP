@@ -144,6 +144,9 @@ static int selected_ap_index = -1;
 static char ap_connect_ssid[64] = {0};
 static lv_timer_t *ap_scan_poll_timer = NULL;
 static int64_t ap_scan_ui_start_time = 0;
+/* Set while an async AP scan was started for Wi-Fi Security Check. Completion
+ * then opens the terminal with the report instead of the AP list. */
+static bool wpa3_check_waiting_for_ap_scan = false;
 static paged_menu_t *scanall_list_menu = NULL;
 static paged_menu_t *sta_list_menu = NULL;
 static scan_status_t *sta_scan_status = NULL;
@@ -343,6 +346,8 @@ static void sweep_poll_timer_cb(lv_timer_t *timer);
 static void sweep_complete_callback(void);
 static void show_sweep_detail(void);
 static void ap_scan_complete_callback(void);
+static void wpa3_check_scan_complete_callback(void);
+static bool start_wpa3_check_flow(void);
 static void ap_detail_back_cb(lv_event_t *e);
 static void ap_scan_poll_timer_cb(lv_timer_t *timer);
 static void ap_list_cleanup(void);
@@ -545,6 +550,15 @@ static void ap_scan_poll_timer_cb(lv_timer_t *timer) {
         lv_timer_del(ap_scan_poll_timer);
         ap_scan_poll_timer = NULL;
         ap_scan_finish_async();
+        if (wpa3_check_waiting_for_ap_scan) {
+            wpa3_check_waiting_for_ap_scan = false;
+            if (ap_scan_status) {
+                scan_status_close(ap_scan_status);
+                ap_scan_status = NULL;
+            }
+            wpa3_check_scan_complete_callback();
+            return;
+        }
         ap_scan_complete_callback();
     }
 }
@@ -7009,7 +7023,18 @@ void handle_hardware_button_press_options(InputEvent *event) {
             }
         } else if (keyValue == 13) {
             ESP_LOGI(TAG, "Enter button pressed");
-            if (is_settings_mode) {
+            /* Windowed result lists are activated by backing-list index, like the
+             * joystick and encoder paths: the pool rows carry rebinding indices,
+             * so reading a child by selected_item_index would activate the wrong
+             * row once scrolled, or nothing at all past the pool size. */
+            if (vlist_kind_for_state() != VLIST_NONE && options_view_is_virtual(g_options_view)) {
+                int count = options_view_virtual_count(g_options_view);
+                if (selected_item_index < 0 || selected_item_index >= count) {
+                    back_event_cb(NULL);
+                } else {
+                    vlist_activate(selected_item_index, NULL);
+                }
+            } else if (is_settings_mode) {
                 settings_activate_row(selected_item_index, true);
             } else {
                 lv_obj_t *selected_obj = lv_obj_get_child(menu_container, selected_item_index);
@@ -9150,11 +9175,17 @@ void option_event_cb(lv_event_t *e) {
     }
 
     else if (strcmp(Selected_Option, "Wi-Fi Security Check") == 0) {
-        terminal_set_return_view(&options_menu_view);
-        display_manager_switch_view(&terminal_view);
-        vTaskDelay(pdMS_TO_TICKS(100));
-        wpa3_compliance_check_selected();
-        view_switched = true;
+        /* Never blocks: cached results report straight into the terminal,
+         * otherwise a spinner + async scan runs and the report follows. */
+        if (!start_wpa3_check_flow()) {
+            error_popup_create("Scan failed to start");
+            option_invoked = false;
+            return;
+        }
+        // Cached results: the terminal opens with the report, so the view is
+        // considered switched. Async scan: the spinner runs and the menu stays
+        // responsive, so fall through unswitched (re-arms option_invoked).
+        view_switched = !wpa3_check_waiting_for_ap_scan;
     }
 
     else if (strcmp(Selected_Option, "Multi-Select Stations") == 0) {
@@ -13407,6 +13438,55 @@ static void ap_scan_complete_callback(void) {
      * finished scan results into the visible rows. */
     current_wifi_menu_state = WIFI_MENU_AP_LIST;
     rebuild_current_menu();
+}
+
+/* Wi-Fi Security Check needs AP data but must never block the LVGL task the way
+ * a synchronous scan would (the UI would freeze with no spinner, and queued key
+ * repeats would flood the terminal afterwards). With cached results the report
+ * prints immediately; otherwise an async scan runs under a spinner and the
+ * poll-timer completion opens the terminal with the report. */
+static bool start_wpa3_check_flow(void) {
+    if (ap_scan_get_count() > 0) {
+        terminal_set_return_view(&options_menu_view);
+        display_manager_switch_view(&terminal_view);
+        wpa3_compliance_check_selected();
+        return true;
+    }
+    /* A station or scan-all flow may already own the shared AP-scan
+     * completion; starting over it would orphan that flow. */
+    if (station_scan_waiting_for_ap_scan || scan_all_flow_active) {
+        return false;
+    }
+    ap_list_cleanup();
+    ap_scan_status = scan_status_create("WPA3 Scan");
+    if (ap_scan_status) {
+        char wait_msg[48];
+        snprintf(wait_msg, sizeof(wait_msg), "Please wait %d seconds", AP_SCAN_ESTIMATE_SECONDS);
+        scan_status_set_subtext(ap_scan_status, wait_msg);
+    }
+
+    if (ap_scan_start_async() != ESP_OK) {
+        if (ap_scan_status) {
+            scan_status_close(ap_scan_status);
+            ap_scan_status = NULL;
+        }
+        return false;
+    }
+
+    wpa3_check_waiting_for_ap_scan = true;
+    ap_scan_ui_start_time = esp_timer_get_time();
+    ap_scan_poll_timer = lv_timer_create(ap_scan_poll_timer_cb, 100, NULL);
+    return true;
+}
+
+static void wpa3_check_scan_complete_callback(void) {
+    if (ap_scan_get_count() == 0) {
+        error_popup_create("No APs found");
+        return;
+    }
+    terminal_set_return_view(&options_menu_view);
+    display_manager_switch_view(&terminal_view);
+    wpa3_compliance_check_all();
 }
 
 static bool station_select_for_action(void) {

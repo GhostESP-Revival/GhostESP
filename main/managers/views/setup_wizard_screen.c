@@ -4,6 +4,7 @@
 #include "managers/settings_manager.h"
 #include "managers/display_manager.h"
 #include "gui/screen_layout.h"
+#include "gui/gui_router.h"
 #include "gui/theme_palette_api.h"
 #include "gui/accessibility_fonts.h"
 #include "esp_log.h"
@@ -190,9 +191,67 @@ static void show_complete_screen(void);
 static void finish_setup(void);
 static void skip_setup(void);
 
-#define STATUS_BAR_H 18
+/* Every step is drawn by setup_wizard_create(), so moving between steps means
+ * rebuilding the wizard itself. Switching to setup_wizard_view again would be
+ * dropped as a duplicate route (see gui_router_navigate_immediate), leaving the
+ * wizard stuck on the step it is already showing, so refresh in place. */
+static void wizard_goto_step(SetupStep step) {
+    current_step = step;
+    gui_router_refresh();
+}
+
+/* The wizard draws a real status bar (its root is created with a title), so
+ * reserve the space that one actually occupies instead of an older 18px guess
+ * that let the title slide under it on the small panels. */
+#define STATUS_BAR_H GUI_STATUS_BAR_H
 #define USABLE_H (LV_VER_RES - STATUS_BAR_H)
 #define USABLE_W LV_HOR_RES
+
+/* ---------------------------------------------------------------------------
+ * Row-list geometry
+ *
+ * The country picker and every option list (theme, timezone, layout, ...) share
+ * one source so their row rhythm is identical. A row hugs its label: the floor
+ * is one line of the row font plus a 2px margin, because a fixed 22px floor
+ * wrapped an 11px label in a third of padding on the 240x135 panels, which read
+ * as a column of empty space and left only three rows of a six-row list on
+ * screen. The proportional term and the ceiling are unchanged, so touch panels
+ * keep their finger-sized rows.
+ * ------------------------------------------------------------------------ */
+typedef struct {
+    int title_y;
+    int list_y;
+    int list_h;
+    int row_h;
+    int pad_h;      /* list inset, left/right */
+    int pad_v;      /* list inset, top/bottom */
+    int hint_gap;   /* distance from the screen bottom to the hint label */
+} wizard_rows_t;
+
+static void wizard_row_metrics(wizard_rows_t *m, const lv_font_t *row_font) {
+    m->title_y = STATUS_BAR_H + (USABLE_H * 3 / 100);
+    m->list_y = STATUS_BAR_H + (USABLE_H * 15 / 100);
+    m->list_h = USABLE_H * 70 / 100;
+    m->hint_gap = GUI_HOME_SAFE_H + (USABLE_H * 3 / 100);
+    if (m->hint_gap < GUI_HOME_SAFE_H + 3) m->hint_gap = GUI_HOME_SAFE_H + 3;
+
+    m->pad_h = USABLE_W * 2 / 100;
+    if (m->pad_h < 3) m->pad_h = 3;
+    /* Vertical insets only clip the visible rows, so keep them tight; the rows
+     * already carry their own breathing room. */
+    m->pad_v = GUI_GRID / 2;
+    if (m->pad_v < 2) m->pad_v = 2;
+
+    /* One line of the row font plus a 2px margin above and below, never less. */
+    int margin = GUI_GRID / 2;
+    if (margin < 2) margin = 2;
+    int row_min = lv_font_get_line_height(row_font) + 2 * margin;
+    int row_h = USABLE_H * 12 / 100;
+    if (row_h < row_min) row_h = row_min;
+    if (row_h > 36) row_h = 36;
+    if (row_h < 14) row_h = 14;
+    m->row_h = row_h;
+}
 
 static void style_wizard_btn(lv_obj_t *btn, lv_color_t bg, lv_coord_t radius) {
     lv_obj_set_style_bg_color(btn, bg, LV_PART_MAIN);
@@ -397,14 +456,12 @@ static void show_welcome_screen(void) {
 static void country_btn_event_cb(lv_event_t *e) {
     intptr_t index = (intptr_t)lv_event_get_user_data(e);
     selected_country_index = (int)index;
-    current_step = SETUP_STEP_TIMEZONE;
-    display_manager_switch_view(&setup_wizard_view);
+    wizard_goto_step(SETUP_STEP_TIMEZONE);
 }
 
 static void timezone_btn_event_cb(lv_event_t *e) {
     (void)e;
-    current_step = SETUP_STEP_DISPLAY_TIMEOUT;
-    display_manager_switch_view(&setup_wizard_view);
+    wizard_goto_step(SETUP_STEP_DISPLAY_TIMEOUT);
 }
 
 static void update_option_selection(int count) {
@@ -447,44 +504,41 @@ static void update_option_selection(int count) {
 static void show_option_screen(const char *title_text, const char **options, int count, int current_value) {
     const lv_font_t *title_font = get_title_font();
     const lv_font_t *body_font = get_body_font();
-    
-    int title_y = STATUS_BAR_H + (USABLE_H * 3 / 100);
-    int list_top = STATUS_BAR_H + (USABLE_H * 15 / 100);
-    int list_height = USABLE_H * 70 / 100;
-    int btn_h = USABLE_H * 12 / 100;
-    if (btn_h < 22) btn_h = 22;
-    if (btn_h > 36) btn_h = 36;
-    int hint_bottom = USABLE_H * 3 / 100;
-    if (hint_bottom < 3) hint_bottom = 3;
-    
+
+    wizard_rows_t rows;
+    wizard_row_metrics(&rows, body_font);
+
     lv_obj_t *title = lv_label_create(root);
     lv_label_set_text(title, title_text);
     s_option_title_label = title;
     lv_obj_set_style_text_color(title, wizard_color(theme_palette_get_text(wizard_theme())), 0);
     lv_obj_set_style_text_font(title, title_font, 0);
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, title_y);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, rows.title_y);
 
-    int list_pad = USABLE_W * 2 / 100;
-    if (list_pad < 3) list_pad = 3;
     option_list = lv_obj_create(root);
-    lv_obj_set_size(option_list, USABLE_W - list_pad * 2, list_height);
-    lv_obj_align(option_list, LV_ALIGN_TOP_MID, 0, list_top);
+    lv_obj_set_size(option_list, USABLE_W - rows.pad_h * 2, rows.list_h);
+    lv_obj_align(option_list, LV_ALIGN_TOP_MID, 0, rows.list_y);
     lv_obj_set_style_bg_opa(option_list, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(option_list, 0, 0);
     lv_obj_set_style_shadow_width(option_list, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(option_list, list_pad, 0);
+    lv_obj_set_style_pad_hor(option_list, rows.pad_h, 0);
+    lv_obj_set_style_pad_ver(option_list, rows.pad_v, 0);
+    /* Plain objects inherit the theme card's 10px row gap, which reads as a
+     * column of empty space between the short rows on the small panels. */
+    lv_obj_set_style_pad_row(option_list, GUI_GRID / 2, 0);
+    lv_obj_set_style_pad_column(option_list, 0, 0);
     lv_obj_set_flex_flow(option_list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(option_list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    int item_w = get_card_width(list_pad);
-    
+    int item_w = get_card_width(rows.pad_h);
+
     for (int i = 0; i < count; i++) {
         lv_obj_t *btn = lv_btn_create(option_list);
         gui_apply_pressed_style(btn);
-        lv_obj_set_size(btn, item_w, btn_h);
+        lv_obj_set_size(btn, item_w, rows.row_h);
         uint8_t row_theme = current_step == SETUP_STEP_THEME ? (uint8_t)i : wizard_theme();
         style_wizard_btn(btn, wizard_color(theme_palette_get_surface(row_theme)), 4);
-        
+
         lv_obj_t *label = lv_label_create(btn);
         lv_label_set_text(label, options[i]);
         lv_obj_set_style_text_font(label, body_font, 0);
@@ -510,7 +564,7 @@ static void show_option_screen(const char *title_text, const char **options, int
 #endif
     lv_obj_set_style_text_color(hint, wizard_color(theme_palette_get_text_muted(wizard_theme())), 0);
     lv_obj_set_style_text_font(hint, body_font, 0);
-    lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -(GUI_HOME_SAFE_H + hint_bottom));
+    lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -rows.hint_gap);
 }
 
 static int prev_country_cursor = -1;
@@ -540,40 +594,37 @@ static void update_country_selection(void) {
 static void show_country_screen(void) {
     const lv_font_t *title_font = get_title_font();
     const lv_font_t *body_font = get_body_font();
-    
-    int title_y = STATUS_BAR_H + (USABLE_H * 3 / 100);
-    int list_top = STATUS_BAR_H + (USABLE_H * 15 / 100);
-    int list_height = USABLE_H * 70 / 100;
-    int btn_h = USABLE_H * 12 / 100;
-    if (btn_h < 22) btn_h = 22;
-    if (btn_h > 36) btn_h = 36;
-    int hint_bottom = USABLE_H * 3 / 100;
-    if (hint_bottom < 3) hint_bottom = 3;
-    
+
+    wizard_rows_t rows;
+    wizard_row_metrics(&rows, body_font);
+
     lv_obj_t *title = lv_label_create(root);
     lv_label_set_text(title, "Select Region");
     lv_obj_set_style_text_color(title, wizard_color(theme_palette_get_text(wizard_theme())), 0);
     lv_obj_set_style_text_font(title, title_font, 0);
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, title_y);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, rows.title_y);
 
-    int list_pad = USABLE_W * 2 / 100;
-    if (list_pad < 3) list_pad = 3;
     country_list = lv_obj_create(root);
-    lv_obj_set_size(country_list, USABLE_W - list_pad * 2, list_height);
-    lv_obj_align(country_list, LV_ALIGN_TOP_MID, 0, list_top);
+    lv_obj_set_size(country_list, USABLE_W - rows.pad_h * 2, rows.list_h);
+    lv_obj_align(country_list, LV_ALIGN_TOP_MID, 0, rows.list_y);
     lv_obj_set_style_bg_opa(country_list, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(country_list, 0, 0);
     lv_obj_set_style_shadow_width(country_list, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(country_list, list_pad, 0);
+    lv_obj_set_style_pad_hor(country_list, rows.pad_h, 0);
+    lv_obj_set_style_pad_ver(country_list, rows.pad_v, 0);
+    /* Plain objects inherit the theme card's 10px row gap, which reads as a
+     * column of empty space between the short rows on the small panels. */
+    lv_obj_set_style_pad_row(country_list, GUI_GRID / 2, 0);
+    lv_obj_set_style_pad_column(country_list, 0, 0);
     lv_obj_set_flex_flow(country_list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(country_list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    int item_w = get_card_width(list_pad);
-    
+    int item_w = get_card_width(rows.pad_h);
+
     for (int i = 0; i < (int)COUNTRY_COUNT; i++) {
         lv_obj_t *btn = lv_btn_create(country_list);
         gui_apply_pressed_style(btn);
-        lv_obj_set_size(btn, item_w, btn_h);
+        lv_obj_set_size(btn, item_w, rows.row_h);
         style_wizard_btn(btn, wizard_color(theme_palette_get_surface(wizard_theme())), 4);
 
         lv_obj_t *label = lv_label_create(btn);
@@ -596,7 +647,7 @@ static void show_country_screen(void) {
 #endif
     lv_obj_set_style_text_color(hint, wizard_color(theme_palette_get_text_muted(wizard_theme())), 0);
     lv_obj_set_style_text_font(hint, body_font, 0);
-    lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -(GUI_HOME_SAFE_H + hint_bottom));
+    lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -rows.hint_gap);
 }
 
 static void finish_btn_event_cb(lv_event_t *e) {
@@ -981,8 +1032,7 @@ static void setup_wizard_input_callback(InputEvent *event) {
                                 data->point.y >= btn_area.y1 && data->point.y <= btn_area.y2) {
                                 country_cursor = (int)i;
                                 selected_country_index = country_cursor;
-                                current_step = SETUP_STEP_TIMEZONE;
-                                display_manager_switch_view(&setup_wizard_view);
+                                wizard_goto_step(SETUP_STEP_TIMEZONE);
                                 return;
                             }
                         }
@@ -1045,8 +1095,7 @@ static void setup_wizard_input_callback(InputEvent *event) {
 #endif
                                 }
                                 
-                                current_step = next_step;
-                                display_manager_switch_view(&setup_wizard_view);
+                                wizard_goto_step(next_step);
                                 return;
                             }
                         }
@@ -1129,11 +1178,9 @@ static void setup_wizard_input_callback(InputEvent *event) {
                 }
             } else if (idx == 1 || idx == 3) { // Select/OK or Right
                 selected_country_index = country_cursor;
-                current_step = SETUP_STEP_TIMEZONE;
-                display_manager_switch_view(&setup_wizard_view);
+                wizard_goto_step(SETUP_STEP_TIMEZONE);
             } else if (idx == 0) { // Left/Back
-                current_step = SETUP_STEP_STA_SSID;
-                display_manager_switch_view(&setup_wizard_view);
+                wizard_goto_step(SETUP_STEP_STA_SSID);
             }
         } else if (event->type == INPUT_TYPE_KEYBOARD) {
             int kv = event->data.key_value;
@@ -1149,11 +1196,9 @@ static void setup_wizard_input_callback(InputEvent *event) {
                 }
             } else if (kv == LV_KEY_ENTER || kv == 13) { // enter
                 selected_country_index = country_cursor;
-                current_step = SETUP_STEP_TIMEZONE;
-                display_manager_switch_view(&setup_wizard_view);
+                wizard_goto_step(SETUP_STEP_TIMEZONE);
             } else if (kv == LV_KEY_ESC || kv == 29 || kv == '`') { // esc
-                current_step = SETUP_STEP_STA_SSID;
-                display_manager_switch_view(&setup_wizard_view);
+                wizard_goto_step(SETUP_STEP_STA_SSID);
             }
         }
 #ifdef CONFIG_USE_ENCODER
@@ -1165,8 +1210,7 @@ static void setup_wizard_input_callback(InputEvent *event) {
             }
             if (event->data.encoder.button) {
                 selected_country_index = country_cursor;
-                current_step = SETUP_STEP_TIMEZONE;
-                display_manager_switch_view(&setup_wizard_view);
+                wizard_goto_step(SETUP_STEP_TIMEZONE);
             }
         }
 #endif
@@ -1240,11 +1284,9 @@ static void setup_wizard_input_callback(InputEvent *event) {
 #ifdef CONFIG_WITH_STATUS_DISPLAY
                 else if (current_step == SETUP_STEP_IDLE_ANIMATION) temp_idle_animation = option_cursor;
 #endif
-                current_step = next_step;
-                display_manager_switch_view(&setup_wizard_view);
+                wizard_goto_step(next_step);
             } else if (idx == 0) { // Back
-                current_step = prev_step;
-                display_manager_switch_view(&setup_wizard_view);
+                wizard_goto_step(prev_step);
             }
         } else if (event->type == INPUT_TYPE_KEYBOARD) {
             int kv = event->data.key_value;
@@ -1265,11 +1307,9 @@ static void setup_wizard_input_callback(InputEvent *event) {
 #ifdef CONFIG_WITH_STATUS_DISPLAY
                 else if (current_step == SETUP_STEP_IDLE_ANIMATION) temp_idle_animation = option_cursor;
 #endif
-                current_step = next_step;
-                display_manager_switch_view(&setup_wizard_view);
+                wizard_goto_step(next_step);
             } else if (kv == LV_KEY_ESC || kv == 29 || kv == '`') { // esc
-                current_step = prev_step;
-                display_manager_switch_view(&setup_wizard_view);
+                wizard_goto_step(prev_step);
             }
         }
 #ifdef CONFIG_USE_ENCODER
@@ -1290,8 +1330,7 @@ static void setup_wizard_input_callback(InputEvent *event) {
 #ifdef CONFIG_WITH_STATUS_DISPLAY
                 else if (current_step == SETUP_STEP_IDLE_ANIMATION) temp_idle_animation = option_cursor;
 #endif
-                current_step = next_step;
-                display_manager_switch_view(&setup_wizard_view);
+                wizard_goto_step(next_step);
             }
         }
 #endif
