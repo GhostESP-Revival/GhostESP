@@ -33,6 +33,7 @@
 #include "lvgl_tft/disp_spi.h"
 #if defined(CONFIG_LV_TOUCH_DRIVER_PROTOCOL_SPI) && !defined(CONFIG_USE_BIT_BANG_TOUCH)
 #include "lvgl_touch/tp_spi.h"
+#include "lvgl_spi_conf.h"
 #endif
 
 #define MAX_PORTALS 32
@@ -1604,7 +1605,7 @@ esp_err_t sd_card_resume_from_usb_msc(void) {
       .max_files = 3,
   };
   FATFS *fs = NULL;
-  esp_err_t err = esp_vfs_fat_register(&conf, &fs);
+  esp_err_t err = esp_vfs_fat_register_cfg(&conf, &fs);
   if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
     ESP_LOGE(TAG, "USB MSC resume: VFS register failed: %s", esp_err_to_name(err));
     ff_diskio_unregister(pdrv);
