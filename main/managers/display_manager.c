@@ -5455,6 +5455,11 @@ static bool dm_handle_crowpanel_home_event(const InputEvent *event) {
 }
 #endif
 
+void display_manager_flush_input_queue(void) {
+    if (!input_queue) return;
+    xQueueReset(input_queue);
+}
+
 void processEvent() {  // do not process events until the display manager is up
   if (!display_manager_init_success) {
     return;

@@ -25,8 +25,6 @@
 
 static const char *PCAP_TAG = "PCAP";
 static bool is_valid_tag_length(uint8_t tag_num, uint8_t tag_len);
-static bool is_valid_beacon_fixed_params(const uint8_t *frame, size_t offset,
-                                         size_t max_len);
 esp_err_t pcap_file_open_in_dir(const char *base_file_name,
                                 const char *dir_path,
                                 pcap_capture_type_t capture_type);
@@ -558,6 +556,41 @@ esp_err_t pcap_file_open_in_dir(const char *base_file_name,
   return ESP_OK;
 }
 
+/* Fixed-parameter lengths for management frames (IEEE 802.11-2020 9.4).
+ * Returns the number of bytes that follow the 24-byte MAC header, or 0 for
+ * subtypes that carry no fixed parameters. */
+static size_t management_fixed_param_len(uint8_t subtype) {
+  switch (subtype) {
+  case 0x0: return 4;  // Association Request
+  case 0x1: return 6;  // Association Response
+  case 0x2: return 36; // Reassociation Request
+  case 0x3: return 6;  // Reassociation Response
+  case 0x4: return 4;  // Probe Request
+  case 0x5: return 12; // Probe Response
+  case 0x6: return 12; // Timing Advertisement
+  case 0x8: return 12; // Beacon
+  case 0x9: return 4;  // ATIM
+  case 0xa: return 2;  // Disassociation
+  case 0xb: return 6;  // Authentication
+  case 0xc: return 2;  // Deauthentication
+  case 0xd: return 1;  // Action
+  case 0xe: return 1;  // Action No Ack
+  default: return 0;   // Reserved / unused
+  }
+}
+
+/* Length of a control frame body (802.11-2020 9.2). ACK and CTS have no
+ * duration field, Block Ack Request has no ID. */
+static size_t control_frame_len(uint8_t subtype) {
+  switch (subtype) {
+  case 0x8: return 14; // Block Ack Request
+  case 0x9: return 32; // Block Ack
+  case 0xc: return 10; // CTS
+  case 0xd: return 10; // ACK
+  default: return 16;  // PS-Poll, RTS, reserved
+  }
+}
+
 static size_t calculate_wifi_frame_length(const uint8_t *frame,
                                           size_t max_len) {
   if (frame == NULL || max_len < 2)
@@ -572,82 +605,45 @@ static size_t calculate_wifi_frame_length(const uint8_t *frame,
   size_t length = 24; // Basic MAC header length
 
   switch (type) {
-  case 0x0: // Management frames
+  case 0x0: { // Management frames
     if (max_len < length)
       return max_len;
 
-    // Handle fixed parameters
-    switch (subtype) {
-    case 0x8: // Beacon
-    case 0x5: // Probe Response
-      if (max_len < length + 12)
-        return length;
-      if (subtype == 0x8 &&
-          !is_valid_beacon_fixed_params(frame, length, max_len)) {
-        return length;
-      }
-      length += 12;
-      break;
-
-    case 0x0: // Association Request
-      if (max_len < length + 4)
-        return length;
-      length += 4;
-      break;
-
-    case 0xb: // Authentication
-      if (max_len < length + 6)
-        return length;
-      length += 6;
-      break;
-
-    case 0xd: // Action
-      if (max_len < length + 1)
-        return length;
-      length += 1;
-      break;
+    size_t fixed = management_fixed_param_len(subtype);
+    if (fixed > 0) {
+      // The radio did not hand us the whole frame. Emit what we actually got
+      // instead of falling back to a bare MAC header.
+      if (max_len < length + fixed)
+        return max_len;
+      length += fixed;
     }
 
-    // Process tagged parameters with validation
-    if (max_len > length) {
-      size_t pos = length;
-      while (pos + 2 <= max_len) {
-        uint8_t tag_num = frame[pos];
-        uint8_t tag_len = frame[pos + 1];
+    /* Walk the tagged parameters starting after the fixed parameters, so the
+     * fixed parameters are never mistaken for elements. Stop at the first
+     * element that does not fit or is structurally invalid, but never cut
+     * into an element the radio did capture. */
+    size_t pos = length;
+    while (pos + 2 <= max_len) {
+      uint8_t tag_num = frame[pos];
+      uint8_t tag_len = frame[pos + 1];
 
-        if (pos + 2 + tag_len > max_len) {
-          length = pos;
-          break;
-        }
+      if (pos + 2 + tag_len > max_len)
+        break;
+      if (!is_valid_tag_length(tag_num, tag_len))
+        break;
 
-        if (!is_valid_tag_length(tag_num, tag_len)) {
-          length = pos;
-          break;
-        }
+      pos += 2 + tag_len;
 
-        pos += 2 + tag_len;
-
-        // Check for padding or end of tags
-        if (tag_num == 0 && tag_len == 0) {
-          break;
-        }
-      }
-      length = pos;
+      // End-of-elements marker
+      if (tag_num == 0 && tag_len == 0)
+        break;
     }
+    length = pos;
     break;
+  }
 
   case 0x1: // Control frames
-    switch (subtype) {
-    case 0xB: // RTS
-      length = 16;
-      break;
-    case 0xC: // CTS
-    case 0xD: // ACK
-      length = 10;
-      break;
-    default:
-      length = 16; // Default for other control frames
-    }
+    length = control_frame_len(subtype);
     break;
 
   case 0x2: // Data frames
@@ -659,7 +655,7 @@ static size_t calculate_wifi_frame_length(const uint8_t *frame,
 
     if ((subtype & 0x8) != 0) { // QoS data
       if (max_len < length + 2)
-        return length;
+        return max_len;
       length += 2;
     }
 
@@ -740,28 +736,6 @@ static bool is_valid_tag_length(uint8_t tag_num, uint8_t tag_len) {
   default:
     return true; // All other tags can have any length
   }
-}
-
-static bool is_valid_beacon_fixed_params(const uint8_t *frame, size_t offset,
-                                         size_t max_len) {
-  if (offset + 12 > max_len)
-    return false;
-
-  // Skip timestamp (8 bytes) as it can be any value
-
-  // Check beacon interval (2 bytes) - typically between 1-65535
-  uint16_t beacon_interval = frame[offset + 8] | (frame[offset + 9] << 8);
-  if (beacon_interval == 0)
-    return false;
-
-  // Check capability info (2 bytes) - must have some bits set
-  uint16_t capability = frame[offset + 10] | (frame[offset + 11] << 8);
-  if ((capability & 0x0001) == 0 && (capability & 0x0002) == 0) {
-    // At least one of ESS or IBSS must be set
-    return false;
-  }
-
-  return true;
 }
 
 esp_err_t pcap_write_packet_to_buffer(const void *packet, size_t length,
@@ -967,6 +941,11 @@ static esp_err_t _pcap_flush_buffer_to_file_nolock() {
       } else {
         fflush(pcap_file);
       }
+    } else if (s_pcap_mode == PCAP_MODE_WIRESHARK) {
+      /* Live stream: the host reader expects a bare pcap byte stream. Writing
+       * the [BUF/BEGIN]/[BUF/CLOSE] text markers here would inject non-pcap
+       * bytes into the middle of the stream and desync the reader. */
+      _pcap_flush_wireshark_stream_nolock();
     } else { // If no file, try JIT mount for somethingsomething, else UART
       bool gating_template = pcap_is_jit_template();
 

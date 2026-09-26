@@ -74,6 +74,20 @@ static bool scan_results_truncated = false;
 // merged results, so finish_async skips the driver harvest.
 static bool async_profile_results_ready = false;
 
+/* Per-profile-channel scan work, handed to a dedicated task by
+ * ap_scan_start_async(). Running the per-channel sweep inline blocked the
+ * caller's task for the whole plan: from the UI that is the LVGL task, so the
+ * "Scanning APs" overlay never got a frame painted, queued taps were lost to a
+ * full input queue, and the stale presses then cancelled the follow-up station
+ * scan. The blocking ap_scan_start() CLI path is intentionally unchanged. */
+static uint8_t s_profile_scan_channels[WIFI_CHANNELS_MAX];
+static size_t s_profile_scan_count = 0;
+static volatile bool async_profile_scan_running = false;
+/* Set by ap_scan_cancel_async() while the worker still owns the radio. The
+ * worker checks it before publishing, so a cancelled sweep cannot leave
+ * async_profile_results_ready set for the next scan to consume. */
+static volatile bool s_profile_scan_cancelled = false;
+
 // External dependencies
 extern RGBManager_t rgb_manager;
 extern TaskHandle_t rgb_effect_task_handle;
@@ -294,6 +308,35 @@ esp_err_t ap_scan_scan_channels(const uint8_t *channels, size_t count) {
     return ESP_OK;
 }
 
+/* Worker for the async per-profile-channel sweep. ap_scan_scan_channels()
+ * publishes the merged results itself (scanned_aps / ap_count), so this only
+ * has to signal completion. The running flag is cleared last: ap_scan_check_done()
+ * polls it and must not report done before those writes are visible. */
+static void ap_scan_profile_task(void *arg) {
+    (void)arg;
+    esp_err_t perr = ap_scan_scan_channels(s_profile_scan_channels,
+                                           s_profile_scan_count);
+    if (s_profile_scan_cancelled) {
+        /* Drop the merged results: the caller already abandoned this scan, and
+         * publishing now would make the next scan's finish_async take the
+         * profile branch with someone else's data. */
+        ESP_LOGW(TAG, "Profile scan discarded (cancelled): %s",
+                 esp_err_to_name(perr));
+        async_profile_results_ready = false;
+        if (scanned_aps != NULL) {
+            free(scanned_aps);
+            scanned_aps = NULL;
+        }
+        ap_count = 0;
+    } else {
+        async_profile_results_ready = (perr == ESP_OK);
+        ESP_LOGI(TAG, "Profile scan task finished: %s, %u APs",
+                 esp_err_to_name(perr), (unsigned)ap_count);
+    }
+    async_profile_scan_running = false;
+    vTaskDelete(NULL);
+}
+
 void ap_scan_start(void) {
     if (wardriving_is_running()) {
         ESP_LOGW(TAG, "Stop wardriving before starting a general AP scan");
@@ -506,16 +549,28 @@ esp_err_t ap_scan_start_async(void) {
 
     rgb_manager_set_color(&rgb_manager, -1, 50, 255, 50, false);
 
-    // User hop profile: run per-channel scans now (blocking) and publish
+    // User hop profile: run the per-channel sweep on a worker task and publish
     // merged results, then let the normal async completion flow collect them.
-    uint8_t profile_channels[WIFI_CHANNELS_MAX];
+    // This must not run inline: the UI calls this from the LVGL task, and a
+    // blocking multi-channel sweep would starve it, so the "Scanning APs"
+    // overlay would never paint and queued taps would overflow the input queue.
     size_t profile_count = 0;
-    hop_profile_resolve_monitor(profile_channels, WIFI_CHANNELS_MAX, &profile_count);
+    hop_profile_resolve_monitor(s_profile_scan_channels, WIFI_CHANNELS_MAX,
+                                &profile_count);
     if (profile_count > 0) {
+        s_profile_scan_count = profile_count;
+        s_profile_scan_cancelled = false;
+        async_profile_results_ready = false;
+        async_profile_scan_running = true;
+        if (xTaskCreate(ap_scan_profile_task, "ap_profile_scan", 4096, NULL, 5,
+                        NULL) != pdPASS) {
+            async_profile_scan_running = false;
+            ESP_LOGE(TAG, "Failed to spawn profile scan task");
+            async_scan_in_progress = false;
+            goto cleanup;
+        }
         printf("WiFi Scan started (%u channels)\n", (unsigned)profile_count);
         TERMINAL_VIEW_ADD_TEXT("WiFi Scan started\n");
-        esp_err_t perr = ap_scan_scan_channels(profile_channels, profile_count);
-        async_profile_results_ready = (perr == ESP_OK);
         async_scan_start_time = esp_timer_get_time();
         log_heap_status(TAG, "async_scan_started");
         return ESP_OK;
@@ -569,7 +624,12 @@ bool ap_scan_check_done(void) {
         return true;
     }
 
-    // Profile scans already merged their results synchronously.
+    // A profile scan runs on a worker task, so wait for it even though the
+    // results are already merged the moment it exits.
+    if (async_profile_scan_running) {
+        return false;
+    }
+
     if (async_profile_results_ready) {
         async_scan_in_progress = false;
         return true;
@@ -702,6 +762,18 @@ void ap_scan_finish_async(void) {
 void ap_scan_cancel_async(void) {
     if (!async_scan_in_progress) return;
 
+    /* The profile worker owns the radio until it exits; tearing the driver down
+     * underneath it would leave it scanning into a stopped stack. Let it finish
+     * and discard the result instead - it is bounded by the plan length. */
+    if (async_profile_scan_running) {
+        ESP_LOGW(TAG, "Cancel during profile scan: worker will drain and discard");
+        s_profile_scan_cancelled = true;
+        async_profile_results_ready = false;
+        async_scan_in_progress = false;
+        return;
+    }
+
+    s_profile_scan_cancelled = false;
     async_profile_results_ready = false;
     esp_err_t err = esp_wifi_scan_stop();
     if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_STARTED) {

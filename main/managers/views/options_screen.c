@@ -106,6 +106,7 @@ static const char **blocklist_load_page(void);
 static bool wigle_csv_browser_active = false;
 static char selected_wigle_csv[MAX_PORTAL_NAME] = {0};
 
+#define AP_LIST_PAGE_SIZE 10
 #define STA_LIST_PAGE_SIZE 10
 #define SCANALL_LIST_PAGE_SIZE 8
 #define BLE_DETECT_LIST_PAGE_SIZE 8
@@ -123,10 +124,6 @@ static char selected_wigle_csv[MAX_PORTAL_NAME] = {0};
 static scan_status_t *ap_scan_status = NULL;
 static detail_view_t *ap_detail_view = NULL;
 
-/* Set while a menu is being built for a windowed (virtual) list, so the
- * string-based list path is skipped and the batched row builder stays out of
- * the way. */
-static bool s_vlist_pending = false;
 static rssi_meter_t *track_meter = NULL; /* live RSSI ring overlay for Track AP/STA/BLE */
 
 /* Which hardware source feeds the live RSSI ring overlay, so teardown stops the
@@ -148,6 +145,7 @@ static int64_t ap_scan_ui_start_time = 0;
  * then opens the terminal with the report instead of the AP list. */
 static bool wpa3_check_waiting_for_ap_scan = false;
 static paged_menu_t *scanall_list_menu = NULL;
+static paged_menu_t *ap_list_menu = NULL;
 static paged_menu_t *sta_list_menu = NULL;
 static scan_status_t *sta_scan_status = NULL;
 static detail_view_t *sta_detail_view = NULL;
@@ -282,25 +280,7 @@ static void sanitize_recolor_text(char *text);
 static void station_lookup_ap_ssid(const uint8_t ap_bssid[6], char *ssid_out,
                                    size_t ssid_out_size);
 
-/* Windowed (virtual) result lists. Each kind is one scan-result list shown as a
- * fixed row pool instead of one button per record behind page rows. */
-typedef enum {
-    VLIST_NONE = 0,
-    VLIST_AP,
-    VLIST_STA,
-    VLIST_SCANALL,
-    VLIST_ARP,
-    VLIST_GOVEE,
-    VLIST_MDNS,
-    VLIST_ENUM,
-    VLIST_BLE_DETECT,
-    VLIST_BLE_ADV,
-    VLIST_BLE_GATT,
-} vlist_kind_t;
-
-static vlist_kind_t vlist_kind_for_state(void);
-static void vlist_activate(int index, void *user_data);
-static void vlist_show(void);
+static const char **ap_list_get_options(void);
 static const char **sta_list_get_options(void);
 static const char **scanall_list_get_options(void);
 static const char **ble_detect_list_get_options(void);
@@ -326,6 +306,8 @@ static const char **govee_list_get_options(void);
 static void show_govee_detail(int index);
 static void govee_brightness_kb_cb(const char *text);
 static void govee_color_kb_cb(const char *text);
+static void ble_spam_name_kb_cb(const char *text);
+static void ble_spam_name_prompt(void);
 
 static bool start_mdns_scan_flow(void);
 static void mdns_scan_poll_timer_cb(lv_timer_t *timer);
@@ -577,6 +559,12 @@ static bool start_station_scan_flow(void) {
     station_list_cleanup();
     station_scan_clear_results();
 
+    /* This overlay ends on any input, and a Scan All hands off from the AP
+     * phase in the same tick - so the tap that started the AP scan (plus
+     * anything the user pressed while it ran) is still queued and would stop
+     * the station scan within milliseconds. Discard pre-overlay input. */
+    display_manager_flush_input_queue();
+
     sta_scan_status = scan_status_create("Scanning Stations");
     station_scan_set_subtext(0);
 
@@ -715,6 +703,7 @@ static void ble_adv_set_subtext(int found_count) {
 #include "managers/wifi_manager.h"
 #include "core/wpa_crypto.h"
 #include "attacks/wifi/gtk_abuse.h"
+#include "attacks/ble/ble_spam.h"
 #include "managers/settings_manager.h"
 #include "managers/infrared_manager.h"
 #include "managers/gps_manager.h"
@@ -2313,7 +2302,8 @@ static const char * const bluetooth_oui_options[] = {
 };
 static const char * const bluetooth_spam_options[] = {
     "BLE Spam - Apple", "BLE Spam - Microsoft", "BLE Spam - Samsung",
-    "BLE Spam - Google", "BLE Spam - Random", "Stop BLE Spam", NULL
+    "BLE Spam - Google", "BLE Spam - Random", "BLE Spam - AirPods Popup Name",
+    "Stop BLE Spam", NULL
 };
 static const char * const bluetooth_raw_options[] = {
     "Raw BLE Scanner", NULL
@@ -2491,7 +2481,7 @@ static void opt_touch_begin(lv_indev_data_t *data) {
     opt_touch_bluetooth_state = current_bluetooth_menu_state;
 }
 
-static int opt_clamp_drag_delta(int delta) {
+static int32_t opt_clamp_drag_delta(int32_t delta) {
     if (abs(delta) <= OPT_DRAG_DELTA_DEADZONE) return 0;
     if (delta > OPT_DRAG_MAX_STEP) return OPT_DRAG_MAX_STEP;
     if (delta < -OPT_DRAG_MAX_STEP) return -OPT_DRAG_MAX_STEP;
@@ -3574,11 +3564,6 @@ static void update_scroll_buttons_visibility(void) {
     } else if (ble_gatt_detail_view && current_bluetooth_menu_state == BLUETOOTH_MENU_GATT_DETAILS) {
         target = detail_view_get_list(ble_gatt_detail_view);
         force_show = true;
-    } else if (g_options_view && options_view_is_virtual(g_options_view)) {
-        /* A windowed list never overflows its viewport, so the usual overflow
-         * test would hide the touch bar the list is now navigated with. */
-        target = menu_container;
-        force_show = true;
     } else {
         target = menu_container;
     }
@@ -3772,12 +3757,6 @@ static void scroll_options_up(lv_event_t *e) {
         return;
     }
     if (!menu_container) return;
-    if (g_options_view && options_view_is_virtual(g_options_view)) {
-        /* A windowed list keeps its rows inside the viewport, so there is
-         * nothing to scroll: step the selection instead. */
-        select_option_item(selected_item_index - 1);
-        return;
-    }
     lv_coord_t scroll_amt = lv_obj_get_height(menu_container) / 2;
     lv_obj_scroll_by_bounded(menu_container, 0, scroll_amt, LV_ANIM_OFF);
 }
@@ -3825,12 +3804,6 @@ static void scroll_options_down(lv_event_t *e) {
         return;
     }
     if (!menu_container) return;
-    if (g_options_view && options_view_is_virtual(g_options_view)) {
-        /* A windowed list keeps its rows inside the viewport, so there is
-         * nothing to scroll: step the selection instead. */
-        select_option_item(selected_item_index + 1);
-        return;
-    }
     lv_coord_t scroll_amt = lv_obj_get_height(menu_container) / 2;
     lv_obj_scroll_by_bounded(menu_container, 0, -scroll_amt, LV_ANIM_OFF);
 }
@@ -4162,9 +4135,7 @@ void options_menu_create() {
                 break;
             case WIFI_MENU_GOVEE_LIST:
             case WIFI_MENU_GOVEE_DETAILS:
-                /* Windowed list: rows come from the scan results on demand. */
-                options = NULL;
-                s_vlist_pending = true;
+                options = govee_list_get_options();
                 break;
             case WIFI_MENU_EVIL_PORTAL_SELECT:
             {
@@ -4183,22 +4154,26 @@ void options_menu_create() {
             }
             case WIFI_MENU_AP_LIST:
             case WIFI_MENU_AP_DETAILS:
-                /* Windowed list: rows come from the scan results on demand. */
-                options = NULL;
-                s_vlist_pending = true;
+                options = ap_list_get_options();
                 break;
             case WIFI_MENU_STA_LIST:
             case WIFI_MENU_STA_DETAILS:
+                options = sta_list_get_options();
+                break;
             case WIFI_MENU_SCANALL_LIST:
+                options = scanall_list_get_options();
+                break;
             case WIFI_MENU_ARP_LIST:
             case WIFI_MENU_ARP_DETAILS:
+                options = arp_list_get_options();
+                break;
             case WIFI_MENU_MDNS_LIST:
             case WIFI_MENU_MDNS_DETAILS:
+                options = mdns_list_get_options();
+                break;
             case WIFI_MENU_ENUM_LIST:
             case WIFI_MENU_ENUM_DETAILS:
-                /* Windowed list: rows come from the scan results on demand. */
-                options = NULL;
-                s_vlist_pending = true;
+                options = enum_list_get_options();
                 break;
             case WIFI_MENU_AP_MULTI_SELECT:
                 options = ap_multi_select_get_options();
@@ -4226,12 +4201,10 @@ void options_menu_create() {
                     start_ble_detect_flow();
                 }
 #endif
-                options = NULL;
-                s_vlist_pending = true;
+                options = ble_detect_list_get_options();
                 break;
             case BLUETOOTH_MENU_DETECT_DETAILS:
-                options = NULL;
-                s_vlist_pending = true;
+                options = ble_detect_list_get_options();
                 break;
             case BLUETOOTH_MENU_ADV_LIST:
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
@@ -4239,12 +4212,10 @@ void options_menu_create() {
                     start_ble_adv_flow();
                 }
 #endif
-                options = NULL;
-                s_vlist_pending = true;
+                options = ble_adv_list_get_options();
                 break;
             case BLUETOOTH_MENU_ADV_DETAILS:
-                options = NULL;
-                s_vlist_pending = true;
+                options = ble_adv_list_get_options();
                 break;
             case BLUETOOTH_MENU_GATT_LIST:
 #ifndef CONFIG_IDF_TARGET_ESP32S2
@@ -4252,12 +4223,10 @@ void options_menu_create() {
                     start_ble_gatt_flow();
                 }
 #endif
-                options = NULL;
-                s_vlist_pending = true;
+                options = ble_gatt_list_get_options();
                 break;
             case BLUETOOTH_MENU_GATT_DETAILS:
-                options = NULL;
-                s_vlist_pending = true;
+                options = ble_gatt_list_get_options();
                 break;
             case BLUETOOTH_MENU_OUI: options = bluetooth_oui_options; break;
             case BLUETOOTH_MENU_OUI_VENDOR_LIST: options = ble_oui_vendor_list_get_options(); break;
@@ -4338,7 +4307,7 @@ void options_menu_create() {
     default: options = NULL; break;
     }
 
-    if (!is_settings_mode && options == NULL && !s_vlist_pending) {
+    if (!is_settings_mode && options == NULL) {
         if (s_pending_detail_resume == RESUME_NONE) {
             display_manager_switch_view(&main_menu_view);
             return;
@@ -4349,9 +4318,7 @@ void options_menu_create() {
             if (current_wifi_menu_state == WIFI_MENU_SCANALL_LIST) {
                 options = scanall_list_get_options();
             } else {
-                /* Windowed list: rows come from the scan results on demand. */
-                options = NULL;
-                s_vlist_pending = true;
+                options = ap_list_get_options();
             }
             break;
         case RESUME_STA_DETAIL:
@@ -4359,25 +4326,20 @@ void options_menu_create() {
             if (current_wifi_menu_state == WIFI_MENU_SCANALL_LIST) {
                 options = scanall_list_get_options();
             } else {
-                /* Windowed list: rows come from the scan results on demand. */
-                options = NULL;
-                s_vlist_pending = true;
+                options = sta_list_get_options();
             }
             break;
         case RESUME_BLE_DETECT_DETAIL:
             current_bluetooth_menu_state = BLUETOOTH_MENU_DETECT_LIST;
-            options = NULL;
-            s_vlist_pending = true;
+            options = ble_detect_list_get_options();
             break;
         case RESUME_BLE_ADV_DETAIL:
             current_bluetooth_menu_state = BLUETOOTH_MENU_ADV_LIST;
-            options = NULL;
-            s_vlist_pending = true;
+            options = ble_adv_list_get_options();
             break;
         case RESUME_BLE_GATT_DETAIL:
             current_bluetooth_menu_state = BLUETOOTH_MENU_GATT_LIST;
-            options = NULL;
-            s_vlist_pending = true;
+            options = ble_gatt_list_get_options();
             break;
         default:
             display_manager_switch_view(&main_menu_view);
@@ -4431,14 +4393,6 @@ void options_menu_create() {
     // (like the dedicated BadUSB/NFC views) instead of crawling in from the
     // top; the timer only fills overflow rows, keeping big lists responsive.
     // Done last so touch bar / scroll buttons / final container size exist.
-    if (s_vlist_pending) {
-        /* Windowed list: bind the row pool now that the list has its final
-         * size, then let menu_builder_cb tear down the unused build timer. */
-        s_vlist_pending = false;
-        vlist_show();
-        num_items = options_view_get_item_count(g_options_view);
-        selected_item_index = 0;
-    }
     menu_builder_cb(NULL);
 
     createdTimeInMs = (unsigned long)(esp_timer_get_time() / 1000ULL);
@@ -6403,6 +6357,7 @@ void handle_hardware_button_press_options(InputEvent *event) {
             // find which button was tapped
             for (int i = 0; i < num_items; i++) {
                 lv_obj_t *btn = lv_obj_get_child(menu_container, i);
+                if (!btn || !lv_obj_is_valid(btn)) continue;
                 lv_area_t btn_area;
                 lv_obj_get_coords(btn, &btn_area);
                 if (data->point.x >= btn_area.x1 && data->point.x <= btn_area.x2 &&
@@ -6644,33 +6599,6 @@ void handle_hardware_button_press_options(InputEvent *event) {
             return;
         }
         
-        /* Windowed result lists own their own navigation and activation: the
-         * pool rows carry the item index and options_view rebinds them on
-         * scroll, so there are no page rows to walk here. This sits ahead of
-         * the per-list paged handling below. */
-        if (vlist_kind_for_state() != VLIST_NONE && options_view_is_virtual(g_options_view)) {
-            if (button == 2) {
-                if (num_items > 0) {
-                    selected_item_index = (selected_item_index <= 0) ? (num_items - 1) : (selected_item_index - 1);
-                }
-                select_option_item(selected_item_index);
-            } else if (button == 4) {
-                if (num_items > 0) {
-                    selected_item_index = (selected_item_index >= (num_items - 1)) ? 0 : (selected_item_index + 1);
-                }
-                select_option_item(selected_item_index);
-            } else if (button == 1) {
-                int count = options_view_virtual_count(g_options_view);
-                if (selected_item_index < 0 || selected_item_index >= count) {
-                    back_event_cb(NULL);
-                    return;
-                }
-                vlist_activate(selected_item_index, NULL);
-            } else if (button == 0 || button == 3) {
-                back_event_cb(NULL);
-            }
-            return;
-        }
 
         if (current_wifi_menu_state == WIFI_MENU_SCANALL_LIST && scanall_list_menu) {
             if (button == 2) {
@@ -6707,6 +6635,49 @@ void handle_hardware_button_press_options(InputEvent *event) {
                         int skip = paged_menu_has_prev(scanall_list_menu) ? 1 : 0;
                         int row_idx = offset + (selected_item_index - skip);
                         scanall_select_row(row_idx);
+                    }
+                }
+            } else if (button == 0 || button == 3) {
+                back_event_cb(NULL);
+            }
+            return;
+        }
+
+        if (current_wifi_menu_state == WIFI_MENU_AP_LIST && ap_list_menu) {
+            if (button == 2) {
+                if (num_items > 0) {
+                    selected_item_index = (selected_item_index <= 0) ? (num_items - 1) : (selected_item_index - 1);
+                }
+                select_option_item(selected_item_index);
+            } else if (button == 4) {
+                if (num_items > 0) {
+                    selected_item_index = (selected_item_index >= (num_items - 1)) ? 0 : (selected_item_index + 1);
+                }
+                select_option_item(selected_item_index);
+            } else if (button == 1) {
+                const char **opts = paged_menu_get_options(ap_list_menu);
+                int count = 0;
+                for (int i = 0; opts[i]; i++) count++;
+
+                if (selected_item_index >= count) {
+                    back_event_cb(NULL);
+                    return;
+                }
+
+                const char *selected_option = opts[selected_item_index];
+
+                if (selected_option) {
+                    if (strcmp(selected_option, "< Prev") == 0) {
+                        paged_menu_page_prev(ap_list_menu);
+                        rebuild_current_menu();
+                    } else if (strcmp(selected_option, "Next >") == 0) {
+                        paged_menu_page_next(ap_list_menu);
+                        rebuild_current_menu();
+                    } else if (strcmp(selected_option, "No items found") != 0) {
+                        int offset = paged_menu_get_page_offset(ap_list_menu);
+                        int skip = paged_menu_has_prev(ap_list_menu) ? 1 : 0;
+                        int idx = offset + (selected_item_index - skip);
+                        show_ap_detail(idx);
                     }
                 }
             } else if (button == 0 || button == 3) {
@@ -7023,18 +6994,7 @@ void handle_hardware_button_press_options(InputEvent *event) {
             }
         } else if (keyValue == 13) {
             ESP_LOGI(TAG, "Enter button pressed");
-            /* Windowed result lists are activated by backing-list index, like the
-             * joystick and encoder paths: the pool rows carry rebinding indices,
-             * so reading a child by selected_item_index would activate the wrong
-             * row once scrolled, or nothing at all past the pool size. */
-            if (vlist_kind_for_state() != VLIST_NONE && options_view_is_virtual(g_options_view)) {
-                int count = options_view_virtual_count(g_options_view);
-                if (selected_item_index < 0 || selected_item_index >= count) {
-                    back_event_cb(NULL);
-                } else {
-                    vlist_activate(selected_item_index, NULL);
-                }
-            } else if (is_settings_mode) {
+            if (is_settings_mode) {
                 settings_activate_row(selected_item_index, true);
             } else {
                 lv_obj_t *selected_obj = lv_obj_get_child(menu_container, selected_item_index);
@@ -7205,25 +7165,6 @@ void handle_hardware_button_press_options(InputEvent *event) {
             return;
         }
 
-        /* Windowed result lists use a fixed pool of visible rows.  The
-         * selected index is an index into the backing scan, not a child index
-         * in menu_container, so route encoder activation through the same
-         * callback used by the virtual row click handler. */
-        if (vlist_kind_for_state() != VLIST_NONE && options_view_is_virtual(g_options_view)) {
-            if (event->data.encoder.button) {
-                int count = options_view_virtual_count(g_options_view);
-                if (selected_item_index < 0 || selected_item_index >= count) {
-                    back_event_cb(NULL);
-                } else {
-                    vlist_activate(selected_item_index, NULL);
-                }
-            } else if (event->data.encoder.direction < 0) {
-                select_option_item(selected_item_index - 1);
-            } else if (event->data.encoder.direction > 0) {
-                select_option_item(selected_item_index + 1);
-            }
-            return;
-        }
 
         if (event->data.encoder.button) {
             // Encoder button press - treat as select/enter/cycle
@@ -7544,21 +7485,6 @@ void option_event_cb(lv_event_t *e) {
         }
 #endif
         change_setting_value(setting_index, true);
-        option_invoked = false;
-        return;
-    }
-
-    /* Virtual rows store their backing-list index in the LVGL object's user
-     * data.  A legacy/manual activation can therefore arrive here with a
-     * small integer instead of a label pointer.  Route it before any strcmp;
-     * treating an AP index such as 2 or 3 as a string causes a Load access
-     * fault at exactly that address. */
-    if (vlist_kind_for_state() != VLIST_NONE && options_view_is_virtual(g_options_view)) {
-        intptr_t row_index = (intptr_t)lv_event_get_user_data(e);
-        int count = options_view_virtual_count(g_options_view);
-        if (row_index >= 0 && row_index < count) {
-            vlist_activate((int)row_index, NULL);
-        }
         option_invoked = false;
         return;
     }
@@ -8256,6 +8182,13 @@ void option_event_cb(lv_event_t *e) {
 #else
             error_popup_create("Device Does not Support Bluetooth...");
 #endif
+        } else if (strcmp(Selected_Option, "BLE Spam - AirPods Popup Name") == 0) {
+#ifndef CONFIG_IDF_TARGET_ESP32S2
+            ble_spam_name_prompt();
+            view_switched = true;
+#else
+            error_popup_create("Device Does not Support Bluetooth...");
+#endif
         } else if (strcmp(Selected_Option, "Stop BLE Spam") == 0) {
 #ifndef CONFIG_IDF_TARGET_ESP32S2
             terminal_set_return_view(&options_menu_view);
@@ -8741,7 +8674,40 @@ void option_event_cb(lv_event_t *e) {
         option_invoked = false;
         return;
     }
-    
+
+    else if (current_wifi_menu_state == WIFI_MENU_AP_LIST) {
+        if (strcmp(Selected_Option, "No items found") == 0) {
+            option_invoked = false;
+            return;
+        }
+        if (strcmp(Selected_Option, "< Prev") == 0) {
+            paged_menu_page_prev(ap_list_menu);
+            rebuild_current_menu();
+            option_invoked = false;
+            return;
+        }
+        if (strcmp(Selected_Option, "Next >") == 0) {
+            paged_menu_page_next(ap_list_menu);
+            rebuild_current_menu();
+            option_invoked = false;
+            return;
+        }
+
+        int offset = paged_menu_get_page_offset(ap_list_menu);
+        const char **opts = paged_menu_get_options(ap_list_menu);
+        int skip = paged_menu_has_prev(ap_list_menu) ? 1 : 0;
+
+        for (int i = 0; opts[i]; i++) {
+            if (opts[i] == Selected_Option || strcmp(opts[i], Selected_Option) == 0) {
+                int idx = offset + (i - skip);
+                show_ap_detail(idx);
+                break;
+            }
+        }
+        option_invoked = false;
+        return;
+    }
+
     else if (current_wifi_menu_state == WIFI_MENU_STA_LIST) {
         if (strcmp(Selected_Option, "No items found") == 0) {
             option_invoked = false;
@@ -9013,6 +8979,9 @@ void option_event_cb(lv_event_t *e) {
     else if (strcmp(Selected_Option, "List APs") == 0) {
         uint16_t ap_count_local = ap_scan_get_count();
         if (ap_count_local > 0) {
+            if (ap_list_menu) {
+                paged_menu_reset(ap_list_menu);
+            }
             current_wifi_menu_state = WIFI_MENU_AP_LIST;
             rebuild_current_menu();
             option_invoked = false;
@@ -10122,6 +10091,15 @@ void option_event_cb(lv_event_t *e) {
 #endif
     }
 
+    else if (strcmp(Selected_Option, "BLE Spam - AirPods Popup Name") == 0) {
+#ifndef CONFIG_IDF_TARGET_ESP32S2
+        ble_spam_name_prompt();
+        view_switched = true;
+#else
+        error_popup_create("Device Does not Support Bluetooth...");
+#endif
+    }
+
     else if (strcmp(Selected_Option, "Stop BLE Spam") == 0) {
 #ifndef CONFIG_IDF_TARGET_ESP32S2
         terminal_set_return_view(&options_menu_view);
@@ -10961,305 +10939,6 @@ static bool options_menu_needs_back_row(void) {
 #endif
 }
 
-/* Which result list, if any, the current menu state shows. */
-static vlist_kind_t vlist_kind_for_state(void) {
-    if (is_settings_mode) return VLIST_NONE;
-
-    if (SelectedMenuType == OT_Wifi) {
-        switch (current_wifi_menu_state) {
-        /* The *_DETAILS states keep the list bound behind the detail view, so
-         * they resolve to the same list kind as their *_LIST counterparts. */
-        case WIFI_MENU_AP_LIST:
-        case WIFI_MENU_AP_DETAILS:      return VLIST_AP;
-        case WIFI_MENU_STA_LIST:
-        case WIFI_MENU_STA_DETAILS:     return VLIST_STA;
-        case WIFI_MENU_SCANALL_LIST:    return VLIST_SCANALL;
-        case WIFI_MENU_ARP_LIST:
-        case WIFI_MENU_ARP_DETAILS:     return VLIST_ARP;
-        case WIFI_MENU_GOVEE_LIST:
-        case WIFI_MENU_GOVEE_DETAILS:   return VLIST_GOVEE;
-        case WIFI_MENU_MDNS_LIST:
-        case WIFI_MENU_MDNS_DETAILS:    return VLIST_MDNS;
-        case WIFI_MENU_ENUM_LIST:
-        case WIFI_MENU_ENUM_DETAILS:    return VLIST_ENUM;
-        default:                        return VLIST_NONE;
-        }
-    }
-
-    if (SelectedMenuType == OT_Bluetooth) {
-        switch (current_bluetooth_menu_state) {
-        case BLUETOOTH_MENU_DETECT_LIST:
-        case BLUETOOTH_MENU_DETECT_DETAILS: return VLIST_BLE_DETECT;
-        case BLUETOOTH_MENU_ADV_LIST:
-        case BLUETOOTH_MENU_ADV_DETAILS:    return VLIST_BLE_ADV;
-        case BLUETOOTH_MENU_GATT_LIST:
-        case BLUETOOTH_MENU_GATT_DETAILS:   return VLIST_BLE_GATT;
-        default:                            return VLIST_NONE;
-        }
-    }
-
-    return VLIST_NONE;
-}
-
-/* Real rows in a list, excluding the synthetic Back row. Each case mirrors the
- * count the old per-page loader walked. */
-static int vlist_real_count(vlist_kind_t kind) {
-    switch (kind) {
-    case VLIST_AP:   return (int)ap_scan_get_count();
-    case VLIST_STA:  return station_scan_get_count();
-    case VLIST_ARP:  return arp_scan_get_count();
-    case VLIST_GOVEE:return govee_scan_get_count();
-    case VLIST_MDNS: return wifi_manager_ip_lookup_get_count();
-    case VLIST_ENUM: return enum_scan_get_count();
-    case VLIST_BLE_DETECT: return ble_device_detect_get_count();
-    case VLIST_BLE_ADV:    return advertiser_scan_get_count();
-    case VLIST_BLE_GATT:   return gatt_scan_get_device_count();
-    case VLIST_SCANALL: {
-        uint16_t ap_count = 0;
-        wifi_ap_record_t *aps = NULL;
-        ap_scan_get_results(&ap_count, &aps);
-        if (!aps || ap_count == 0) return 0;
-        return scanall_total_rows(ap_count, aps);
-    }
-    default: return 0;
-    }
-}
-
-/* Format one row. These bodies are the old per-page loaders with the page
- * window removed: same accessors, same label text. */
-static void vlist_format_row(vlist_kind_t kind, int index, char *out, size_t out_len) {
-    uint8_t theme = settings_get_menu_theme(&G_Settings);
-    uint32_t muted_color = theme_palette_get_text_muted(theme);
-    char color_code[16];
-    snprintf(color_code, sizeof(color_code), "#%06X", (unsigned int)(muted_color & 0xFFFFFFu));
-
-    switch (kind) {
-    case VLIST_AP: {
-        uint16_t count = 0;
-        wifi_ap_record_t *aps = NULL;
-        ap_scan_get_results(&count, &aps);
-        if (!aps || index < 0 || index >= (int)count) return;
-
-        const char *band = (aps[index].primary >= 36) ? "5G" : "2.4G";
-        if (aps[index].ssid[0] == 0) {
-            snprintf(out, out_len, "Hidden Network %s %s Ch:%d#", color_code, band, aps[index].primary);
-        } else {
-            char ssid_trunc[28] = {0};
-            strncpy(ssid_trunc, (const char *)aps[index].ssid, sizeof(ssid_trunc) - 1);
-            snprintf(out, out_len, "%s %s %s Ch:%d#", ssid_trunc, color_code, band, aps[index].primary);
-        }
-    } break;
-
-    case VLIST_STA: {
-        int count = station_scan_get_count();
-        if (index < 0 || index >= count) return;
-
-        uint16_t ap_count = 0;
-        wifi_ap_record_t *aps = NULL;
-        ap_scan_get_results(&ap_count, &aps);
-
-        char sta_mac[18];
-        char sta_vendor[64] = {0};
-        char ap_ssid[33];
-        int ap_channel = 0;
-
-        station_format_mac(station_ap_list[index].station_mac, sta_mac, sizeof(sta_mac));
-        bool has_vendor = ouis_lookup_vendor(sta_mac, sta_vendor, sizeof(sta_vendor));
-        station_lookup_ap_ssid(station_ap_list[index].ap_bssid, ap_ssid, sizeof(ap_ssid));
-
-        for (int j = 0; aps && j < (int)ap_count; j++) {
-            if (memcmp(aps[j].bssid, station_ap_list[index].ap_bssid, 6) == 0) {
-                ap_channel = aps[j].primary;
-                break;
-            }
-        }
-
-        const char *display_name = has_vendor ? sta_vendor : sta_mac;
-        char display_name_trunc[40] = {0};
-        char ap_ssid_trunc[28] = {0};
-        strncpy(display_name_trunc, display_name, sizeof(display_name_trunc) - 1);
-        strncpy(ap_ssid_trunc, ap_ssid, sizeof(ap_ssid_trunc) - 1);
-        for (size_t k = 0; k < sizeof(ap_ssid_trunc) && ap_ssid_trunc[k] != '\0'; k++) {
-            if (ap_ssid_trunc[k] == '#') ap_ssid_trunc[k] = '.';
-        }
-
-        if (ap_channel > 0) {
-            snprintf(out, out_len, "%s -> %s%s Ch:%d#", display_name_trunc, color_code, ap_ssid_trunc, ap_channel);
-        } else {
-            snprintf(out, out_len, "%s -> %s%s#", display_name_trunc, color_code, ap_ssid_trunc);
-        }
-    } break;
-
-    case VLIST_SCANALL: {
-        uint16_t ap_count = 0;
-        wifi_ap_record_t *aps = NULL;
-        ap_scan_get_results(&ap_count, &aps);
-        if (!aps || ap_count == 0) return;
-
-        bool is_station_row = false;
-        int ap_index = -1;
-        int station_index = -1;
-        if (!scanall_row_to_indices(index, ap_count, aps, &is_station_row, &ap_index, &station_index)) return;
-
-        if (!is_station_row) {
-            char ssid[33] = {0};
-            if (aps[ap_index].ssid[0] == 0) {
-                strncpy(ssid, "Hidden Network", sizeof(ssid) - 1);
-            } else {
-                strncpy(ssid, (const char *)aps[ap_index].ssid, sizeof(ssid) - 1);
-            }
-            sanitize_recolor_text(ssid);
-            const char *band = (aps[ap_index].primary >= 36) ? "5G" : "2.4G";
-            snprintf(out, out_len, "%.*s %sBand:%s Ch:%d#",
-                     24, ssid, color_code, band, aps[ap_index].primary);
-        } else if (station_index >= 0) {
-            char sta_mac[18];
-            char sta_vendor[64] = {0};
-            station_format_mac(station_ap_list[station_index].station_mac, sta_mac, sizeof(sta_mac));
-            const char *display_name = sta_mac;
-            if (ouis_lookup_vendor(sta_mac, sta_vendor, sizeof(sta_vendor)) && sta_vendor[0] != '\0') {
-                sanitize_recolor_text(sta_vendor);
-                display_name = sta_vendor;
-            }
-            snprintf(out, out_len, "-> %.*s", 36, display_name);
-        } else {
-            snprintf(out, out_len, "-> Unknown station");
-        }
-    } break;
-
-    case VLIST_ARP: {
-        const arp_host_t *host = arp_scan_get_host(index);
-        if (!host) return;
-        char mac_str[18];
-        char vendor[64] = {0};
-        format_mac_address(host->mac, mac_str, sizeof(mac_str), true);
-        ouis_lookup_vendor(mac_str, vendor, sizeof(vendor));
-        snprintf(out, out_len, "%s  %s", host->ip, vendor[0] ? vendor : mac_str);
-    } break;
-
-    case VLIST_GOVEE: {
-        const govee_device_t *device = govee_scan_get_device(index);
-        if (!device) return;
-        snprintf(out, out_len, "%s  %s", device->sku[0] ? device->sku : "Govee Light", device->ip);
-    } break;
-
-    case VLIST_MDNS: {
-        const mdns_device_t *dev = wifi_manager_ip_lookup_get_device(index);
-        if (!dev) return;
-        snprintf(out, out_len, "%s  %s", dev->hostname[0] ? dev->hostname : dev->ip, dev->ip);
-    } break;
-
-    case VLIST_ENUM: {
-        const enum_host_t *host = enum_scan_get_host(index);
-        if (!host) return;
-        snprintf(out, out_len, "%s  %s", host->ip, host->hostname[0] ? host->hostname : "SMB");
-    } break;
-
-    case VLIST_BLE_DETECT: {
-        BLEDetectDeviceInfo info;
-        if (ble_device_detect_get_device(index, &info) != 0) return;
-
-        char title[48];
-        const char *type = ble_device_detect_type_to_string(info.type);
-        if (info.type == BLE_DETECT_DEVICE_FLIPPER && info.subtype[0] != '\0') {
-            snprintf(title, sizeof(title), "%s %s", info.subtype, type);
-        } else {
-            snprintf(title, sizeof(title), "%s", type);
-        }
-
-        char label[40];
-        if (info.name[0] != '\0') {
-            snprintf(label, sizeof(label), "%s", info.name);
-        } else {
-            snprintf(label, sizeof(label), "%02X:%02X:%02X", info.mac[3], info.mac[4], info.mac[5]);
-        }
-
-        snprintf(out, out_len, "%s%s | %.*s | %d dBm",
-                 info.tracking ? "* " : "", title, 20, label, info.rssi);
-    } break;
-
-    case VLIST_BLE_ADV: {
-        AdvertiserDeviceInfo info;
-        if (advertiser_scan_get_device(index, &info) != 0) return;
-
-        char label[32];
-        if (info.name[0] != '\0') {
-            snprintf(label, sizeof(label), "%s", info.name);
-        } else {
-            snprintf(label, sizeof(label), "%02X:%02X:%02X", info.mac[3], info.mac[4], info.mac[5]);
-        }
-
-        snprintf(out, out_len, "%s | %.*s | %d dBm",
-                 info.is_ibeacon ? "iBeacon" : info.adv_type, 20, label, info.rssi);
-    } break;
-
-    case VLIST_BLE_GATT: {
-        uint8_t mac[6];
-        int8_t rssi;
-        char name[32];
-        if (gatt_scan_get_device_data(index, mac, &rssi, name, sizeof(name)) != 0) return;
-
-        char label[32];
-        if (name[0] != '\0') {
-            snprintf(label, sizeof(label), "%s", name);
-        } else {
-            snprintf(label, sizeof(label), "%02X:%02X:%02X", mac[3], mac[4], mac[5]);
-        }
-
-        snprintf(out, out_len, "GATT | %.*s | %d dBm", 20, label, rssi);
-    } break;
-
-    default: break;
-    }
-}
-
-static void vlist_activate_row(vlist_kind_t kind, int index) {
-    switch (kind) {
-    case VLIST_AP:         show_ap_detail(index); break;
-    case VLIST_STA:        show_station_detail(index); break;
-    case VLIST_SCANALL:    scanall_select_row(index); break;
-    case VLIST_ARP:        show_arp_detail(index); break;
-    case VLIST_GOVEE:      show_govee_detail(index); break;
-    case VLIST_MDNS:       show_mdns_detail(index); break;
-    case VLIST_ENUM:       show_enum_detail(index); break;
-    case VLIST_BLE_DETECT: show_ble_detect_detail(index); break;
-    case VLIST_BLE_ADV:    show_ble_adv_detail(index); break;
-    case VLIST_BLE_GATT:   show_ble_gatt_detail(index); break;
-    default: break;
-    }
-}
-
-static int vlist_count(void *user_data) {
-    (void)user_data;
-    int n = vlist_real_count(vlist_kind_for_state());
-    if (n <= 0) return 0; /* options_view renders "No items found" */
-    return n + (options_menu_needs_back_row() ? 1 : 0);
-}
-
-static void vlist_fill(int index, char *out, size_t out_len, void *user_data) {
-    (void)user_data;
-    if (!out || out_len == 0) return;
-    out[0] = '\0';
-
-    vlist_kind_t kind = vlist_kind_for_state();
-    if (index < 0) return;
-    if (index >= vlist_real_count(kind)) {
-        snprintf(out, out_len, LV_SYMBOL_LEFT " Back");
-        return;
-    }
-    vlist_format_row(kind, index, out, out_len);
-}
-
-static void vlist_activate(int index, void *user_data) {
-    (void)user_data;
-    vlist_kind_t kind = vlist_kind_for_state();
-    if (index < 0) return;
-    if (index >= vlist_real_count(kind)) {
-        back_event_cb(NULL);
-        return;
-    }
-    vlist_activate_row(kind, index);
-}
 
 static void ap_list_cleanup(void) {
     bool had_ap_scan_ui = (ap_scan_poll_timer != NULL) || (ap_scan_status != NULL);
@@ -11267,6 +10946,10 @@ static void ap_list_cleanup(void) {
     if (ap_scan_poll_timer) {
         lv_timer_del(ap_scan_poll_timer);
         ap_scan_poll_timer = NULL;
+    }
+    if (ap_list_menu) {
+        paged_menu_destroy(ap_list_menu);
+        ap_list_menu = NULL;
     }
     if (ap_scan_status) {
         scan_status_close(ap_scan_status);
@@ -11279,16 +10962,6 @@ static void ap_list_cleanup(void) {
     if (had_ap_scan_ui && ap_scan_is_running()) {
         ap_scan_stop();
     }
-}
-
-/* (Re)bind the current result list as a windowed list. */
-static void vlist_show(void) {
-    if (!g_options_view) return;
-    if (button_height_global > 0) {
-        options_view_set_item_height(g_options_view, button_height_global);
-    }
-    options_view_virtual_start(g_options_view, vlist_count, vlist_fill, vlist_activate, NULL);
-    num_items = options_view_get_item_count(g_options_view);
 }
 
 #define AP_MULTI_SELECT_PAGE_SIZE 10
@@ -11474,6 +11147,50 @@ static int scanall_get_station_count_for_ap(const uint8_t ap_bssid[6]) {
         }
     }
     return count;
+}
+
+static int ap_list_load_fn(int offset, int page_size, char names[][PAGED_MENU_NAME_MAX], bool *has_more, void *user_data) {
+    (void)user_data;
+
+    uint16_t count = 0;
+    wifi_ap_record_t *aps = NULL;
+    ap_scan_get_results(&count, &aps);
+
+    if (!aps || count == 0) {
+        *has_more = false;
+        return 0;
+    }
+
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    uint32_t muted_color = theme_palette_get_text_muted(theme);
+    char color_code[16];
+    snprintf(color_code, sizeof(color_code), "#%06X", (unsigned int)(muted_color & 0xFFFFFFu));
+
+    int loaded = 0;
+    for (int i = offset; i < (int)count && loaded < page_size; i++) {
+        const char *band = (aps[i].primary >= 36) ? "5G" : "2.4G";
+
+        if (aps[i].ssid[0] == 0) {
+            snprintf(names[loaded], PAGED_MENU_NAME_MAX, "Hidden Network %s %s Ch:%d#",
+                     color_code, band, aps[i].primary);
+        } else {
+            char ssid_trunc[28] = {0};
+            strncpy(ssid_trunc, (const char *)aps[i].ssid, sizeof(ssid_trunc) - 1);
+            snprintf(names[loaded], PAGED_MENU_NAME_MAX, "%s %s %s Ch:%d#",
+                     ssid_trunc, color_code, band, aps[i].primary);
+        }
+        loaded++;
+    }
+
+    *has_more = (offset + loaded) < (int)count;
+    return loaded;
+}
+
+static const char **ap_list_get_options(void) {
+    if (!ap_list_menu) {
+        ap_list_menu = paged_menu_create(AP_LIST_PAGE_SIZE, ap_list_load_fn, NULL);
+    }
+    return paged_menu_get_options(ap_list_menu);
 }
 
 static bool scanall_get_station_for_ap_order(const uint8_t ap_bssid[6], int order, int *station_index_out) {
@@ -14125,9 +13842,7 @@ static void rebuild_current_menu(void) {
                 case WIFI_MENU_GOVEE: options = wifi_govee_options; break;
                 case WIFI_MENU_GOVEE_LIST:
                 case WIFI_MENU_GOVEE_DETAILS:
-                    /* Windowed list: rows come from the scan results on demand. */
-                    options = NULL;
-                    s_vlist_pending = true;
+                    options = govee_list_get_options();
                     break;
                 case WIFI_MENU_EVIL_PORTAL_SELECT:
                 {
@@ -14168,25 +13883,29 @@ static void rebuild_current_menu(void) {
                     break;
                 }
                 case WIFI_MENU_AP_LIST:
-                    /* Windowed list: rows come from the scan results on demand. */
-                    options = NULL;
-                    s_vlist_pending = true;
+                    options = ap_list_get_options();
                     break;
                 case WIFI_MENU_AP_DETAILS:
-                    options = NULL;
+                    options = ap_list_get_options();
                     break;
                 case WIFI_MENU_STA_LIST:
                 case WIFI_MENU_STA_DETAILS:
+                    options = sta_list_get_options();
+                    break;
                 case WIFI_MENU_SCANALL_LIST:
+                    options = scanall_list_get_options();
+                    break;
                 case WIFI_MENU_ARP_LIST:
                 case WIFI_MENU_ARP_DETAILS:
+                    options = arp_list_get_options();
+                    break;
                 case WIFI_MENU_MDNS_LIST:
                 case WIFI_MENU_MDNS_DETAILS:
+                    options = mdns_list_get_options();
+                    break;
                 case WIFI_MENU_ENUM_LIST:
                 case WIFI_MENU_ENUM_DETAILS:
-                    /* Windowed list: rows come from the scan results on demand. */
-                    options = NULL;
-                    s_vlist_pending = true;
+                    options = enum_list_get_options();
                     break;
                 case WIFI_MENU_AP_MULTI_SELECT:
                     options = ap_multi_select_get_options();
@@ -14217,12 +13936,10 @@ static void rebuild_current_menu(void) {
                         start_ble_detect_flow();
                     }
 #endif
-                    options = NULL;
-                    s_vlist_pending = true;
+                    options = ble_detect_list_get_options();
                     break;
                 case BLUETOOTH_MENU_DETECT_DETAILS:
-                    options = NULL;
-                    s_vlist_pending = true;
+                    options = ble_detect_list_get_options();
                     break;
                 case BLUETOOTH_MENU_ADV_LIST:
 #ifndef CONFIG_IDF_TARGET_ESP32S2
@@ -14230,12 +13947,10 @@ static void rebuild_current_menu(void) {
                         start_ble_adv_flow();
                     }
 #endif
-                    options = NULL;
-                    s_vlist_pending = true;
+                    options = ble_adv_list_get_options();
                     break;
                 case BLUETOOTH_MENU_ADV_DETAILS:
-                    options = NULL;
-                    s_vlist_pending = true;
+                    options = ble_adv_list_get_options();
                     break;
                 case BLUETOOTH_MENU_GATT_LIST:
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
@@ -14243,12 +13958,10 @@ static void rebuild_current_menu(void) {
                         start_ble_gatt_flow();
                     }
 #endif
-                    options = NULL;
-                    s_vlist_pending = true;
+                    options = ble_gatt_list_get_options();
                     break;
                 case BLUETOOTH_MENU_GATT_DETAILS:
-                    options = NULL;
-                    s_vlist_pending = true;
+                    options = ble_gatt_list_get_options();
                     break;
                 case BLUETOOTH_MENU_OUI: options = bluetooth_oui_options; break;
                 case BLUETOOTH_MENU_OUI_VENDOR_LIST:
@@ -14353,14 +14066,6 @@ static void rebuild_current_menu(void) {
     // submenus) appear instantly like the dedicated BadUSB/NFC views instead
     // of crawling in from the top; the timer only fills overflow rows, which
     // keeps huge lists (AP/STA scans, portals, settings) non-blocking.
-    if (s_vlist_pending) {
-        /* Windowed list: bind the row pool directly, since there is no batched
-         * build to hook into. Any pending selection restore is applied by
-         * menu_builder_cb's windowed branch below. */
-        s_vlist_pending = false;
-        vlist_show();
-        num_items = options_view_get_item_count(g_options_view);
-    }
     menu_build_timer = lv_timer_create(menu_builder_cb, timer_period, NULL);
     menu_builder_cb(NULL);
 }
@@ -14631,6 +14336,47 @@ static void govee_color_kb_cb(const char *text) {
                         err == ESP_OK ? TOAST_SUCCESS : TOAST_ERROR, 1500);
     govee_return_to_list();
 }
+
+#ifndef CONFIG_IDF_TARGET_ESP32S2
+static void ble_spam_name_prompt(void) {
+    keyboard_view_set_return_view(&options_menu_view);
+    keyboard_view_set_placeholder("Name (Apple uses first 14 chars)");
+    keyboard_view_set_initial_text(ble_spam_get_name());
+    keyboard_view_set_start_caps(true);
+    keyboard_view_set_submit_callback(ble_spam_name_kb_cb);
+    display_manager_switch_view(&keyboard_view);
+}
+
+static void ble_spam_name_kb_cb(const char *text) {
+    keyboard_view_set_submit_callback(NULL);
+
+    // An empty field clears the name, which puts the spam back on its
+    // built-in name list rather than refusing the input.
+    if (!text || !*text) {
+        ble_spam_set_name(NULL);
+        toast_show_duration("Name cleared", TOAST_SUCCESS, 1500);
+        return;
+    }
+
+    if (strlen(text) > BLE_SPAM_NAME_MAX) {
+        char msg[48];
+        snprintf(msg, sizeof(msg), "Name is too long (max %d chars)", BLE_SPAM_NAME_MAX);
+        error_popup_create(msg);
+        return;
+    }
+
+    if (!ble_spam_set_name(text)) {
+        error_popup_create("Please enter a valid name");
+        return;
+    }
+
+    // The name only reaches an AirPods popup via the Apple spam, so point
+    // at the row that actually uses it.
+    toast_show_duration(ble_spam_is_running() ? "Name set, applied now"
+                                             : "Name set, start BLE Spam - Apple",
+                        TOAST_SUCCESS, 2500);
+}
+#endif // CONFIG_IDF_TARGET_ESP32S2
 
 static void netbios_scan_kb_cb(const char *text) {
     if (!text || strlen(text) == 0) {
@@ -14980,35 +14726,6 @@ static void dual_comm_http_request_kb_cb(const char *text) {
 // build menu items in small batches so we don't starve the watchdog
 static void menu_builder_cb(lv_timer_t *t)
 {
-    /* Windowed (virtual) menus rebind a fixed row pool on scroll, so there are
-     * no rows to materialise in batches. Finish the menu setup the way the
-     * normal completion path does, then tear the now-unused build timer down. */
-    if (g_options_view && options_view_is_virtual(g_options_view)) {
-        if (t) {
-            lv_timer_del(t);
-        } else {
-            lvgl_timer_del_safe(&menu_build_timer);
-        }
-        menu_build_timer = NULL;
-        /* Restore a pending selection the way the batched completion path does,
-         * minus the scroll (a windowed list never overflows). */
-        if (s_pending_restore_state.valid) {
-            int restore_index = s_pending_restore_state.selected;
-            if (num_items > 0) {
-                if (restore_index < 0) restore_index = 0;
-                if (restore_index >= num_items) restore_index = num_items - 1;
-                select_option_item(restore_index);
-            }
-            s_pending_restore_state.valid = false;
-        }
-        if (menu_container && lv_obj_is_valid(menu_container)) {
-            update_scroll_buttons_visibility();
-            update_settings_arrows_visibility();
-        }
-        s_rendered_menu_state = options_menu_capture_nav_state();
-        options_menu_apply_pending_detail_resume();
-        return;
-    }
     if (!menu_container || !lv_obj_is_valid(menu_container) || !g_options_view) {
         if (t) {
             lv_timer_del(t);

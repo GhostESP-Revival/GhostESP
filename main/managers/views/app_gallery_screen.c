@@ -1121,6 +1121,17 @@ static void create_apps_launcher_menu(void) {
         lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
         lv_obj_set_width(label, card_width - (apps_is_compact_layout() ? 12 : 8));
         lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+        /* An asset pack paints its own background behind the grid, which can be
+         * light or busy enough to swallow the title text. Give the label a
+         * scrim so it stays readable, matching what the carousel/hero labels
+         * already do. */
+        if (asset_pack_is_loaded()) {
+            lv_obj_set_style_bg_color(label, lv_color_hex(0x000000), 0);
+            lv_obj_set_style_bg_opa(label, LV_OPA_60, 0);
+            lv_obj_set_style_radius(label, 3, 0);
+            lv_obj_set_style_pad_hor(label, 4, 0);
+            lv_obj_set_style_pad_ver(label, 1, 0);
+        }
         if (apps_is_compact_layout()) {
             lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
         } else {

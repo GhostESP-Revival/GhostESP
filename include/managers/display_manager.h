@@ -44,6 +44,12 @@ typedef struct {
 #define INPUT_ITEM_SIZE sizeof(InputEvent)
 extern QueueHandle_tt input_queue;
 
+/* Drop every input event still queued. Views call this when opening a modal
+ * overlay that treats any input as "dismiss": events queued before the overlay
+ * existed (e.g. taps that landed while a long scan held the UI) would
+ * otherwise arrive afterwards and immediately cancel it. */
+void display_manager_flush_input_queue(void);
+
 #define MUTEX_TIMEOUT_MS 10
 
 #define HARDWARE_INPUT_TASK_PRIORITY (14)
