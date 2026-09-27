@@ -199,10 +199,16 @@ bool wifi_channels_is_monitor_channel(uint8_t channel) {
 }
 
 bool wifi_channels_is_tx_channel(uint8_t channel) {
-    if (!wifi_channels_is_monitor_channel(channel) || wifi_channels_is_dfs(channel)) {
+    // DFS channels (52-144) are allowed for TX. The active country already gates
+    // which 5 GHz channels are usable via wifi_channels_is_monitor_channel(), and
+    // esp_wifi_set_channel() remains the final authority. Blocking DFS here
+    // silently disabled every attack on a DFS target.
+    if (!wifi_channels_is_monitor_channel(channel)) {
         return false;
     }
 #if defined(CONFIG_SOC_WIFI_SUPPORT_5G)
+    // Channels >= 149 are only usable in domains that also permit non-DFS
+    // upper band use, so keep gating them on the country.
     if (channel >= 149) {
         wifi_country_t country;
         get_effective_country(&country);
