@@ -14,6 +14,26 @@ import tempfile
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 
+# partition layout is derived, never restated here. the ci workflow imports
+# the same module, so both produce the same merged image.
+sys.path.insert(0, str(Path(__file__).resolve().parent / "scripts"))
+try:
+    import partition_table
+except ImportError:  # keep the rest of the script usable on its own
+    partition_table = None
+
+
+def _partition_layout():
+    """read the partition table this build produced"""
+    if partition_table is None:
+        raise RuntimeError(
+            "scripts/partition_table.py not found; cannot derive image offsets")
+    path = Path("build") / "partition_table" / "partition-table.bin"
+    if not path.exists():
+        raise RuntimeError(f"partition table missing at {path}; build first")
+    return path, partition_table.app_layout(path.read_bytes())
+
+
 class Colors:
     HEADER = '\033[95m'
     OKBLUE = '\033[94m'
@@ -720,18 +740,26 @@ def build_target(target: Dict[str, str], env: Dict[str, str], cmd_prefix: str = 
             break
 
     if firmware_bin:
-        # Determine offsets (adjust if needed for your project)
-        # ESP32-C5's ROM expects the second-stage bootloader at 0x2000.
-        # Classic ESP32/S2 targets use 0x1000; preserve the existing
-        # placement for the remaining targets.
-        if target['idf_target'] == 'esp32c5':
-            boot_offset = "0x2000"
-        elif target['idf_target'] in ["esp32", "esp32s2"]:
-            boot_offset = "0x1000"
-        else:
-            boot_offset = "0x0"
-        partition_offset = "0x8000"
-        firmware_offset = "0x10000"
+        # offsets come from the table the build produced. firmware_offset used
+        # to be pinned to 0x10000, which is where the ota tables put otadata, so
+        # the merged image overwrote otadata and every app slot came up empty
+        # ("No bootable app partitions"). ci had worked around that; this had
+        # not. the bootloader offset is a per-chip constant and cannot be
+        # derived, so it comes from the shared table.
+        table_path, layout = _partition_layout()
+        partition_offset = "0x%x" % partition_table.PARTITION_TABLE_OFFSET
+        firmware_offset = "0x%x" % layout.factory_offset
+        boot_offset = "0x%x" % partition_table.bootloader_offset(
+            target['idf_target'])
+        print(f"Partition table: {table_path}")
+        print(f"  bootloader @ {boot_offset}   partitions @ {partition_offset}"
+              f"   app @ {firmware_offset}")
+        print(f"  smallest app partition: {layout.min_app_size} bytes")
+        if os.path.getsize(firmware_bin) >= layout.min_app_size:
+            print(f"ERROR: firmware ({os.path.getsize(firmware_bin)} bytes) does "
+                  f"not fit the smallest app partition "
+                  f"({layout.min_app_size} bytes)")
+            return False
         import re
         import sys
 
@@ -769,8 +797,18 @@ def build_target(target: Dict[str, str], env: Dict[str, str], cmd_prefix: str = 
             firmware_offset, firmware_bin
         ]
         if target['idf_target'] == 'esp32p4':
+            # the c6 network adapter lives in the slave_fw partition. its offset
+            # was pinned to 0xbe0000, but partitions_crowpanel_p4.csv leaves
+            # every offset blank for idf to auto-assign, so that was a guess.
+            try:
+                slave_part = partition_table.find_by_label(
+                    table_path.read_bytes(), "slave_fw")
+            except partition_table.PartitionError as exc:
+                print(f"ERROR: {exc}")
+                return False
+            print(f"  slave_fw (C6 image) @ 0x{slave_part.offset:x}")
             merge_cmd.extend([
-                "0xbe0000",
+                "0x%x" % slave_part.offset,
                 os.path.join("firmware", "crowpanel_p4", "network_adapter.bin")
             ])
         print(f"Merging binaries with: {' '.join(merge_cmd)}")

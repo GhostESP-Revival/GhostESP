@@ -47,10 +47,10 @@ jobs:
           - { name: "CrowPanel Advanced P4 5-inch", idf_target: "esp32p4", sdkconfig_file: "configs/sdkconfig.crowpanel_advanced_p4_rgb_800x480", zip_name: "CrowPanel_Advanced_P4_5inch.zip" }
           - { name: "Awok V5",                 idf_target: "esp32s2", sdkconfig_file: "configs/sdkconfig.default.esp32s2",                 zip_name: "esp32v5_awok.zip" }
           - { name: "ghostboard",              idf_target: "esp32c6", sdkconfig_file: "configs/sdkconfig.ghostboard",                      zip_name: "ghostboard.zip" }
-          - { name: "MarauderV4_FlipperHub",   idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.marauderv4",                      zip_name: "MarauderV4_FlipperHub.zip", ota: true, ota_slot_size: 6291456, board_key: "marauderv4" }
+          - { name: "MarauderV4_FlipperHub",   idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.marauderv4",                      zip_name: "MarauderV4_FlipperHub.zip", ota: true, board_key: "marauderv4" }
           - { name: "MarauderV6&AwokDual",     idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.marauderv6",                      zip_name: "MarauderV6_AwokDual.zip" }
           - { name: "AwokMini",                idf_target: "esp32s2", sdkconfig_file: "configs/sdkconfig.awokmini",                        zip_name: "AwokMini.zip" }
-          - { name: "ESP32-S3-Cardputer",      idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.cardputer",                       zip_name: "ESP32-S3-Cardputer.zip", ota: true, ota_slot_size: 4194304, board_key: "cardputer" }
+          - { name: "ESP32-S3-Cardputer",      idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.cardputer",                       zip_name: "ESP32-S3-Cardputer.zip", ota: true, board_key: "cardputer" }
           - { name: "Heltec V3",               idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.heltecv3",                        zip_name: "HeltecV3.zip" }
           - { name: "CYD2USB",                 idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.CYD2USB",                         zip_name: "CYD2USB.zip" }
           - { name: "CYDMicroUSB",             idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.CYDMicroUSB",                     zip_name: "CYDMicroUSB.zip" }
@@ -58,41 +58,41 @@ jobs:
           - { name: "CYD2USB2.4_Inch",         idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.CYD2USB2.4Inch",                  zip_name: "CYD2USB2.4Inch.zip" }
           - { name: "CYD2USB2.4_Inch_C",       idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.CYD2USB2.4Inch_C_Varient",        zip_name: "CYD2USB2.4Inch_C.zip" }
           - { name: "CYD2432S028R",            idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.CYD2432S028R",                    zip_name: "CYD2432S028R.zip" }
-          - { name: "Waveshare_LCD",           idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.waveshare7inch",                  zip_name: "Waveshare_LCD.zip", ota: true, ota_slot_size: 4194304, board_key: "waveshare7inch" }
+          - { name: "Waveshare_LCD",           idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.waveshare7inch",                  zip_name: "Waveshare_LCD.zip", ota: true, board_key: "waveshare7inch" }
           - { name: "Crowtech_LCD",            idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.crowtech7inch",                   zip_name: "Crowtech_LCD.zip" }
           - { name: "CrowPanel 4.2-inch E-paper", idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.crowpanel_42_epaper",          zip_name: "CrowPanel_4.2_Epaper.zip" }
           - { name: "CrowPanel 5.79-inch E-paper", idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.crowpanel_579_epaper",        zip_name: "CrowPanel_5.79_Epaper.zip" }
-          - { name: "CrowPanel Advance 7-inch", idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.crowpanel_advance7",              zip_name: "CrowPanel_Advance_7inch.zip", ota: true, ota_slot_size: 6291456, board_key: "crowpanel_advance7" }
-          - { name: "CrowPanel Advance 5-inch", idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.crowpanel_advance5",              zip_name: "CrowPanel_Advance_5.zip", ota: true, ota_slot_size: 6291456, board_key: "crowpanel_advance5" }
-          - { name: "CrowPanel Advance 4.3-inch", idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.crowpanel_advance43",            zip_name: "CrowPanel_Advance_43.zip", ota: true, ota_slot_size: 6291456, board_key: "crowpanel_advance43" }
-          - { name: "CrowPanel Advance 3.5-inch", idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.crowpanel_advance35",            zip_name: "CrowPanel_Advance_35.zip", ota: true, ota_slot_size: 6291456, board_key: "crowpanel_advance35" }
-          - { name: "CrowPanel Advance 2.8-inch", idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.crowpanel_advance28",            zip_name: "CrowPanel_Advance_28.zip", ota: true, ota_slot_size: 6291456, board_key: "crowpanel_advance28" }
-          - { name: "CrowPanel Advance 2.4-inch", idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.crowpanel_advance24",            zip_name: "CrowPanel_Advance_24.zip", ota: true, ota_slot_size: 6291456, board_key: "crowpanel_advance24" }
-          - { name: "Sunton_LCD",              idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.sunton7inch",                     zip_name: "Sunton_LCD.zip", ota: true, ota_slot_size: 4194304, board_key: "sunton7inch" }
-          - { name: "JC3248W535EN_LCD",        idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.JC3248W535EN",                    zip_name: "JC3248W535EN_LCD.zip", ota: true, ota_slot_size: 6291456, board_key: "JC3248W535EN" }
+          - { name: "CrowPanel Advance 7-inch", idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.crowpanel_advance7",              zip_name: "CrowPanel_Advance_7inch.zip", ota: true, board_key: "crowpanel_advance7" }
+          - { name: "CrowPanel Advance 5-inch", idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.crowpanel_advance5",              zip_name: "CrowPanel_Advance_5.zip", ota: true, board_key: "crowpanel_advance5" }
+          - { name: "CrowPanel Advance 4.3-inch", idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.crowpanel_advance43",            zip_name: "CrowPanel_Advance_43.zip", ota: true, board_key: "crowpanel_advance43" }
+          - { name: "CrowPanel Advance 3.5-inch", idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.crowpanel_advance35",            zip_name: "CrowPanel_Advance_35.zip", ota: true, board_key: "crowpanel_advance35" }
+          - { name: "CrowPanel Advance 2.8-inch", idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.crowpanel_advance28",            zip_name: "CrowPanel_Advance_28.zip", ota: true, board_key: "crowpanel_advance28" }
+          - { name: "CrowPanel Advance 2.4-inch", idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.crowpanel_advance24",            zip_name: "CrowPanel_Advance_24.zip", ota: true, board_key: "crowpanel_advance24" }
+          - { name: "Sunton_LCD",              idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.sunton7inch",                     zip_name: "Sunton_LCD.zip", ota: true, board_key: "sunton7inch" }
+          - { name: "JC3248W535EN_LCD",        idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.JC3248W535EN",                    zip_name: "JC3248W535EN_LCD.zip", ota: true, board_key: "JC3248W535EN" }
           - { name: "Flipper_JCMK_GPS",        idf_target: "esp32s2", sdkconfig_file: "configs/sdkconfig.flipper.jcmk_gps",               zip_name: "Flipper_JCMK_GPS.zip" }
           - { name: "T-Deck",                  idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.tdeck",                           zip_name: "LilyGo-T-Deck.zip" }
-          - { name: "TEmbedC1101",             idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.TEmbedC1101",                     zip_name: "LilyGo-TEmbedC1101.zip", ota: true, ota_slot_size: 6291456, board_key: "LilyGo TEmbedC1101" }
+          - { name: "TEmbedC1101",             idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.TEmbedC1101",                     zip_name: "LilyGo-TEmbedC1101.zip", ota: true, board_key: "LilyGo TEmbedC1101" }
           - { name: "Elecrow CrowPanel 1.28-inch Rotary", idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.crowpanel_1p28_rotary", zip_name: "CrowPanel_1.28inch_Rotary.zip" }
           - { name: "GhostLink P1 Core",     idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.ghostlink_p1_core",           zip_name: "GhostLink_P1_Core.zip" }
           - { name: "GhostLink P1 Peer",     idf_target: "esp32c3", sdkconfig_file: "configs/sdkconfig.ghostlink_p1_peer",           zip_name: "GhostLink_P1_Peer.zip" }
-          - { name: "TDongleS3",               idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.TDongleS3",                       zip_name: "LilyGo-TDongleS3.zip", ota: true, ota_slot_size: 6291456, board_key: "LilyGo T-Dongle-S3" }
-          - { name: "TDongleC5",               idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.TDongleC5",                       zip_name: "LilyGo-TDongleC5.zip", ota: true, ota_slot_size: 5767168, board_key: "LilyGo T-Dongle-C5" }
-          - { name: "S3TWatch",                idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.S3TWatch",                        zip_name: "LilyGo-S3TWatch-2020.zip", ota: true, ota_slot_size: 4194304, board_key: "S3TWatch" }
+          - { name: "TDongleS3",               idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.TDongleS3",                       zip_name: "LilyGo-TDongleS3.zip", ota: true, board_key: "LilyGo T-Dongle-S3" }
+          - { name: "TDongleC5",               idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.TDongleC5",                       zip_name: "LilyGo-TDongleC5.zip", ota: true, board_key: "LilyGo T-Dongle-C5" }
+          - { name: "S3TWatch",                idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.S3TWatch",                        zip_name: "LilyGo-S3TWatch-2020.zip", ota: true, board_key: "S3TWatch" }
           - { name: "TDisplayS3-Touch",        idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.TDisplayS3-Touch",               zip_name: "LilyGo-TDisplayS3-Touch.zip" }
           - { name: "JCMK_DevBoardPro",        idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.JCMK_DevBoardPro",               zip_name: "JCMK_DevBoardPro.zip" }
           - { name: "RabbitLabs_Minion",       idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.minion",                         zip_name: "RabbitLabs_Minion.zip" }
           - { name: "Lolin_S3_Pro",            idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.lolins3pro",                     zip_name: "Lolin_S3_Pro.zip" }
-          - { name: "Cardputer ADV",           idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.cardputeradv",                   zip_name: "CardputerADV.zip", ota: true, ota_slot_size: 4194304, board_key: "Cardputer ADV" }
+          - { name: "Cardputer ADV",           idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.cardputeradv",                   zip_name: "CardputerADV.zip", ota: true, board_key: "Cardputer ADV" }
           - { name: "Rabbit-Labs Poltergeist", idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.poltergeist",                    zip_name: "Poltergeist.zip" }
           - { name: "Banshee C5",              idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.somethingsomething",             zip_name: "Banshee_C5.zip", board_key: "somethingsomething" }
-          - { name: "Banshee S3",              idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.somethingsomething2",            zip_name: "Banshee_S3.zip", ota: true, ota_slot_size: 4194304, board_key: "somethingsomething2" }
+          - { name: "Banshee S3",              idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.somethingsomething2",            zip_name: "Banshee_S3.zip", ota: true, board_key: "somethingsomething2" }
           - { name: "FeberisPro",              idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.feberispro",                     zip_name: "FeberisPro.zip" }
           - { name: "ACE C5",                  idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.ACE_C5",                         zip_name: "ACE_C5.zip" }
-          - { name: "NM-CYD-C5",               idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.NM-CYD-C5",                     zip_name: "NM-CYD-C5.zip", ota: true, ota_slot_size: 5767168, board_key: "NM-CYD-C5" }
+          - { name: "NM-CYD-C5",               idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.NM-CYD-C5",                     zip_name: "NM-CYD-C5.zip", ota: true, board_key: "NM-CYD-C5" }
           - { name: "ACE S3",                  idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.ACE_S3",                         zip_name: "ACE_S3.zip" }
-          - { name: "XIAO_S3_Sense",           idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.xiao_esp32s3_sense",              zip_name: "XIAO_S3_Sense.zip", ota: true, ota_slot_size: 4194304, board_key: "xiao_esp32s3_sense" }
-          - { name: "XIAO_S3",                 idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.xiao_esp32s3",                    zip_name: "XIAO_S3.zip", ota: true, ota_slot_size: 4194304, board_key: "xiao_esp32s3" }
+          - { name: "XIAO_S3_Sense",           idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.xiao_esp32s3_sense",              zip_name: "XIAO_S3_Sense.zip", ota: true, board_key: "xiao_esp32s3_sense" }
+          - { name: "XIAO_S3",                 idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.xiao_esp32s3",                    zip_name: "XIAO_S3.zip", ota: true, board_key: "xiao_esp32s3" }
           - { name: "M5Stack CoreS3-SE",        idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.m5cores3se",                    zip_name: "M5Stack_CoreS3-SE.zip" }
           - { name: "M5Stack AtomS3R",          idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.atoms3r",                      zip_name: "M5Stack_AtomS3R.zip" }
           - { name: "XIAO_C5",                 idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.xiao_esp32c5",                    zip_name: "XIAO_C5.zip" }
@@ -264,15 +264,20 @@ jobs:
       - name: Check OTA Slot Size
         if: matrix.target.ota == true
         run: |
-          APP_BIN="build/Ghost_ESP_IDF.bin"
-          APP_SIZE=$(stat -c%s "$APP_BIN")
-          SLOT_SIZE=${{ matrix.target.ota_slot_size }}
-          echo "App binary: $APP_SIZE bytes; OTA slot budget: $SLOT_SIZE bytes"
-          if [ "$APP_SIZE" -ge "$SLOT_SIZE" ]; then
-            echo "Error: ${{ matrix.target.name }} firmware ($APP_SIZE bytes) does not fit its OTA slot ($SLOT_SIZE bytes)."
-            echo "Either trim the build for this target or revisit its partition table (see partitions_ota_*.csv)."
-            exit 1
-          fi
+          # the slot budget is read from the partition table this build
+          # produced. it used to be an ota_slot_size field in the matrix above,
+          # which had drifted by 128KB on seven boards.
+          python3 scripts/partition_table.py check-fit \
+            build/Ghost_ESP_IDF.bin build/partition_table/partition-table.bin
+
+      - name: Note unpublished A/B boards
+        run: |
+          # advisory only. publishing ota for a board is a support commitment,
+          # so it stays a deliberate `ota: true` in the matrix; this just makes
+          # it visible when someone adds ota_0/ota_1 and forgets the follow-up.
+          python3 scripts/partition_table.py ota-warning \
+            build/partition_table/partition-table.bin \
+            --name "${{ matrix.target.name }}"
 
       - name: Package Artifacts into ZIP
         run: |
@@ -300,42 +305,16 @@ jobs:
           FLASH_MODE=${FLASH_MODE:-dio}
           FLASH_FREQ=${FLASH_FREQ:-40m}
           FLASH_SIZE=${FLASH_SIZE:-4MB}
-          if [ "$IDF_TARGET" = "esp32" ] || [ "$IDF_TARGET" = "esp32s2" ]; then
-            BOOT_OFFSET=0x1000
-          elif [ "$IDF_TARGET" = "esp32p4" ]; then
-            BOOT_OFFSET=0x2000
-          else
-            BOOT_OFFSET=0x0
-          fi
-          # The app offset is NOT always 0x10000: the OTA tables put otadata
-          # there and the first app slot at 0x20000 or above, so a hardcoded
-          # offset writes the app over otadata and leaves every app slot empty
-          # ("No bootable app partitions"). Read the real offset out of the
-          # partition table this build produced -- factory if present, else the
-          # lowest OTA slot, which is what the bootloader falls back to when
-          # otadata is blank (as it is on a fresh flash).
-          APP_OFFSET=$(python3 - "$ARTIFACT_DIR/partitions.bin" <<'PY'
-          import pathlib, struct, sys
-          FMT = "<2sBBLL16sL"
-          SZ = struct.calcsize(FMT)
-          table = pathlib.Path(sys.argv[1]).read_bytes()
-          factory, ota = None, {}
-          for pos in range(0, len(table) - SZ + 1, SZ):
-              magic, ptype, subtype, offset, _size, _label, _flags = struct.unpack(
-                  FMT, table[pos:pos + SZ])
-              if magic != bytes((0xAA, 0x50)):
-                  break  # end of table (MD5 entry or padding)
-              if ptype != 0x00:  # not an app partition
-                  continue
-              if subtype == 0x00 and factory is None:
-                  factory = offset
-              elif 0x10 <= subtype <= 0x1F:
-                  ota.setdefault(subtype, offset)
-          if factory is None and not ota:
-              sys.exit("no factory or ota app partition in table")
-          print("0x%x" % (factory if factory is not None else ota[min(ota)]))
-          PY
-          ) || { echo "Failed to read app offset from partition table"; exit 1; }
+          # offsets come from the partition table this build produced. the app
+          # offset is not always 0x10000: the ota tables put otadata there and
+          # the first app slot at 0x20000 or above, so a hardcoded offset
+          # writes the app over otadata and leaves every app slot empty. the
+          # bootloader offset is the one value that cannot be derived, so it
+          # lives in scripts/partition_table.py, which build.py also uses.
+          BOOT_OFFSET=$(python3 scripts/partition_table.py bootloader-offset "$IDF_TARGET")
+          APP_OFFSET=$(python3 scripts/partition_table.py offset "$ARTIFACT_DIR/partitions.bin") \
+            || { echo "Failed to read app offset from partition table"; exit 1; }
+          echo "Bootloader offset for ${{ matrix.target.name }}: $BOOT_OFFSET"
           echo "App offset for ${{ matrix.target.name }}: $APP_OFFSET"
 
           if [ "$IDF_TARGET" = "esp32p4" ]; then
@@ -343,25 +322,9 @@ jobs:
             # factory bundle based at APP_OFFSET which contains both the P4 app
             # and the C6 image in the slave_fw data partition. The standalone
             # C6 image is intentionally not published as a fourth file.
-            SLAVE_OFFSET=$(python3 - "$ARTIFACT_DIR/partitions.bin" <<'PY'
-          import pathlib, struct, sys
-          FMT = "<2sBBLL16sL"
-          SZ = struct.calcsize(FMT)
-          table = pathlib.Path(sys.argv[1]).read_bytes()
-          found = None
-          for pos in range(0, len(table) - SZ + 1, SZ):
-              magic, _ptype, _subtype, offset, _size, label, _flags = struct.unpack(
-                  FMT, table[pos:pos + SZ])
-              if magic != bytes((0xAA, 0x50)):
-                  break
-              if label.rstrip(b"\0") == b"slave_fw":
-                  found = offset
-                  break
-          if found is None:
-              sys.exit("slave_fw partition is missing")
-          print("0x%x" % found)
-          PY
-            ) || { echo "Failed to read slave_fw offset from partition table"; exit 1; }
+            SLAVE_OFFSET=$(python3 scripts/partition_table.py label-offset \
+              "$ARTIFACT_DIR/partitions.bin" slave_fw) \
+              || { echo "Failed to read slave_fw offset from partition table"; exit 1; }
             echo "C6 payload offset for ${{ matrix.target.name }}: $SLAVE_OFFSET"
             cp "$ARTIFACT_DIR/firmware.bin" "$ARTIFACT_DIR/p4-app.bin"
             python3 - "$APP_OFFSET" "$SLAVE_OFFSET" \
@@ -451,9 +414,24 @@ jobs:
           name: ota-fragment-${{ matrix.target.board_key }}
           path: ota_manifest_fragment/${{ matrix.target.board_key }}.json
 
+  # fast, board-independent guard rails for the partition/matrix wiring. runs
+  # in about a second, so it fails without waiting on the 62-way fan-out.
+  partition-checks:
+    name: Partition Table Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Check partition table and build matrix agree
+        run: python scripts/test_partition_table.py -v
+
   publish_ota_manifest:
     name: Publish OTA Manifest to R2
-    needs: build
+    needs: [build, partition-checks]
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.buildType != 'build-only'
     runs-on: ubuntu-latest
 
@@ -537,7 +515,7 @@ jobs:
 
   update_manifest_for_commit:
     name: Update Commit Manifest (push)
-    needs: build
+    needs: [build, partition-checks]
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.buildType != 'build-only'
     runs-on: ubuntu-latest
 
@@ -644,7 +622,7 @@ jobs:
 
   upload_prerelease:
     name: Create Pre-release and Upload Artifacts
-    needs: build
+    needs: [build, partition-checks]
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.buildType == 'prerelease'
     runs-on: ubuntu-latest
 
@@ -808,7 +786,7 @@ jobs:
 
   upload_release:
     name: Create Release and Upload Artifacts
-    needs: build
+    needs: [build, partition-checks]
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.buildType == 'all'
     runs-on: ubuntu-latest
 
