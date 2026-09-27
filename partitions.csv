@@ -1,4 +1,27 @@
+# 4MB-flash factory partition table (single app, no OTA).
+#
+# A 4MB part is completely filled by this table: nvs ends at 0x10000, app0 runs
+# to the end of flash minus coredump. There is no spare flash, so the app
+# partition and the coredump partition are always in tension -- growing one
+# shrinks the other.
+#
+# app0 is 0x3E0000 (4,063,232 bytes). The coredump partition is 0x10000 (64KB),
+# the size ESP-IDF's own examples use, which buys 64KB of app headroom over the
+# 0x3D0000/0x20000 split this table used until the app outgrew it.
+#
+# This is a real trade, not a free win. Flash coredumps are written
+# all-or-nothing: esp_core_dump_flash_write_init() compares the finished ELF
+# against the partition size and gives up with ESP_ERR_NO_MEM, and the ELF
+# carries every included task's full stack. So a crash that needed more than
+# 64KB (many tasks alive at once) produced nothing here where 128KB would have
+# captured it. If coredump coverage matters more than app size on a given board,
+# give these 64KB back to coredump and take them out of the app instead.
+#
+# If a board needs a bigger app again, take the bytes from coredump, not from
+# nvs: nvs sits below the app and cannot lend it space (and the ESP32-C5 needs
+# the app offset 64KB-aligned for its MMU page size).
+#
 # Name,     Type, SubType, Offset,  Size,    Flags
 nvs,        data, nvs,     0x9000,  0x7000,
-app0,       app,  factory, 0x10000, 0x3D0000,
-coredump,   data, coredump,0x3E0000,0x20000,
+app0,       app,  factory, 0x10000, 0x3E0000,
+coredump,   data, coredump,0x3F0000,0x10000,

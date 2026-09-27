@@ -57,8 +57,8 @@ static const char *cu_mfc_type_str(MFC_TYPE t) {
 }
 
 #ifdef CONFIG_HAS_NFC
-extern const uint8_t _binary_mf_classic_dict_nfc_start[] asm("_binary_mf_classic_dict_nfc_start");
-extern const uint8_t _binary_mf_classic_dict_nfc_end[]   asm("_binary_mf_classic_dict_nfc_end");
+extern const uint8_t _binary_mf_classic_dict_packed_bin_start[] asm("_binary_mf_classic_dict_packed_bin_start");
+extern const uint8_t _binary_mf_classic_dict_packed_bin_end[]   asm("_binary_mf_classic_dict_packed_bin_end");
 #endif
 
 // ui hooks from nfc view (weak)
@@ -3211,26 +3211,17 @@ static int cu_load_user_keys(uint8_t **keys_out){
 
 #ifdef CONFIG_HAS_NFC
 static int cu_count_embedded_dict_lines(void){
-    const char *s = (const char*)_binary_mf_classic_dict_nfc_start;
-    const char *e = (const char*)_binary_mf_classic_dict_nfc_end;
+    const uint8_t *s = _binary_mf_classic_dict_packed_bin_start;
+    const uint8_t *e = _binary_mf_classic_dict_packed_bin_end;
     if (!s || !e || e <= s) return 0;
-    int cnt = 0; const char *p = s; uint8_t tmp[6];
-    while (p < e) { const char* nl = memchr(p, '\n', (size_t)(e - p)); const char* ln_end = nl ? nl : e; if (cu_parse_key_line(p, ln_end, tmp)) cnt++; p = nl ? nl + 1 : e; }
-    return cnt;
+    return (int)((e - s) / 6);
 }
 
 static int cu_load_embedded_keys(uint8_t **keys_out){
     *keys_out = NULL; int total = cu_count_embedded_dict_lines(); if (total <= 0) return 0;
     *keys_out = (uint8_t*)malloc((size_t)total * 6); if (!*keys_out) return 0;
-    const char *s = (const char*)_binary_mf_classic_dict_nfc_start;
-    const char *e = (const char*)_binary_mf_classic_dict_nfc_end;
-    const char *p = s; int idx = 0; uint8_t key[6];
-    while (p < e && idx < total) {
-        const char* nl = memchr(p, '\n', (size_t)(e - p)); const char* ln_end = nl ? nl : e;
-        if (cu_parse_key_line(p, ln_end, key)) { memcpy(&(*keys_out)[idx * 6], key, 6); idx++; }
-        p = nl ? nl + 1 : e;
-    }
-    return idx;
+    memcpy(*keys_out, _binary_mf_classic_dict_packed_bin_start, (size_t)total * 6);
+    return total;
 }
 #endif
 

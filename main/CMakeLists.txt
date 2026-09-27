@@ -307,11 +307,20 @@ if(FALSE)
 endif()
 
 if(CONFIG_HAS_NFC)
+    set(mfc_dict_packed "${CMAKE_CURRENT_BINARY_DIR}/mf_classic_dict_packed.bin")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+                 "${CMAKE_CURRENT_SOURCE_DIR}/mf_classic_dict.nfc")
+    execute_process(
+        COMMAND "${GHOSTESP_PYTHON}" "${CMAKE_SOURCE_DIR}/scripts/pack_mfc_dict.py"
+                "${CMAKE_CURRENT_SOURCE_DIR}/mf_classic_dict.nfc" "${mfc_dict_packed}"
+        RESULT_VARIABLE mfc_dict_pack_result)
+    if(NOT mfc_dict_pack_result EQUAL 0)
+        message(FATAL_ERROR "Failed to pack embedded MIFARE Classic dictionary")
+    endif()
     idf_component_register(SRCS ${sources}
                            INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/include" ${extra_includes}
                            REQUIRES ${required_components}
-                           EMBED_TXTFILES "mf_classic_dict.nfc"
-                           EMBED_FILES ${embed_files_list})
+                           EMBED_FILES ${embed_files_list} "${mfc_dict_packed}")
     target_compile_definitions(${COMPONENT_LIB} PRIVATE CONFIG_MFC_DICT_EMBEDDED=1)
 else()
     idf_component_register(SRCS ${sources}

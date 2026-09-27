@@ -50,7 +50,7 @@ jobs:
           - { name: "MarauderV4_FlipperHub",   idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.marauderv4",                      zip_name: "MarauderV4_FlipperHub.zip", ota: true, ota_slot_size: 6291456, board_key: "marauderv4" }
           - { name: "MarauderV6&AwokDual",     idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.marauderv6",                      zip_name: "MarauderV6_AwokDual.zip" }
           - { name: "AwokMini",                idf_target: "esp32s2", sdkconfig_file: "configs/sdkconfig.awokmini",                        zip_name: "AwokMini.zip" }
-          - { name: "ESP32-S3-Cardputer",      idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.cardputer",                       zip_name: "ESP32-S3-Cardputer.zip", ota: true, ota_slot_size: 4001792, board_key: "cardputer" }
+          - { name: "ESP32-S3-Cardputer",      idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.cardputer",                       zip_name: "ESP32-S3-Cardputer.zip", ota: true, ota_slot_size: 4194304, board_key: "cardputer" }
           - { name: "Heltec V3",               idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.heltecv3",                        zip_name: "HeltecV3.zip" }
           - { name: "CYD2USB",                 idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.CYD2USB",                         zip_name: "CYD2USB.zip" }
           - { name: "CYDMicroUSB",             idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.CYDMicroUSB",                     zip_name: "CYDMicroUSB.zip" }
@@ -58,7 +58,7 @@ jobs:
           - { name: "CYD2USB2.4_Inch",         idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.CYD2USB2.4Inch",                  zip_name: "CYD2USB2.4Inch.zip" }
           - { name: "CYD2USB2.4_Inch_C",       idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.CYD2USB2.4Inch_C_Varient",        zip_name: "CYD2USB2.4Inch_C.zip" }
           - { name: "CYD2432S028R",            idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.CYD2432S028R",                    zip_name: "CYD2432S028R.zip" }
-          - { name: "Waveshare_LCD",           idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.waveshare7inch",                  zip_name: "Waveshare_LCD.zip", ota: true, ota_slot_size: 4001792, board_key: "waveshare7inch" }
+          - { name: "Waveshare_LCD",           idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.waveshare7inch",                  zip_name: "Waveshare_LCD.zip", ota: true, ota_slot_size: 4194304, board_key: "waveshare7inch" }
           - { name: "Crowtech_LCD",            idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.crowtech7inch",                   zip_name: "Crowtech_LCD.zip" }
           - { name: "CrowPanel 4.2-inch E-paper", idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.crowpanel_42_epaper",          zip_name: "CrowPanel_4.2_Epaper.zip" }
           - { name: "CrowPanel 5.79-inch E-paper", idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.crowpanel_579_epaper",        zip_name: "CrowPanel_5.79_Epaper.zip" }
@@ -68,7 +68,7 @@ jobs:
           - { name: "CrowPanel Advance 3.5-inch", idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.crowpanel_advance35",            zip_name: "CrowPanel_Advance_35.zip", ota: true, ota_slot_size: 6291456, board_key: "crowpanel_advance35" }
           - { name: "CrowPanel Advance 2.8-inch", idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.crowpanel_advance28",            zip_name: "CrowPanel_Advance_28.zip", ota: true, ota_slot_size: 6291456, board_key: "crowpanel_advance28" }
           - { name: "CrowPanel Advance 2.4-inch", idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.crowpanel_advance24",            zip_name: "CrowPanel_Advance_24.zip", ota: true, ota_slot_size: 6291456, board_key: "crowpanel_advance24" }
-          - { name: "Sunton_LCD",              idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.sunton7inch",                     zip_name: "Sunton_LCD.zip", ota: true, ota_slot_size: 4001792, board_key: "sunton7inch" }
+          - { name: "Sunton_LCD",              idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.sunton7inch",                     zip_name: "Sunton_LCD.zip", ota: true, ota_slot_size: 4194304, board_key: "sunton7inch" }
           - { name: "JC3248W535EN_LCD",        idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.JC3248W535EN",                    zip_name: "JC3248W535EN_LCD.zip", ota: true, ota_slot_size: 6291456, board_key: "JC3248W535EN" }
           - { name: "Flipper_JCMK_GPS",        idf_target: "esp32s2", sdkconfig_file: "configs/sdkconfig.flipper.jcmk_gps",               zip_name: "Flipper_JCMK_GPS.zip" }
           - { name: "T-Deck",                  idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.tdeck",                           zip_name: "LilyGo-T-Deck.zip" }
@@ -83,16 +83,16 @@ jobs:
           - { name: "JCMK_DevBoardPro",        idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.JCMK_DevBoardPro",               zip_name: "JCMK_DevBoardPro.zip" }
           - { name: "RabbitLabs_Minion",       idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.minion",                         zip_name: "RabbitLabs_Minion.zip" }
           - { name: "Lolin_S3_Pro",            idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.lolins3pro",                     zip_name: "Lolin_S3_Pro.zip" }
-          - { name: "Cardputer ADV",           idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.cardputeradv",                   zip_name: "CardputerADV.zip", ota: true, ota_slot_size: 4001792, board_key: "Cardputer ADV" }
+          - { name: "Cardputer ADV",           idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.cardputeradv",                   zip_name: "CardputerADV.zip", ota: true, ota_slot_size: 4194304, board_key: "Cardputer ADV" }
           - { name: "Rabbit-Labs Poltergeist", idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.poltergeist",                    zip_name: "Poltergeist.zip" }
           - { name: "Banshee C5",              idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.somethingsomething",             zip_name: "Banshee_C5.zip", board_key: "somethingsomething" }
-          - { name: "Banshee S3",              idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.somethingsomething2",            zip_name: "Banshee_S3.zip", ota: true, ota_slot_size: 4001792, board_key: "somethingsomething2" }
+          - { name: "Banshee S3",              idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.somethingsomething2",            zip_name: "Banshee_S3.zip", ota: true, ota_slot_size: 4194304, board_key: "somethingsomething2" }
           - { name: "FeberisPro",              idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.feberispro",                     zip_name: "FeberisPro.zip" }
           - { name: "ACE C5",                  idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.ACE_C5",                         zip_name: "ACE_C5.zip" }
           - { name: "NM-CYD-C5",               idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.NM-CYD-C5",                     zip_name: "NM-CYD-C5.zip", ota: true, ota_slot_size: 5767168, board_key: "NM-CYD-C5" }
           - { name: "ACE S3",                  idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.ACE_S3",                         zip_name: "ACE_S3.zip" }
-          - { name: "XIAO_S3_Sense",           idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.xiao_esp32s3_sense",              zip_name: "XIAO_S3_Sense.zip", ota: true, ota_slot_size: 4001792, board_key: "xiao_esp32s3_sense" }
-          - { name: "XIAO_S3",                 idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.xiao_esp32s3",                    zip_name: "XIAO_S3.zip", ota: true, ota_slot_size: 4001792, board_key: "xiao_esp32s3" }
+          - { name: "XIAO_S3_Sense",           idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.xiao_esp32s3_sense",              zip_name: "XIAO_S3_Sense.zip", ota: true, ota_slot_size: 4194304, board_key: "xiao_esp32s3_sense" }
+          - { name: "XIAO_S3",                 idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.xiao_esp32s3",                    zip_name: "XIAO_S3.zip", ota: true, ota_slot_size: 4194304, board_key: "xiao_esp32s3" }
           - { name: "M5Stack CoreS3-SE",        idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.m5cores3se",                    zip_name: "M5Stack_CoreS3-SE.zip" }
           - { name: "M5Stack AtomS3R",          idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.atoms3r",                      zip_name: "M5Stack_AtomS3R.zip" }
           - { name: "XIAO_C5",                 idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.xiao_esp32c5",                    zip_name: "XIAO_C5.zip" }

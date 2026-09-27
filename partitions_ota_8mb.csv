@@ -1,8 +1,15 @@
 # OTA (A/B) partition table for 8MB boards without flash-XIP/storage extras:
-# sunton7inch, waveshare7inch, xiao_esp32s3, xiao_esp32s3_sense.
+# sunton7inch, waveshare7inch, xiao_esp32s3, xiao_esp32s3_sense, cardputer,
+# cardputeradv, banshee_s3.
+#
+# Slots are 0x3E0000 each so they match (and exceed) the app budget the
+# factory table in partitions.csv now provides, while coredump keeps its full
+# 128KB: 0x20000 + 2 * 0x3E0000 + 0x20000 == 0x800000, the whole 8MB part.
+# Keep the ota_slot_size values in .github/workflows/compile_all.yml equal to
+# 0x3E0000 (4194304) so the CI gate cannot pass an image that will not fit.
 # Name,     Type, SubType,  Offset,   Size,     Flags
 nvs,        data, nvs,      0x9000,   0x7000,
 otadata,    data, ota,      0x10000,  0x2000,
-ota_0,      app,  ota_0,    0x20000,  0x3D0000,
-ota_1,      app,  ota_1,    0x3F0000, 0x3D0000,
-coredump,   data, coredump, 0x7C0000, 0x20000,
+ota_0,      app,  ota_0,    0x20000,  0x3E0000,
+ota_1,      app,  ota_1,    0x400000, 0x3E0000,
+coredump,   data, coredump, 0x7E0000, 0x20000,
