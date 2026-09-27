@@ -22,6 +22,13 @@ try:
 except ImportError:  # keep the rest of the script usable on its own
     partition_table = None
 
+# the esp-idf version in use, tracked by the badge in README.md. keep these in
+# step with it when migrating; CI clones the same tag in compile_all.yml.
+ESP_IDF_VERSION = "6.1"
+# older releases stay downloadable/autodetectable, just not recommended
+ESP_IDF_LEGACY = ("6.0.2", "5.5.1", "5.5", "5.4.1")
+_IDF_RELEASE_URL = "https://github.com/espressif/esp-idf/releases/download/v{v}/esp-idf-v{v}.zip"
+
 
 def _partition_layout():
     """read the partition table this build produced"""
@@ -57,17 +64,13 @@ def print_banner():
     print("       +======================================+")
     print()
 
-def download_esp_idf(version: str = "6.0.2") -> Optional[str]:
+def download_esp_idf(version: str = ESP_IDF_VERSION) -> Optional[str]:
     """Download and extract ESP-IDF"""
     print(f"\nDownloading ESP-IDF v{version}...")
-    
-    # ESP-IDF download URLs
-    urls = {
-        "6.0.2": "https://github.com/espressif/esp-idf/releases/download/v6.0.2/esp-idf-v6.0.2.zip",
-        "5.5.1": "https://github.com/espressif/esp-idf/releases/download/v5.5.1/esp-idf-v5.5.1.zip",
-        "5.5": "https://github.com/espressif/esp-idf/releases/download/v5.5/esp-idf-v5.5.zip",
-        "5.4.1": "https://github.com/espressif/esp-idf/releases/download/v5.4.1/esp-idf-v5.4.1.zip"
-    }
+
+    # current version first, then older releases
+    urls = {ESP_IDF_VERSION: _IDF_RELEASE_URL.format(v=ESP_IDF_VERSION)}
+    urls.update({v: _IDF_RELEASE_URL.format(v=v) for v in ESP_IDF_LEGACY})
     
     if version not in urls:
         print(f"ERROR: Unsupported ESP-IDF version {version}")
@@ -194,13 +197,11 @@ def find_esp_idf(auto_download: bool = False) -> Optional[str]:
             r"C:\Program Files\esp-idf",
             r"C:\Program Files (x86)\esp-idf",
             r"C:\tools\esp-idf",
-            r"C:\esp\esp-idf-v6.0.2",
-            # r"S:\Espressif\frameworks\esp-idf-v5.5",
-            r"C:\esp\esp-idf-v5.5",
-            r"C:\esp\esp-idf-v5.4.1",
-            os.path.join(script_dir, "esp-idf-v6.0.2"),
-            os.path.join(script_dir, "esp-idf-v5.5"),
-            os.path.join(script_dir, "esp-idf-v5.4.1"),
+            rf"C:\esp\esp-idf-v{ESP_IDF_VERSION}",
+            rf"C:\esp\v{ESP_IDF_VERSION}\esp-idf",
+            *[rf"C:\esp\esp-idf-v{v}" for v in ESP_IDF_LEGACY],
+            os.path.join(script_dir, f"esp-idf-v{ESP_IDF_VERSION}"),
+            *[os.path.join(script_dir, f"esp-idf-v{v}") for v in ESP_IDF_LEGACY],
             os.path.join(script_dir, "esp-idf")
         ]
     else:  # Unix-like systems
@@ -213,14 +214,13 @@ def find_esp_idf(auto_download: bool = False) -> Optional[str]:
             "/opt/esp-idf",
             "/usr/local/esp-idf",
             "/opt/espressif/esp-idf",
-            f"{home}/esp/esp-idf-v5.5",
-            f"{home}/esp/esp-idf-v5.4.1",
-            f"{home}/esp/esp-idf-v6.0.2",
+            f"{home}/esp/esp-idf-v{ESP_IDF_VERSION}",
+            f"{home}/esp/v{ESP_IDF_VERSION}/esp-idf",
+            *[f"{home}/esp/esp-idf-v{v}" for v in ESP_IDF_LEGACY],
             f"{home}/esp/v5.5/esp-idf",
             f"{home}/esp/v5.4.1/esp-idf",
-            os.path.join(script_dir, "esp-idf-v6.0.2"),
-            os.path.join(script_dir, "esp-idf-v5.5"),
-            os.path.join(script_dir, "esp-idf-v5.4.1"),
+            os.path.join(script_dir, f"esp-idf-v{ESP_IDF_VERSION}"),
+            *[os.path.join(script_dir, f"esp-idf-v{v}") for v in ESP_IDF_LEGACY],
             os.path.join(script_dir, "esp-idf")
         ]
     
@@ -268,23 +268,23 @@ def find_esp_idf(auto_download: bool = False) -> Optional[str]:
     
     # If auto-download is enabled, offer to download ESP-IDF
     if auto_download:
+        legacy = list(ESP_IDF_LEGACY)[:2]
         print("\nESP-IDF not found. Would you like to download it automatically?")
         print("Available versions:")
-        print("  1. ESP-IDF v6.0.2 (recommended)")
-        print("  2. ESP-IDF v5.5.1")
-        print("  3. ESP-IDF v5.4.1")
-        print("  4. Manual path input")
-        print("  5. Exit")
-        
-        choice = input("Enter your choice (1-5): ").strip()
-        
+        print(f"  1. ESP-IDF v{ESP_IDF_VERSION} (recommended)")
+        for i, v in enumerate(legacy, start=2):
+            print(f"  {i}. ESP-IDF v{v}")
+        manual = len(legacy) + 2
+        print(f"  {manual}. Manual path input")
+        print(f"  {manual + 1}. Exit")
+
+        choice = input(f"Enter your choice (1-{manual + 1}): ").strip()
+
         if choice == '1':
-            return download_esp_idf("6.0.2")
-        elif choice == '2':
-            return download_esp_idf("5.5.1")
-        elif choice == '3':
-            return download_esp_idf("5.4.1")
-        elif choice == '4':
+            return download_esp_idf(ESP_IDF_VERSION)
+        elif choice.isdigit() and 2 <= int(choice) <= manual:
+            return download_esp_idf(legacy[int(choice) - 2])
+        elif choice == str(manual):
             pass  # Fall through to manual input
         else:
             print("Exiting build script.")
@@ -317,10 +317,9 @@ def validate_esp_idf(idf_path: str) -> bool:
     
     if not os.path.exists(export_path):
         print(f"ERROR: Invalid ESP-IDF path. {export_script} not found in {idf_path}")
-        print("Please ensure you have ESP-IDF v6.0.2 (recommended), v5.5.1, or v5.4.1 installed.")
-        print("Download v6.0.2: https://github.com/espressif/esp-idf/releases/tag/v6.0.2")
-        print("Download v5.5.1: https://github.com/espressif/esp-idf/releases/tag/v5.5.1")
-        print("Download v5.4.1: https://github.com/espressif/esp-idf/releases/tag/v5.4.1")
+        print(f"Please ensure you have ESP-IDF v{ESP_IDF_VERSION} installed "
+              f"(see the badge in README.md for the version in use).")
+        print(f"Download: {_IDF_RELEASE_URL.format(v=ESP_IDF_VERSION)}")
         return False
     
     tools_path = os.path.join(idf_path, "tools")
