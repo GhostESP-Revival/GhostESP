@@ -1463,7 +1463,7 @@ typedef struct {
 #define PCAP_POOL_SLOTS_DEFAULT 10
 #define PCAP_POOL_SLOTS_MIN 4
 #else
-#define PCAP_POOL_SLOTS_DEFAULT 8
+#define PCAP_POOL_SLOTS_DEFAULT 4
 #define PCAP_POOL_SLOTS_MIN 4
 #endif
 static QueueHandle_t s_pcap_q = NULL;
