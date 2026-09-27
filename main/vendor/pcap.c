@@ -34,6 +34,14 @@ static esp_err_t _pcap_flush_buffer_to_file_nolock();
 static esp_err_t _pcap_flush_wireshark_stream_nolock();
 static void pcap_release_idle_resources(void);
 static void pcap_progress_stop(void);
+static void pcap_progress_log_summary(void);
+
+/* Periodic capture progress state. Declared up here rather than next to the
+ * progress code because pcap_file_close() keys the closing summary off it. */
+static volatile uint32_t s_progress_interval_ms = 0;
+static char s_progress_label[16] = "PCAP";
+static bool s_progress_active = false;
+
 static char pcap_file_path[MAX_FILE_NAME_LENGTH];
 static char pcap_base_name[32] = "capture";
 static char pcap_dir_path[MAX_FILE_NAME_LENGTH] = SD_DIR_PCAPS;
@@ -1087,11 +1095,15 @@ void pcap_file_close() {
       _pcap_flush_buffer_to_file_nolock();
     }
 
+    /* Stamp the stop time unconditionally, not just when a file is open: JIT
+     * boards open and close the file per flush, so pcap_file is NULL here and
+     * the duration would otherwise always read zero. */
+    struct timeval stop_tv;
+    gettimeofday(&stop_tv, NULL);
+    s_capture_stats.stopped_us = (uint64_t)stop_tv.tv_sec * 1000000ULL +
+                                 (uint64_t)stop_tv.tv_usec;
+
     if (pcap_file != NULL) {
-      struct timeval stop_tv;
-      gettimeofday(&stop_tv, NULL);
-      s_capture_stats.stopped_us = (uint64_t)stop_tv.tv_sec * 1000000ULL +
-                                   (uint64_t)stop_tv.tv_usec;
       fclose(pcap_file);
       pcap_file = NULL;
       ESP_LOGI(PCAP_TAG, "PCAP file closed.");
@@ -1104,6 +1116,15 @@ void pcap_file_close() {
     s_capture_active = false;
     xSemaphoreGive(pcap_mutex);
   }
+
+  /* Report the tally here rather than in any one command handler: the capture
+   * can be ended by "capture -stop", a bare "stop", the UI back button or a
+   * watchdog, and all of them land here. */
+  if (s_progress_active) {
+    s_progress_active = false;
+    pcap_progress_log_summary();
+  }
+
   cleanup_pcap_queue();
   pcap_release_idle_resources();
   ghostscript_emit_event("capture_stopped", pcap_file_path);
@@ -1173,8 +1194,6 @@ void pcap_wireshark_stop(void) {
 #define PCAP_PROGRESS_MIN_INTERVAL_MS 2000
 
 static TaskHandle_t s_progress_task = NULL;
-static volatile uint32_t s_progress_interval_ms = 0;
-static char s_progress_label[16] = "PCAP";
 static portMUX_TYPE s_progress_lock = portMUX_INITIALIZER_UNLOCKED;
 
 /* The on-device terminal is about 18 columns wide and wraps anything longer
@@ -1207,6 +1226,30 @@ static void pcap_progress_log_line(void) {
        (unsigned long)stats.packets_written,
        (unsigned long)(stats.bytes_written / 1024),
        drops);
+}
+
+/* Closing summary, emitted from pcap_file_close() so every stop path reports
+ * one: "capture -stop", a bare "stop", the UI back button, a watchdog. Same
+ * short-field layout as the progress block, with no trailing blank row. */
+static void pcap_progress_log_summary(void) {
+  pcap_capture_stats_t stats;
+  pcap_get_stats(&stats);
+
+  char dest[MAX_FILE_NAME_LENGTH];
+  pcap_get_destination(dest, sizeof(dest));
+
+  uint32_t duration_s = 0;
+  if (stats.started_us != 0 && stats.stopped_us > stats.started_us) {
+    duration_s = (uint32_t)((stats.stopped_us - stats.started_us) / 1000000ULL);
+  }
+
+  glog("Captured %s\nRan for %lus\n%lu packets\n%lu KB written\n%lu dropped\n",
+       s_progress_label,
+       (unsigned long)duration_s,
+       (unsigned long)stats.packets_written,
+       (unsigned long)(stats.bytes_written / 1024),
+       (unsigned long)stats.packets_dropped);
+  glog("-> %s\n", dest);
 }
 
 /* Exits once the interval is cleared or the capture ends, so this task only
@@ -1258,6 +1301,7 @@ void pcap_progress_start(const char *label, uint32_t interval_ms) {
 
   taskENTER_CRITICAL(&s_progress_lock);
   s_progress_interval_ms = interval_ms;
+  s_progress_active = true;
   if (label && *label) {
     strncpy(s_progress_label, label, sizeof(s_progress_label) - 1);
     s_progress_label[sizeof(s_progress_label) - 1] = '\0';

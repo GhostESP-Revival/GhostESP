@@ -435,22 +435,6 @@ void handle_capture_scan(int argc, char **argv) {
 #endif
         pcap_file_close();
         pcap_wireshark_stop();
-        pcap_capture_stats_t stats = {0};
-        pcap_get_stats(&stats);
-        char dest[MAX_FILE_NAME_LENGTH];
-        pcap_get_destination(dest, sizeof(dest));
-        uint32_t duration_s = 0;
-        if (stats.started_us != 0 && stats.stopped_us > stats.started_us) {
-            duration_s = (uint32_t)((stats.stopped_us - stats.started_us) / 1000000ULL);
-        }
-        // Short field lines: the terminal is ~18 columns and a single joined
-        // line would wrap mid-word.
-        glog("Capture stopped\nRan for %lus\n%lu packets\n%lu KB written\n%lu dropped\n",
-             (unsigned long)duration_s,
-             (unsigned long)stats.packets_written,
-             (unsigned long)(stats.bytes_written / 1024),
-             (unsigned long)stats.packets_dropped);
-        glog("-> %s\n", dest);
         status_display_show_status("Capture Stop");
     }
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
