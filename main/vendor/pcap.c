@@ -1,6 +1,7 @@
 #include "vendor/pcap.h"
 #include "core/utils.h"
 #include "core/glog.h"
+#include "core/system_manager.h"
 #include "core/serial_manager.h"
 #include "core/callbacks.h"
 #include "driver/uart.h"
@@ -11,6 +12,7 @@
 #include "managers/ghostchi_manager.h"
 #include "managers/ghostscript_runtime.h"
 #include "gui/toast.h"
+#include "freertos/task.h"
 #include "sys/time.h"
 #include <arpa/inet.h>
 #include <errno.h>
@@ -31,6 +33,7 @@ esp_err_t pcap_file_open_in_dir(const char *base_file_name,
 static esp_err_t _pcap_flush_buffer_to_file_nolock();
 static esp_err_t _pcap_flush_wireshark_stream_nolock();
 static void pcap_release_idle_resources(void);
+static void pcap_progress_stop(void);
 static char pcap_file_path[MAX_FILE_NAME_LENGTH];
 static char pcap_base_name[32] = "capture";
 static char pcap_dir_path[MAX_FILE_NAME_LENGTH] = SD_DIR_PCAPS;
@@ -926,6 +929,7 @@ esp_err_t pcap_wireshark_start(pcap_capture_type_t capture_type) {
 static esp_err_t _pcap_flush_wireshark_stream_nolock() {
   if (buffer_offset > 0) {
     serial_manager_write_bytes((const void *)pcap_buffer, buffer_offset);
+    s_capture_stats.bytes_written += buffer_offset;
     buffer_offset = 0;
   }
   return ESP_OK;
@@ -995,6 +999,7 @@ static esp_err_t _pcap_flush_buffer_to_file_nolock() {
         glog_flush_deferred();
       }
     }
+    s_capture_stats.bytes_written += buffer_offset;
     buffer_offset = 0; // Reset buffer
   }
   return ESP_OK;
@@ -1068,6 +1073,10 @@ static void pcap_release_idle_resources(void) {
 }
 
 void pcap_file_close() {
+  /* Stop the progress line first so the last thing the user sees is the final
+   * tally, not a stale "still running" line. */
+  pcap_progress_stop();
+
   if (pcap_mutex == NULL) {
     return;
   }
@@ -1110,11 +1119,36 @@ void pcap_get_stats(pcap_capture_stats_t *out) {
   }
 }
 
+void pcap_get_destination(char *out, size_t out_len) {
+  if (!out || out_len == 0) return;
+  out[0] = '\0';
+
+  /* pcap_file_path is filled lazily by the JIT mount path, so copy it under
+   * the mutex rather than handing out the static buffer. */
+  if (pcap_mutex && xSemaphoreTake(pcap_mutex, pdMS_TO_TICKS(20)) == pdTRUE) {
+    if (pcap_file_path[0] != '\0') {
+      strncpy(out, pcap_file_path, out_len - 1);
+      out[out_len - 1] = '\0';
+    }
+    xSemaphoreGive(pcap_mutex);
+  } else if (pcap_file_path[0] != '\0') {
+    strncpy(out, pcap_file_path, out_len - 1);
+    out[out_len - 1] = '\0';
+  }
+
+  if (out[0] == '\0') {
+    strncpy(out, "UART", out_len - 1);
+    out[out_len - 1] = '\0';
+  }
+}
+
 void pcap_wireshark_stop(void) {
+  pcap_progress_stop();
+
   if (pcap_mutex == NULL) {
     return;
   }
-  
+
   if (xSemaphoreTake(pcap_mutex, portMAX_DELAY) == pdTRUE) {
     if (s_pcap_mode == PCAP_MODE_WIRESHARK) {
       if (buffer_offset > 0) {
@@ -1127,4 +1161,132 @@ void pcap_wireshark_stop(void) {
   }
   cleanup_pcap_queue();
   pcap_release_idle_resources();
+}
+
+/* ---- Periodic capture progress ---------------------------------------- */
+/* Between the start banner and the stop summary a capture is otherwise
+ * completely silent, so a device capturing for a minute looks hung. Stream a
+ * single line through glog on a fixed interval instead. Opt-in via
+ * pcap_progress_start(): ghostchi and the plugin API run unattended and print
+ * their own telemetry, so they must not trigger this. */
+#define PCAP_PROGRESS_TASK_STACK 4096
+#define PCAP_PROGRESS_MIN_INTERVAL_MS 2000
+
+static TaskHandle_t s_progress_task = NULL;
+static volatile uint32_t s_progress_interval_ms = 0;
+static char s_progress_label[16] = "PCAP";
+static portMUX_TYPE s_progress_lock = portMUX_INITIALIZER_UNLOCKED;
+
+/* The on-device terminal is about 18 columns wide and wraps anything longer
+ * mid-token, which turns one long status line into an unreadable block. Emit
+ * one short field per line instead, matching the capture start banner, and
+ * leave a blank row between updates so consecutive blocks stay distinct. */
+static void pcap_progress_log_line(void) {
+  pcap_capture_stats_t stats;
+  pcap_get_stats(&stats);
+
+  struct timeval tv;
+  gettimeofday(&tv, NULL);
+  uint64_t now_us = (uint64_t)tv.tv_sec * 1000000ULL + (uint64_t)tv.tv_usec;
+  uint32_t elapsed_s = 0;
+  if (stats.started_us != 0 && now_us > stats.started_us) {
+    elapsed_s = (uint32_t)((now_us - stats.started_us) / 1000000ULL);
+  }
+
+  // Drops only earn a line when packets are actually being lost, so it joins
+  // the block rather than following the blank separator.
+  char drops[24] = "";
+  if (stats.packets_dropped > 0) {
+    snprintf(drops, sizeof(drops), "%lu dropped\n",
+             (unsigned long)stats.packets_dropped);
+  }
+
+  glog("Capturing %s\nRunning for %lus\n%lu packets\n%lu KB written\n%s\n",
+       s_progress_label,
+       (unsigned long)elapsed_s,
+       (unsigned long)stats.packets_written,
+       (unsigned long)(stats.bytes_written / 1024),
+       drops);
+}
+
+/* Exits once the interval is cleared or the capture ends, so this task only
+ * lives as long as the capture it is reporting on. */
+static void pcap_progress_task(void *arg) {
+  (void)arg;
+
+  for (;;) {
+    taskENTER_CRITICAL(&s_progress_lock);
+    uint32_t interval = s_progress_interval_ms;
+    taskEXIT_CRITICAL(&s_progress_lock);
+    if (interval == 0) {
+      break; // pcap_progress_stop()
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(interval));
+
+    taskENTER_CRITICAL(&s_progress_lock);
+    bool running = s_progress_interval_ms != 0;
+    taskEXIT_CRITICAL(&s_progress_lock);
+    if (!running) {
+      break;
+    }
+    if (!pcap_is_capturing()) {
+      break; // capture ended without an explicit stop
+    }
+
+    pcap_progress_log_line();
+  }
+
+  taskENTER_CRITICAL(&s_progress_lock);
+  s_progress_task = NULL;
+  taskEXIT_CRITICAL(&s_progress_lock);
+  vTaskDeleteWithCaps(NULL);
+}
+
+void pcap_progress_start(const char *label, uint32_t interval_ms) {
+  if (interval_ms < PCAP_PROGRESS_MIN_INTERVAL_MS) {
+    interval_ms = PCAP_PROGRESS_MIN_INTERVAL_MS;
+  }
+  if (!pcap_is_capturing()) {
+    return; // nothing to report on
+  }
+  if (pcap_is_wireshark_mode()) {
+    // Packets stream over UART as a raw pcap byte stream; interleaving text
+    // would corrupt the host's parse.
+    return;
+  }
+
+  taskENTER_CRITICAL(&s_progress_lock);
+  s_progress_interval_ms = interval_ms;
+  if (label && *label) {
+    strncpy(s_progress_label, label, sizeof(s_progress_label) - 1);
+    s_progress_label[sizeof(s_progress_label) - 1] = '\0';
+  }
+  bool already_reporting = s_progress_task != NULL;
+  taskEXIT_CRITICAL(&s_progress_lock);
+
+  if (already_reporting) {
+    return; // already reporting; the new interval is picked up above
+  }
+
+  TaskHandle_t task = NULL;
+  BaseType_t rc = xTaskCreate_psram(pcap_progress_task, "pcap_prog",
+                                    PCAP_PROGRESS_TASK_STACK, NULL, 3, &task);
+  if (rc != pdPASS) {
+    ESP_LOGW(PCAP_TAG, "Capture progress task not started");
+    taskENTER_CRITICAL(&s_progress_lock);
+    s_progress_interval_ms = 0;
+    taskEXIT_CRITICAL(&s_progress_lock);
+    return;
+  }
+
+  taskENTER_CRITICAL(&s_progress_lock);
+  s_progress_task = task;
+  taskEXIT_CRITICAL(&s_progress_lock);
+}
+
+static void pcap_progress_stop(void) {
+  taskENTER_CRITICAL(&s_progress_lock);
+  s_progress_interval_ms = 0;
+  taskEXIT_CRITICAL(&s_progress_lock);
 }

@@ -56,6 +56,7 @@ typedef struct {
   uint32_t packets_written;
   uint32_t packets_dropped;
   uint32_t buffer_flushes;
+  uint32_t bytes_written;  // pcap payload bytes handed to the file/stream
 } pcap_capture_stats_t;
 
 esp_err_t pcap_init(void);
@@ -76,6 +77,18 @@ void pcap_file_close();
 void pcap_wireshark_stop(void);
 void pcap_discard_buffer(void);
 void pcap_get_stats(pcap_capture_stats_t *out);
+
+/* Copies the destination of the active capture (the .pcap path, or "UART" when
+ * streaming to the terminal) into out. Safe to call from any task. */
+void pcap_get_destination(char *out, size_t out_len);
+
+/* Periodic user-visible progress line. A capture otherwise goes silent between
+ * its start banner and the stop summary, so long captures feel hung. Opt-in:
+ * autonomous modes (ghostchi, plugins) drive their own telemetry and would only
+ * spam, so they never call this. `label` heads each block (e.g. "RAW").
+ * Reporting stops on its own when the capture ends, so there is no matching stop
+ * call to make. */
+void pcap_progress_start(const char *label, uint32_t interval_ms);
 bool pcap_has_hc22000_material(const char *path);
 esp_err_t pcap_export_hc22000(const char *pcap_path, char *out_path, size_t out_path_len,
                               int *pmkid_count, int *handshake_count);

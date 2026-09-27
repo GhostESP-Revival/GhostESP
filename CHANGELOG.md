@@ -8,9 +8,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 ### Added
 - Added a clock to the centre of the status bar, toggleable in Settings > Date & Time
 - Added switchable analog and seven-segment clock faces to the Clock view
-- Added Meshtastic-compatible LoRa support for SX1262 radios, including BLE app support with the official Meshtastic App
-- Added MeshCore companion support for SX1262 radios (enable `HAS_MESHCORE`): adverts, contacts, 8 group channels, group and direct text with ACK, an Ed25519 identity, and a `meshcore` CLI. Meshtastic and MeshCore share one radio and are mutually exclusive at runtime.
-- Added a MeshCore BLE companion link so the official MeshCore apps can chat, manage contacts and channels, and configure the radio
+- Added Meshtastic and Meshcore-compatible LoRa support for SX1262 radios, including BLE app support with the official Meshtastic and Meshcore Apps
 - Added LoRa support to Heltec V3, Elecrow CrowPanel Advance 2.4/2.8/4.3-inch, and CrowPanel Advanced P4 7/9/10.1-inch
 - Added USB SD card passthrough on ESP32-S3 boards with an SD card
 - Added a custom channel hopping setting for attacks, AP and station scans, airspace monitor, and packet hopping
@@ -54,6 +52,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Reduced GhostScript RAM use across all boards
 - Raised the Banshee GhostLink UART to 921600 baud with a larger receive buffer so the higher rate does not increase receive loss
 - Cleaned up boot and GhostLink console output
+- Added periodic capture progress and shut up the PCAP writer HWM log
 
 ### Fixed
 - Fixed empty options menus (Wi-Fi, Settings, BadUSB, NFC, SubGHz, and more)
@@ -89,7 +88,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Fixed the Packet Visualiser "Channel Hopping" row being unselectable by touch and doing nothing
 - Fixed Packet Visualiser selector rows being dead on touch boards other than CrowPanel P4
 - Fixed main menu and Apps grid titles being unreadable over asset pack backgrounds
-- Fixed corrupted frames in the Wireshark USB stream ("Unknown protocol version: 3", "Malformed Packet") by keeping `[BUF/BEGIN]` text out of the live pcap stream, correcting the 802.11 management frame length table that dropped Probe Request SSIDs, and rejecting false resync points in the extcap reader
+- Fixed corrupted frames in the Wireshark USB stream 
 
 ## Revival v2.1.2 - 2026-09-03
 

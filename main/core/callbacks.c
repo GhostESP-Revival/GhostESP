@@ -1548,8 +1548,8 @@ static void pcap_writer_task(void *arg) {
             }
             processed++;
             if ((processed & 0xFF) == 0) { // log occasionally to avoid spam
-                UBaseType_t hwm_words = uxTaskGetStackHighWaterMark(NULL);
-                glog("PCAP writer HWM (bytes): %lu\n", (unsigned long)hwm_words);
+                UBaseType_t hwm_bytes = uxTaskGetStackHighWaterMark(NULL);
+                ESP_LOGD(TAG, "PCAP writer HWM (bytes): %lu", (unsigned long)hwm_bytes);
             }
             if ((processed & 0x1F) == 0 && pcap_auto_flush_enabled()) {
                 pcap_flush_buffer_to_file();
