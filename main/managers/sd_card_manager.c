@@ -1605,7 +1605,7 @@ esp_err_t sd_card_resume_from_usb_msc(void) {
       .max_files = 3,
   };
   FATFS *fs = NULL;
-  esp_err_t err = esp_vfs_fat_register_cfg(&conf, &fs);
+  esp_err_t err = esp_vfs_fat_register(&conf, &fs);
   if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
     ESP_LOGE(TAG, "USB MSC resume: VFS register failed: %s", esp_err_to_name(err));
     ff_diskio_unregister(pdrv);
