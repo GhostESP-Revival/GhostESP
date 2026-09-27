@@ -711,6 +711,8 @@ static void deferred_sd_init_task(void *arg) {
     vTaskDelete(NULL);
 }
 
+extern bool pcap_pool_preinit(void);
+
 void app_main(void) {
     memory_debug_init();
     memory_debug_start_boot_trace();
@@ -1072,6 +1074,9 @@ void app_main(void) {
 #elif defined(CONFIG_HAS_SUBGHZ)
     subghz_remote_manager_register_stream_handler();
 #endif
+
+    ESP_LOGI(TAG, "Pre-allocating PCAP pool");
+    pcap_pool_preinit();
 
     ESP_LOGI(TAG, "Initializing AP Manager");
     MEASURE_INIT_RAM("AP Manager", ap_manager_init());
