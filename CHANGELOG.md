@@ -9,7 +9,8 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Added a clock to the centre of the status bar, toggleable in Settings > Date & Time
 - Added switchable analog and seven-segment clock faces to the Clock view
 - Added Meshtastic and Meshcore-compatible LoRa support for SX1262 radios, including BLE app support with the official Meshtastic and Meshcore Apps
-- Added LoRa support to Heltec V3, Elecrow CrowPanel Advance 2.4/2.8/4.3-inch, and CrowPanel Advanced P4 7/9/10.1-inch
+- Added LoRa support to Heltec V3, LilyGo TDeck, Elecrow CrowPanel Advance 2.4/2.8/4.3-inch, and CrowPanel Advanced P4 7/9/10.1-inch
+- Added Audio Player support to the LilyGo T-Deck via its onboard MAX98357A speaker amp
 - Added USB SD card passthrough on ESP32-S3 boards with an SD card
 - Added a custom channel hopping setting for attacks, AP and station scans, airspace monitor, and packet hopping
 - Added a Country selector to Settings > Wi-Fi

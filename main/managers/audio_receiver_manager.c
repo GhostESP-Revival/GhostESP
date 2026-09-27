@@ -1,6 +1,6 @@
 #include "managers/audio_receiver_manager.h"
 
-#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER) || defined(CONFIG_HAS_CROWPANEL_NS4168)
+#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER) || defined(CONFIG_HAS_CROWPANEL_NS4168) || defined(CONFIG_HAS_TDECK_SPEAKER)
 
 #include "managers/audio_i2s_output.h"
 #include "core/esp_comm_manager.h"

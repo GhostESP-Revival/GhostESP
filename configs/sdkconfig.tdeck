@@ -660,6 +660,60 @@ CONFIG_HAS_NFC=y
 # end of Misc Options
 
 #
+# LoRa Options
+#
+CONFIG_HAS_LORA=y
+CONFIG_HAS_MESHCORE=y
+CONFIG_MESHCORE_REGION_US=y
+# SPI2 is shared with the ST7789 (CS=12) and the TF card (CS=39); the SX1262
+# joins that bus with its own CS. Bring-up only needs GPIO10 (POWERON) HIGH,
+# which main.c already drives for the whole board, so there is no radio Vext.
+CONFIG_LORA_SPI_HOST=2
+CONFIG_LORA_SPI_MOSI_PIN=41
+CONFIG_LORA_SPI_MISO_PIN=38
+CONFIG_LORA_SPI_SCK_PIN=40
+CONFIG_LORA_NSS_PIN=9
+CONFIG_LORA_DIO1_PIN=45
+CONFIG_LORA_BUSY_PIN=13
+CONFIG_LORA_RST_PIN=17
+CONFIG_LORA_VEXT_PIN=-1
+CONFIG_LORA_VEXT_ACTIVE_LOW=y
+CONFIG_LORA_ENABLE_PIN=-1
+CONFIG_LORA_MODULE_SX1262=y
+# CONFIG_LORA_MODULE_SX1276 is not set
+# CONFIG_LORA_MODULE_LLCC68 is not set
+# CONFIG_LORA_TCXO_DISABLED is not set
+CONFIG_LORA_TCXO_1V8=y
+# CONFIG_LORA_TCXO_3V3 is not set
+CONFIG_LORA_MAX_TX_DBM=22
+CONFIG_LORA_MSG_RING=32
+# CONFIG_LORA_REGION_US915 is not set
+# CONFIG_LORA_REGION_EU868 is not set
+# CONFIG_LORA_REGION_EU433 is not set
+# CONFIG_LORA_REGION_CN is not set
+# CONFIG_LORA_REGION_JP is not set
+CONFIG_LORA_REGION_ANZ=y
+# CONFIG_LORA_REGION_KR is not set
+# CONFIG_LORA_REGION_TW is not set
+# CONFIG_LORA_REGION_RU is not set
+# CONFIG_LORA_REGION_IN is not set
+# CONFIG_LORA_REGION_NZ865 is not set
+# CONFIG_LORA_REGION_TH is not set
+# CONFIG_LORA_REGION_UA433 is not set
+# CONFIG_LORA_REGION_MY433 is not set
+# CONFIG_LORA_REGION_MY919 is not set
+# CONFIG_LORA_REGION_SG923 is not set
+# CONFIG_LORA_REGION_PH433 is not set
+# CONFIG_LORA_REGION_PH868 is not set
+# CONFIG_LORA_REGION_PH915 is not set
+# CONFIG_LORA_REGION_ANZ433 is not set
+# CONFIG_LORA_REGION_KZ433 is not set
+# CONFIG_LORA_REGION_KZ863 is not set
+# CONFIG_LORA_REGION_NP865 is not set
+# CONFIG_LORA_REGION_BR902 is not set
+# end of LoRa Options
+
+#
 # GPS Configuration
 #
 CONFIG_HAS_GPS=y
@@ -696,6 +750,16 @@ CONFIG_SD_SPI_CLK_PIN=40
 CONFIG_SD_SPI_MISO_PIN=38
 CONFIG_SD_SPI_MOSI_PIN=41
 # end of SPI and MMC Configuration
+
+#
+# Audio & DAC Configuration
+#
+# Onboard MAX98357A class-D amp + speaker. Fixed-wired: no enable line, no gain
+# pin, no I2C control - just I2S BCLK=7 / WS=5 / DOUT=6 on I2S_NUM_1.
+CONFIG_HAS_TDECK_SPEAKER=y
+CONFIG_HAS_AUDIO_PLAYER=y
+CONFIG_AUDIO_FILES_PATH="/mnt/ghostesp/audio"
+# end of Audio & DAC Configuration
 # end of Ghost ESP Options
 
 #
