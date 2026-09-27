@@ -32,6 +32,7 @@ esp_err_t pcap_file_open_in_dir(const char *base_file_name,
                                 pcap_capture_type_t capture_type);
 static esp_err_t _pcap_flush_buffer_to_file_nolock();
 static esp_err_t _pcap_flush_wireshark_stream_nolock();
+static void pcap_buffer_reset(void);
 static void pcap_release_idle_resources(void);
 static void pcap_progress_stop(void);
 static void pcap_progress_log_summary(void);
@@ -53,6 +54,15 @@ static FILE *pcap_file = NULL;
 static SemaphoreHandle_t pcap_mutex = NULL;
 static volatile bool s_capture_active = false;
 static pcap_capture_stats_t s_capture_stats;
+
+/* Records sitting in pcap_buffer that no destination has accepted yet. Held
+ * alongside buffer_offset so a flush that fails can charge the packets it could
+ * not save to packets_dropped rather than dropping them on the floor. */
+static uint32_t s_packets_in_buffer = 0;
+/* Latched on the first failed flush, cleared when a capture starts. A capture
+ * that lost part of itself stays marked no matter how cleanly it ends, so the
+ * stop path can report a truncated file instead of a clean save. */
+static bool s_capture_write_failed = false;
 
 #define HCX_MAX_SSIDS 8
 #define HCX_MAX_M2 4
@@ -436,10 +446,13 @@ esp_err_t pcap_write_global_header(FILE *f, pcap_capture_type_t capture_type) {
     }
   } else {
     size_t written = fwrite(&header, 1, sizeof(header), f);
-    if (written == sizeof(header)) {
-      fflush(f);
+    /* A full fwrite can still fail when stdio commits it, and callers treat
+     * ESP_OK as "the file has a header": reporting success there yields a
+     * capture file that no reader can open. */
+    if (written == sizeof(header) && fflush(f) == 0) {
       return ESP_OK;
     }
+    clearerr(f);
     return ESP_FAIL;
   }
 }
@@ -510,8 +523,9 @@ esp_err_t pcap_file_open_in_dir(const char *base_file_name,
     pcap_file = NULL;
   }
 
-  buffer_offset = 0;
+  pcap_buffer_reset();
   s_capture_active = false;
+  s_capture_write_failed = false;
   memset(&s_capture_stats, 0, sizeof(s_capture_stats));
   struct timeval start_tv;
   gettimeofday(&start_tv, NULL);
@@ -880,6 +894,7 @@ esp_err_t pcap_write_packet_to_buffer(const void *packet, size_t length,
   }
 
   s_capture_stats.packets_written++;
+  s_packets_in_buffer++;
 
   if (pcap_file == NULL && s_pcap_mode == PCAP_MODE_WIRESHARK) {
     _pcap_flush_wireshark_stream_nolock();
@@ -920,7 +935,8 @@ esp_err_t pcap_wireshark_start(pcap_capture_type_t capture_type) {
   s_pcap_mode = PCAP_MODE_WIRESHARK;
   s_capture_type = capture_type;
   pcap_file = NULL;
-  buffer_offset = 0;
+  pcap_buffer_reset();
+  s_capture_write_failed = false;
 
   esp_err_t ret = pcap_write_global_header(NULL, capture_type);
   if (ret != ESP_OK) {
@@ -934,83 +950,177 @@ esp_err_t pcap_wireshark_start(pcap_capture_type_t capture_type) {
   return ESP_OK;
 }
 
+/* Empties pcap_buffer. Every site that clears buffer_offset has to clear the
+ * buffered packet count with it, or a later failed flush charges the wrong
+ * number of drops. */
+static void pcap_buffer_reset(void) {
+  buffer_offset = 0;
+  s_packets_in_buffer = 0;
+}
+
 static esp_err_t _pcap_flush_wireshark_stream_nolock() {
   if (buffer_offset > 0) {
+    /* A short return here is UART backpressure, not a storage failure, so it is
+     * deliberately not turned into a capture error: the host stream is the only
+     * destination and failing the capture would not put those bytes anywhere
+     * else. bytes_written still counts the whole buffer for that reason. */
     serial_manager_write_bytes((const void *)pcap_buffer, buffer_offset);
     s_capture_stats.bytes_written += buffer_offset;
-    buffer_offset = 0;
+    pcap_buffer_reset();
   }
   return ESP_OK;
 }
 
-static esp_err_t _pcap_flush_buffer_to_file_nolock() {
-  if (buffer_offset > 0) {
-    s_capture_stats.buffer_flushes++;
-    if (pcap_file) { // If file is open, write to file
-      size_t written = fwrite(pcap_buffer, 1, buffer_offset, pcap_file);
-      if (written < buffer_offset) {
-        ESP_LOGE(PCAP_TAG, "Failed to write buffered data to PCAP file.");
-      } else {
-        fflush(pcap_file);
-      }
-    } else if (s_pcap_mode == PCAP_MODE_WIRESHARK) {
-      /* Live stream: the host reader expects a bare pcap byte stream. Writing
-       * the [BUF/BEGIN]/[BUF/CLOSE] text markers here would inject non-pcap
-       * bytes into the middle of the stream and desync the reader. */
-      _pcap_flush_wireshark_stream_nolock();
-    } else { // If no file, try JIT mount for somethingsomething, else UART
-      bool gating_template = pcap_is_jit_template();
+/* Hands the buffer to an open stream and reports how many bytes really landed.
+ * A full fwrite can still fail when the data is committed, so fflush is part of
+ * the write rather than a separate best-effort step. The result is 0 whenever
+ * anything went wrong: with a write in doubt we cannot know how much of it
+ * reached storage, so we claim none of it rather than overstate bytes_written. */
+static size_t _pcap_write_to_stream(FILE *f) {
+  size_t written = fwrite(pcap_buffer, 1, buffer_offset, f);
+  int commit_failed = 0;
+  if (written == buffer_offset && fflush(f) != 0) {
+    written = 0;
+    commit_failed = 1;
+  }
+  if (ferror(f)) {
+    written = 0;
+    commit_failed = 1;
+  }
+  if (commit_failed) {
+    /* The indicator is sticky and pcap_file outlives any single flush, so
+     * leaving it set makes every later write inherit the failure. Clearing it
+     * lets a card that was re-inserted accept writes again instead of failing
+     * for the rest of the capture. Done on any detected failure rather than on
+     * ferror() alone, because a failing fflush is not guaranteed to set it. */
+    clearerr(f);
+  }
+  return written;
+}
 
-      if (gating_template) {
-          bool display_was_suspended = false;
-          if (sd_card_mount_for_flush(&display_was_suspended) == ESP_OK) {
-            if (pcap_file_path[0] == '\0') {
-            get_next_pcap_file_name(pcap_file_path, pcap_dir_path, pcap_base_name);
-            }
-          FILE *f = fopen(pcap_file_path, "ab+");
-          if (f) {
-            fseek(f, 0, SEEK_END);
-            long sz = ftell(f);
-            if (sz == 0) {
-              // write global header on first write
-              pcap_write_global_header(f, s_capture_type);
-            }
-            size_t written = fwrite(pcap_buffer, 1, buffer_offset, f);
-            fclose(f);
-            if (written < buffer_offset) {
-              ESP_LOGE(PCAP_TAG, "Failed to write buffered data to PCAP file (JIT).");
-            }
-          }
-          sd_card_unmount_after_flush(display_was_suspended);
-        } else {
-          const char *mark_begin = "[BUF/BEGIN]";
-          const size_t mark_begin_len = strlen(mark_begin);
-          const char *mark_close = "[BUF/CLOSE]";
-          const size_t mark_close_len = strlen(mark_close);
-          glog_set_defer(1);
-          uart_write_bytes(UART_NUM_0, mark_begin, mark_begin_len);
-          uart_write_bytes(UART_NUM_0, (const char *)pcap_buffer, buffer_offset);
-          uart_write_bytes(UART_NUM_0, mark_close, mark_close_len);
-          glog_set_defer(0);
-          glog_flush_deferred();
-        }
-      } else {
-        const char *mark_begin = "[BUF/BEGIN]";
-        const size_t mark_begin_len = strlen(mark_begin);
-        const char *mark_close = "[BUF/CLOSE]";
-        const size_t mark_close_len = strlen(mark_close);
-        glog_set_defer(1);
-        uart_write_bytes(UART_NUM_0, mark_begin, mark_begin_len);
-        uart_write_bytes(UART_NUM_0, (const char *)pcap_buffer, buffer_offset);
-        uart_write_bytes(UART_NUM_0, mark_close, mark_close_len);
-        glog_set_defer(0);
-        glog_flush_deferred();
+/* JIT templates keep no open handle: the card is mounted for the length of one
+ * flush and reopened next time, so a card that comes back mid-capture is picked
+ * up by a later flush. Every step can fail on a card pulled mid-capture, and
+ * all of them funnel into *accepted so the caller can charge the records it
+ * could not save. */
+static esp_err_t _pcap_flush_buffer_jit_nolock(size_t *accepted) {
+  *accepted = 0;
+
+  bool display_was_suspended = false;
+  if (sd_card_mount_for_flush(&display_was_suspended) != ESP_OK) {
+    ESP_LOGE(PCAP_TAG, "JIT flush: SD mount failed");
+    return ESP_FAIL;
+  }
+
+  esp_err_t ret = ESP_OK;
+  if (pcap_file_path[0] == '\0') {
+    get_next_pcap_file_name(pcap_file_path, pcap_dir_path, pcap_base_name);
+  }
+
+  FILE *f = fopen(pcap_file_path, "ab+");
+  if (!f) {
+    ESP_LOGE(PCAP_TAG, "JIT flush: cannot open %s", pcap_file_path);
+    ret = ESP_FAIL;
+  } else {
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    if (sz == 0) {
+      // write global header on first write
+      if (pcap_write_global_header(f, s_capture_type) != ESP_OK) {
+        ESP_LOGE(PCAP_TAG, "JIT flush: global header write failed");
+        ret = ESP_FAIL;
       }
     }
-    s_capture_stats.bytes_written += buffer_offset;
-    buffer_offset = 0; // Reset buffer
+    if (ret == ESP_OK) {
+      size_t written = fwrite(pcap_buffer, 1, buffer_offset, f);
+      int io_error = ferror(f); // must be sampled before fclose
+      /* fclose commits whatever stdio is still holding, so a full or yanked
+       * card can leave fwrite reporting the full count and surface only here.
+       * Its result is part of the write, not cleanup. */
+      int close_failed = fclose(f) != 0;
+      f = NULL;
+      if (io_error || close_failed || written < buffer_offset) {
+        ESP_LOGE(PCAP_TAG, "JIT flush: write failed %zu/%zu bytes (close=%d)",
+                 written, buffer_offset, close_failed);
+        ret = ESP_FAIL;
+      } else {
+        *accepted = written;
+      }
+    }
+    if (f != NULL) {
+      fclose(f); // gave up before writing; still release the handle
+    }
   }
-  return ESP_OK;
+
+  sd_card_unmount_after_flush(display_was_suspended);
+  return ret;
+}
+
+/* Last resort destination when there is no file and no SD: wrap the buffer in
+ * text markers so a host-side reader can find it on the console. */
+static void _pcap_flush_buffer_to_uart(void) {
+  const char *mark_begin = "[BUF/BEGIN]";
+  const size_t mark_begin_len = strlen(mark_begin);
+  const char *mark_close = "[BUF/CLOSE]";
+  const size_t mark_close_len = strlen(mark_close);
+  glog_set_defer(1);
+  uart_write_bytes(UART_NUM_0, mark_begin, mark_begin_len);
+  uart_write_bytes(UART_NUM_0, (const char *)pcap_buffer, buffer_offset);
+  uart_write_bytes(UART_NUM_0, mark_close, mark_close_len);
+  glog_set_defer(0);
+  glog_flush_deferred();
+}
+
+static esp_err_t _pcap_flush_buffer_to_file_nolock() {
+  if (buffer_offset == 0) {
+    return ESP_OK;
+  }
+  s_capture_stats.buffer_flushes++;
+
+  const size_t pending = buffer_offset;
+  const uint32_t buffered_packets = s_packets_in_buffer;
+  size_t accepted = 0;
+  esp_err_t ret = ESP_OK;
+  const char *dest = "uart";
+
+  if (pcap_file) { // If file is open, write to file
+    dest = "file";
+    accepted = _pcap_write_to_stream(pcap_file);
+    if (accepted < pending) {
+      ret = ESP_FAIL;
+    }
+  } else if (s_pcap_mode == PCAP_MODE_WIRESHARK) {
+    /* Live stream: the host reader expects a bare pcap byte stream. Writing
+     * the [BUF/BEGIN]/[BUF/CLOSE] text markers here would inject non-pcap
+     * bytes into the middle of the stream and desync the reader. */
+    return _pcap_flush_wireshark_stream_nolock();
+  } else if (pcap_is_jit_template()) { // No file, try JIT mount
+    dest = "JIT";
+    ret = _pcap_flush_buffer_jit_nolock(&accepted);
+  } else { // If no file, fall back to UART
+    _pcap_flush_buffer_to_uart();
+    accepted = pending;
+  }
+
+  s_capture_stats.bytes_written += accepted;
+
+  if (ret == ESP_OK) {
+    pcap_buffer_reset();
+    return ESP_OK;
+  }
+
+  /* A partial write is not resumable: stdio may still be holding the tail it
+   * failed to commit, so writing those bytes again from here risks duplicating
+   * records in the middle of the capture. Drop them instead, but charge them to
+   * packets_dropped and take them back out of packets_written, so a capture
+   * that lost the card says so instead of reporting a clean stop. */
+  s_capture_write_failed = true;
+  s_capture_stats.packets_dropped += buffered_packets;
+  s_capture_stats.packets_written -= buffered_packets;
+  pcap_buffer_reset();
+  ESP_LOGE(PCAP_TAG, "Flush to %s failed: %zu/%zu bytes, %lu packets lost",
+           dest, accepted, pending, (unsigned long)buffered_packets);
+  return ESP_FAIL;
 }
 
 void pcap_discard_buffer(void) {
@@ -1018,7 +1128,7 @@ void pcap_discard_buffer(void) {
     return;
   }
   if (xSemaphoreTake(pcap_mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
-    buffer_offset = 0;
+    pcap_buffer_reset();
     xSemaphoreGive(pcap_mutex);
   }
 }
@@ -1074,7 +1184,7 @@ static void pcap_release_idle_resources(void) {
 
   free(pcap_buffer);
   pcap_buffer = NULL;
-  buffer_offset = 0;
+  pcap_buffer_reset();
   pcap_mutex = NULL;
   xSemaphoreGive(mutex);
   vSemaphoreDelete(mutex);
@@ -1104,12 +1214,25 @@ void pcap_file_close() {
                                  (uint64_t)stop_tv.tv_usec;
 
     if (pcap_file != NULL) {
-      fclose(pcap_file);
+      /* The closing fclose commits whatever stdio still holds, so a card that
+       * was pulled or filled mid-capture can fail here after a clean-looking
+       * flush and still cost us the tail of the file. */
+      if (fclose(pcap_file) != 0) {
+        ESP_LOGE(PCAP_TAG, "Final commit of %s failed.", pcap_file_path);
+        s_capture_write_failed = true;
+      }
       pcap_file = NULL;
       ESP_LOGI(PCAP_TAG, "PCAP file closed.");
       if (pcap_file_path[0] != '\0') {
-        toast_show("PCAP saved", TOAST_SUCCESS);
-        ghostchi_manager_add_xp(6);
+        if (s_capture_write_failed) {
+          /* Part of the capture never reached the card, so this is not a clean
+           * save: say so and do not pay out the save reward for a file the
+           * user cannot use as captured. */
+          toast_show("PCAP saved, capture truncated", TOAST_ERROR);
+        } else {
+          toast_show("PCAP saved", TOAST_SUCCESS);
+          ghostchi_manager_add_xp(6);
+        }
       }
     }
 
@@ -1250,6 +1373,12 @@ static void pcap_progress_log_summary(void) {
        (unsigned long)(stats.bytes_written / 1024),
        (unsigned long)stats.packets_dropped);
   glog("-> %s\n", dest);
+  /* "N dropped" counts packets the capture chose not to buffer, so it says
+   * nothing on its own about a card that was pulled mid-capture. Name the
+   * truncation separately, otherwise a lost capture still reads as a clean one. */
+  if (s_capture_write_failed) {
+    glog("Storage error: capture truncated\n");
+  }
 }
 
 /* Exits once the interval is cleared or the capture ends, so this task only

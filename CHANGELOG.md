@@ -89,6 +89,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Fixed Packet Visualiser selector rows being dead on touch boards other than CrowPanel P4
 - Fixed main menu and Apps grid titles being unreadable over asset pack backgrounds
 - Fixed corrupted frames in the Wireshark USB stream 
+- Fixed captures reporting success when an SD write fails
 
 ## Revival v2.1.2 - 2026-09-03
 
