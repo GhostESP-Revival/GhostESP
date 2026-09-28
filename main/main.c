@@ -44,6 +44,9 @@
 #include <esp_log.h>
 #include "esp_random.h"
 #include "esp_sleep.h"
+#if defined(CONFIG_BT_ENABLED) && !defined(CONFIG_IDF_TARGET_ESP32P4)
+#include "esp_bt.h"
+#endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
 #include "freertos/task.h"
@@ -711,11 +714,24 @@ static void deferred_sd_init_task(void *arg) {
     vTaskDelete(NULL);
 }
 
+extern bool pcap_pool_preinit(void);
+
 void app_main(void) {
     memory_debug_init();
     memory_debug_start_boot_trace();
     MEASURE_INIT_RAM("Ghostchi Mood init", ghostchi_mood_init());
     ghostchi_mood_record_event(GHOSTCHI_MOOD_EVENT_BOOT, 3);
+
+#if defined(CONFIG_BT_ENABLED) && defined(CONFIG_BTDM_CTRL_MODE_BLE_ONLY) && \
+    !defined(CONFIG_IDF_TARGET_ESP32P4)
+    /* BLE-only build never uses the Classic BT controller, which otherwise
+     * keeps ~19 KB of internal RAM reserved for the whole session. ble_manager
+     * releases it, but only during lazy BLE init, which may never run and never
+     * runs before the display/SD boot crunch. Reclaim it here at boot so SD
+     * mount and the rest of init have the headroom; BLE stays fully functional
+     * because only the Classic BT region is freed. Safe to call again later. */
+    (void)esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT);
+#endif
 
 #ifdef CONFIG_CROWPANEL_EPAPER_42
     /* Factory firmware enables both board rails before touching the panel or
@@ -1072,6 +1088,9 @@ void app_main(void) {
 #elif defined(CONFIG_HAS_SUBGHZ)
     subghz_remote_manager_register_stream_handler();
 #endif
+
+    ESP_LOGI(TAG, "Pre-allocating PCAP pool");
+    pcap_pool_preinit();
 
     ESP_LOGI(TAG, "Initializing AP Manager");
     MEASURE_INIT_RAM("AP Manager", ap_manager_init());

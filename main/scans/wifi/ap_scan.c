@@ -735,6 +735,9 @@ void ap_scan_finish_async(void) {
         }
 
         ap_count = actual_ap_count;
+ 
+        // Print detailed results and auto-save scan to SD (if enabled)
+        ap_scan_print_results();
     } else {
         printf("No access points found\n");
         ap_count = 0;

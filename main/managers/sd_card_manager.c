@@ -33,6 +33,7 @@
 #include "lvgl_tft/disp_spi.h"
 #if defined(CONFIG_LV_TOUCH_DRIVER_PROTOCOL_SPI) && !defined(CONFIG_USE_BIT_BANG_TOUCH)
 #include "lvgl_touch/tp_spi.h"
+#include "lvgl_spi_conf.h"
 #endif
 
 #define MAX_PORTALS 32

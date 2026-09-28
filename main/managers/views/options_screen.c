@@ -10492,6 +10492,7 @@ static void back_event_cb(lv_event_t *e) {
         if (options_menu_restore_previous_state()) {
             return;
         }
+        s_skip_history_capture_once = true;
         current_wifi_menu_state = WIFI_MENU_SCAN_SELECT;
         rebuild_current_menu();
         return;
@@ -10502,6 +10503,7 @@ static void back_event_cb(lv_event_t *e) {
         if (options_menu_restore_previous_state()) {
             return;
         }
+        s_skip_history_capture_once = true;
         current_wifi_menu_state = WIFI_MENU_SCAN_SELECT;
         rebuild_current_menu();
         return;
@@ -10512,6 +10514,7 @@ static void back_event_cb(lv_event_t *e) {
         if (options_menu_restore_previous_state()) {
             return;
         }
+        s_skip_history_capture_once = true;
         current_wifi_menu_state = WIFI_MENU_SCAN_SELECT;
         rebuild_current_menu();
         return;
@@ -10577,6 +10580,7 @@ static void back_event_cb(lv_event_t *e) {
         if (options_menu_restore_previous_state()) {
             return;
         }
+        s_skip_history_capture_once = true;
         current_wifi_menu_state = WIFI_MENU_SCAN_SELECT;
         rebuild_current_menu();
         return;
@@ -10587,6 +10591,7 @@ static void back_event_cb(lv_event_t *e) {
         if (options_menu_restore_previous_state()) {
             return;
         }
+        s_skip_history_capture_once = true;
         current_wifi_menu_state = WIFI_MENU_SCAN_SELECT;
         rebuild_current_menu();
         return;
