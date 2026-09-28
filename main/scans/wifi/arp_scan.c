@@ -14,6 +14,7 @@
 #include "core/scan_saver.h"
 #include "core/system_manager.h"
 #include "core/utils.h"
+#include "vendor/wifi_l2.h"
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
@@ -940,28 +941,37 @@ static void format_compact_packet(const wifi_promiscuous_pkt_t *pkt,
 
     const char *name = packet_type_name(type, subtype);
     if (packet_type == WIFI_PKT_DATA && len >= 24) {
-        bool to_ds = (fc & 0x0100) != 0;
-        bool from_ds = (fc & 0x0200) != 0;
-        size_t header_len = (to_ds && from_ds) ? 30 : 24;
-        if (subtype & 0x08) {
-            header_len += 2;
-            if (fc & 0x8000) header_len += 4;
-        }
-        if (len >= header_len + 8) {
-            const uint8_t *llc = frame + header_len;
-            if (llc[0] == 0xAA && llc[1] == 0xAA && llc[2] == 0x03) {
-                uint16_t ether_type = ((uint16_t)llc[6] << 8) | llc[7];
-                if (ether_type == 0x0806 && len >= header_len + 8 + 28) {
-                    const uint8_t *arp = llc + 8;
+        /* Shared header geometry plus 802.1Q/802.1ad tag peeling. The old
+         * inline version only allowed for the HT Control field on QoS frames,
+         * and treated a VLAN tag as the ethertype, so tagged traffic fell
+         * through as "DAT" instead of ARP/EAP/IP. */
+        wifi_l2_info_t l2;
+        if (wifi_l2_parse(frame, len, &l2)) {
+            const uint8_t *payload = frame + l2.payload_offset;
+            if (l2.ethertype == WIFI_L2_ETHERTYPE_ARP) {
+                /* ARP: htype(2) ptype(2) hlen(1) plen(1) oper(2) sha(6) spa(4)
+                 * tha(6) tpa(4). Sender protocol address is at +14. */
+                if (l2.payload_offset + 28 <= len) {
+                    const uint8_t *arp = payload;
                     snprintf(out, out_size, "%02u %4d ARP %u.%u>%u.%u %s",
                              (unsigned int)pkt->rx_ctrl.channel, pkt->rx_ctrl.rssi,
                              (unsigned int)arp[16], (unsigned int)arp[17],
                              (unsigned int)arp[26], (unsigned int)arp[27], src);
                     return;
                 }
-                if (ether_type == 0x888E) name = "EAP";
-                else if (ether_type == 0x0800) name = "IP4";
-                else if (ether_type == 0x86DD) name = "IP6";
+            } else if (l2.ethertype == WIFI_L2_ETHERTYPE_EAPOL) {
+                name = "EAP";
+            } else if (l2.ethertype == WIFI_L2_ETHERTYPE_IPV4) {
+                name = "IP4";
+            } else if (l2.ethertype == WIFI_L2_ETHERTYPE_IPV6) {
+                name = "IP6";
+            }
+            if (l2.vlan_depth > 0) {
+                /* Flag the frame so a tagged line is distinguishable from an
+                 * untagged one carrying the same protocol. */
+                if (flag_pos < 2) {
+                    flags[flag_pos++] = 'V';
+                }
             }
         }
     }

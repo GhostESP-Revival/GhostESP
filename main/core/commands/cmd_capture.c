@@ -308,6 +308,10 @@ void handle_capture_scan(int argc, char **argv) {
             status_display_show_status("PCAP Fail");
             return;
         }
+        /* A raw capture has to be byte-exact, so write frames as received
+         * rather than trimming management frames to their last valid
+         * information element. */
+        pcap_set_write_frames_verbatim(true);
         wifi_manager_start_monitor_mode(wifi_raw_scan_callback);
         APPLY_CAPTURE_CHANNEL_LOCK();
         status_display_show_status("Capture Raw");
@@ -394,6 +398,8 @@ void handle_capture_scan(int argc, char **argv) {
             status_display_show_status("Wireshark Err");
             return;
         }
+        /* Same callback as -raw, so it gets the same byte-exact framing. */
+        pcap_set_write_frames_verbatim(true);
         wifi_manager_start_monitor_mode(wifi_raw_scan_callback);
 
         if (fixed_channel_set) {

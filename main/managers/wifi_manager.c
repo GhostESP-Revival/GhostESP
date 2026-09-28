@@ -2389,8 +2389,16 @@ void wifi_manager_start_monitor_mode(wifi_promiscuous_cb_t_t callback) {
         // tracking needs MGMT (AP beacons) + DATA (active stations);
         // CTRL frames carry no usable RSSI targets, so leave them out.
         filter.filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT | WIFI_PROMIS_FILTER_MASK_DATA;
+    } else if (callback == wifi_raw_scan_callback) {
+        /* Ask for individual MPDUs rather than whole A-MPDUs. An aggregate can
+         * run to tens of kilobytes, which no per-frame buffer can hold, and
+         * writing one blob as if it were a single frame produces garbage in
+         * Wireshark. Requesting MPDUs makes the driver split the aggregate for
+         * us, so every subframe is written as a normal, valid frame. */
+        filter.filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT | WIFI_PROMIS_FILTER_MASK_DATA |
+                             WIFI_PROMIS_FILTER_MASK_CTRL | WIFI_PROMIS_FILTER_MASK_DATA_MPDU;
     } else {
-        // Default: capture all frame types (for raw capture, SAE flood, etc.)
+        // Default: capture all frame types (for SAE flood, airspace, etc.)
         filter.filter_mask = WIFI_PROMIS_FILTER_MASK_ALL;
     }
     

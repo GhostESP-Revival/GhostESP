@@ -22,6 +22,9 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Added a `bledetect` CLI command and Devices menu row for the device detect scan, with list, track and AirTag spoof actions
 - Added a `glbench` CLI command and Settings > Tools row to benchmark GhostLink throughput and view link statistics
 - Added a `-name <text>` argument to `blespam` to advertise a custom name
+- Added signal, channel and rate to captures so Wireshark shows per-frame radio info
+- Added 802.1Q/QinQ tag support so VLAN-tagged traffic and handshakes are recognised
+- Added control frames (RTS/CTS/ACK/Block Ack) to the EAPOL and Wireshark captures
 - Added more devices to the BLE detect scan
   - Tile trackers. Adapted from [Flock-You-Android](https://github.com/MaxwellDPS/Flock-You-Android/blob/main/docs/detections/BLE_TRACKER_DETECTION.md) and [Silabs](https://docs.silabs.com/bluetooth/2.13/bluetooth-code-examples-applications/bluetooth-device-examples-and-use-cases)
   - Samsung SmartTag. Adapted from [arxiv 2210.14702](https://arxiv.org/pdf/2210.14702) and [adwatch](https://github.com/bensmith83/adwatch/blob/main/docs/protocols/smarttag.md)
@@ -47,7 +50,6 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Added a T-Embed detent mode setting
 - Improved the Track RSSI readout with a warmer/colder trend arrow
 - Standardized the bottom touch bar, back-key handling, list/log scrolling and view layout with shared helpers
-- Reverted the windowed options rows back to paged lists
 - Wi-Fi and Bluetooth scan results page with `< Prev` / `Next >` rows
 - Mapped IR buttons to the theme palette
 - Matched the Ethernet dashboard status card to the rounded action rows
@@ -55,10 +57,13 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Raised the Banshee GhostLink UART to 921600 baud with a larger receive buffer so the higher rate does not increase receive loss
 - Cleaned up boot and GhostLink console output
 - Added periodic capture progress and shut up the PCAP writer HWM log
+- Reworded the deauth notice to say plainly whether the target will drop it, based on the network's security type
 - Sorted SD apps alphabetically instead of in card order
 - Replaced the "SD apps ready" toast on Apps entry with a count in the status bar
 
 ### Fixed
+- Fixed the HT Control field being ignored on non-QoS data frames, which hid some ARP, EAP and IP traffic
+- Capture summaries now report frames lost to an oversized buffer or a full queue instead of discarding them silently
 - Fixed empty options menus (Wi-Fi, Settings, BadUSB, NFC, SubGHz, and more)
 - Fixed the setup wizard getting stuck on the country step, which looked like a freeze on keyboard-only devices
 - Fixed on-screen keyboard preview text scrolling vertically instead of horizontally
@@ -95,6 +100,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Fixed corrupted frames in the Wireshark USB stream 
 - Fixed captures reporting success when an SD write fails
 - Fixed SD apps built for another chip showing in the Apps gallery and then failing to launch
+- Fixed `capture -raw` and `capture -wireshark` dropping data frames over 768 bytes, stripping the FCS only from some frame types, and discarding every ACK/CTS as too short
 
 ## Revival v2.1.2 - 2026-09-03
 

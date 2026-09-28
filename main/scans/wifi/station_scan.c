@@ -302,6 +302,27 @@ static bool station_exists(const uint8_t *station_mac, const uint8_t *ap_bssid) 
 }
 
 /**
+ * @brief Fill in the parent AP's security type for a station record
+ *
+ * Looks the station's AP BSSID up in the AP scan results. The AP is not
+ * necessarily in the scan (a station can be seen on a network that was never
+ * scanned), so this is best effort and leaves the field as WIFI_AUTH_UNKNOWN
+ * when the lookup fails.
+ */
+static void station_fill_ap_authmode(station_ap_pair_t *pair) {
+    if (pair == NULL) return;
+    pair->ap_authmode = (uint8_t)WIFI_AUTH_UNKNOWN;
+
+    uint16_t ap_count = 0;
+    wifi_ap_record_t *aps = NULL;
+    ap_scan_get_results(&ap_count, &aps);
+    int ap_idx = find_ap_by_bssid(pair->ap_bssid, aps, ap_count, NULL, 0);
+    if (ap_idx >= 0) {
+        pair->ap_authmode = (uint8_t)aps[ap_idx].authmode;
+    }
+}
+
+/**
  * @brief Add a station-AP pair to the list
  * 
  * @param station_mac Station MAC address
@@ -311,6 +332,8 @@ static void add_station_ap_pair(const uint8_t *station_mac, const uint8_t *ap_bs
     if (station_count < STATION_SCAN_MAX_RESULTS) {
         memcpy(station_ap_list[station_count].station_mac, station_mac, 6);
         memcpy(station_ap_list[station_count].ap_bssid, ap_bssid, 6);
+        /* Resolved later, at selection time, when the AP scan is available. */
+        station_ap_list[station_count].ap_authmode = (uint8_t)WIFI_AUTH_UNKNOWN;
         station_count++;
     } else {
         glog("Station list full\nCan't add more stations.\n");
@@ -867,8 +890,13 @@ esp_err_t station_scan_select(int index) {
     ap_scan_get_results(&ap_count, &scanned_aps);
 
     char sanitized_ssid[33] = "(Unknown AP)";
-    find_ap_by_bssid(selected_station.ap_bssid, scanned_aps, ap_count, 
+    find_ap_by_bssid(selected_station.ap_bssid, scanned_aps, ap_count,
                      sanitized_ssid, sizeof(sanitized_ssid));
+
+    /* Carry the parent AP's security type along with the selection so the
+     * deauth path can say whether this network enforces protected management
+     * frames, instead of reporting the posture as unknown. */
+    station_fill_ap_authmode(&selected_station);
 
     // Log selection using helper
     char sta_mac_str[18], ap_mac_str[18];
@@ -919,6 +947,7 @@ esp_err_t station_scan_select_multiple(int *indices, int count) {
 
     for (int i = 0; i < count; i++) {
         selected_stations[i] = station_ap_list[indices[i]];
+        station_fill_ap_authmode(&selected_stations[i]);
     }
 
     char sta_mac_str[18], ap_mac_str[18];

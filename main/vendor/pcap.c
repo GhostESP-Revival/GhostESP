@@ -1,4 +1,5 @@
 #include "vendor/pcap.h"
+#include "vendor/radiotap.h"
 #include "core/utils.h"
 #include "core/glog.h"
 #include "core/system_manager.h"
@@ -23,6 +24,8 @@
 #include <stdlib.h>
 #include <stdbool.h>
 
+/* A radiotap header with no fields present is exactly the 8 byte fixed prefix.
+ * radiotap_build() may grow that with signal/channel/rate/antenna. */
 #define RADIOTAP_HEADER_LEN 8
 
 static const char *PCAP_TAG = "PCAP";
@@ -526,6 +529,12 @@ esp_err_t pcap_file_open_in_dir(const char *base_file_name,
   pcap_buffer_reset();
   s_capture_active = false;
   s_capture_write_failed = false;
+  /* Verbatim writing is opt-in per capture, so clear it: a later beacon
+   * capture must not inherit it from a raw one. */
+  s_pcap_write_frames_verbatim = false;
+  /* Queue drops belong to the capture that is ending, so start the new one
+   * from zero. */
+  pcap_reset_queue_drop_stats();
   memset(&s_capture_stats, 0, sizeof(s_capture_stats));
   struct timeval start_tv;
   gettimeofday(&start_tv, NULL);
@@ -614,6 +623,16 @@ static size_t control_frame_len(uint8_t subtype) {
   case 0xd: return 10; // ACK
   default: return 16;  // PS-Poll, RTS, reserved
   }
+}
+
+/* When set, the frame is written exactly as received instead of being walked
+ * and trimmed. The walk exists so beacon and probe captures stop at the last
+ * valid information element rather than trailing padding the radio handed us,
+ * but a raw capture has to stay byte-exact or the tail of a frame goes missing. */
+static bool s_pcap_write_frames_verbatim = false;
+
+void pcap_set_write_frames_verbatim(bool enabled) {
+    s_pcap_write_frames_verbatim = enabled;
 }
 
 static size_t calculate_wifi_frame_length(const uint8_t *frame,
@@ -765,6 +784,12 @@ static bool is_valid_tag_length(uint8_t tag_num, uint8_t tag_len) {
 
 esp_err_t pcap_write_packet_to_buffer(const void *packet, size_t length,
                                       pcap_capture_type_t capture_type) {
+  return pcap_write_packet_to_buffer_meta(packet, length, capture_type, NULL);
+}
+
+esp_err_t pcap_write_packet_to_buffer_meta(const void *packet, size_t length,
+                                           pcap_capture_type_t capture_type,
+                                           const radiotap_meta_t *meta) {
   s_capture_type = capture_type;
   s_capture_stats.packets_seen++;
   if (packet == NULL || length < 2) {
@@ -781,12 +806,26 @@ esp_err_t pcap_write_packet_to_buffer(const void *packet, size_t length,
   size_t actual_length;
   size_t header_length = 0;
   uint8_t bt_h4_header[1];
+  uint8_t radiotap_header[RADIOTAP_MAX_LEN];
+  size_t radiotap_len = 0;
   int is_bt = 0;
 
   if (capture_type == PCAP_CAPTURE_WIFI) {
     const uint8_t *frame = (const uint8_t *)packet;
-    actual_length = calculate_wifi_frame_length(frame, length);
-    header_length = RADIOTAP_HEADER_LEN;
+    actual_length = s_pcap_write_frames_verbatim ? length
+                                                 : calculate_wifi_frame_length(frame, length);
+    /* Build the radiotap up front so the length it declares is the length we
+     * account for below. With no metadata this collapses to the original
+     * 8 byte empty header. */
+    radiotap_len = radiotap_build(radiotap_header, sizeof(radiotap_header), meta);
+    if (radiotap_len < RADIOTAP_HEADER_LEN) {
+      radiotap_len = RADIOTAP_HEADER_LEN;
+      memset(radiotap_header, 0, radiotap_len);
+      radiotap_header[0] = 0;
+      radiotap_header[2] = (uint8_t)(radiotap_len & 0xFF);
+      radiotap_header[3] = (uint8_t)((radiotap_len >> 8) & 0xFF);
+    }
+    header_length = radiotap_len;
   } else if (capture_type == PCAP_CAPTURE_IEEE802154) {
     // IEEE 802.15.4 frames are written as-is (no FCS) with NOFCS DLT
     actual_length = length;
@@ -871,14 +910,11 @@ esp_err_t pcap_write_packet_to_buffer(const void *packet, size_t length,
   buffer_offset += sizeof(packet_header);
 
   if (capture_type == PCAP_CAPTURE_WIFI) {
-    // Write radiotap header for WiFi packets
-    uint8_t radiotap_header[RADIOTAP_HEADER_LEN] = {
-        0x00, 0x00,            // Version 0
-        0x08, 0x00,            // Header length
-        0x00, 0x00, 0x00, 0x00 // Present flags
-    };
-    memcpy(pcap_buffer + buffer_offset, radiotap_header, RADIOTAP_HEADER_LEN);
-    buffer_offset += RADIOTAP_HEADER_LEN;
+    /* Radiotap header for WiFi packets. Built from the per-frame radio
+     * metadata when the caller supplied it, so captures carry signal, channel
+     * and rate instead of an empty header. */
+    memcpy(pcap_buffer + buffer_offset, radiotap_header, radiotap_len);
+    buffer_offset += radiotap_len;
   }
 
   // Write packet data
@@ -937,6 +973,10 @@ esp_err_t pcap_wireshark_start(pcap_capture_type_t capture_type) {
   pcap_file = NULL;
   pcap_buffer_reset();
   s_capture_write_failed = false;
+  /* Verbatim writing is opt-in and set by the caller after this returns, so
+   * make sure a previous file capture's setting does not carry over. */
+  s_pcap_write_frames_verbatim = false;
+  pcap_reset_queue_drop_stats();
 
   esp_err_t ret = pcap_write_global_header(NULL, capture_type);
   if (ret != ESP_OK) {
@@ -1378,6 +1418,24 @@ static void pcap_progress_log_summary(void) {
    * truncation separately, otherwise a lost capture still reads as a clean one. */
   if (s_capture_write_failed) {
     glog("Storage error: capture truncated\n");
+  }
+
+  /* Frames the capture queue could not take, reported separately from the
+   * writer's own drop count. A raw capture that never filled a slot looks
+   * identical to a complete one otherwise, which is how the old 768-byte slot
+   * limit went unnoticed: every oversized frame was discarded with no trace. */
+  uint32_t q_too_big = 0, q_no_slot = 0, q_queue_full = 0;
+  pcap_get_queue_drop_stats(&q_too_big, &q_no_slot, &q_queue_full);
+  if (q_too_big > 0 || q_no_slot > 0 || q_queue_full > 0) {
+    if (q_too_big > 0) {
+      glog("Frames too large to buffer: %lu\n", (unsigned long)q_too_big);
+    }
+    if (q_no_slot > 0) {
+      glog("Frames dropped, queue full: %lu\n", (unsigned long)q_no_slot);
+    }
+    if (q_queue_full > 0) {
+      glog("Frames dropped, backlog: %lu\n", (unsigned long)q_queue_full);
+    }
   }
 }
 

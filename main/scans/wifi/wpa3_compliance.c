@@ -4,6 +4,7 @@
  */
 
 #include "scans/wifi/wpa3_compliance.h"
+#include "scans/wifi/deauth_pmf_note.h"
 #include "scans/wifi/ap_scan.h"
 #include "core/glog.h"
 #include "core/scan_saver.h"
@@ -264,17 +265,15 @@ void wpa3_compliance_check_all(void) {
     glog("--- End of Report ---\n");
 }
 
+const char *wpa3_deauth_warning_for_authmode(wifi_auth_mode_t authmode) {
+    return deauth_pmf_note((uint8_t)authmode);
+}
+
 const char *wpa3_deauth_warning(const wifi_ap_record_t *ap) {
-    if (!ap) return "No AP selected; PMF posture is unknown.";
-    switch (ap->authmode) {
-        case WIFI_AUTH_WPA3_PSK:
-        case WIFI_AUTH_WPA3_ENTERPRISE:
-            return "PMF is required; deauthentication is expected to be ineffective for WPA3 clients.";
-        case WIFI_AUTH_WPA2_WPA3_PSK:
-            return "This is WPA2/WPA3 transition mode; WPA3 clients may resist deauthentication.";
-        default:
-            return NULL;
+    if (!ap) {
+        return "No AP selected, so there's nothing to say about its security yet.";
     }
+    return wpa3_deauth_warning_for_authmode(ap->authmode);
 }
 
 void wpa3_compliance_check_selected(void) {

@@ -45,7 +45,14 @@ void wpa3_compliance_check_selected(void);
  */
 void wpa3_compliance_check_all(void);
 
-/** Return a user-facing warning when deauth is unlikely to work. */
+/** Return a user-facing warning when deauth is unlikely to work, or NULL when
+ *  deauth should work normally. Takes the full AP record. */
 const char *wpa3_deauth_warning(const wifi_ap_record_t *ap);
+
+/** Same as wpa3_deauth_warning() but keyed on a security type alone, for
+ *  callers that only know the network's encryption (a station record carrying
+ *  the authmode of the AP it was seen on, for example) rather than a whole AP
+ *  record. */
+const char *wpa3_deauth_warning_for_authmode(wifi_auth_mode_t authmode);
 
 #endif // WPA3_COMPLIANCE_H

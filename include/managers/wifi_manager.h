@@ -21,6 +21,11 @@ typedef struct dns_server_handle *dns_server_handle_t;
 typedef struct {
   uint8_t station_mac[6]; // MAC address of the station (client)
   uint8_t ap_bssid[6];    // BSSID (MAC address) of the access point
+  /* Security type of the AP this station was seen on, as a wifi_auth_mode_t.
+   * Filled in when the station is selected, by looking the parent BSSID up in
+   * the AP scan results. Left as WIFI_AUTH_UNKNOWN when the AP was not in the
+   * scan, which is why callers must treat it as advisory. */
+  uint8_t ap_authmode;
 } station_ap_pair_t;
 
 extern station_ap_pair_t station_ap_list[MAX_STATIONS];

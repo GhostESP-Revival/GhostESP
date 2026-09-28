@@ -348,14 +348,20 @@ static void deauth_task(void *param) {
     vTaskDeleteWithCaps(NULL);
 }
 
+/* Prints a note about whether deauth is expected to get through, if there is
+ * anything worth saying. The messages are already written as plain sentences,
+ * so no "WARNING:" prefix is added on top. */
+static void deauth_print_effectiveness_note(const char *note) {
+    if (note != NULL && *note) {
+        glog("%s\n", note);
+        TERMINAL_VIEW_ADD_TEXT("%s\n", note);
+    }
+}
+
 void deauth_attack_start(void) {
     if (!deauth_task_running) {
         extern wifi_ap_record_t selected_ap;
-        const char *pmf_warning = wpa3_deauth_warning(&selected_ap);
-        if (pmf_warning) {
-            glog("WARNING: %s\n", pmf_warning);
-            TERMINAL_VIEW_ADD_TEXT("WARNING: %s\n", pmf_warning);
-        }
+        deauth_print_effectiveness_note(wpa3_deauth_warning(&selected_ap));
         ap_manager_stop_services();
         ghostchi_manager_add_xp(3);
 
@@ -484,7 +490,8 @@ void deauth_attack_start_station(void) {
         deauth_attack_start();
         return;
     }
-    glog("WARNING: PMF posture is not available for the selected station; deauth effectiveness is unverified.\n");
+    deauth_print_effectiveness_note(wpa3_deauth_warning_for_authmode(
+        (wifi_auth_mode_t)selected_station_local.ap_authmode));
     if (deauth_station_task_handle) {
         printf("Station deauth already running.\n");
         return;
@@ -720,10 +727,13 @@ void deauth_attack_start_handshake_deauth(void) {
 #endif
             return;
         }
-        const char *pmf_warning = wpa3_deauth_warning(&selected_ap_local);
-        if (pmf_warning) glog("WARNING: %s\n", pmf_warning);
+        deauth_print_effectiveness_note(wpa3_deauth_warning(&selected_ap_local));
     } else {
-        glog("WARNING: PMF posture is not available for the selected station; deauth effectiveness is unverified.\n");
+        /* A station record carries the security type of the AP it was seen on,
+         * so the network can still be described even though there is no AP
+         * record to hand. */
+        deauth_print_effectiveness_note(wpa3_deauth_warning_for_authmode(
+            (wifi_auth_mode_t)selected_station_local.ap_authmode));
     }
 
     ap_manager_stop_services();
