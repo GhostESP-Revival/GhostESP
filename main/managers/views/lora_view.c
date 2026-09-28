@@ -537,6 +537,27 @@ static lv_obj_t *add_row(const char *label, int action) {
     return row;
 }
 
+/* An on/off row, drawn as an iOS switch pinned to the right edge instead of an
+ * "ON - tap to stop" suffix, so the state reads at a glance. The switch is not
+ * clickable itself: taps bubble to the row, whose action handler applies the
+ * change and rebuilds the page with the new value. */
+static lv_obj_t *add_toggle_row(const char *label, int action, bool value) {
+    lv_obj_t *row = add_row(label, action);
+    if (!row) return NULL;
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_t *lbl = lv_obj_get_child(row, 0);
+    if (lbl) {
+        lv_obj_set_flex_grow(lbl, 1);
+        lv_obj_set_width(lbl, LV_SIZE_CONTENT);
+    }
+    lv_obj_t *toggle = ios_toggle_create(row);
+    lv_obj_update_layout(row);
+    ios_toggle_set_value(toggle, value, false);
+    return row;
+}
+
 static void style_message_bubble(lv_obj_t *bubble, lv_obj_t *list,
                                  const char *text, bool outgoing) {
     if (!bubble || !list) return;
@@ -820,6 +841,22 @@ static void add_protocol_toggle(void) {
 }
 #endif // CONFIG_HAS_MESHCORE
 
+/* Start or stop Meshtastic. Used by the Meshtastic Settings radio switch,
+ * which always drives the Meshtastic radio even when the protocol toggle is
+ * pointed at MeshCore. */
+static void meshtastic_radio_toggle(void) {
+    bool stopping = lora_manager_is_running();
+    bool ok = true;
+    if (stopping) lora_manager_stop();
+    else if (lora_manager_needs_setup()) ok = false;
+    else ok = start_meshtastic_backend();
+    notice(ok ? (stopping ? "Meshtastic stopped" : "Meshtastic started")
+              : (lora_manager_needs_setup() ? "Set Meshtastic region first"
+                                             : lora_manager_last_error()),
+           ok ? TOAST_SUCCESS : TOAST_ERROR);
+    rebuild_page();
+}
+
 /* Start or stop the protocol selected by the toggle. Shared by the Radio row
  * and the HUD encoder double-press. */
 static void toggle_radio(void) {
@@ -835,38 +872,20 @@ static void toggle_radio(void) {
         return;
     }
 #endif
-    bool stopping = lora_manager_is_running();
-    bool ok = true;
-    if (stopping) lora_manager_stop();
-    else if (lora_manager_needs_setup()) ok = false;
-    else ok = start_meshtastic_backend();
-    notice(ok ? (stopping ? "Meshtastic stopped" : "Meshtastic started")
-              : (lora_manager_needs_setup() ? "Set Meshtastic region first"
-                                             : lora_manager_last_error()),
-           ok ? TOAST_SUCCESS : TOAST_ERROR);
-    rebuild_page();
+    meshtastic_radio_toggle();
 }
 
 static void build_settings(void) {
     options_view_set_title(s_ov, "Radio Settings");
-    char line[96];
 #ifdef CONFIG_HAS_MESHCORE
     add_protocol_toggle();
     bool running = proto_is_meshcore() ? mc_manager_is_running() : lora_manager_is_running();
-    snprintf(line, sizeof(line), "Radio: %s - tap to %s", running ? "ON" : "OFF",
-             running ? "stop" : "start");
 #else
-    snprintf(line, sizeof(line), "Radio: %s - tap to %s", lora_manager_is_running() ? "ON" : "OFF",
-             lora_manager_is_running() ? "stop" : "start");
+    bool running = lora_manager_is_running();
 #endif
-    add_row(line, ACT_RADIO);
-    const char *boot_backend = "Meshtastic";
-#ifdef CONFIG_HAS_MESHCORE
-    if (mc_manager_default_backend_meshcore()) boot_backend = "MeshCore";
-#endif
-    snprintf(line, sizeof(line), "Auto-start %s on boot: %s - tap to toggle",
-             boot_backend, lora_manager_auto_start_enabled() ? "yes" : "no");
-    add_row(line, ACT_AUTOSTART);
+    add_toggle_row("Radio", ACT_RADIO, running);
+    /* The protocol row above already names the backend that boots. */
+    add_toggle_row("Auto-start on boot", ACT_AUTOSTART, lora_manager_auto_start_enabled());
     add_row("Meshtastic settings", ACT_MESHTASTIC_SETTINGS);
 #ifdef CONFIG_HAS_MESHCORE
     add_row("MeshCore settings", ACT_MESHCORE_SETTINGS);
@@ -880,9 +899,7 @@ static void build_meshtastic_settings(void) {
     options_view_set_title(s_ov, "Meshtastic Settings");
     char line[96];
     const char *stop_first = st.running ? " (stop radio first)" : "";
-    snprintf(line, sizeof(line), "Radio: %s - tap to %s", st.running ? "ON" : "OFF",
-             st.running ? "stop" : "start");
-    add_row(line, ACT_MT_RADIO);
+    add_toggle_row("Radio", ACT_MT_RADIO, st.running);
     snprintf(line, sizeof(line), "Region: %s%s%s - tap to change",
              lora_region_name((int)st.region),
              lora_manager_region_saved() ? "" : " *", stop_first);
@@ -906,9 +923,7 @@ static void build_meshcore_settings(void) {
     mc_manager_get_status(&st);
     options_view_set_title(s_ov, "MeshCore Settings");
     char line[104];
-    snprintf(line, sizeof(line), "Radio: %s - tap to %s", st.running ? "ON" : "OFF",
-             st.running ? "stop" : "start");
-    add_row(line, ACT_MC_RADIO);
+    add_toggle_row("Radio", ACT_MC_RADIO, st.running);
     const char *node_name_mc = mc_mesh_node_name();
     snprintf(line, sizeof(line), "Node name: %.24s - tap to edit",
              (node_name_mc && node_name_mc[0]) ? node_name_mc : "unnamed");
@@ -1531,6 +1546,9 @@ static void action_click(lv_event_t *e) {
     switch ((lora_action_t)action) {
     case ACT_RADIO:
         toggle_radio();
+        break;
+    case ACT_MT_RADIO:
+        meshtastic_radio_toggle();
         break;
 #ifdef CONFIG_HAS_MESHCORE
     case ACT_MC_RADIO: {

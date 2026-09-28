@@ -66,6 +66,12 @@ static uint32_t s_packets_in_buffer = 0;
  * that lost part of itself stays marked no matter how cleanly it ends, so the
  * stop path can report a truncated file instead of a clean save. */
 static bool s_capture_write_failed = false;
+/* When set, the frame is written exactly as received instead of being walked
+ * and trimmed. The walk exists so beacon and probe captures stop at the last
+ * valid information element rather than trailing padding the radio handed us,
+ * but a raw capture has to stay byte-exact or the tail of a frame goes missing.
+ * Declared up here because pcap_file_open_in_dir() clears it. */
+static bool s_pcap_write_frames_verbatim = false;
 
 #define HCX_MAX_SSIDS 8
 #define HCX_MAX_M2 4
@@ -624,12 +630,6 @@ static size_t control_frame_len(uint8_t subtype) {
   default: return 16;  // PS-Poll, RTS, reserved
   }
 }
-
-/* When set, the frame is written exactly as received instead of being walked
- * and trimmed. The walk exists so beacon and probe captures stop at the last
- * valid information element rather than trailing padding the radio handed us,
- * but a raw capture has to stay byte-exact or the tail of a frame goes missing. */
-static bool s_pcap_write_frames_verbatim = false;
 
 void pcap_set_write_frames_verbatim(bool enabled) {
     s_pcap_write_frames_verbatim = enabled;
