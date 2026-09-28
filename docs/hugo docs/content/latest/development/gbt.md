@@ -151,7 +151,7 @@ For backgrounds, a source named `background` with `"variants": true` generates t
 ## `gbt setup` — Install ESP-IDF
 
 ```
-gbt setup [--target esp32s3 esp32c6 ...] [--idf-version v6.0] [--install-dir ~/esp-idf]
+gbt setup [--target esp32s3 esp32c6 ...] [--idf-version v6.1] [--install-dir ~/esp-idf]
 ```
 
 If `idf.py` or `$IDF_PATH` is already available, GBT saves the path and exits. Confirm that the existing ESP-IDF installation includes tools for the target you need. Otherwise, GBT clones ESP-IDF from GitHub and runs the installer:

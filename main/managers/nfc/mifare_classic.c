@@ -399,8 +399,8 @@ static void mfc_try_backdoor_once(pn532_io_handle_t io){
 
 #if defined(CONFIG_HAS_NFC) && defined(CONFIG_MFC_DICT_EMBEDDED)
 // Primary embedded blob symbols (strong). We're inside CONFIG_MFC_DICT_EMBEDDED section, so they must exist.
-extern const uint8_t _binary_mf_classic_dict_nfc_start[] asm("_binary_mf_classic_dict_nfc_start");
-extern const uint8_t _binary_mf_classic_dict_nfc_end[]   asm("_binary_mf_classic_dict_nfc_end");
+extern const uint8_t _binary_mf_classic_dict_packed_bin_start[] asm("_binary_mf_classic_dict_packed_bin_start");
+extern const uint8_t _binary_mf_classic_dict_packed_bin_end[]   asm("_binary_mf_classic_dict_packed_bin_end");
 static int hexn(char c){ if(c>='0'&&c<='9')return c-'0'; c|=0x20; if(c>='a'&&c<='f')return 10+(c-'a'); return -1; }
 static bool parse_key_line(const char* s,const char* e,uint8_t out[6]){
     uint8_t b[6]; int bi=0; int hi=-1; for(const char* p=s;p<e && bi<6; ++p){ int v=hexn(*p); if(v<0){ if(*p=='#') return false; else continue; } if(hi<0){ hi=v; } else { b[bi++]=(uint8_t)((hi<<4)|v); hi=-1; } }
@@ -418,18 +418,17 @@ extern void mfc_ui_set_phase(int sector, int first_block, bool key_b, int total_
 extern bool nfc_is_scan_cancelled(void) __attribute__((weak));
 // UI-layer dict-skip hook (weak). When true, skip only dictionary attempts but keep reading flow.
 extern bool nfc_is_dict_skip_requested(void) __attribute__((weak));
-// Resolve embedded dictionary start/end regardless of exact symbol variant
+// Resolve the packed embedded dictionary bounds.
 static inline void dict_blob_bounds(const char **out_start, const char **out_end){
-    const char *s = (const char*)_binary_mf_classic_dict_nfc_start;
-    const char *e = (const char*)_binary_mf_classic_dict_nfc_end;
+    const char *s = (const char*)_binary_mf_classic_dict_packed_bin_start;
+    const char *e = (const char*)_binary_mf_classic_dict_packed_bin_end;
     if (e > s) { *out_start = s; *out_end = e; } else { *out_start = NULL; *out_end = NULL; }
 }
 static int dict_total_keys_cached = -1;
 static int mfc_dict_total_keys(void){
     if (dict_total_keys_cached >= 0) return dict_total_keys_cached;
     const char *s, *e; dict_blob_bounds(&s, &e); if(!s||!e||e<=s) { dict_total_keys_cached = 0; return 0; }
-    int cnt=0; const char* p=s; uint8_t tmp[6];
-    while(p<e){ const char* nl=memchr(p,'\n',(size_t)(e-p)); const char* ln_end = nl? nl : e; if(parse_key_line(p,ln_end,tmp)) cnt++; p = nl? nl+1 : e; }
+    int cnt = (int)((e - s) / 6);
     dict_total_keys_cached = cnt;
     ESP_LOGI("MFC", "Dict: embedded ok s=%p e=%p total=%d", (void*)s, (void*)e, cnt);
     return cnt;
@@ -443,16 +442,8 @@ static void mfc_dict_ensure_loaded(void){
     if (!s || !e || e <= s) return;
     g_dict_keys = (uint8_t*)malloc((size_t)total * 6);
     if (!g_dict_keys) { g_dict_key_count = 0; return; }
-    int idx = 0; const char *p = s; uint8_t key[6];
-    while (p < e && idx < total) {
-        const char* nl = memchr(p,'\n',(size_t)(e-p)); const char* ln_end = nl? nl : e;
-        if (parse_key_line(p, ln_end, key)) {
-            memcpy(&g_dict_keys[idx*6], key, 6);
-            idx++;
-        }
-        p = nl? nl+1 : e;
-    }
-    g_dict_key_count = idx;
+    memcpy(g_dict_keys, s, (size_t)total * 6);
+    g_dict_key_count = total;
 }
 static bool mfc_auth_with_dict(pn532_io_handle_t io,uint8_t block,bool use_key_b,const uint8_t* uid,uint8_t uid_len){
     if (&nfc_is_dict_skip_requested && nfc_is_dict_skip_requested()) {
@@ -463,7 +454,7 @@ static bool mfc_auth_with_dict(pn532_io_handle_t io,uint8_t block,bool use_key_b
         ESP_LOGI("MFC", "Dict: blob missing, trying SD file (blk=%u keyB=%d)", (unsigned)block, (int)use_key_b);
         // Fallback: try SD card dictionary at /mnt/ghostesp/nfc/mf_classic_dict.nfc
         FILE *f = fopen("/mnt/ghostesp/nfc/mf_classic_dict.nfc", "r");
-        if (!f) { ESP_LOGI("MFC", "Dict syms: s=%p e=%p", (void*)_binary_mf_classic_dict_nfc_start, (void*)_binary_mf_classic_dict_nfc_end); return false; }
+        if (!f) { ESP_LOGI("MFC", "Dict syms: s=%p e=%p", (void*)_binary_mf_classic_dict_packed_bin_start, (void*)_binary_mf_classic_dict_packed_bin_end); return false; }
         char line[96];
         uint8_t key[6];
         int idx = 0;
@@ -516,27 +507,22 @@ static bool mfc_auth_with_dict(pn532_io_handle_t io,uint8_t block,bool use_key_b
         ESP_LOGI("MFC", "Dict: start auth blk=%u keyB=%d total=%d", (unsigned)block, (int)use_key_b, total);
         if (g_prog_cb) g_prog_cb(0, total, g_prog_user);
         int idx = 0; int last_cb = 0;
-        const char *p = s; uint8_t key[6];
-        while (p < e) {
+        for (const char *p = s; p + 6 <= e; p += 6) {
             if (mfc_call_should_cancel() || mfc_call_should_skip_dict()) { ESP_LOGW("MFC", "Dict: cancelled/skip blk=%u keyB=%d at idx=%d", (unsigned)block, (int)use_key_b, idx); return false; }
-            const char *nl = memchr(p,'\n',(size_t)(e - p));
-            const char *ln_end = nl ? nl : e;
-            if (parse_key_line(p, ln_end, key)) {
-                if (mfc_auth_block(io, block, use_key_b, key, uid, uid_len) == ESP_OK) {
-                    ESP_LOGI("MFC", "Dict: success blk=%u keyB=%d idx=%d key=%02X%02X%02X%02X%02X%02X",
-                            (unsigned)block, (int)use_key_b, idx+1, key[0],key[1],key[2],key[3],key[4],key[5]);
-                    if (use_key_b) { memcpy(g_last_key_b, key, 6); g_last_key_b_valid = true; }
-                    else { memcpy(g_last_key_a, key, 6); g_last_key_a_valid = true; }
-                    mfc_record_working_key(key, use_key_b);
-                    return true;
-                }
-                idx++;
-                if (g_prog_cb) {
-                    int pct = (total > 0) ? ((idx * 100) / total) : 0;
-                    if (pct > last_cb) { g_prog_cb(idx, total, g_prog_user); last_cb = pct; }
-                }
+            const uint8_t *key = (const uint8_t *)p;
+            if (mfc_auth_block(io, block, use_key_b, key, uid, uid_len) == ESP_OK) {
+                ESP_LOGI("MFC", "Dict: success blk=%u keyB=%d idx=%d key=%02X%02X%02X%02X%02X%02X",
+                        (unsigned)block, (int)use_key_b, idx+1, key[0],key[1],key[2],key[3],key[4],key[5]);
+                if (use_key_b) { memcpy(g_last_key_b, key, 6); g_last_key_b_valid = true; }
+                else { memcpy(g_last_key_a, key, 6); g_last_key_a_valid = true; }
+                mfc_record_working_key(key, use_key_b);
+                return true;
             }
-            p = nl ? (nl + 1) : e;
+            idx++;
+            if (g_prog_cb) {
+                int pct = (total > 0) ? ((idx * 100) / total) : 0;
+                if (pct > last_cb) { g_prog_cb(idx, total, g_prog_user); last_cb = pct; }
+            }
         }
         ESP_LOGI("MFC", "Dict: failed blk=%u keyB=%d", (unsigned)block, (int)use_key_b);
         return false;

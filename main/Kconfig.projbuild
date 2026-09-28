@@ -2093,7 +2093,7 @@ menu "Ghost ESP Options"
             config HAS_AUDIO_PLAYER
                 bool "Enable Audio Player App"
                 default n
-                depends on WITH_SCREEN && (USING_SPI || USING_MMC_1_BIT) && (HAS_TLV320DAC_I2C || HAS_AW88298_SPEAKER || HAS_CROWPANEL_NS4168)
+                depends on WITH_SCREEN && (USING_SPI || USING_MMC_1_BIT) && (HAS_TLV320DAC_I2C || HAS_AW88298_SPEAKER || HAS_CROWPANEL_NS4168 || HAS_TDECK_SPEAKER)
                 help
                     Enable MP3 audio player UI and SD card playback. Streams to a
                     GhostLink peer when one is connected, or plays through the
@@ -2155,6 +2155,26 @@ menu "Ghost ESP Options"
                     Uses I2S_NUM_1 master: BCLK=GPIO22, WCLK=GPIO21, DIN=GPIO23,
                     amplifier enable (active-low) via STC8 I2C on the 5-inch RGB
                     board or GPIO30 on MIPI boards. Audio sourced from SD.
+
+        endmenu
+
+        menu "T-Deck Speaker Audio"
+            config HAS_TDECK_SPEAKER
+                bool "Enable T-Deck I2S Speaker (BCLK7/WCLK5/DIN6)"
+                default n
+                depends on IDF_TARGET_ESP32S3 && USE_TDECK
+                help
+                    Enable I2S master TX to the LilyGo T-Deck's onboard
+                    MAX98357A class-D amplifier and speaker. Uses I2S_NUM_1
+                    master: BCLK=GPIO7, WCLK=GPIO5, DIN=GPIO6. The amp is
+                    fixed-wired (SD/MODE strapped, no I2C control and no enable
+                    line), so it needs only the three I2S lines and drives the
+                    same PCM path as the CoreS3 and CrowPanel speakers. Audio
+                    is sourced from SD.
+
+                    The onboard ES7210 microphone shares nothing with these
+                    lines (MCLK=48, LRCK=21, SCK=47, DIN=14), so a mic capture
+                    path can be added later without a pin conflict.
 
         endmenu
 

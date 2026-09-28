@@ -191,6 +191,7 @@ void handle_help(int argc, char **argv) {
     }
 
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
+    #include "attacks/ble/ble_spam.h"
     if (strcmp(category, "ble") == 0) {
         glog("\nBLE Commands:\n\n");
         glog("blescan\n");
@@ -220,14 +221,19 @@ void handle_help(int argc, char **argv) {
         glog("        -sp <index> : Advertise as a discovered AirTag; 'stopspoof' ends it\n\n");
         glog("blespam\n");
         glog("    Description: Start BLE advertisement spam attacks.\n");
-        glog("    Usage: blespam [OPTION]\n");
+        glog("    Usage: blespam [OPTION] [-name <text>]\n");
         glog("    Arguments:\n");
         glog("        -apple     : Apple device spam (AirPods, Apple TV, etc.)\n");
         glog("        -ms        : Microsoft Swift Pair spam\n");
         glog("        -samsung   : Samsung Galaxy Watch spam\n");
         glog("        -google    : Google Fast Pair spam\n");
         glog("        -random    : Random spam (cycles through all types)\n");
-        glog("        -s         : Stop BLE spam\n\n");
+        glog("        -name <t>  : Advertise a custom name (max %d chars)\n", BLE_SPAM_NAME_MAX);
+        glog("        -s         : Stop BLE spam\n");
+        glog("    Examples:\n");
+        glog("        blespam -apple -name \"My AirPods\"\n");
+        glog("        blespam -ms -name \"GhostESP\"\n");
+        glog("        blespam -name \"T-Deck\"    (renames a running spam)\n\n");
         glog("blewardriving\n");
         glog("    Description: Start/Stop BLE wardriving with GPS logging\n");
         glog("    Usage: blewardriving [-s]\n");

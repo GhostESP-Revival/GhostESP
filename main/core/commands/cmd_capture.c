@@ -22,6 +22,37 @@
 
 #include "core/network_constants.h"
 
+/* How often a running capture reports progress. Short enough to prove the
+ * capture is alive, long enough not to bury the terminal in log lines. */
+#define CAPTURE_PROGRESS_INTERVAL_MS 5000
+
+/* Label for the periodic progress line, or NULL for modes with nothing
+ * recording to report on (list/export/stop). */
+static const char *capture_type_progress_label(const char *t) {
+    static const struct { const char *type; const char *label; } k_recording[] = {
+        { "-raw",       "RAW"       },
+        { "-probe",     "PROBE"     },
+        { "-deauth",    "DEAUTH"    },
+        { "-beacon",    "BEACON"    },
+        { "-eapol",     "EAPOL"     },
+        { "-pwn",       "PWN"       },
+        { "-wps",       "WPS"       },
+        { "-skimmer",   "SKIMMER"   },
+        { "-ble",       "BLE"       },
+        { "-wireshark", "WIRESHARK" },
+#if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
+        { "-802154",    "802.15.4"  },
+#endif
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
+        { "-wiresharkble", "WIRESHARK BLE" },
+#endif
+    };
+    for (size_t i = 0; i < sizeof(k_recording) / sizeof(k_recording[0]); i++) {
+        if (strcmp(t, k_recording[i].type) == 0) return k_recording[i].label;
+    }
+    return NULL;
+}
+
 static void capture_resolve_pcap_path(const char *arg, char *out, size_t out_len) {
     if (!arg || !out || out_len == 0) return;
     if (arg[0] == '/' || strchr(arg, '/')) {
@@ -404,12 +435,6 @@ void handle_capture_scan(int argc, char **argv) {
 #endif
         pcap_file_close();
         pcap_wireshark_stop();
-        pcap_capture_stats_t stats = {0};
-        pcap_get_stats(&stats);
-        glog("Capture stats: seen=%lu written=%lu dropped=%lu\n",
-             (unsigned long)stats.packets_seen,
-             (unsigned long)stats.packets_written,
-             (unsigned long)stats.packets_dropped);
         status_display_show_status("Capture Stop");
     }
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
@@ -438,6 +463,13 @@ void handle_capture_scan(int argc, char **argv) {
 
     }
     #endif
+
+    const char *progress_label = capture_type_progress_label(capturetype);
+    if (progress_label) {
+        // A capture can run for many minutes with nothing between its start
+        // banner and the stop summary, so stream progress while it records.
+        pcap_progress_start(progress_label, CAPTURE_PROGRESS_INTERVAL_MS);
+    }
 
     if (strcmp(capturetype, "-probe") != 0 &&
         strcmp(capturetype, "-deauth") != 0 &&

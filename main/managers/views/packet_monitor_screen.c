@@ -50,6 +50,19 @@ static bool s_touch_started;
 static lv_obj_t *s_mode_buttons[3];
 static lv_point_t s_selector_touch_start;
 
+static void packet_monitor_create_visualizer(void);
+static void packet_monitor_destroy(void);
+
+/* Swap the mode selector for the live visualizer without going through the
+ * router. The selector and the visualizer are the same View, so routing to it
+ * again is an identity move that the router drops (gui_router.c:43) and create()
+ * never runs. Tearing the selector down and building the visualizer in place is
+ * what actually starts the capture. */
+static void packet_monitor_rebuild_visualizer(void) {
+    packet_monitor_destroy();
+    packet_monitor_create_visualizer();
+}
+
 static volatile uint32_t s_total_packets;
 static volatile uint32_t s_management_packets;
 static volatile uint32_t s_control_packets;
@@ -190,8 +203,13 @@ static void packet_channels_submit(const char *text) {
 
 static void packet_mode_activate(int selected) {
     if (selected == 0) {
+        /* Channel Hopping needs no keyboard, so the visualizer has to be built
+         * in place. Switching to the view we are already on is a no-op - the
+         * router early-returns on an identical route (gui_router.c:43) and
+         * create() never runs, which is why this row did nothing while the
+         * keyboard row worked. Rebuild the view directly instead. */
         s_start_mode = PACKET_START_HOP;
-        display_manager_switch_view(&packet_monitor_view);
+        packet_monitor_rebuild_visualizer();
     } else if (selected == 1) {
         keyboard_view_set_return_view(&packet_monitor_view);
         keyboard_view_set_submit_callback(packet_channels_submit);
@@ -521,12 +539,12 @@ static void packet_monitor_input(InputEvent *event) {
     }
 
     if (!s_mode_options) return;
-#ifdef CONFIG_CROWPANEL_ADVANCED_P4
-    /* CrowPanel P4 touch is delivered through the manual InputEvent queue,
-     * not a registered LVGL indev, so LV_EVENT_CLICKED is never generated.
-     * Resolve the released point against the actual row coordinates here.
-     * Other targets retain the LVGL callbacks and therefore cannot dispatch
-     * the same selection twice. */
+#if defined(CONFIG_USE_TOUCHSCREEN) || defined(CONFIG_CROWPANEL_ADVANCED_P4)
+    /* Touch is delivered through the manual InputEvent queue, not a registered
+     * LVGL indev, so LV_EVENT_CLICKED is never generated for the selector rows.
+     * Resolve the released point against the real row coordinates here. This was
+     * previously P4-only, so every other touch board (T-Deck, CYD, Waveshare)
+     * had dead selector rows. */
     if (event->type == INPUT_TYPE_TOUCH) {
         if (event->data.touch_data.state == LV_INDEV_STATE_PR && !event->is_touch_move) {
             s_selector_touch_start = event->data.touch_data.point;
@@ -546,6 +564,9 @@ static void packet_monitor_input(InputEvent *event) {
                     }
                 }
             }
+            return;
+        } else {
+            return;
         }
     } else
 #endif

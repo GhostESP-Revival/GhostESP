@@ -49,14 +49,15 @@
 #define CLOUD_CATALOG_MAX_SIZE (256 * 1024)
 #define CLOUD_DOWNLOAD_RANGE_CHUNK_SIZE (32 * 1024)
 #define CLOUD_DOWNLOAD_RANGE_ATTEMPTS 5
-#ifdef CONFIG_SPIRAM
-#define CLOUD_INSTALL_TASK_STACK_BYTES 12288
-#else
-// The Cloud Store keeps the AP stopped on no-PSRAM boards, but their heap can
-// still be fragmented enough that a 12 KB task stack cannot be allocated.
-#define CLOUD_INSTALL_TASK_STACK_BYTES 8192
-#endif
-#define CLOUD_INSTALL_TASK_FALLBACK_STACK_BYTES 6144
+// Both Cloud Store tasks run a full mbedTLS handshake before any HTTP data
+// flows: X.509 chain parsing plus ECDSA P-256 verification of the proxy cert.
+// On no-PSRAM boards there is no hardware ECDSA peripheral (the esp32s3 lacks
+// SOC_ECDSA_SUPPORTED), so mbedTLS verifies in software via mbedtls_mpi, which
+// needs far more stack than the PSRAM boards' accelerated path. An 8 KB frame
+// overflowed mid-handshake on Cardputer, so match OTA_DOWNLOAD_TASK_STACK_BYTES,
+// which already runs the same handshake at this size.
+#define CLOUD_TLS_TASK_STACK_BYTES 12288
+#define CLOUD_INSTALL_TASK_STACK_BYTES CLOUD_TLS_TASK_STACK_BYTES
 #define CLOUD_DOWNLOAD_DIR "/mnt/ghostesp/downloads"
 #define CLOUD_THEMES_DIR "/mnt/ghostesp/themes"
 #define CLOUD_SCRIPTS_DIR GHOSTSCRIPT_ROOT_DIR
@@ -1386,10 +1387,11 @@ esp_err_t cloud_store_refresh_async(void) {
     s_ctx->status.error[0] = '\0';
     xSemaphoreGive(s_ctx->mutex);
     cloud_store_pause_ap_if_needed();
-    BaseType_t rc = xTaskCreateWithCaps(refresh_task, "cloud_refresh", 8192, (void *)1, 5,
-                                        NULL, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    BaseType_t rc = xTaskCreateWithCaps(refresh_task, "cloud_refresh", CLOUD_TLS_TASK_STACK_BYTES,
+                                        (void *)1, 5, NULL, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (rc != pdPASS) {
-        rc = xTaskCreate(refresh_task, "cloud_refresh", 8192, NULL, 5, NULL);
+        // Same size from internal RAM -- no smaller retry, see CLOUD_TLS_TASK_STACK_BYTES.
+        rc = xTaskCreate(refresh_task, "cloud_refresh", CLOUD_TLS_TASK_STACK_BYTES, NULL, 5, NULL);
     }
     if (rc != pdPASS) {
         xSemaphoreTake(s_ctx->mutex, portMAX_DELAY);
@@ -1504,20 +1506,18 @@ esp_err_t cloud_store_install_async(cloud_store_item_type_t type, const char *id
     BaseType_t rc = xTaskCreateWithCaps(install_task, "cloud_install",
                                         CLOUD_INSTALL_TASK_STACK_BYTES, req, 5, NULL,
                                         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (rc != pdPASS && CLOUD_INSTALL_TASK_STACK_BYTES != CLOUD_INSTALL_TASK_FALLBACK_STACK_BYTES) {
-        ESP_LOGW(TAG, "install task stack allocation failed (%u bytes; free=%u largest=%u); retrying with %u bytes",
+    if (rc != pdPASS) {
+        // Retry at the same size out of internal RAM. Deliberately do not fall
+        // back to a smaller stack: anything under CLOUD_TLS_TASK_STACK_BYTES
+        // cannot survive the handshake on no-PSRAM boards, so a smaller retry
+        // would just trade a clean failure for a stack overflow reboot.
+        ESP_LOGW(TAG, "PSRAM install task stack allocation failed (%u bytes; free=%u largest=%u); retrying from internal RAM",
                  (unsigned)CLOUD_INSTALL_TASK_STACK_BYTES,
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
-                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
-                 (unsigned)CLOUD_INSTALL_TASK_FALLBACK_STACK_BYTES);
-        rc = xTaskCreateWithCaps(install_task, "cloud_install",
-                                 CLOUD_INSTALL_TASK_FALLBACK_STACK_BYTES, req, 5, NULL,
-                                 MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    }
-    if (rc != pdPASS) {
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
         req->caps_task = false;
         rc = xTaskCreate(install_task, "cloud_install",
-                         CLOUD_INSTALL_TASK_FALLBACK_STACK_BYTES, req, 5, NULL);
+                         CLOUD_INSTALL_TASK_STACK_BYTES, req, 5, NULL);
     }
     if (rc != pdPASS) {
         ESP_LOGE(TAG, "install task failed to start (free=%u largest=%u)",

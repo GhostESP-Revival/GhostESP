@@ -82,7 +82,7 @@
 #include "managers/motion_detector_manager.h"
 #include "managers/camera_stream_manager.h"
 #endif
-#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER) || defined(CONFIG_HAS_CROWPANEL_NS4168)
+#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER) || defined(CONFIG_HAS_CROWPANEL_NS4168) || defined(CONFIG_HAS_TDECK_SPEAKER)
 #include "managers/audio_receiver_manager.h"
 #endif
 
@@ -1066,7 +1066,7 @@ void app_main(void) {
     mic_visualizer_start();
 #endif
 #endif
-#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER) || defined(CONFIG_HAS_CROWPANEL_NS4168)
+#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER) || defined(CONFIG_HAS_CROWPANEL_NS4168) || defined(CONFIG_HAS_TDECK_SPEAKER)
 #if !defined(CONFIG_WITH_SCREEN)
     // Headless boards only need the receiver when `audio start` runs; it
     // self-initializes there. Skip the boot-time I2S + decode task + 96KB

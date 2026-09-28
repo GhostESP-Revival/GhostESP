@@ -234,6 +234,22 @@ GhostESP is a platform, not a bag of tools. Five things set it apart:
 - On-device OTA and SD firmware update with verification and rollback protection
 </details>
 
+<details>
+<summary><strong>LoRa Features</strong></summary>
+
+- Meshtastic-compatible LoRa (SX1262 / SX1276 / LLCC68) with stock air framing
+- MeshCore companion stack on the same radio, switchable at runtime
+- Official Meshtastic and MeshCore apps over BLE (PhoneAPI)
+- On-screen LoRa view: node list, map, chat and packet log
+- `lora` and `meshcore` CLI commands
+- 24 region / band-plan presets plus a custom channel, with per-board TX power caps
+- Encrypted LoRa chat and Ed25519 PKI direct messages
+- Position, node info, routing and traceroute packets
+- MeshCore adverts, group and direct text, contacts and channels
+- Boot auto-start of the remembered protocol
+- Enabled on Heltec V3, Elecrow CrowPanel Advance 2.4 / 2.8 / 4.3-inch, Elecrow CrowPanel Advanced P4 7/9/10.1-inch, and the LilyGo T-Deck
+</details>
+
 ---
 
 ## Supported ESP32 Variants
@@ -251,69 +267,69 @@ GhostESP is a platform, not a bag of tools. Five things set it apart:
 <details>
 <summary><strong>Board feature matrix (click to expand)</strong></summary>
 
-| Board | Bluetooth | NFC (PN532) | NFC (Chameleon) | IR TX | IR RX | GPS Default | Keyboard | Display | SD | OTA | Native SD Apps |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| ESP32-Wroom DevKitC | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ |
-| ESP32-S2 DevKitC | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ |
-| ESP32-S3 DevKitC | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ |
-| ESP32-C3 DevKitC | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ |
-| ESP32-C5 DevKitC | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ |
-| ESP32-C6 DevKitC | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ |
-| Awok V5 | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ |
-| GhostBoard | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | — | ✓ | ✗ | ✗ |
-| Marauder v4 | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | Full | ✓ | ✓ | ✗ |
-| Marauder v6 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✗ | ✗ | ✗ |
-| AWOK Mini | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | Full | ✗ | ✗ | ✓ |
-| Cardputer | ✓ | ✗ | ✓ | ✓ | ✗ | ✓ | ✓ | Full | ✓ | ✓ | ✗ |
-| Heltec V3 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Status | ✓ | ✗ | ✗ |
-| CYD2 USB | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✗ | ✗ |
-| CYD2 Micro USB | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✗ | ✗ |
-| CYD2 Dual USB | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✗ | ✗ |
-| CYD2 USB 2.4" | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✗ | ✗ |
-| CYD2 USB 2.4" (C variant) | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✗ | ✗ |
-| CYD 2432S028R | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✗ | ✗ |
-| Waveshare 7" Touch | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
-| Crowtech 7" | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✗ | ✓ |
-| CrowPanel Advance 7" (S3, TFCard mode) | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
-| CrowPanel 4.2" E-paper (400×300) | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | E-paper | ✓ | ✗ | ✗ |
-| CrowPanel 5.79" E-paper (792×272) | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | E-paper | ✓ | ✗ | ✗ |
-| CrowPanel Advance 2.4" (S3, 320×240) | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
-| CrowPanel Advance 2.8" (S3, 320×240) | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
-| CrowPanel Advance 3.5" (S3, 480×320) | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
-| CrowPanel Advance 4.3" (S3, 800×480) | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
-| CrowPanel Advance 5" (S3, 800×480) | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
-| CrowPanel Advanced P4 7/9/10.1" (v1.2+) | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✗ | ✓ |
-| CrowPanel Advanced P4 7/9/10.1" (v1.1) | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✗ | ✓ |
-| CrowPanel Advanced P4 5" RGB | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✗ | ✓ |
-| Sunton 7" | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
-| JC3248W535EN | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
-| Flipper JCMK GPS | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | — | ✓ | ✗ | ✗ |
-| T-Deck | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✓ | Full | ✓ | ✗ | ✓ |
-| T-Embed CC1101 | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
-| GhostLink P1 Core | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✗ | ✓ |
-| GhostLink P1 Peer | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ |
-| T-Dongle-S3 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✗ |
-| T-Dongle-C5 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
-| S3TWatch | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ | ✗ | Full | has 4MB vfs partition | ✓ | ✗ |
-| T-Display S3 Touch | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | Full | ✓ | ✗ | ✗ |
-| JCMK Devboard Pro | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | — | ✓ | ✗ | ✗ |
-| Minion | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ |
-| Lolin S3 Pro | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ |
-| Cardputer ADV | ✓ | ✗ | ✓ | ✓ | ✗ | ✓ | ✓ | Full | ✓ | ✓ | ✗ |
-| Poltergeist | ✓ | ✗ | ✓ | ✓ | ✓ | ✗ | ✗ | Status | ✓ | ✗ | ✗ |
-| Banshee (C5 display MCU) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | Full + Status | ✓ | ✓ | ✓ |
-| Banshee (S3 main) | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | — | ✗ | ✓ | ✗ |
-| Febris Pro | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | — | ✗ | ✗ | ✗ |
-| ACE C5 | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | — | ✓ | ✗ | ✗ |
-| NM-CYD-C5 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
-| ACE S3 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ |
-| Seeed XIAO ESP32-S3 Sense | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✓ | ✗ |
-| Seeed XIAO ESP32-S3 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✓ | ✗ |
-| Seeed XIAO ESP32-C5 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ |
-| Marauder v8 | ✓ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | Full | ✓ | ✗ | ✓ |
-| Pancake C5 | ✓ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | Full | ✓ | ✗ | ✓ |
-| M5Stack CoreS3-SE | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | Full | ✓ | ✗ | ✓ |
-| M5Stack AtomS3R | ✓ | ✗ | ✓ | ✓ | ✗ | ✓ | ✗ | Full | has 1MB vfs partition | ✗ | ✗ |
+| Board | Bluetooth | NFC (PN532) | NFC (Chameleon) | IR TX | IR RX | GPS Default | Keyboard | Display | SD | OTA | Native SD Apps | LoRa |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| ESP32-Wroom DevKitC | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ | ✗ |
+| ESP32-S2 DevKitC | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ | ✗ |
+| ESP32-S3 DevKitC | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ | ✗ |
+| ESP32-C3 DevKitC | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ | ✗ |
+| ESP32-C5 DevKitC | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ | ✗ |
+| ESP32-C6 DevKitC | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ | ✗ |
+| Awok V5 | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ | ✗ |
+| GhostBoard | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | — | ✓ | ✗ | ✗ | ✗ |
+| Marauder v4 | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | Full | ✓ | ✓ | ✗ | ✗ |
+| Marauder v6 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✗ | ✗ | ✗ | ✗ |
+| AWOK Mini | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | Full | ✗ | ✗ | ✓ | ✗ |
+| Cardputer | ✓ | ✗ | ✓ | ✓ | ✗ | ✓ | ✓ | Full | ✓ | ✓ | ✗ | ✗ |
+| Heltec V3 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Status | ✓ | ✗ | ✗ | ✓ |
+| CYD2 USB | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✗ | ✗ | ✗ |
+| CYD2 Micro USB | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✗ | ✗ | ✗ |
+| CYD2 Dual USB | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✗ | ✗ | ✗ |
+| CYD2 USB 2.4" | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✗ | ✗ | ✗ |
+| CYD2 USB 2.4" (C variant) | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✗ | ✗ | ✗ |
+| CYD 2432S028R | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✗ | ✗ | ✗ |
+| Waveshare 7" Touch | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ | ✗ |
+| Crowtech 7" | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✗ | ✓ | ✗ |
+| CrowPanel Advance 7" (S3, TFCard mode) | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ | ✗ |
+| CrowPanel 4.2" E-paper (400×300) | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | E-paper | ✓ | ✗ | ✓ | ✗ |
+| CrowPanel 5.79" E-paper (792×272) | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | E-paper | ✓ | ✗ | ✓ | ✗ |
+| CrowPanel Advance 2.4" (S3, 320×240) | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ | ✓ |
+| CrowPanel Advance 2.8" (S3, 320×240) | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ | ✓ |
+| CrowPanel Advance 3.5" (S3, 480×320) | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ | ✗ |
+| CrowPanel Advance 4.3" (S3, 800×480) | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ | ✓ |
+| CrowPanel Advance 5" (S3, 800×480) | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ | ✗ |
+| CrowPanel Advanced P4 7/9/10.1" (v1.2+) | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ | ✓ |
+| CrowPanel Advanced P4 7/9/10.1" (v1.1) | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ | ✓ |
+| CrowPanel Advanced P4 5" RGB | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ | ✗ |
+| Sunton 7" | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ | ✗ |
+| JC3248W535EN | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ | ✗ |
+| Flipper JCMK GPS | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | — | ✓ | ✗ | ✗ | ✗ |
+| T-Deck | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✓ | Full | ✓ | ✗ | ✓ | ✓ |
+| T-Embed CC1101 | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | Full | ✓ | ✓ | ✓ | ✗ |
+| GhostLink P1 Core | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ | ✗ |
+| GhostLink P1 Peer | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ | ✗ |
+| T-Dongle-S3 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✗ | ✗ |
+| T-Dongle-C5 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ | ✗ |
+| S3TWatch | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ | ✗ | Full | has 4MB vfs partition | ✓ | ✗ | ✗ |
+| T-Display S3 Touch | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | Full | ✓ | ✗ | ✗ | ✗ |
+| JCMK Devboard Pro | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | — | ✓ | ✗ | ✗ | ✗ |
+| Minion | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ | ✗ |
+| Lolin S3 Pro | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✓ | ✗ |
+| Cardputer ADV | ✓ | ✗ | ✓ | ✓ | ✗ | ✓ | ✓ | Full | ✓ | ✓ | ✗ | ✗ |
+| Poltergeist | ✓ | ✗ | ✓ | ✓ | ✓ | ✗ | ✗ | Status | ✓ | ✗ | ✗ | ✗ |
+| Banshee (C5 display MCU) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | Full + Status | ✓ | ✓ | ✓ | ✗ |
+| Banshee (S3 main) | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | — | ✗ | ✓ | ✗ | ✗ |
+| Febris Pro | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | — | ✗ | ✗ | ✗ | ✗ |
+| ACE C5 | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | — | ✓ | ✗ | ✗ | ✗ |
+| NM-CYD-C5 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ | ✗ |
+| ACE S3 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ | ✗ |
+| Seeed XIAO ESP32-S3 Sense | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✓ | ✗ | ✗ |
+| Seeed XIAO ESP32-S3 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✓ | ✗ | ✗ |
+| Seeed XIAO ESP32-C5 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ | ✗ |
+| Marauder v8 | ✓ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | Full | ✓ | ✗ | ✓ | ✗ |
+| Pancake C5 | ✓ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | Full | ✓ | ✗ | ✓ | ✗ |
+| M5Stack CoreS3-SE | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | Full | ✓ | ✓ | ✓ | ✗ |
+| M5Stack AtomS3R | ✓ | ✗ | ✓ | ✓ | ✗ | ✓ | ✗ | Full | has 1MB vfs partition | ✗ | ✗ | ✗ |
 
 `*` — the checked-in config for this board predates a Kconfig option (`NFC_CHAMELEON`) that defaults on for BLE-capable boards; no board-specific override is present, so this reflects the Kconfig default rather than an explicit setting in the file. Most unstarred BLE-capable boards set the symbol explicitly, but some generic configs may also rely on the Kconfig default.
 

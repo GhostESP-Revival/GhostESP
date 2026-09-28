@@ -8,10 +8,9 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 ### Added
 - Added a clock to the centre of the status bar, toggleable in Settings > Date & Time
 - Added switchable analog and seven-segment clock faces to the Clock view
-- Added Meshtastic-compatible LoRa support for SX1262 radios, including BLE app support with the official Meshtastic App
-- Added MeshCore companion support for SX1262 radios (enable `HAS_MESHCORE`): adverts, contacts, 8 group channels, group and direct text with ACK, an Ed25519 identity, and a `meshcore` CLI. Meshtastic and MeshCore share one radio and are mutually exclusive at runtime.
-- Added a MeshCore BLE companion link so the official MeshCore apps can chat, manage contacts and channels, and configure the radio
-- Added LoRa support to Heltec V3, Elecrow CrowPanel Advance 2.4/2.8/4.3-inch, and CrowPanel Advanced P4 7/9/10.1-inch
+- Added Meshtastic and Meshcore-compatible LoRa support for SX1262 radios, including BLE app support with the official Meshtastic and Meshcore Apps
+- Added LoRa support to Heltec V3, LilyGo TDeck, Elecrow CrowPanel Advance 2.4/2.8/4.3-inch, and CrowPanel Advanced P4 7/9/10.1-inch
+- Added Audio Player support to the LilyGo T-Deck via its onboard MAX98357A speaker amp
 - Added USB SD card passthrough on ESP32-S3 boards with an SD card
 - Added a custom channel hopping setting for attacks, AP and station scans, airspace monitor, and packet hopping
 - Added a Country selector to Settings > Wi-Fi
@@ -22,6 +21,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Added `mdnssniff` passive local-name sniffer (mDNS/LLMNR/SSDP/NetBIOS) per ARP-discovered host
 - Added a `bledetect` CLI command and Devices menu row for the device detect scan, with list, track and AirTag spoof actions
 - Added a `glbench` CLI command and Settings > Tools row to benchmark GhostLink throughput and view link statistics
+- Added a `-name <text>` argument to `blespam` to advertise a custom name
 - Added more devices to the BLE detect scan
   - Tile trackers. Adapted from [Flock-You-Android](https://github.com/MaxwellDPS/Flock-You-Android/blob/main/docs/detections/BLE_TRACKER_DETECTION.md) and [Silabs](https://docs.silabs.com/bluetooth/2.13/bluetooth-code-examples-applications/bluetooth-device-examples-and-use-cases)
   - Samsung SmartTag. Adapted from [arxiv 2210.14702](https://arxiv.org/pdf/2210.14702) and [adwatch](https://github.com/bensmith83/adwatch/blob/main/docs/protocols/smarttag.md)
@@ -46,12 +46,14 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Added a T-Embed detent mode setting
 - Improved the Track RSSI readout with a warmer/colder trend arrow
 - Standardized the bottom touch bar, back-key handling, list/log scrolling and view layout with shared helpers
-- Wi-Fi and Bluetooth scan results now scroll as one list instead of paging with `< Prev` / `Next >` rows
+- Reverted the windowed options rows back to paged lists
+- Wi-Fi and Bluetooth scan results page with `< Prev` / `Next >` rows
 - Mapped IR buttons to the theme palette
 - Matched the Ethernet dashboard status card to the rounded action rows
 - Reduced GhostScript RAM use across all boards
 - Raised the Banshee GhostLink UART to 921600 baud with a larger receive buffer so the higher rate does not increase receive loss
 - Cleaned up boot and GhostLink console output
+- Added periodic capture progress and shut up the PCAP writer HWM log
 
 ### Fixed
 - Fixed empty options menus (Wi-Fi, Settings, BadUSB, NFC, SubGHz, and more)
@@ -66,7 +68,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Fixed detail titles always showing 'Details'
 - Fixed detail view info labels being cut off instead of scrolling sideways when too wide
 - Fixed touch-bar row passthrough
-- Fixed encoder select in virtual scan-result lists
+- Fixed encoder select in scan result lists
 - Fixed T-Embed rotary encoder step rate and sensitivity
 - Fixed NM-CYD-C5 AP row crash
 - Fixed CrowPanel display startup configs
@@ -82,6 +84,13 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Fixed C5 station scans across AP/STA-to-promiscuous transitions
 - Fixed memory and handle leaks in LVGL async calls, PSRAM task stacks, PCAP/wardrive CSV files, DIAL sessions and Chameleon/audio semaphores
 - Fixed ESP32-C5 merged firmware failing to boot when flashed at `0x0` by placing the bootloader at the required `0x2000` offset - @yanxke (#395)
+- Fixed Scan All on C5 showing no AP spinner, as the per-channel sweep blocked the UI task
+- Fixed Scan All's station scan being cancelled by taps queued during the AP phase
+- Fixed the Packet Visualiser "Channel Hopping" row being unselectable by touch and doing nothing
+- Fixed Packet Visualiser selector rows being dead on touch boards other than CrowPanel P4
+- Fixed main menu and Apps grid titles being unreadable over asset pack backgrounds
+- Fixed corrupted frames in the Wireshark USB stream 
+- Fixed captures reporting success when an SD write fails
 
 ## Revival v2.1.2 - 2026-09-03
 
