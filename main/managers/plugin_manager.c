@@ -520,6 +520,17 @@ static bool parse_manifest(const char *base_path, plugin_app_manifest_t *out) {
         snprintf(out->error, sizeof(out->error), "invalid id");
         return false;
     }
+    /* Reject apps built for another chip here rather than at dlopen time.
+     * Without this they boot, take a tile in the gallery, inflate a folder
+     * count and only then fail to launch. Placed before the appdata dir is
+     * created and its state file read, so a rejected app costs nothing.
+     * A manifest that declares no target at all stays allowed, so older
+     * packages keep working. */
+    if (!plugin_manager_target_matches(out)) {
+        snprintf(out->error, sizeof(out->error), "built for another target (this board: %s)",
+                 plugin_api_current_target());
+        return false;
+    }
     ensure_appdata_dir(out->id);
     if (out->name[0] == '\0') strncpy(out->name, out->id, sizeof(out->name) - 1);
     load_app_state(out);
@@ -630,6 +641,16 @@ bool plugin_manager_required_features_supported(const plugin_app_manifest_t *app
     return true;
 }
 
+static int compare_apps_by_name(const void *lhs, const void *rhs) {
+    const plugin_app_manifest_t *a = (const plugin_app_manifest_t *)lhs;
+    const plugin_app_manifest_t *b = (const plugin_app_manifest_t *)rhs;
+    int by_name = strcasecmp(a->name, b->name);
+    /* Ties break on id so the registry order is total, not just mostly
+     * stable, and `apps list` output is reproducible. */
+    if (by_name != 0) return by_name;
+    return strcmp(a->id, b->id);
+}
+
 int plugin_manager_reload(void) {
     int64_t start_us = esp_timer_get_time();
     if (!plugin_manager_target_supported()) {
@@ -700,6 +721,11 @@ int plugin_manager_reload(void) {
         }
 
         closedir(dir);
+    }
+    /* readdir order is arbitrary. Sort before decoding icons so the gallery,
+     * folder counts and `apps list` all present the same stable order. */
+    if (s_app_count > 1) {
+        qsort(s_apps, (size_t)s_app_count, sizeof(s_apps[0]), compare_apps_by_name);
     }
     for (int i = 0; i < s_app_count; ++i) {
         if (s_apps[i].icon[0] != '\0' && s_apps[i].icon_width > 0 && s_apps[i].icon_height > 0 && !s_apps[i].icon_dsc) {

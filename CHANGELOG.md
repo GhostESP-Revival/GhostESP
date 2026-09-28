@@ -37,6 +37,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Added an embeddable native options list to the plugin API, plus widget rects, design metrics, a page stack and raw touch state
 - Added batched plugin UI calls for faster plugin menus: `ui_obj_get_rects` and `ui_obj_apply_props`
 - Added a `forward_back` manifest option so plugin apps can handle BACK themselves, and `GHOSTESP_API_HAS()` for feature-gating plugin API fields
+- Added `Tools`, `System`, `Games`, `Communication`, `Media` and `Sensors` folders to the Apps gallery, shared with SD apps by their manifest `category`
 
 ### Changed
 - Restyled the on-screen keyboard with a standard iOS-style layout
@@ -54,6 +55,8 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Raised the Banshee GhostLink UART to 921600 baud with a larger receive buffer so the higher rate does not increase receive loss
 - Cleaned up boot and GhostLink console output
 - Added periodic capture progress and shut up the PCAP writer HWM log
+- Sorted SD apps alphabetically instead of in card order
+- Replaced the "SD apps ready" toast on Apps entry with a count in the status bar
 
 ### Fixed
 - Fixed empty options menus (Wi-Fi, Settings, BadUSB, NFC, SubGHz, and more)
@@ -91,6 +94,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Fixed main menu and Apps grid titles being unreadable over asset pack backgrounds
 - Fixed corrupted frames in the Wireshark USB stream 
 - Fixed captures reporting success when an SD write fails
+- Fixed SD apps built for another chip showing in the Apps gallery and then failing to launch
 
 ## Revival v2.1.2 - 2026-09-03
 

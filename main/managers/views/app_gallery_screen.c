@@ -54,6 +54,7 @@ LV_IMG_DECLARE(storefront);
 #include "freertos/task.h"
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 #include <stdlib.h>
 
 uint32_t theme_palette_get_background(uint8_t theme);
@@ -383,89 +384,154 @@ static void add_back_app_item(void) {
     num_apps++;
 }
 
+/* --- Folder and item construction ---------------------------------------- */
+
+/* Categories discovered on the card that the firmware table does not define.
+ * Bounded so a card with many odd categories cannot blow the stack. */
+#define APPS_MAX_DYNAMIC_FOLDERS 8
+
+typedef struct {
+    char key[PLUGIN_APP_CATEGORY_MAX];
+    int count;
+} app_dynamic_folder_t;
+
+static bool plugin_app_displayable(const plugin_app_manifest_t *app) {
+    if (!app) return false;
+    return !(app->requires_psram && !apps_native_plugins_enabled());
+}
+
+/* An explicit menu_config entry pins a native app to the gallery root, which
+ * also opts it out of its folder. Mirrors menu_catalog_is_grouped(). */
+static bool plugin_app_pinned_to_root(const plugin_app_manifest_t *app) {
+    if (!app) return false;
+    char id[MENU_CONFIG_ID_LEN];
+    snprintf(id, sizeof(id), "plugin:%s", app->id);
+    return menu_config_find(&G_Settings.menu_config, id) != NULL;
+}
+
+static app_item_t *next_app_item(void) {
+    /* Leave one slot so the trailing Back tile always fits. */
+    if (!app_items || num_apps >= s_app_items_capacity - 1) return NULL;
+    return &app_items[num_apps++];
+}
+
+static void add_builtin_app_item(const menu_catalog_item_t *item) {
+    app_item_t *dst = next_app_item();
+    if (!dst || !item) return;
+    snprintf(dst->name, sizeof(dst->name), "%s", item->name);
+    snprintf(dst->catalog_id, sizeof(dst->catalog_id), "%s", item->id);
+    snprintf(dst->category, sizeof(dst->category), "%s", item->category);
+    dst->asset_key = item->asset_key;
+    dst->icon = item->icon;
+    dst->view = item->view;
+}
+
 static void add_plugin_app_item(const plugin_app_manifest_t *app) {
-    snprintf(app_items[num_apps].name, sizeof(app_items[num_apps].name), "%s", app->name);
-    snprintf(app_items[num_apps].catalog_id, sizeof(app_items[num_apps].catalog_id), "plugin:%s", app->id);
-    app_items[num_apps].asset_key = NULL;
-    app_items[num_apps].icon = &GESPAppGallery;
-    app_items[num_apps].palette_index = 3;
-    app_items[num_apps].view = &plugin_runner_view;
-    app_items[num_apps].disabled = false;
-    strncpy(app_items[num_apps].plugin_id, app->id, sizeof(app_items[num_apps].plugin_id) - 1);
-    strncpy(app_items[num_apps].accent_color, app->accent_color, sizeof(app_items[num_apps].accent_color) - 1);
-    strncpy(app_items[num_apps].category, app->category, sizeof(app_items[num_apps].category) - 1);
-    num_apps++;
+    app_item_t *dst = next_app_item();
+    if (!dst || !app) return;
+    snprintf(dst->name, sizeof(dst->name), "%s", app->name);
+    snprintf(dst->catalog_id, sizeof(dst->catalog_id), "plugin:%s", app->id);
+    snprintf(dst->plugin_id, sizeof(dst->plugin_id), "%s", app->id);
+    snprintf(dst->accent_color, sizeof(dst->accent_color), "%s", app->accent_color);
+    snprintf(dst->category, sizeof(dst->category), "%s", app->category);
+    dst->asset_key = NULL;
+    dst->icon = &GESPAppGallery;
+    dst->palette_index = 3;
+    dst->view = &plugin_runner_view;
+    dst->disabled = false;
 }
 
-static void add_plugin_category_folders(void) {
-    if (in_submenu) return;
-    char (*category_names)[PLUGIN_APP_CATEGORY_MAX] =
-        calloc(PLUGIN_APP_MAX_COUNT, sizeof(*category_names));
-    if (!category_names) return;
-    bool has_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM) > 0;
-    int plugin_count = plugin_manager_count();
-
-    int num_categories = 0;
-    for (int i = 0; i < plugin_count; ++i) {
-        const plugin_app_manifest_t *app = plugin_manager_get(i);
-        if (!app) continue;
-        if (app->requires_psram && !has_psram) continue;
-        if (app->category[0] == '\0') continue;
-        char id[MENU_CONFIG_ID_LEN];
-        snprintf(id, sizeof(id), "plugin:%s", app->id);
-        if (menu_config_find(&G_Settings.menu_config, id)) continue;
-
-        bool already_seen = false;
-        for (int j = 0; j < num_categories; ++j) {
-            if (strcmp(category_names[j], app->category) == 0) {
-                already_seen = true;
-                break;
-            }
-        }
-        if (!already_seen && num_categories < PLUGIN_APP_MAX_COUNT) {
-            strncpy(category_names[num_categories], app->category, PLUGIN_APP_CATEGORY_MAX - 1);
-            category_names[num_categories][PLUGIN_APP_CATEGORY_MAX - 1] = '\0';
-            num_categories++;
-        }
-    }
-
-    for (int j = 0; j < num_categories && num_apps < s_app_items_capacity - 1; ++j) {
-        strncpy(app_items[num_apps].category, category_names[j], sizeof(app_items[num_apps].category) - 1);
-        snprintf(app_items[num_apps].name, sizeof(app_items[num_apps].name), "%s", category_names[j]);
-        app_items[num_apps].asset_key = "folder";
-        app_items[num_apps].icon = &folder;
-        app_items[num_apps].palette_index = 1;
-        app_items[num_apps].view = NULL;
-        app_items[num_apps].disabled = false;
-        app_items[num_apps].is_category_folder = true;
-        num_apps++;
-    }
-    free(category_names);
+/* Folder tiles come from the firmware table, which is what fixes the order of
+ * the built-in categories. Folders with no members are not rendered. */
+static void add_folder_tile(const char *key, const char *label, int member_count) {
+    app_item_t *dst = next_app_item();
+    /* Guard the empty case here as well as at the call sites, so a future
+     * caller cannot reintroduce a tile for a folder nobody can open. */
+    if (!dst || !key || !label || member_count < 1) return;
+    snprintf(dst->name, sizeof(dst->name), "%s (%d)", label, member_count);
+    snprintf(dst->category, sizeof(dst->category), "%s", key);
+    dst->asset_key = "folder";
+    dst->icon = &folder;
+    dst->palette_index = 1;
+    dst->view = NULL;
+    dst->disabled = false;
+    dst->is_category_folder = true;
 }
 
-static void add_plugin_app_items_flat(void) {
-    bool has_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM) > 0;
-    int plugin_count = plugin_manager_count();
+static void add_folder_app_item(int folder_index, int member_count) {
+    add_folder_tile(menu_catalog_folder_key(folder_index),
+                    menu_catalog_folder_label(folder_index), member_count);
+}
 
-    if (in_submenu) {
-        for (int i = 0; i < plugin_count && num_apps < s_app_items_capacity - 1; ++i) {
-            const plugin_app_manifest_t *app = plugin_manager_get(i);
-            if (!app) continue;
-            if (app->requires_psram && !has_psram) continue;
-            if (strcmp(app->category, current_category) != 0) continue;
-            char id[MENU_CONFIG_ID_LEN];
-            snprintf(id, sizeof(id), "plugin:%s", app->id);
-            if (menu_config_find(&G_Settings.menu_config, id)) continue;
-            add_plugin_app_item(app);
-        }
-        return;
+/* Tallies members per folder in a single pass. One pass rather than one per
+ * folder keeps menu_config_find off the hot path six times over. */
+static void count_all_folder_members(int counts[MENU_CATALOG_MAX_FOLDERS],
+                                     const menu_catalog_item_t *items, int item_count,
+                                     bool include_loaded_plugins) {
+    int folder_count = menu_catalog_folder_count();
+    for (int f = 0; f < folder_count; ++f) counts[f] = 0;
+
+    for (int i = 0; items && i < item_count; ++i) {
+        if (!menu_catalog_is_grouped(&items[i])) continue;
+        int f = menu_catalog_folder_index(items[i].category);
+        if (f >= 0) ++counts[f];
     }
-
-    for (int i = 0; i < plugin_count && num_apps < s_app_items_capacity - 1; ++i) {
+    if (!include_loaded_plugins) return;
+    for (int i = 0; i < plugin_manager_count(); ++i) {
         const plugin_app_manifest_t *app = plugin_manager_get(i);
-        if (!app) continue;
-        if (app->requires_psram && !has_psram) continue;
-        if (app->category[0] != '\0') continue;
+        if (!plugin_app_displayable(app) || plugin_app_pinned_to_root(app)) continue;
+        int f = menu_catalog_folder_index(app->category);
+        if (f >= 0) ++counts[f];
+    }
+}
+
+/* Categories the firmware does not define still get their own folder, so a
+ * card that uses its own taxonomy is not scattered across the root. Collected
+ * in first-seen order, which the registry's alphabetical sort makes
+ * deterministic. Only native apps can produce one: built-in categories come
+ * from the compile-time table. */
+static int collect_dynamic_folders(app_dynamic_folder_t *out, int max, bool include_loaded_plugins) {
+    int found = 0;
+    if (!include_loaded_plugins) return 0;
+    for (int i = 0; i < plugin_manager_count() && found < max; ++i) {
+        const plugin_app_manifest_t *app = plugin_manager_get(i);
+        if (!plugin_app_displayable(app) || plugin_app_pinned_to_root(app)) continue;
+        if (app->category[0] == '\0') continue;                    /* unfiled, root */
+        if (menu_catalog_folder_index(app->category) >= 0) continue; /* firmware folder */
+
+        int slot = -1;
+        for (int j = 0; j < found; ++j) {
+            if (strcasecmp(out[j].key, app->category) == 0) { slot = j; break; }
+        }
+        if (slot < 0) {
+            slot = found++;
+            snprintf(out[slot].key, sizeof(out[slot].key), "%s", app->category);
+            out[slot].count = 0;
+        }
+        ++out[slot].count;
+    }
+    return found;
+}
+
+/* Native apps that belong in the folder the user just opened. */
+static void add_plugin_apps_in_folder(const char *key, bool include_loaded_plugins) {
+    if (!include_loaded_plugins || !key) return;
+    for (int i = 0; i < plugin_manager_count(); ++i) {
+        const plugin_app_manifest_t *app = plugin_manager_get(i);
+        if (!plugin_app_displayable(app) || plugin_app_pinned_to_root(app)) continue;
+        if (strcasecmp(app->category, key) != 0) continue;
+        add_plugin_app_item(app);
+    }
+}
+
+/* Native apps with no category, or one the firmware does not define, stay at
+ * the root next to the unfiled built-ins. Pinned apps are already there. */
+static void add_uncategorised_plugin_apps(bool include_loaded_plugins) {
+    if (!include_loaded_plugins) return;
+    for (int i = 0; i < plugin_manager_count(); ++i) {
+        const plugin_app_manifest_t *app = plugin_manager_get(i);
+        if (!plugin_app_displayable(app)) continue;
+        if (!plugin_app_pinned_to_root(app) && menu_catalog_folder_index(app->category) >= 0) continue;
         add_plugin_app_item(app);
     }
 }
@@ -475,41 +541,44 @@ static void rebuild_app_items(bool include_loaded_plugins) {
     if (!ensure_app_items()) return;
     memset(app_items, 0, sizeof(*app_items) * (size_t)s_app_items_capacity);
 
+    int count = 0;
+    menu_catalog_item_t *items = menu_catalog_collect(MENU_PLACE_APPS, true, &count);
+
     if (in_submenu) {
         add_back_app_item();
-        if (include_loaded_plugins) add_plugin_app_items_flat();
+        for (int i = 0; items && i < count; ++i) {
+            if (!menu_catalog_is_grouped(&items[i])) continue;
+            if (strcasecmp(items[i].category, current_category) != 0) continue;
+            add_builtin_app_item(&items[i]);
+        }
+        add_plugin_apps_in_folder(current_category, include_loaded_plugins);
+        free(items);
         return;
     }
 
-    /* Preserve default folder-first behavior. Explicitly customized plugins
-     * appear at the gallery root, where their saved order can be honored. */
-    bool customized = false;
-    for (int i = 0; i < G_Settings.menu_config.count; ++i) {
-        if (G_Settings.menu_config.entries[i].order[1] != MENU_ORDER_DEFAULT) customized = true;
+    /* Root: the firmware's folders first, then anything the card brought with
+     * it, then everything unfiled. Folders are skipped when empty and the
+     * firmware ones always appear in table order, so installing an app can
+     * add one tile but never reorders or hides an existing one. The only way
+     * this list moves is the user reordering it. */
+    int counts[MENU_CATALOG_MAX_FOLDERS];
+    count_all_folder_members(counts, items, count, include_loaded_plugins);
+    int folder_count = menu_catalog_folder_count();
+    for (int f = 0; f < folder_count; ++f) {
+        if (counts[f] > 0) add_folder_app_item(f, counts[f]);
     }
-    if (include_loaded_plugins && !customized) add_plugin_category_folders();
-
-    int count = 0;
-    menu_catalog_item_t *items = menu_catalog_collect(MENU_PLACE_APPS, true, &count);
-    for (int i = 0; items && i < count && num_apps < s_app_items_capacity - 1; ++i) {
-        const menu_catalog_item_t *item = &items[i];
-        if (strncmp(item->id, "plugin:", 7) == 0) {
-            if (!include_loaded_plugins) continue;
-            const plugin_app_manifest_t *app = plugin_manager_find(item->id + 7);
-            if (!app) continue;
-            if (app->category[0] && !menu_config_find(&G_Settings.menu_config, item->id)) continue;
-            add_plugin_app_item(app);
-            continue;
-        }
-        app_item_t *dst = &app_items[num_apps++];
-        snprintf(dst->name, sizeof(dst->name), "%s", item->name);
-        snprintf(dst->catalog_id, sizeof(dst->catalog_id), "%s", item->id);
-        dst->asset_key = item->asset_key;
-        dst->icon = item->icon;
-        dst->view = item->view;
+    app_dynamic_folder_t dynamic[APPS_MAX_DYNAMIC_FOLDERS];
+    int dynamic_count = collect_dynamic_folders(dynamic, APPS_MAX_DYNAMIC_FOLDERS, include_loaded_plugins);
+    for (int d = 0; d < dynamic_count; ++d) {
+        /* No label table for these, so the key is shown as the author wrote it. */
+        add_folder_tile(dynamic[d].key, dynamic[d].key, dynamic[d].count);
     }
+    for (int i = 0; items && i < count; ++i) {
+        if (menu_catalog_is_grouped(&items[i])) continue;
+        add_builtin_app_item(&items[i]);
+    }
+    add_uncategorised_plugin_apps(include_loaded_plugins);
     free(items);
-    if (include_loaded_plugins && customized) add_plugin_category_folders();
     add_back_app_item();
 }
 
@@ -1330,11 +1399,8 @@ static void apps_plugin_reload_done(void *arg) {
         selected_app_index = 0;
     }
     rebuild_app_items(plugins_enabled && boot_count > 0);
-    if (plugins_enabled && boot_count > 0) {
-        char msg[48];
-        snprintf(msg, sizeof(msg), "%d SD app%s ready", boot_count, boot_count == 1 ? "" : "s");
-        toast_show_duration(msg, TOAST_SUCCESS, 1000);
-    }
+    /* No toast here: this screen is entered often and the count has not
+     * changed. The status bar carries it instead. */
     refresh_apps_surface_colors();
     display_manager_fill_screen(apps_bg_color);
 
@@ -1344,7 +1410,13 @@ static void apps_plugin_reload_done(void *arg) {
         toast_show_duration("Native SD apps require PSRAM", TOAST_WARN, 1500);
     }
 
-    const char *title = (LV_VER_RES > 320 ? "Apps Menu" : "Apps");
+    /* lv_label_set_text copies, so this buffer does not need static storage. */
+    char title[32];
+    if (boot_count > 0) {
+        snprintf(title, sizeof(title), "Apps  %d on card", boot_count);
+    } else {
+        snprintf(title, sizeof(title), "%s", LV_VER_RES > 320 ? "Apps Menu" : "Apps");
+    }
 
     apps_root = gui_screen_create_root(NULL, title, apps_bg_color, LV_OPA_TRANSP);
     apps_menu_view.root = apps_root;
