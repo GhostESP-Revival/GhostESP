@@ -1,4 +1,8 @@
+#include "sdkconfig.h"
 #include "boot_banner_text.h"
+#if defined(CONFIG_IDF_TARGET_ESP32) && defined(CONFIG_BT_ENABLED)
+#include "esp_bt.h"
+#endif
 #include "core/shell.h"
 #include "core/commandline.h"
 #include "core/callbacks.h"
@@ -712,6 +716,12 @@ static void deferred_sd_init_task(void *arg) {
 }
 
 void app_main(void) {
+#if defined(CONFIG_IDF_TARGET_ESP32) && defined(CONFIG_BT_ENABLED)
+    /* BLE is only used on demand, but the Classic BT controller's ~15KB DRAM
+     * is otherwise held until the first ble_init(). Nothing uses Classic BT
+     * (ble_manager releases it anyway), so return it to the heap now. */
+    (void)esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT);
+#endif
     memory_debug_init();
     memory_debug_start_boot_trace();
     MEASURE_INIT_RAM("Ghostchi Mood init", ghostchi_mood_init());

@@ -50,13 +50,18 @@
 #define CLOUD_DOWNLOAD_RANGE_CHUNK_SIZE (32 * 1024)
 #define CLOUD_DOWNLOAD_RANGE_ATTEMPTS 5
 // Both Cloud Store tasks run a full mbedTLS handshake before any HTTP data
-// flows: X.509 chain parsing plus ECDSA P-256 verification of the proxy cert.
-// On no-PSRAM boards there is no hardware ECDSA peripheral (the esp32s3 lacks
-// SOC_ECDSA_SUPPORTED), so mbedTLS verifies in software via mbedtls_mpi, which
-// needs far more stack than the PSRAM boards' accelerated path. An 8 KB frame
-// overflowed mid-handshake on Cardputer, so match OTA_DOWNLOAD_TASK_STACK_BYTES,
-// which already runs the same handshake at this size.
-#define CLOUD_TLS_TASK_STACK_BYTES 12288
+// flows: X.509 chain parsing plus ECDSA P-256 verification. The stack cost is
+// call-chain depth (esp_http_client -> esp_tls -> ssl_handshake -> x509 -> ecp),
+// not big-integer scratch: that lands on the heap in this mbedTLS, and on
+// no-PSRAM boards the heap is the scarce resource. Measured peak on an ESP32 CYD
+// build is 5900 bytes, so 8 KB keeps ~2 KB spare while handing 4 KB back to the
+// heap the handshake itself needs. The 12288 this replaced matched
+// OTA_DOWNLOAD_TASK_STACK_BYTES by analogy, not by measurement. log_stack_hwm()
+// re-reports the real peak on every run; the 5900 figure came from a handshake
+// that aborted at chain verification, so a successful one goes a little deeper.
+// The install task is aliased here but is not measured yet -- split it out if
+// its high-water mark comes back thin.
+#define CLOUD_TLS_TASK_STACK_BYTES 8192
 #define CLOUD_INSTALL_TASK_STACK_BYTES CLOUD_TLS_TASK_STACK_BYTES
 #define CLOUD_DOWNLOAD_DIR "/mnt/ghostesp/downloads"
 #define CLOUD_THEMES_DIR "/mnt/ghostesp/themes"
@@ -1335,6 +1340,23 @@ bool cloud_store_apps_available(void) {
     return heap_caps_get_total_size(MALLOC_CAP_SPIRAM) > 0;
 }
 
+// Report how deep this task actually got. The stack budget above is only a
+// guess until something measures it: FreeRTOS lowers the high-water mark as a
+// task runs deeper, so reading it just before the task deletes itself gives the
+// deepest point of the whole fetch/download -- the mbedTLS handshake included.
+// On no-PSRAM boards the stack is charged to the same internal heap that
+// handshake needs, so this number is what decides how much of
+// CLOUD_TLS_TASK_STACK_BYTES can be handed back. Undershoots by the depth of
+// this log call itself, so leave a margin when trimming.
+static void log_stack_hwm(const char *label, uint32_t stack_bytes) {
+    UBaseType_t free_bytes = uxTaskGetStackHighWaterMark(NULL);
+    ESP_LOGI(TAG, "%s stack hwm: peak used %u of %u bytes (%u left)",
+             label,
+             (unsigned)(stack_bytes - free_bytes),
+             (unsigned)stack_bytes,
+             (unsigned)free_bytes);
+}
+
 static void refresh_task(void *arg) {
     bool caps_task = arg != NULL;
     cloud_store_pause_ap_if_needed();
@@ -1364,6 +1386,7 @@ static void refresh_task(void *arg) {
     }
     s_ctx->task_running = false;
     xSemaphoreGive(s_ctx->mutex);
+    log_stack_hwm("cloud_refresh", CLOUD_TLS_TASK_STACK_BYTES);
     if (caps_task) {
         vTaskDeleteWithCaps(NULL);
     } else {
@@ -1475,6 +1498,7 @@ static void install_task(void *arg) {
     xSemaphoreTake(s_ctx->mutex, portMAX_DELAY);
     s_ctx->task_running = false;
     xSemaphoreGive(s_ctx->mutex);
+    log_stack_hwm("cloud_install", CLOUD_INSTALL_TASK_STACK_BYTES);
     if (req.caps_task) {
         vTaskDeleteWithCaps(NULL);
     } else {

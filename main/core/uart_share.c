@@ -45,13 +45,18 @@ esp_err_t uart_share_ensure_installed(uart_port_t uart_num, int rx_buffer_size, 
     xSemaphoreTake(st->mutex, portMAX_DELAY);
 
     if (!st->installed) {
-        if (event_queue_size <= 0) {
+        // Zero keeps the historical default. A negative value explicitly
+        // requests no event queue for clients that read UART bytes directly.
+        if (event_queue_size < 0) {
+            event_queue_size = 0;
+        } else if (event_queue_size == 0) {
             event_queue_size = 16;
         }
 
         st->event_queue_size = event_queue_size;
 
-        esp_err_t err = uart_driver_install(uart_num, rx_buffer_size, tx_buffer_size, event_queue_size, &st->event_queue, 0);
+        QueueHandle_t *queue_out = event_queue_size > 0 ? &st->event_queue : NULL;
+        esp_err_t err = uart_driver_install(uart_num, rx_buffer_size, tx_buffer_size, event_queue_size, queue_out, 0);
         if (err != ESP_OK) {
             xSemaphoreGive(st->mutex);
             return err;

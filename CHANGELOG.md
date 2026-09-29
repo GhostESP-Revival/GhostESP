@@ -60,6 +60,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Reworded the deauth notice to say plainly whether the target will drop it, based on the network's security type
 - Sorted SD apps alphabetically instead of in card order
 - Replaced the "SD apps ready" toast on Apps entry with a count in the status bar
+- Freed ~15KB of RAM at boot on classic ESP32 boards by releasing unused Classic Bluetooth memory at startup instead of on first BLE use
 
 ### Fixed
 - Fixed the HT Control field being ignored on non-QoS data frames, which hid some ARP, EAP and IP traffic
