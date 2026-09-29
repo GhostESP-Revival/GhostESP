@@ -1159,6 +1159,99 @@ static void recover_script_install(const char *final_gsb, const char *manifest_p
     }
 }
 
+// Kept out of install_item so its ~1 KB of path buffers are not part of the
+// frame every install (notably .gapp apps, which recurse deeper) runs under.
+static __attribute__((noinline)) esp_err_t install_script_item(const cloud_store_item_t *item, const char *download_path) {
+    esp_err_t err = ESP_OK;
+    char script_dir[128];
+    int n = snprintf(script_dir, sizeof(script_dir), "%s/%s", CLOUD_SCRIPTS_DIR, item->id);
+    if (n <= 0 || (size_t)n >= sizeof(script_dir)) {
+        err = ESP_ERR_INVALID_SIZE;
+        ESP_LOGW(TAG, "script dir path too long for %s", item->id);
+    } else {
+        mkdir_if_missing(script_dir);
+        char final_gsb[160];
+        snprintf(final_gsb, sizeof(final_gsb), "%s/%s.gsb", script_dir, item->id);
+        char entry_name[CLOUD_STORE_ID_MAX + 8];
+        snprintf(entry_name, sizeof(entry_name), "%s.gsb", item->id);
+        char manifest_path[160];
+        snprintf(manifest_path, sizeof(manifest_path), "%s/manifest.json", script_dir);
+        char manifest_tmp_path[164];
+        snprintf(manifest_tmp_path, sizeof(manifest_tmp_path), "%s.tmp", manifest_path);
+        recover_script_install(final_gsb, manifest_path);
+        cJSON *manifest = cJSON_CreateObject();
+        cJSON *permissions = manifest ? cJSON_AddArrayToObject(manifest, "permissions") : NULL;
+        bool manifest_ok = manifest && permissions &&
+                           cJSON_AddStringToObject(manifest, "id", item->id) &&
+                           cJSON_AddStringToObject(manifest, "name", item->name) &&
+                           cJSON_AddStringToObject(manifest, "entry", entry_name) &&
+                           cJSON_AddNumberToObject(manifest, "memory_limit", item->script_memory_limit);
+        for (uint32_t bit = 0; manifest_ok && bit < 32; ++bit) {
+            uint32_t permission = 1u << bit;
+            if ((item->script_permissions & permission) == 0) continue;
+            const char *name = script_permission_name(permission);
+            if (!name || !cJSON_AddItemToArray(permissions, cJSON_CreateString(name))) {
+                manifest_ok = false;
+            }
+        }
+        unlink(manifest_tmp_path);
+        char *manifest_json = manifest_ok ? cJSON_PrintUnformatted(manifest) : NULL;
+        FILE *mf = manifest_json ? fopen(manifest_tmp_path, "w") : NULL;
+        if (!mf) {
+            manifest_ok = false;
+        } else {
+            bool write_ok = fputs(manifest_json, mf) >= 0;
+            bool close_ok = fclose(mf) == 0;
+            manifest_ok = manifest_ok && write_ok && close_ok;
+        }
+        free(manifest_json);
+        cJSON_Delete(manifest);
+
+        char gsb_backup[164];
+        char manifest_backup[164];
+        snprintf(gsb_backup, sizeof(gsb_backup), "%s.bak", final_gsb);
+        snprintf(manifest_backup, sizeof(manifest_backup), "%s.bak", manifest_path);
+        struct stat st;
+        bool had_gsb = stat(final_gsb, &st) == 0;
+        bool had_manifest = stat(manifest_path, &st) == 0;
+        bool backed_gsb = false;
+        bool backed_manifest = false;
+        bool installed_gsb = false;
+        bool installed_manifest = false;
+        if (manifest_ok) {
+            unlink(gsb_backup);
+            unlink(manifest_backup);
+            if (had_gsb && rename(final_gsb, gsb_backup) != 0) manifest_ok = false;
+            else backed_gsb = had_gsb;
+            if (manifest_ok && had_manifest && rename(manifest_path, manifest_backup) != 0) manifest_ok = false;
+            else if (manifest_ok) backed_manifest = had_manifest;
+            if (manifest_ok && rename(download_path, final_gsb) != 0) manifest_ok = false;
+            else if (manifest_ok) installed_gsb = true;
+            if (manifest_ok && rename(manifest_tmp_path, manifest_path) != 0) manifest_ok = false;
+            else if (manifest_ok) installed_manifest = true;
+        }
+        if (!manifest_ok) {
+            unlink(manifest_tmp_path);
+            if (installed_manifest) unlink(manifest_path);
+            if (installed_gsb) unlink(final_gsb);
+            if (backed_manifest && rename(manifest_backup, manifest_path) != 0) {
+                ESP_LOGW(TAG, "manifest rollback failed for script %s", item->id);
+            }
+            if (backed_gsb && rename(gsb_backup, final_gsb) != 0) {
+                ESP_LOGW(TAG, "bytecode rollback failed for script %s", item->id);
+            }
+            ESP_LOGW(TAG, "script install failed for %s", item->id);
+            err = ESP_FAIL;
+        } else {
+            unlink(gsb_backup);
+            unlink(manifest_backup);
+            ESP_LOGI(TAG, "script installed: %s -> %s", item->id, final_gsb);
+            err = ESP_OK;
+        }
+    }
+    return err;
+}
+
 static esp_err_t install_item(const cloud_store_item_t *item) {
     if (!safe_id(item->id)) return ESP_ERR_INVALID_ARG;
     if (!sd_card_manager.is_initialized && !sd_card_needs_jit_mount()) {
@@ -1226,92 +1319,7 @@ static esp_err_t install_item(const cloud_store_item_t *item) {
         err = plugin_installer_install_gapp(download_path);
         if (err == ESP_OK) plugin_manager_reload();
     } else if (item->type == CLOUD_STORE_TYPE_SCRIPT) {
-        char script_dir[128];
-        int n = snprintf(script_dir, sizeof(script_dir), "%s/%s", CLOUD_SCRIPTS_DIR, item->id);
-        if (n <= 0 || (size_t)n >= sizeof(script_dir)) {
-            err = ESP_ERR_INVALID_SIZE;
-            ESP_LOGW(TAG, "script dir path too long for %s", item->id);
-        } else {
-            mkdir_if_missing(script_dir);
-            char final_gsb[160];
-            snprintf(final_gsb, sizeof(final_gsb), "%s/%s.gsb", script_dir, item->id);
-            char entry_name[CLOUD_STORE_ID_MAX + 8];
-            snprintf(entry_name, sizeof(entry_name), "%s.gsb", item->id);
-            char manifest_path[160];
-            snprintf(manifest_path, sizeof(manifest_path), "%s/manifest.json", script_dir);
-            char manifest_tmp_path[164];
-            snprintf(manifest_tmp_path, sizeof(manifest_tmp_path), "%s.tmp", manifest_path);
-            recover_script_install(final_gsb, manifest_path);
-            cJSON *manifest = cJSON_CreateObject();
-            cJSON *permissions = manifest ? cJSON_AddArrayToObject(manifest, "permissions") : NULL;
-            bool manifest_ok = manifest && permissions &&
-                               cJSON_AddStringToObject(manifest, "id", item->id) &&
-                               cJSON_AddStringToObject(manifest, "name", item->name) &&
-                               cJSON_AddStringToObject(manifest, "entry", entry_name) &&
-                               cJSON_AddNumberToObject(manifest, "memory_limit", item->script_memory_limit);
-            for (uint32_t bit = 0; manifest_ok && bit < 32; ++bit) {
-                uint32_t permission = 1u << bit;
-                if ((item->script_permissions & permission) == 0) continue;
-                const char *name = script_permission_name(permission);
-                if (!name || !cJSON_AddItemToArray(permissions, cJSON_CreateString(name))) {
-                    manifest_ok = false;
-                }
-            }
-            unlink(manifest_tmp_path);
-            char *manifest_json = manifest_ok ? cJSON_PrintUnformatted(manifest) : NULL;
-            FILE *mf = manifest_json ? fopen(manifest_tmp_path, "w") : NULL;
-            if (!mf) {
-                manifest_ok = false;
-            } else {
-                bool write_ok = fputs(manifest_json, mf) >= 0;
-                bool close_ok = fclose(mf) == 0;
-                manifest_ok = manifest_ok && write_ok && close_ok;
-            }
-            free(manifest_json);
-            cJSON_Delete(manifest);
-
-            char gsb_backup[164];
-            char manifest_backup[164];
-            snprintf(gsb_backup, sizeof(gsb_backup), "%s.bak", final_gsb);
-            snprintf(manifest_backup, sizeof(manifest_backup), "%s.bak", manifest_path);
-            struct stat st;
-            bool had_gsb = stat(final_gsb, &st) == 0;
-            bool had_manifest = stat(manifest_path, &st) == 0;
-            bool backed_gsb = false;
-            bool backed_manifest = false;
-            bool installed_gsb = false;
-            bool installed_manifest = false;
-            if (manifest_ok) {
-                unlink(gsb_backup);
-                unlink(manifest_backup);
-                if (had_gsb && rename(final_gsb, gsb_backup) != 0) manifest_ok = false;
-                else backed_gsb = had_gsb;
-                if (manifest_ok && had_manifest && rename(manifest_path, manifest_backup) != 0) manifest_ok = false;
-                else if (manifest_ok) backed_manifest = had_manifest;
-                if (manifest_ok && rename(download_path, final_gsb) != 0) manifest_ok = false;
-                else if (manifest_ok) installed_gsb = true;
-                if (manifest_ok && rename(manifest_tmp_path, manifest_path) != 0) manifest_ok = false;
-                else if (manifest_ok) installed_manifest = true;
-            }
-            if (!manifest_ok) {
-                unlink(manifest_tmp_path);
-                if (installed_manifest) unlink(manifest_path);
-                if (installed_gsb) unlink(final_gsb);
-                if (backed_manifest && rename(manifest_backup, manifest_path) != 0) {
-                    ESP_LOGW(TAG, "manifest rollback failed for script %s", item->id);
-                }
-                if (backed_gsb && rename(gsb_backup, final_gsb) != 0) {
-                    ESP_LOGW(TAG, "bytecode rollback failed for script %s", item->id);
-                }
-                ESP_LOGW(TAG, "script install failed for %s", item->id);
-                err = ESP_FAIL;
-            } else {
-                unlink(gsb_backup);
-                unlink(manifest_backup);
-                ESP_LOGI(TAG, "script installed: %s -> %s", item->id, final_gsb);
-                err = ESP_OK;
-            }
-        }
+        err = install_script_item(item, download_path);
     } else {
         char final_name[CLOUD_STORE_ID_MAX + 16];
         snprintf(final_name, sizeof(final_name), "%s.gtheme", item->id);
