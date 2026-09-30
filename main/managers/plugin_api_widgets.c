@@ -48,6 +48,12 @@ typedef struct {
 
 typedef struct {
     void *handle;
+    int val;
+    const char *str;
+} wgt_set_str_idx_t;
+
+typedef struct {
+    void *handle;
     const char *label;
     const char *value;
 } wgt_set_str2_t;
@@ -149,6 +155,32 @@ ghostesp_options_t plugin_api_ui_options_create(const char *title) {
     return plugin_api_internal_run_sync(opts_create_sync, &ctx) ? ctx.result : NULL;
 }
 
+typedef struct {
+    ghostesp_ui_obj_t parent;
+    const char *title;
+    uint32_t flags;
+    void *result;
+} wgt_opts_create_ex_t;
+
+static void opts_create_ex_sync(void *arg) {
+    wgt_opts_create_ex_t *ctx = (wgt_opts_create_ex_t *)arg;
+    /* Fall back to the view root exactly like ui_options_create does, so an
+       app that passes NULL gets the same placement as before. */
+    lv_obj_t *parent = plugin_api_internal_parent_or_current(ctx->parent);
+    bool transparent = (ctx->flags & GHOSTESP_UI_OPTIONS_TRANSPARENT) != 0;
+    /* The status bar is the only other difference the flags can ask for, and
+       it is driven entirely by whether a title is present. */
+    const char *title = (ctx->flags & GHOSTESP_UI_OPTIONS_NO_STATUS_BAR) ? NULL : ctx->title;
+    ctx->result = options_view_create_flags(parent, title, transparent);
+}
+
+ghostesp_options_t plugin_api_ui_options_create_ex(ghostesp_ui_obj_t parent, const char *title,
+                                                    uint32_t flags) {
+    if (!plugin_api_internal_has_ui_permission()) return NULL;
+    wgt_opts_create_ex_t ctx = { .parent = parent, .title = title, .flags = flags };
+    return plugin_api_internal_run_sync(opts_create_ex_sync, &ctx) ? ctx.result : NULL;
+}
+
 static void opts_add_item_sync(void *arg) {
     wgt_add_t *ctx = (wgt_add_t *)arg;
     options_view_t *ov = (options_view_t *)ctx->handle;
@@ -227,6 +259,50 @@ int plugin_api_ui_options_get_selected(ghostesp_options_t opts) {
     if (!opts) return -1;
     wgt_int_t ctx = { .handle = opts };
     return plugin_api_internal_run_sync(opts_get_sel_sync, &ctx) ? ctx.result : -1;
+}
+
+static void opts_count_sync(void *arg) {
+    wgt_int_t *ctx = (wgt_int_t *)arg;
+    ctx->result = options_view_get_item_count((const options_view_t *)ctx->handle);
+}
+
+int32_t plugin_api_ui_options_get_item_count(ghostesp_options_t opts) {
+    if (!plugin_api_internal_has_ui_permission()) return 0;
+    if (!opts) return 0;
+    wgt_int_t ctx = { .handle = opts };
+    return plugin_api_internal_run_sync(opts_count_sync, &ctx) ? ctx.result : 0;
+}
+
+typedef struct {
+    void *handle;
+    int32_t x;
+    int32_t y;
+    int result;
+} wgt_point_t;
+
+static void opts_item_at_sync(void *arg) {
+    wgt_point_t *ctx = (wgt_point_t *)arg;
+    ctx->result = options_view_item_at((const options_view_t *)ctx->handle, ctx->x, ctx->y);
+}
+
+int32_t plugin_api_ui_options_item_at(ghostesp_options_t opts, int32_t x, int32_t y) {
+    if (!plugin_api_internal_has_ui_permission()) return -1;
+    if (!opts) return -1;
+    wgt_point_t ctx = { .handle = opts, .x = x, .y = y };
+    return plugin_api_internal_run_sync(opts_item_at_sync, &ctx) ? ctx.result : -1;
+}
+
+static void opts_update_text_sync(void *arg) {
+    wgt_set_str_idx_t *ctx = (wgt_set_str_idx_t *)arg;
+    options_view_update_item_text((options_view_t *)ctx->handle, ctx->val, ctx->str);
+}
+
+void plugin_api_ui_options_update_item_text(ghostesp_options_t opts, int32_t index,
+                                            const char *text) {
+    if (!plugin_api_internal_has_ui_permission()) return;
+    if (!opts || !text) return;
+    wgt_set_str_idx_t ctx = { .handle = opts, .val = index, .str = text };
+    plugin_api_internal_run_sync(opts_update_text_sync, &ctx);
 }
 
 static void opts_clear_sync(void *arg) {

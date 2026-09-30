@@ -81,7 +81,7 @@ Every app needs a `manifest.json` at its root. Required fields: `id`, `name`, `e
 | `api_version` | Yes | Must be `1`. |
 | `author` | No | Attribution string. |
 | `description` | No | Short description. |
-| `category` | No | Category for future gallery grouping. |
+| `category` | No | Apps gallery folder. One of `Tools`, `System`, `Games`, `Communication`, `Media`, `Sensors` (matched case-insensitively). The app joins that folder alongside the built-ins; an absent or unrecognised value leaves it at the gallery root. Folders with no members are not shown. |
 | `manifest_version` | No | Must be `1` if set. |
 | `package_version` | No | Integer, minimum `1`. |
 | `data_version` | No | Integer, minimum `1`. Bump to trigger data migration. |

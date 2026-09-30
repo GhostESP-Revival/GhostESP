@@ -9,6 +9,7 @@
 #include "lvgl.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -16,7 +17,11 @@
 typedef struct {
     void (*fn)(void *ctx);
     void *ctx;
-    SemaphoreHandle_t done;
+    /* The task waiting for this call. A direct task notification is stored in
+       the waiter's own TCB, so the wait is per-calling-task and needs no
+       allocation of its own - unlike a per-call semaphore, which allocated and
+       freed a FreeRTOS object on every single UI call. */
+    TaskHandle_t task;
 } plugin_ui_sync_call_t;
 
 typedef struct {

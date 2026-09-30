@@ -1,0 +1,101 @@
+Title: Visualizer (Rave Mode)
+Description: Stream desktop audio to GhostESP and render a live spectrum visualizer
+URL: /v1.9.9/apps/visualizer/
+Version: v1.9.9
+Section: Apps
+Search index: /search-index.json
+
+# Visualizer (Rave Mode)
+
+> Stream desktop audio to GhostESP and render a live spectrum visualizer
+
+## On this page
+
+- [Recommended Download (Windows)](#recommended-download-windows)
+- [Requirements](#requirements)
+- [Open the App](#open-the-app)
+- [Quick Start (USB Serial)](#quick-start-usb-serial)
+- [Quick Start (Wi-Fi / UDP)](#quick-start-wi-fi--udp)
+- [Recommended Usage](#recommended-usage)
+- [Optional: Tray App (Rust)](#optional-tray-app-rust)
+- [Advanced (optional)](#advanced-optional)
+- [Troubleshooting](#troubleshooting)
+
+---
+
+Visualizer is the on-device music visualizer app (previously labeled Rave Mode). It renders a live 15-band spectrum from audio sent over USB serial or UDP.
+## Recommended Download (Windows)
+Start here for the easiest setup:
+- [rave_tray.exe](https://github.com/GhostESP-Revival/GhostESP/blob/Development-deki/scripts/Audio%20Visualizers/rave_tray.exe)
+The current transport supports:
+- High-rate USB serial streaming with compact binary frames
+- UDP streaming on port 6677
+- Auto-discovery service over UDP 6678 (device advertises, helper auto-targets)
+## Requirements
+- A GhostESP build with screen support
+- Desktop helper from scripts/Audio Visualizers/
+- For USB mode: data-capable USB cable
+- For UDP mode: host and GhostESP on the same network
+## Open the App
+From the device UI, open Apps -&gt; Visualizer.
+You can also open it from CLI:
+rave on
+Close with:
+rave off
+## Quick Start (USB Serial)
+USB is usually the smoothest path for realtime updates.
+- Connect GhostESP over USB
+- Open Apps -&gt; Visualizer on the device
+- Run the launcher:
+rave_helper.bat
+- Choose USB serial
+- Pick a source (optional) and port when prompted
+## Quick Start (Wi-Fi / UDP)
+- Connect GhostESP to Wi-Fi
+- Open Apps -&gt; Visualizer
+- Run the launcher:
+rave_helper.bat
+- Choose Wi-Fi / UDP
+- Leave device IP blank for auto-discovery (recommended), or enter a specific IP
+When IP is blank:
+- GhostESP broadcasts discovery beacons on 6678
+- The helper listens for those beacons and switches to that device automatically
+- If discovery does not resolve a target, broadcast fallback still works on normal LANs
+You can disable discovery and use classic routing:
+python &#34;_internal\Display_Visualizer.py&#34; --no-discovery 255.255.255.255
+## Recommended Usage
+For normal use, run the launcher and use its menu:
+rave_helper.bat
+The launcher already handles:
+- USB vs Wi-Fi mode selection
+- Port detection/probing
+- Audio source selection
+- common defaults
+### Optional: Tray App (Rust)
+If you want a persistent desktop helper, you can build and run the tray binary:
+_dev\build_rave_tray.bat
+rave_tray.exe
+chmod &#43;x &#34;_dev/build_rave_tray.sh&#34;
+./_dev/build_rave_tray.sh
+./rave_tray
+Build output is a single distributable with the worker embedded (rave_tray.exe on Windows, rave_tray on Linux).
+End users only need that tray binary and do not need Python or Rust installed.
+Tray menu actions:
+- Start Wi-Fi (Auto) starts background stream with discovery
+- Start Wi-Fi (Set IP...) prompts for a fixed device IP
+- Start USB (Auto Port) auto-selects first detected GhostESP serial port
+- Start USB (Manual Port...) prompts for serial port (for example COM3)
+- Set Audio Source..., Set FPS..., and Set USB Baud... provide quick popup configuration
+- Open Interactive Helper opens rave_helper.bat
+- Stop Stream stops the background stream
+## Advanced (optional)
+Direct script arguments are optional and mainly for troubleshooting or automation.
+python &#34;_internal\Display_Visualizer.py&#34; --list-sources
+python &#34;_internal\Display_Visualizer.py&#34; --list-ports
+## Troubleshooting
+- If device frames stay near 0, verify firmware and helper are both updated and Visualizer is open.
+- If movement is choppy, prefer USB serial and a higher baud rate.
+- If level is always low, run --list-sources and select the correct playback loopback source.
+- If Wi-Fi auto-discovery does not find a device, try direct IP mode. Some guest networks/VLANs block local broadcast traffic.
+- If audio capture drops with runtime errors (for example 0x88890004), the helper now retries and auto-recovers; if it repeats often, reselect the playback source and update audio drivers.
+- raveport should return protocol details for serial helper probe.

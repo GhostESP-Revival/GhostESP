@@ -1,6 +1,8 @@
 #include "vendor/pcap.h"
+#include "vendor/radiotap.h"
 #include "core/utils.h"
 #include "core/glog.h"
+#include "core/system_manager.h"
 #include "core/serial_manager.h"
 #include "core/callbacks.h"
 #include "driver/uart.h"
@@ -11,6 +13,7 @@
 #include "managers/ghostchi_manager.h"
 #include "managers/ghostscript_runtime.h"
 #include "gui/toast.h"
+#include "freertos/task.h"
 #include "sys/time.h"
 #include <arpa/inet.h>
 #include <errno.h>
@@ -21,18 +24,28 @@
 #include <stdlib.h>
 #include <stdbool.h>
 
+/* A radiotap header with no fields present is exactly the 8 byte fixed prefix.
+ * radiotap_build() may grow that with signal/channel/rate/antenna. */
 #define RADIOTAP_HEADER_LEN 8
 
 static const char *PCAP_TAG = "PCAP";
 static bool is_valid_tag_length(uint8_t tag_num, uint8_t tag_len);
-static bool is_valid_beacon_fixed_params(const uint8_t *frame, size_t offset,
-                                         size_t max_len);
 esp_err_t pcap_file_open_in_dir(const char *base_file_name,
                                 const char *dir_path,
                                 pcap_capture_type_t capture_type);
 static esp_err_t _pcap_flush_buffer_to_file_nolock();
 static esp_err_t _pcap_flush_wireshark_stream_nolock();
+static void pcap_buffer_reset(void);
 static void pcap_release_idle_resources(void);
+static void pcap_progress_stop(void);
+static void pcap_progress_log_summary(void);
+
+/* Periodic capture progress state. Declared up here rather than next to the
+ * progress code because pcap_file_close() keys the closing summary off it. */
+static volatile uint32_t s_progress_interval_ms = 0;
+static char s_progress_label[16] = "PCAP";
+static bool s_progress_active = false;
+
 static char pcap_file_path[MAX_FILE_NAME_LENGTH];
 static char pcap_base_name[32] = "capture";
 static char pcap_dir_path[MAX_FILE_NAME_LENGTH] = SD_DIR_PCAPS;
@@ -44,6 +57,21 @@ static FILE *pcap_file = NULL;
 static SemaphoreHandle_t pcap_mutex = NULL;
 static volatile bool s_capture_active = false;
 static pcap_capture_stats_t s_capture_stats;
+
+/* Records sitting in pcap_buffer that no destination has accepted yet. Held
+ * alongside buffer_offset so a flush that fails can charge the packets it could
+ * not save to packets_dropped rather than dropping them on the floor. */
+static uint32_t s_packets_in_buffer = 0;
+/* Latched on the first failed flush, cleared when a capture starts. A capture
+ * that lost part of itself stays marked no matter how cleanly it ends, so the
+ * stop path can report a truncated file instead of a clean save. */
+static bool s_capture_write_failed = false;
+/* When set, the frame is written exactly as received instead of being walked
+ * and trimmed. The walk exists so beacon and probe captures stop at the last
+ * valid information element rather than trailing padding the radio handed us,
+ * but a raw capture has to stay byte-exact or the tail of a frame goes missing.
+ * Declared up here because pcap_file_open_in_dir() clears it. */
+static bool s_pcap_write_frames_verbatim = false;
 
 #define HCX_MAX_SSIDS 8
 #define HCX_MAX_M2 4
@@ -427,10 +455,13 @@ esp_err_t pcap_write_global_header(FILE *f, pcap_capture_type_t capture_type) {
     }
   } else {
     size_t written = fwrite(&header, 1, sizeof(header), f);
-    if (written == sizeof(header)) {
-      fflush(f);
+    /* A full fwrite can still fail when stdio commits it, and callers treat
+     * ESP_OK as "the file has a header": reporting success there yields a
+     * capture file that no reader can open. */
+    if (written == sizeof(header) && fflush(f) == 0) {
       return ESP_OK;
     }
+    clearerr(f);
     return ESP_FAIL;
   }
 }
@@ -496,8 +527,20 @@ esp_err_t pcap_file_open_in_dir(const char *base_file_name,
     return ESP_ERR_TIMEOUT;
   }
 
-  buffer_offset = 0;
+  if (pcap_file) {
+    fclose(pcap_file);
+    pcap_file = NULL;
+  }
+
+  pcap_buffer_reset();
   s_capture_active = false;
+  s_capture_write_failed = false;
+  /* Verbatim writing is opt-in per capture, so clear it: a later beacon
+   * capture must not inherit it from a raw one. */
+  s_pcap_write_frames_verbatim = false;
+  /* Queue drops belong to the capture that is ending, so start the new one
+   * from zero. */
+  pcap_reset_queue_drop_stats();
   memset(&s_capture_stats, 0, sizeof(s_capture_stats));
   struct timeval start_tv;
   gettimeofday(&start_tv, NULL);
@@ -553,6 +596,45 @@ esp_err_t pcap_file_open_in_dir(const char *base_file_name,
   return ESP_OK;
 }
 
+/* Fixed-parameter lengths for management frames (IEEE 802.11-2020 9.4).
+ * Returns the number of bytes that follow the 24-byte MAC header, or 0 for
+ * subtypes that carry no fixed parameters. */
+static size_t management_fixed_param_len(uint8_t subtype) {
+  switch (subtype) {
+  case 0x0: return 4;  // Association Request
+  case 0x1: return 6;  // Association Response
+  case 0x2: return 36; // Reassociation Request
+  case 0x3: return 6;  // Reassociation Response
+  case 0x4: return 4;  // Probe Request
+  case 0x5: return 12; // Probe Response
+  case 0x6: return 12; // Timing Advertisement
+  case 0x8: return 12; // Beacon
+  case 0x9: return 4;  // ATIM
+  case 0xa: return 2;  // Disassociation
+  case 0xb: return 6;  // Authentication
+  case 0xc: return 2;  // Deauthentication
+  case 0xd: return 1;  // Action
+  case 0xe: return 1;  // Action No Ack
+  default: return 0;   // Reserved / unused
+  }
+}
+
+/* Length of a control frame body (802.11-2020 9.2). ACK and CTS have no
+ * duration field, Block Ack Request has no ID. */
+static size_t control_frame_len(uint8_t subtype) {
+  switch (subtype) {
+  case 0x8: return 14; // Block Ack Request
+  case 0x9: return 32; // Block Ack
+  case 0xc: return 10; // CTS
+  case 0xd: return 10; // ACK
+  default: return 16;  // PS-Poll, RTS, reserved
+  }
+}
+
+void pcap_set_write_frames_verbatim(bool enabled) {
+    s_pcap_write_frames_verbatim = enabled;
+}
+
 static size_t calculate_wifi_frame_length(const uint8_t *frame,
                                           size_t max_len) {
   if (frame == NULL || max_len < 2)
@@ -567,82 +649,45 @@ static size_t calculate_wifi_frame_length(const uint8_t *frame,
   size_t length = 24; // Basic MAC header length
 
   switch (type) {
-  case 0x0: // Management frames
+  case 0x0: { // Management frames
     if (max_len < length)
       return max_len;
 
-    // Handle fixed parameters
-    switch (subtype) {
-    case 0x8: // Beacon
-    case 0x5: // Probe Response
-      if (max_len < length + 12)
-        return length;
-      if (subtype == 0x8 &&
-          !is_valid_beacon_fixed_params(frame, length, max_len)) {
-        return length;
-      }
-      length += 12;
-      break;
-
-    case 0x0: // Association Request
-      if (max_len < length + 4)
-        return length;
-      length += 4;
-      break;
-
-    case 0xb: // Authentication
-      if (max_len < length + 6)
-        return length;
-      length += 6;
-      break;
-
-    case 0xd: // Action
-      if (max_len < length + 1)
-        return length;
-      length += 1;
-      break;
+    size_t fixed = management_fixed_param_len(subtype);
+    if (fixed > 0) {
+      // The radio did not hand us the whole frame. Emit what we actually got
+      // instead of falling back to a bare MAC header.
+      if (max_len < length + fixed)
+        return max_len;
+      length += fixed;
     }
 
-    // Process tagged parameters with validation
-    if (max_len > length) {
-      size_t pos = length;
-      while (pos + 2 <= max_len) {
-        uint8_t tag_num = frame[pos];
-        uint8_t tag_len = frame[pos + 1];
+    /* Walk the tagged parameters starting after the fixed parameters, so the
+     * fixed parameters are never mistaken for elements. Stop at the first
+     * element that does not fit or is structurally invalid, but never cut
+     * into an element the radio did capture. */
+    size_t pos = length;
+    while (pos + 2 <= max_len) {
+      uint8_t tag_num = frame[pos];
+      uint8_t tag_len = frame[pos + 1];
 
-        if (pos + 2 + tag_len > max_len) {
-          length = pos;
-          break;
-        }
+      if (pos + 2 + tag_len > max_len)
+        break;
+      if (!is_valid_tag_length(tag_num, tag_len))
+        break;
 
-        if (!is_valid_tag_length(tag_num, tag_len)) {
-          length = pos;
-          break;
-        }
+      pos += 2 + tag_len;
 
-        pos += 2 + tag_len;
-
-        // Check for padding or end of tags
-        if (tag_num == 0 && tag_len == 0) {
-          break;
-        }
-      }
-      length = pos;
+      // End-of-elements marker
+      if (tag_num == 0 && tag_len == 0)
+        break;
     }
+    length = pos;
     break;
+  }
 
   case 0x1: // Control frames
-    switch (subtype) {
-    case 0xB: // RTS
-      length = 16;
-      break;
-    case 0xC: // CTS
-    case 0xD: // ACK
-      length = 10;
-      break;
-    default:
-      length = 16; // Default for other control frames
-    }
+    length = control_frame_len(subtype);
     break;
 
   case 0x2: // Data frames
@@ -654,7 +699,7 @@ static size_t calculate_wifi_frame_length(const uint8_t *frame,
 
     if ((subtype & 0x8) != 0) { // QoS data
       if (max_len < length + 2)
-        return length;
+        return max_len;
       length += 2;
     }
 
@@ -737,30 +782,14 @@ static bool is_valid_tag_length(uint8_t tag_num, uint8_t tag_len) {
   }
 }
 
-static bool is_valid_beacon_fixed_params(const uint8_t *frame, size_t offset,
-                                         size_t max_len) {
-  if (offset + 12 > max_len)
-    return false;
-
-  // Skip timestamp (8 bytes) as it can be any value
-
-  // Check beacon interval (2 bytes) - typically between 1-65535
-  uint16_t beacon_interval = frame[offset + 8] | (frame[offset + 9] << 8);
-  if (beacon_interval == 0)
-    return false;
-
-  // Check capability info (2 bytes) - must have some bits set
-  uint16_t capability = frame[offset + 10] | (frame[offset + 11] << 8);
-  if ((capability & 0x0001) == 0 && (capability & 0x0002) == 0) {
-    // At least one of ESS or IBSS must be set
-    return false;
-  }
-
-  return true;
-}
-
 esp_err_t pcap_write_packet_to_buffer(const void *packet, size_t length,
                                       pcap_capture_type_t capture_type) {
+  return pcap_write_packet_to_buffer_meta(packet, length, capture_type, NULL);
+}
+
+esp_err_t pcap_write_packet_to_buffer_meta(const void *packet, size_t length,
+                                           pcap_capture_type_t capture_type,
+                                           const radiotap_meta_t *meta) {
   s_capture_type = capture_type;
   s_capture_stats.packets_seen++;
   if (packet == NULL || length < 2) {
@@ -777,12 +806,26 @@ esp_err_t pcap_write_packet_to_buffer(const void *packet, size_t length,
   size_t actual_length;
   size_t header_length = 0;
   uint8_t bt_h4_header[1];
+  uint8_t radiotap_header[RADIOTAP_MAX_LEN];
+  size_t radiotap_len = 0;
   int is_bt = 0;
 
   if (capture_type == PCAP_CAPTURE_WIFI) {
     const uint8_t *frame = (const uint8_t *)packet;
-    actual_length = calculate_wifi_frame_length(frame, length);
-    header_length = RADIOTAP_HEADER_LEN;
+    actual_length = s_pcap_write_frames_verbatim ? length
+                                                 : calculate_wifi_frame_length(frame, length);
+    /* Build the radiotap up front so the length it declares is the length we
+     * account for below. With no metadata this collapses to the original
+     * 8 byte empty header. */
+    radiotap_len = radiotap_build(radiotap_header, sizeof(radiotap_header), meta);
+    if (radiotap_len < RADIOTAP_HEADER_LEN) {
+      radiotap_len = RADIOTAP_HEADER_LEN;
+      memset(radiotap_header, 0, radiotap_len);
+      radiotap_header[0] = 0;
+      radiotap_header[2] = (uint8_t)(radiotap_len & 0xFF);
+      radiotap_header[3] = (uint8_t)((radiotap_len >> 8) & 0xFF);
+    }
+    header_length = radiotap_len;
   } else if (capture_type == PCAP_CAPTURE_IEEE802154) {
     // IEEE 802.15.4 frames are written as-is (no FCS) with NOFCS DLT
     actual_length = length;
@@ -867,14 +910,11 @@ esp_err_t pcap_write_packet_to_buffer(const void *packet, size_t length,
   buffer_offset += sizeof(packet_header);
 
   if (capture_type == PCAP_CAPTURE_WIFI) {
-    // Write radiotap header for WiFi packets
-    uint8_t radiotap_header[RADIOTAP_HEADER_LEN] = {
-        0x00, 0x00,            // Version 0
-        0x08, 0x00,            // Header length
-        0x00, 0x00, 0x00, 0x00 // Present flags
-    };
-    memcpy(pcap_buffer + buffer_offset, radiotap_header, RADIOTAP_HEADER_LEN);
-    buffer_offset += RADIOTAP_HEADER_LEN;
+    /* Radiotap header for WiFi packets. Built from the per-frame radio
+     * metadata when the caller supplied it, so captures carry signal, channel
+     * and rate instead of an empty header. */
+    memcpy(pcap_buffer + buffer_offset, radiotap_header, radiotap_len);
+    buffer_offset += radiotap_len;
   }
 
   // Write packet data
@@ -890,6 +930,7 @@ esp_err_t pcap_write_packet_to_buffer(const void *packet, size_t length,
   }
 
   s_capture_stats.packets_written++;
+  s_packets_in_buffer++;
 
   if (pcap_file == NULL && s_pcap_mode == PCAP_MODE_WIRESHARK) {
     _pcap_flush_wireshark_stream_nolock();
@@ -930,7 +971,12 @@ esp_err_t pcap_wireshark_start(pcap_capture_type_t capture_type) {
   s_pcap_mode = PCAP_MODE_WIRESHARK;
   s_capture_type = capture_type;
   pcap_file = NULL;
-  buffer_offset = 0;
+  pcap_buffer_reset();
+  s_capture_write_failed = false;
+  /* Verbatim writing is opt-in and set by the caller after this returns, so
+   * make sure a previous file capture's setting does not carry over. */
+  s_pcap_write_frames_verbatim = false;
+  pcap_reset_queue_drop_stats();
 
   esp_err_t ret = pcap_write_global_header(NULL, capture_type);
   if (ret != ESP_OK) {
@@ -944,76 +990,177 @@ esp_err_t pcap_wireshark_start(pcap_capture_type_t capture_type) {
   return ESP_OK;
 }
 
+/* Empties pcap_buffer. Every site that clears buffer_offset has to clear the
+ * buffered packet count with it, or a later failed flush charges the wrong
+ * number of drops. */
+static void pcap_buffer_reset(void) {
+  buffer_offset = 0;
+  s_packets_in_buffer = 0;
+}
+
 static esp_err_t _pcap_flush_wireshark_stream_nolock() {
   if (buffer_offset > 0) {
+    /* A short return here is UART backpressure, not a storage failure, so it is
+     * deliberately not turned into a capture error: the host stream is the only
+     * destination and failing the capture would not put those bytes anywhere
+     * else. bytes_written still counts the whole buffer for that reason. */
     serial_manager_write_bytes((const void *)pcap_buffer, buffer_offset);
-    buffer_offset = 0;
+    s_capture_stats.bytes_written += buffer_offset;
+    pcap_buffer_reset();
   }
   return ESP_OK;
 }
 
-static esp_err_t _pcap_flush_buffer_to_file_nolock() {
-  if (buffer_offset > 0) {
-    s_capture_stats.buffer_flushes++;
-    if (pcap_file) { // If file is open, write to file
-      size_t written = fwrite(pcap_buffer, 1, buffer_offset, pcap_file);
-      if (written < buffer_offset) {
-        ESP_LOGE(PCAP_TAG, "Failed to write buffered data to PCAP file.");
-      } else {
-        fflush(pcap_file);
-      }
-    } else { // If no file, try JIT mount for somethingsomething, else UART
-      bool gating_template = pcap_is_jit_template();
+/* Hands the buffer to an open stream and reports how many bytes really landed.
+ * A full fwrite can still fail when the data is committed, so fflush is part of
+ * the write rather than a separate best-effort step. The result is 0 whenever
+ * anything went wrong: with a write in doubt we cannot know how much of it
+ * reached storage, so we claim none of it rather than overstate bytes_written. */
+static size_t _pcap_write_to_stream(FILE *f) {
+  size_t written = fwrite(pcap_buffer, 1, buffer_offset, f);
+  int commit_failed = 0;
+  if (written == buffer_offset && fflush(f) != 0) {
+    written = 0;
+    commit_failed = 1;
+  }
+  if (ferror(f)) {
+    written = 0;
+    commit_failed = 1;
+  }
+  if (commit_failed) {
+    /* The indicator is sticky and pcap_file outlives any single flush, so
+     * leaving it set makes every later write inherit the failure. Clearing it
+     * lets a card that was re-inserted accept writes again instead of failing
+     * for the rest of the capture. Done on any detected failure rather than on
+     * ferror() alone, because a failing fflush is not guaranteed to set it. */
+    clearerr(f);
+  }
+  return written;
+}
 
-      if (gating_template) {
-          bool display_was_suspended = false;
-          if (sd_card_mount_for_flush(&display_was_suspended) == ESP_OK) {
-            if (pcap_file_path[0] == '\0') {
-            get_next_pcap_file_name(pcap_file_path, pcap_dir_path, pcap_base_name);
-            }
-          FILE *f = fopen(pcap_file_path, "ab+");
-          if (f) {
-            fseek(f, 0, SEEK_END);
-            long sz = ftell(f);
-            if (sz == 0) {
-              // write global header on first write
-              pcap_write_global_header(f, s_capture_type);
-            }
-            size_t written = fwrite(pcap_buffer, 1, buffer_offset, f);
-            fclose(f);
-            if (written < buffer_offset) {
-              ESP_LOGE(PCAP_TAG, "Failed to write buffered data to PCAP file (JIT).");
-            }
-          }
-          sd_card_unmount_after_flush(display_was_suspended);
-        } else {
-          const char *mark_begin = "[BUF/BEGIN]";
-          const size_t mark_begin_len = strlen(mark_begin);
-          const char *mark_close = "[BUF/CLOSE]";
-          const size_t mark_close_len = strlen(mark_close);
-          glog_set_defer(1);
-          uart_write_bytes(UART_NUM_0, mark_begin, mark_begin_len);
-          uart_write_bytes(UART_NUM_0, (const char *)pcap_buffer, buffer_offset);
-          uart_write_bytes(UART_NUM_0, mark_close, mark_close_len);
-          glog_set_defer(0);
-          glog_flush_deferred();
-        }
-      } else {
-        const char *mark_begin = "[BUF/BEGIN]";
-        const size_t mark_begin_len = strlen(mark_begin);
-        const char *mark_close = "[BUF/CLOSE]";
-        const size_t mark_close_len = strlen(mark_close);
-        glog_set_defer(1);
-        uart_write_bytes(UART_NUM_0, mark_begin, mark_begin_len);
-        uart_write_bytes(UART_NUM_0, (const char *)pcap_buffer, buffer_offset);
-        uart_write_bytes(UART_NUM_0, mark_close, mark_close_len);
-        glog_set_defer(0);
-        glog_flush_deferred();
+/* JIT templates keep no open handle: the card is mounted for the length of one
+ * flush and reopened next time, so a card that comes back mid-capture is picked
+ * up by a later flush. Every step can fail on a card pulled mid-capture, and
+ * all of them funnel into *accepted so the caller can charge the records it
+ * could not save. */
+static esp_err_t _pcap_flush_buffer_jit_nolock(size_t *accepted) {
+  *accepted = 0;
+
+  bool display_was_suspended = false;
+  if (sd_card_mount_for_flush(&display_was_suspended) != ESP_OK) {
+    ESP_LOGE(PCAP_TAG, "JIT flush: SD mount failed");
+    return ESP_FAIL;
+  }
+
+  esp_err_t ret = ESP_OK;
+  if (pcap_file_path[0] == '\0') {
+    get_next_pcap_file_name(pcap_file_path, pcap_dir_path, pcap_base_name);
+  }
+
+  FILE *f = fopen(pcap_file_path, "ab+");
+  if (!f) {
+    ESP_LOGE(PCAP_TAG, "JIT flush: cannot open %s", pcap_file_path);
+    ret = ESP_FAIL;
+  } else {
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    if (sz == 0) {
+      // write global header on first write
+      if (pcap_write_global_header(f, s_capture_type) != ESP_OK) {
+        ESP_LOGE(PCAP_TAG, "JIT flush: global header write failed");
+        ret = ESP_FAIL;
       }
     }
-    buffer_offset = 0; // Reset buffer
+    if (ret == ESP_OK) {
+      size_t written = fwrite(pcap_buffer, 1, buffer_offset, f);
+      int io_error = ferror(f); // must be sampled before fclose
+      /* fclose commits whatever stdio is still holding, so a full or yanked
+       * card can leave fwrite reporting the full count and surface only here.
+       * Its result is part of the write, not cleanup. */
+      int close_failed = fclose(f) != 0;
+      f = NULL;
+      if (io_error || close_failed || written < buffer_offset) {
+        ESP_LOGE(PCAP_TAG, "JIT flush: write failed %zu/%zu bytes (close=%d)",
+                 written, buffer_offset, close_failed);
+        ret = ESP_FAIL;
+      } else {
+        *accepted = written;
+      }
+    }
+    if (f != NULL) {
+      fclose(f); // gave up before writing; still release the handle
+    }
   }
-  return ESP_OK;
+
+  sd_card_unmount_after_flush(display_was_suspended);
+  return ret;
+}
+
+/* Last resort destination when there is no file and no SD: wrap the buffer in
+ * text markers so a host-side reader can find it on the console. */
+static void _pcap_flush_buffer_to_uart(void) {
+  const char *mark_begin = "[BUF/BEGIN]";
+  const size_t mark_begin_len = strlen(mark_begin);
+  const char *mark_close = "[BUF/CLOSE]";
+  const size_t mark_close_len = strlen(mark_close);
+  glog_set_defer(1);
+  uart_write_bytes(UART_NUM_0, mark_begin, mark_begin_len);
+  uart_write_bytes(UART_NUM_0, (const char *)pcap_buffer, buffer_offset);
+  uart_write_bytes(UART_NUM_0, mark_close, mark_close_len);
+  glog_set_defer(0);
+  glog_flush_deferred();
+}
+
+static esp_err_t _pcap_flush_buffer_to_file_nolock() {
+  if (buffer_offset == 0) {
+    return ESP_OK;
+  }
+  s_capture_stats.buffer_flushes++;
+
+  const size_t pending = buffer_offset;
+  const uint32_t buffered_packets = s_packets_in_buffer;
+  size_t accepted = 0;
+  esp_err_t ret = ESP_OK;
+  const char *dest = "uart";
+
+  if (pcap_file) { // If file is open, write to file
+    dest = "file";
+    accepted = _pcap_write_to_stream(pcap_file);
+    if (accepted < pending) {
+      ret = ESP_FAIL;
+    }
+  } else if (s_pcap_mode == PCAP_MODE_WIRESHARK) {
+    /* Live stream: the host reader expects a bare pcap byte stream. Writing
+     * the [BUF/BEGIN]/[BUF/CLOSE] text markers here would inject non-pcap
+     * bytes into the middle of the stream and desync the reader. */
+    return _pcap_flush_wireshark_stream_nolock();
+  } else if (pcap_is_jit_template()) { // No file, try JIT mount
+    dest = "JIT";
+    ret = _pcap_flush_buffer_jit_nolock(&accepted);
+  } else { // If no file, fall back to UART
+    _pcap_flush_buffer_to_uart();
+    accepted = pending;
+  }
+
+  s_capture_stats.bytes_written += accepted;
+
+  if (ret == ESP_OK) {
+    pcap_buffer_reset();
+    return ESP_OK;
+  }
+
+  /* A partial write is not resumable: stdio may still be holding the tail it
+   * failed to commit, so writing those bytes again from here risks duplicating
+   * records in the middle of the capture. Drop them instead, but charge them to
+   * packets_dropped and take them back out of packets_written, so a capture
+   * that lost the card says so instead of reporting a clean stop. */
+  s_capture_write_failed = true;
+  s_capture_stats.packets_dropped += buffered_packets;
+  s_capture_stats.packets_written -= buffered_packets;
+  pcap_buffer_reset();
+  ESP_LOGE(PCAP_TAG, "Flush to %s failed: %zu/%zu bytes, %lu packets lost",
+           dest, accepted, pending, (unsigned long)buffered_packets);
+  return ESP_FAIL;
 }
 
 void pcap_discard_buffer(void) {
@@ -1021,7 +1168,7 @@ void pcap_discard_buffer(void) {
     return;
   }
   if (xSemaphoreTake(pcap_mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
-    buffer_offset = 0;
+    pcap_buffer_reset();
     xSemaphoreGive(pcap_mutex);
   }
 }
@@ -1077,13 +1224,17 @@ static void pcap_release_idle_resources(void) {
 
   free(pcap_buffer);
   pcap_buffer = NULL;
-  buffer_offset = 0;
+  pcap_buffer_reset();
   pcap_mutex = NULL;
   xSemaphoreGive(mutex);
   vSemaphoreDelete(mutex);
 }
 
 void pcap_file_close() {
+  /* Stop the progress line first so the last thing the user sees is the final
+   * tally, not a stale "still running" line. */
+  pcap_progress_stop();
+
   if (pcap_mutex == NULL) {
     return;
   }
@@ -1094,23 +1245,49 @@ void pcap_file_close() {
       _pcap_flush_buffer_to_file_nolock();
     }
 
+    /* Stamp the stop time unconditionally, not just when a file is open: JIT
+     * boards open and close the file per flush, so pcap_file is NULL here and
+     * the duration would otherwise always read zero. */
+    struct timeval stop_tv;
+    gettimeofday(&stop_tv, NULL);
+    s_capture_stats.stopped_us = (uint64_t)stop_tv.tv_sec * 1000000ULL +
+                                 (uint64_t)stop_tv.tv_usec;
+
     if (pcap_file != NULL) {
-      struct timeval stop_tv;
-      gettimeofday(&stop_tv, NULL);
-      s_capture_stats.stopped_us = (uint64_t)stop_tv.tv_sec * 1000000ULL +
-                                   (uint64_t)stop_tv.tv_usec;
-      fclose(pcap_file);
+      /* The closing fclose commits whatever stdio still holds, so a card that
+       * was pulled or filled mid-capture can fail here after a clean-looking
+       * flush and still cost us the tail of the file. */
+      if (fclose(pcap_file) != 0) {
+        ESP_LOGE(PCAP_TAG, "Final commit of %s failed.", pcap_file_path);
+        s_capture_write_failed = true;
+      }
       pcap_file = NULL;
       ESP_LOGI(PCAP_TAG, "PCAP file closed.");
       if (pcap_file_path[0] != '\0') {
-        toast_show("PCAP saved", TOAST_SUCCESS);
-        ghostchi_manager_add_xp(6);
+        if (s_capture_write_failed) {
+          /* Part of the capture never reached the card, so this is not a clean
+           * save: say so and do not pay out the save reward for a file the
+           * user cannot use as captured. */
+          toast_show("PCAP saved, capture truncated", TOAST_ERROR);
+        } else {
+          toast_show("PCAP saved", TOAST_SUCCESS);
+          ghostchi_manager_add_xp(6);
+        }
       }
     }
 
     s_capture_active = false;
     xSemaphoreGive(pcap_mutex);
   }
+
+  /* Report the tally here rather than in any one command handler: the capture
+   * can be ended by "capture -stop", a bare "stop", the UI back button or a
+   * watchdog, and all of them land here. */
+  if (s_progress_active) {
+    s_progress_active = false;
+    pcap_progress_log_summary();
+  }
+
   cleanup_pcap_queue();
   pcap_release_idle_resources();
   ghostscript_emit_event("capture_stopped", pcap_file_path);
@@ -1126,11 +1303,36 @@ void pcap_get_stats(pcap_capture_stats_t *out) {
   }
 }
 
+void pcap_get_destination(char *out, size_t out_len) {
+  if (!out || out_len == 0) return;
+  out[0] = '\0';
+
+  /* pcap_file_path is filled lazily by the JIT mount path, so copy it under
+   * the mutex rather than handing out the static buffer. */
+  if (pcap_mutex && xSemaphoreTake(pcap_mutex, pdMS_TO_TICKS(20)) == pdTRUE) {
+    if (pcap_file_path[0] != '\0') {
+      strncpy(out, pcap_file_path, out_len - 1);
+      out[out_len - 1] = '\0';
+    }
+    xSemaphoreGive(pcap_mutex);
+  } else if (pcap_file_path[0] != '\0') {
+    strncpy(out, pcap_file_path, out_len - 1);
+    out[out_len - 1] = '\0';
+  }
+
+  if (out[0] == '\0') {
+    strncpy(out, "UART", out_len - 1);
+    out[out_len - 1] = '\0';
+  }
+}
+
 void pcap_wireshark_stop(void) {
+  pcap_progress_stop();
+
   if (pcap_mutex == NULL) {
     return;
   }
-  
+
   if (xSemaphoreTake(pcap_mutex, portMAX_DELAY) == pdTRUE) {
     if (s_pcap_mode == PCAP_MODE_WIRESHARK) {
       if (buffer_offset > 0) {
@@ -1143,4 +1345,179 @@ void pcap_wireshark_stop(void) {
   }
   cleanup_pcap_queue();
   pcap_release_idle_resources();
+}
+
+/* ---- Periodic capture progress ---------------------------------------- */
+/* Between the start banner and the stop summary a capture is otherwise
+ * completely silent, so a device capturing for a minute looks hung. Stream a
+ * single line through glog on a fixed interval instead. Opt-in via
+ * pcap_progress_start(): ghostchi and the plugin API run unattended and print
+ * their own telemetry, so they must not trigger this. */
+#define PCAP_PROGRESS_TASK_STACK 4096
+#define PCAP_PROGRESS_MIN_INTERVAL_MS 2000
+
+static TaskHandle_t s_progress_task = NULL;
+static portMUX_TYPE s_progress_lock = portMUX_INITIALIZER_UNLOCKED;
+
+/* The on-device terminal is about 18 columns wide and wraps anything longer
+ * mid-token, which turns one long status line into an unreadable block. Emit
+ * one short field per line instead, matching the capture start banner, and
+ * leave a blank row between updates so consecutive blocks stay distinct. */
+static void pcap_progress_log_line(void) {
+  pcap_capture_stats_t stats;
+  pcap_get_stats(&stats);
+
+  struct timeval tv;
+  gettimeofday(&tv, NULL);
+  uint64_t now_us = (uint64_t)tv.tv_sec * 1000000ULL + (uint64_t)tv.tv_usec;
+  uint32_t elapsed_s = 0;
+  if (stats.started_us != 0 && now_us > stats.started_us) {
+    elapsed_s = (uint32_t)((now_us - stats.started_us) / 1000000ULL);
+  }
+
+  // Drops only earn a line when packets are actually being lost, so it joins
+  // the block rather than following the blank separator.
+  char drops[24] = "";
+  if (stats.packets_dropped > 0) {
+    snprintf(drops, sizeof(drops), "%lu dropped\n",
+             (unsigned long)stats.packets_dropped);
+  }
+
+  glog("Capturing %s\nRunning for %lus\n%lu packets\n%lu KB written\n%s\n",
+       s_progress_label,
+       (unsigned long)elapsed_s,
+       (unsigned long)stats.packets_written,
+       (unsigned long)(stats.bytes_written / 1024),
+       drops);
+}
+
+/* Closing summary, emitted from pcap_file_close() so every stop path reports
+ * one: "capture -stop", a bare "stop", the UI back button, a watchdog. Same
+ * short-field layout as the progress block, with no trailing blank row. */
+static void pcap_progress_log_summary(void) {
+  pcap_capture_stats_t stats;
+  pcap_get_stats(&stats);
+
+  char dest[MAX_FILE_NAME_LENGTH];
+  pcap_get_destination(dest, sizeof(dest));
+
+  uint32_t duration_s = 0;
+  if (stats.started_us != 0 && stats.stopped_us > stats.started_us) {
+    duration_s = (uint32_t)((stats.stopped_us - stats.started_us) / 1000000ULL);
+  }
+
+  glog("Captured %s\nRan for %lus\n%lu packets\n%lu KB written\n%lu dropped\n",
+       s_progress_label,
+       (unsigned long)duration_s,
+       (unsigned long)stats.packets_written,
+       (unsigned long)(stats.bytes_written / 1024),
+       (unsigned long)stats.packets_dropped);
+  glog("-> %s\n", dest);
+  /* "N dropped" counts packets the capture chose not to buffer, so it says
+   * nothing on its own about a card that was pulled mid-capture. Name the
+   * truncation separately, otherwise a lost capture still reads as a clean one. */
+  if (s_capture_write_failed) {
+    glog("Storage error: capture truncated\n");
+  }
+
+  /* Frames the capture queue could not take, reported separately from the
+   * writer's own drop count. A raw capture that never filled a slot looks
+   * identical to a complete one otherwise, which is how the old 768-byte slot
+   * limit went unnoticed: every oversized frame was discarded with no trace. */
+  uint32_t q_too_big = 0, q_no_slot = 0, q_queue_full = 0;
+  pcap_get_queue_drop_stats(&q_too_big, &q_no_slot, &q_queue_full);
+  if (q_too_big > 0 || q_no_slot > 0 || q_queue_full > 0) {
+    if (q_too_big > 0) {
+      glog("Frames too large to buffer: %lu\n", (unsigned long)q_too_big);
+    }
+    if (q_no_slot > 0) {
+      glog("Frames dropped, queue full: %lu\n", (unsigned long)q_no_slot);
+    }
+    if (q_queue_full > 0) {
+      glog("Frames dropped, backlog: %lu\n", (unsigned long)q_queue_full);
+    }
+  }
+}
+
+/* Exits once the interval is cleared or the capture ends, so this task only
+ * lives as long as the capture it is reporting on. */
+static void pcap_progress_task(void *arg) {
+  (void)arg;
+
+  for (;;) {
+    taskENTER_CRITICAL(&s_progress_lock);
+    uint32_t interval = s_progress_interval_ms;
+    taskEXIT_CRITICAL(&s_progress_lock);
+    if (interval == 0) {
+      break; // pcap_progress_stop()
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(interval));
+
+    taskENTER_CRITICAL(&s_progress_lock);
+    bool running = s_progress_interval_ms != 0;
+    taskEXIT_CRITICAL(&s_progress_lock);
+    if (!running) {
+      break;
+    }
+    if (!pcap_is_capturing()) {
+      break; // capture ended without an explicit stop
+    }
+
+    pcap_progress_log_line();
+  }
+
+  taskENTER_CRITICAL(&s_progress_lock);
+  s_progress_task = NULL;
+  taskEXIT_CRITICAL(&s_progress_lock);
+  vTaskDeleteWithCaps(NULL);
+}
+
+void pcap_progress_start(const char *label, uint32_t interval_ms) {
+  if (interval_ms < PCAP_PROGRESS_MIN_INTERVAL_MS) {
+    interval_ms = PCAP_PROGRESS_MIN_INTERVAL_MS;
+  }
+  if (!pcap_is_capturing()) {
+    return; // nothing to report on
+  }
+  if (pcap_is_wireshark_mode()) {
+    // Packets stream over UART as a raw pcap byte stream; interleaving text
+    // would corrupt the host's parse.
+    return;
+  }
+
+  taskENTER_CRITICAL(&s_progress_lock);
+  s_progress_interval_ms = interval_ms;
+  s_progress_active = true;
+  if (label && *label) {
+    strncpy(s_progress_label, label, sizeof(s_progress_label) - 1);
+    s_progress_label[sizeof(s_progress_label) - 1] = '\0';
+  }
+  bool already_reporting = s_progress_task != NULL;
+  taskEXIT_CRITICAL(&s_progress_lock);
+
+  if (already_reporting) {
+    return; // already reporting; the new interval is picked up above
+  }
+
+  TaskHandle_t task = NULL;
+  BaseType_t rc = xTaskCreate_psram(pcap_progress_task, "pcap_prog",
+                                    PCAP_PROGRESS_TASK_STACK, NULL, 3, &task);
+  if (rc != pdPASS) {
+    ESP_LOGW(PCAP_TAG, "Capture progress task not started");
+    taskENTER_CRITICAL(&s_progress_lock);
+    s_progress_interval_ms = 0;
+    taskEXIT_CRITICAL(&s_progress_lock);
+    return;
+  }
+
+  taskENTER_CRITICAL(&s_progress_lock);
+  s_progress_task = task;
+  taskEXIT_CRITICAL(&s_progress_lock);
+}
+
+static void pcap_progress_stop(void) {
+  taskENTER_CRITICAL(&s_progress_lock);
+  s_progress_interval_ms = 0;
+  taskEXIT_CRITICAL(&s_progress_lock);
 }

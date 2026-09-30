@@ -1,0 +1,16 @@
+Title: NRF24
+Description: NRF24L01 frequency analyzer and GhostLink remote control
+URL: /v1.9.8/nrf24/
+Version: v1.9.8
+Section: GhostESP: Revival
+Keywords: NRF24, NRF24L01, 2.4GHz, frequency analyzer, GhostLink
+Search index: /search-index.json
+
+# NRF24
+
+> NRF24L01 frequency analyzer and GhostLink remote control
+
+---
+
+GhostESP includes an NRF24 analyzer for viewing 2.4 GHz activity across channels 0-125.
+Use this section for setup, local analyzer usage, and GhostLink remote control mode.

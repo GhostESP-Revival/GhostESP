@@ -31,11 +31,17 @@
 #if defined(CONFIG_HAS_SUBGHZ) || defined(CONFIG_HAS_SUBGHZ_REMOTE)
 #include "managers/views/subghz_view.h"
 #endif
+#if defined(CONFIG_HAS_LORA) && defined(CONFIG_WITH_SCREEN)
+#include "managers/views/lora_view.h"
+#endif
 #if defined(CONFIG_HAS_BADUSB) || defined(CONFIG_HAS_BADUSB_REMOTE)
 #include "managers/views/badusb_view.h"
 #endif
 #ifdef CONFIG_HAS_BADBLE
 #include "managers/views/badble_view.h"
+#endif
+#if defined(CONFIG_CROWPANEL_1P28_ROTARY) && defined(CONFIG_HAS_BADUSB)
+#include "managers/views/crowpanel_audio_view.h"
 #endif
 #ifdef CONFIG_HAS_AUDIO_PLAYER
 #include "managers/views/audio_player_screen.h"
@@ -56,11 +62,13 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 
 LV_IMG_DECLARE(dualcomm);
 LV_IMG_DECLARE(lan_50dp_FFFFFF_FILL0_wght400_GRAD0_opsz48);
 LV_IMG_DECLARE(nrf24);
 LV_IMG_DECLARE(subghz);
+LV_IMG_DECLARE(lora);
 LV_IMG_DECLARE(lock);
 LV_IMG_DECLARE(rave);
 LV_IMG_DECLARE(speaker_50dp_FFFFFF_FILL0_wght400_GRAD0_opsz48);
@@ -73,6 +81,12 @@ LV_IMG_DECLARE(accelerometer_icon);
 #define ITEM(key, label, asset, image, target, type, place) \
     {.id = key, .name = label, .asset_key = asset, .icon = &image, \
      .view = &target, .options_type = type, .default_placement = place}
+
+/* Same as ITEM, but filed under a firmware folder. Keep the array order
+ * grouped per folder: it is the order apps appear inside that folder. */
+#define ITEM_CAT(key, label, asset, image, target, type, place, cat) \
+    {.id = key, .name = label, .asset_key = asset, .icon = &image, \
+     .view = &target, .options_type = type, .default_placement = place, .category = cat}
 
 /* Keep historical defaults in order; adding a new item never renumbers IDs. */
 static const menu_catalog_item_t builtin_items[] = {
@@ -98,46 +112,105 @@ static const menu_catalog_item_t builtin_items[] = {
 #if defined(CONFIG_HAS_SUBGHZ) || defined(CONFIG_HAS_SUBGHZ_REMOTE)
     ITEM("subghz", "SubGHz", "subghz", subghz, subghz_view, 0, MENU_PLACE_MAIN),
 #endif
+#if defined(CONFIG_HAS_LORA) && defined(CONFIG_WITH_SCREEN)
+    ITEM("lora", "LoRa", "lora", lora, lora_view, 0, MENU_PLACE_MAIN),
+#endif
 #if defined(CONFIG_HAS_BADUSB) || defined(CONFIG_HAS_BADUSB_REMOTE)
     ITEM("badusb", "BadUSB", "usb", usb, badusb_view, 0, MENU_PLACE_MAIN),
 #endif
 #ifdef CONFIG_HAS_BADBLE
     ITEM("badble", "BadBLE", "bluetooth", bluetooth, badble_view, 0, MENU_PLACE_MAIN),
 #endif
+#if defined(CONFIG_CROWPANEL_1P28_ROTARY) && defined(CONFIG_HAS_BADUSB)
+    /* The rotary board's primary job is audio control; keep it on the
+     * circular home gallery instead of hiding it behind Apps. */
+    ITEM("audio_master", "USB Audio", "speaker_50dp_FFFFFF_FILL0_wght400_GRAD0_opsz48", speaker_50dp_FFFFFF_FILL0_wght400_GRAD0_opsz48, crowpanel_audio_view, 0, MENU_PLACE_MAIN),
+#endif
     ITEM("ghostlink", "GhostLink", "dualcomm", dualcomm, options_menu_view, OT_DualComm, MENU_PLACE_MAIN),
     ITEM("ethernet", "Ethernet", "lan_50dp_FFFFFF_FILL0_wght400_GRAD0_opsz48", lan_50dp_FFFFFF_FILL0_wght400_GRAD0_opsz48, ethernet_screen_view, 0, MENU_PLACE_MAIN),
     ITEM("apps", "Apps", "GESPAppGallery", GESPAppGallery, apps_menu_view, 0, MENU_PLACE_MAIN),
     ITEM("lock", "Lock", "lock", lock, lockscreen_view, 0, MENU_PLACE_MAIN),
     ITEM("settings", "Settings", "settings_icon", settings_icon, options_menu_view, OT_Settings, MENU_PLACE_MAIN),
-    ITEM("visualizer", "Visualizer", "rave", rave, music_visualizer_view, 0, MENU_PLACE_APPS),
+    /* --- Apps gallery -------------------------------------------------------
+     * Order below is the gallery's default order. Grouped runs of the same
+     * folder also give the order apps appear inside that folder. A native SD
+     * app joins the folder whose key matches its manifest "category", so both
+     * sources share one taxonomy. */
+    ITEM_CAT("visualizer", "Visualizer", "rave", rave, music_visualizer_view, 0, MENU_PLACE_APPS, "Media"),
 #ifdef CONFIG_HAS_AUDIO_PLAYER
-    ITEM("audio", "Audio", "speaker_50dp_FFFFFF_FILL0_wght400_GRAD0_opsz48", speaker_50dp_FFFFFF_FILL0_wght400_GRAD0_opsz48, audio_player_view, 0, MENU_PLACE_APPS),
+    ITEM_CAT("audio", "Audio", "speaker_50dp_FFFFFF_FILL0_wght400_GRAD0_opsz48", speaker_50dp_FFFFFF_FILL0_wght400_GRAD0_opsz48, audio_player_view, 0, MENU_PLACE_APPS, "Media"),
 #endif
 #ifdef CONFIG_CROWPANEL_P4_CAMERA
-    ITEM("camera", "Camera", "camera_icon", camera_icon, crowpanel_p4_camera_view, 0, MENU_PLACE_APPS),
+    ITEM_CAT("camera", "Camera", "camera_icon", camera_icon, crowpanel_p4_camera_view, 0, MENU_PLACE_APPS, "Media"),
 #endif
-    ITEM("terminal", "Terminal", "terminal_icon", terminal_icon, terminal_view, 0, MENU_PLACE_APPS),
-    ITEM("sd_browser", "SD Browser", "folder", folder, sd_browser_view, 0, MENU_PLACE_APPS),
+    ITEM_CAT("terminal", "Terminal", "terminal_icon", terminal_icon, terminal_view, 0, MENU_PLACE_APPS, "Tools"),
 #if CONFIG_ENABLE_GHOSTSCRIPT
-    ITEM("ghostscript", "GhostScript", "description", description, ghostscript_browser_view, 0, MENU_PLACE_APPS),
+    ITEM_CAT("ghostscript", "GhostScript", "description", description, ghostscript_browser_view, 0, MENU_PLACE_APPS, "Tools"),
 #endif
-    ITEM("store", "Store", "storefront", storefront, cloud_store_view, 0, MENU_PLACE_APPS),
+    ITEM_CAT("sd_browser", "SD Browser", "folder", folder, sd_browser_view, 0, MENU_PLACE_APPS, "Tools"),
 #ifdef CONFIG_WITH_SCREEN
-    ITEM("ghostchi", "Ghostchi", "ghost", ghost, ghostchi_view, 0, MENU_PLACE_APPS),
+    ITEM_CAT("ghostchi", "Ghostchi", "ghost", ghost, ghostchi_view, 0, MENU_PLACE_APPS, "Tools"),
 #endif
-    ITEM("clock", "Clock", "clock_icon", clock_icon, clock_view, 0, MENU_PLACE_APPS),
 #ifdef CONFIG_HAS_COMPASS
-    ITEM("compass", "Compass", "compass", compass, compass_view, 0, MENU_PLACE_APPS),
+    ITEM_CAT("compass", "Compass", "compass", compass, compass_view, 0, MENU_PLACE_APPS, "Sensors"),
 #endif
 #ifdef CONFIG_HAS_ENVIII
-    ITEM("enviii", "ENV-III", "enviii", enviii, enviii_view, 0, MENU_PLACE_APPS),
+    ITEM_CAT("enviii", "ENV-III", "enviii", enviii, enviii_view, 0, MENU_PLACE_APPS, "Sensors"),
 #endif
 #ifdef CONFIG_HAS_ACCELEROMETER
-    ITEM("accelerometer", "Accelerometer", "accelerometer_icon", accelerometer_icon, accelerometer_view, 0, MENU_PLACE_APPS),
+    ITEM_CAT("accelerometer", "Accelerometer", "accelerometer_icon", accelerometer_icon, accelerometer_view, 0, MENU_PLACE_APPS, "Sensors"),
 #endif
+    /* Unfiled apps stay at the gallery root. Clock leads because it is the
+     * app people reopen most; Store trails because it is a destination
+     * rather than something you use. */
+    ITEM("clock", "Clock", "clock_icon", clock_icon, clock_view, 0, MENU_PLACE_APPS),
+    ITEM("store", "Store", "storefront", storefront, cloud_store_view, 0, MENU_PLACE_APPS),
 };
 #undef ITEM
+#undef ITEM_CAT
 #define BUILTIN_COUNT ((int)(sizeof(builtin_items) / sizeof(builtin_items[0])))
+
+/* The firmware's folder list. This table is the only source of gallery
+ * folders, which is what fixes their order and labels no matter what is
+ * installed. Keys are matched case-insensitively against manifest categories;
+ * labels are what the tile shows, so a long key can still be abbreviated on
+ * small screens. Folders with no members are not rendered. */
+typedef struct {
+    const char *key;
+    const char *label;
+} menu_catalog_folder_t;
+
+static const menu_catalog_folder_t builtin_folders[] = {
+    {"Tools", "Tools"},
+    {"System", "System"},
+    {"Games", "Games"},
+    {"Communication", "Comms"},
+    {"Media", "Media"},
+    {"Sensors", "Sensors"},
+};
+#define BUILTIN_FOLDER_COUNT ((int)(sizeof(builtin_folders) / sizeof(builtin_folders[0])))
+_Static_assert(BUILTIN_FOLDER_COUNT > 0 && BUILTIN_FOLDER_COUNT <= MENU_CATALOG_MAX_FOLDERS,
+               "folder table outgrew MENU_CATALOG_MAX_FOLDERS");
+
+int menu_catalog_folder_count(void) {
+    return BUILTIN_FOLDER_COUNT;
+}
+
+const char *menu_catalog_folder_key(int index) {
+    return (index >= 0 && index < BUILTIN_FOLDER_COUNT) ? builtin_folders[index].key : NULL;
+}
+
+const char *menu_catalog_folder_label(int index) {
+    return (index >= 0 && index < BUILTIN_FOLDER_COUNT) ? builtin_folders[index].label : NULL;
+}
+
+int menu_catalog_folder_index(const char *category_key) {
+    if (!category_key || category_key[0] == '\0') return -1;
+    for (int i = 0; i < BUILTIN_FOLDER_COUNT; ++i) {
+        if (strcasecmp(builtin_folders[i].key, category_key) == 0) return i;
+    }
+    return -1;
+}
 
 int menu_catalog_count(void) {
     /* Match the gallery's native-app RAM requirement. No SD scan on menu entry. */
@@ -155,6 +228,7 @@ bool menu_catalog_get(int index, menu_catalog_item_t *item) {
     memset(item, 0, sizeof(*item));
     snprintf(item->id, sizeof(item->id), "plugin:%s", app->id);
     snprintf(item->name, sizeof(item->name), "%s", app->name);
+    snprintf(item->category, sizeof(item->category), "%s", app->category);
     item->icon = &GESPAppGallery;
     item->view = &plugin_runner_view;
     item->default_placement = MENU_PLACE_APPS;
@@ -185,10 +259,12 @@ static int item_order(const menu_catalog_item_t *item, uint8_t menu) {
     return entry ? entry->order[menu == MENU_PLACE_APPS] : MENU_ORDER_DEFAULT;
 }
 
-bool menu_catalog_is_grouped_plugin(const menu_catalog_item_t *item) {
-    if (strncmp(item->id, "plugin:", 7) != 0 || menu_config_find(&G_Settings.menu_config, item->id)) return false;
-    const plugin_app_manifest_t *app = plugin_manager_find(item->id + 7);
-    return app && app->category[0];
+bool menu_catalog_is_grouped(const menu_catalog_item_t *item) {
+    if (!item || item->category[0] == '\0') return false;
+    /* An explicit menu_config entry means the user pinned this app to the
+     * gallery root, so it opts out of the folder regardless of its category. */
+    if (menu_config_find(&G_Settings.menu_config, item->id)) return false;
+    return menu_catalog_folder_index(item->category) >= 0;
 }
 
 menu_catalog_item_t *menu_catalog_collect(uint8_t menu, bool available_only, int *count) {

@@ -7,6 +7,8 @@
 #include "managers/flock_detector_manager.h"
 #include "managers/wifi_manager.h"
 #include "managers/rgb_manager.h"
+#include "scans/wifi/hop_profile.h"
+#include "scans/wifi/wifi_channels.h"
 #include "core/glog.h"
 #include "esp_log.h"
 #include "esp_wifi.h"
@@ -214,14 +216,15 @@ static void drain_task_fn(void *arg) {
 // ---- Channel hopping ----
 
 static uint8_t s_ch_idx = 0;
+static uint8_t s_ch_count = 0;
+static uint8_t s_channels[WIFI_CHANNELS_MAX] = {0};
 static esp_timer_handle_t s_hop_timer = NULL;
-static const uint8_t s_channels[] = {1,2,3,4,5,6,7,8,9,10,11,12,13,14};
-#define S_CH_COUNT 14
 #define FLOCK_HOP_MS 250
 
 static void hop_cb(void *arg) {
     if (!s_running) return;
-    s_ch_idx = (s_ch_idx + 1) % S_CH_COUNT;
+    if (s_ch_count == 0) return;
+    s_ch_idx = (s_ch_idx + 1) % s_ch_count;
     esp_wifi_set_channel(s_channels[s_ch_idx], WIFI_SECOND_CHAN_NONE);
 }
 
@@ -363,6 +366,17 @@ esp_err_t flock_detector_start(void) {
     det_chain_init();
     memset(s_dedup, 0, sizeof(s_dedup));
     s_ch_idx = 0;
+    size_t profile_count = 0;
+    hop_profile_resolve_monitor(s_channels, sizeof(s_channels), &profile_count);
+    s_ch_count = (uint8_t)profile_count;
+    if (s_ch_count == 0) {
+        s_ch_count = wifi_channels_build_country_list(
+            s_channels, sizeof(s_channels));
+    }
+    if (s_ch_count == 0) {
+        s_channels[0] = 1;
+        s_ch_count = 1;
+    }
     s_alert_head = 0;
     s_alert_tail = 0;
     s_running = true;
@@ -376,7 +390,8 @@ esp_err_t flock_detector_start(void) {
 
     xTaskCreate(drain_task_fn, "flock_drain", 3072, NULL, 2, &s_drain_task);
 
-    glog("[FLOCK] Scanning for surveillance cameras on channels 1-14...\n");
+    glog("[FLOCK] Scanning for surveillance cameras on %u country/profile channels...\n",
+         (unsigned)s_ch_count);
     ESP_LOGI(TAG, "detection started");
     return ESP_OK;
 }

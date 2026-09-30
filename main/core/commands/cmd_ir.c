@@ -753,3 +753,60 @@ bool cmd_ir_stop_universal_send(void) {
     }
     return false;
 }
+
+void handle_ir_pin_cmd(int argc, char **argv) {
+    if (argc < 2) {
+        int32_t tx = settings_get_ir_tx_pin(&G_Settings);
+        int32_t rx = settings_get_ir_rx_pin(&G_Settings);
+        glog("IR TX pin: GPIO%d (%s)\n", (int)infrared_get_tx_pin(),
+             tx >= 0 ? "override" : "default");
+        glog("IR RX pin: GPIO%d (%s)\n", (int)infrared_get_rx_pin(),
+             rx >= 0 ? "override" : "default");
+        glog("Usage: irpin tx|rx <pin|-1>\n");
+        glog("-1 clears the override (use the board default pin)\n");
+        return;
+    }
+
+    const char *which = argv[1];
+    bool is_tx;
+    if (strcmp(which, "tx") == 0) {
+        is_tx = true;
+    } else if (strcmp(which, "rx") == 0) {
+        is_tx = false;
+    } else {
+        glog("Unknown pin: %s. Use 'tx' or 'rx'.\n", which);
+        return;
+    }
+
+    if (argc < 3) {
+        glog("Usage: irpin %s <pin|-1>\n", is_tx ? "tx" : "rx");
+        return;
+    }
+
+    char *end = NULL;
+    long pin = strtol(argv[2], &end, 10);
+    if (end == argv[2] || *end != '\0') {
+        glog("Invalid pin value: %s\n", argv[2]);
+        return;
+    }
+
+    bool ok = is_tx ? settings_set_ir_tx_pin(&G_Settings, (int32_t)pin)
+                    : settings_set_ir_rx_pin(&G_Settings, (int32_t)pin);
+    if (!ok) {
+        glog("Invalid IR %s pin %ld. Must be -1 or a valid GPIO%s.\n",
+             is_tx ? "TX" : "RX", pin, is_tx ? " (output-capable)" : "");
+        return;
+    }
+
+    settings_save(&G_Settings);
+    if (pin < 0) {
+        glog("IR %s pin override cleared (board default).\n", is_tx ? "TX" : "RX");
+    } else {
+        glog("IR %s pin set to GPIO%ld.\n", is_tx ? "TX" : "RX", pin);
+    }
+    if (is_tx) {
+        glog("Applies after reboot (TX pin is resolved at boot).\n");
+    } else {
+        glog("Applies at the next IR learn session.\n");
+    }
+}

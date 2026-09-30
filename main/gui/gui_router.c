@@ -108,7 +108,9 @@ static void schedule_route(const gui_route_t *route,
     if (!call) return;
     call->route = *route;
     call->operation = operation;
-    display_manager_run_on_lvgl(run_route_call, call);
+    if (!display_manager_run_on_lvgl(run_route_call, call)) {
+        free(call);
+    }
 }
 
 void gui_router_navigate(const gui_route_t *route) {
@@ -130,6 +132,20 @@ static void run_back(void *arg) {
 
 void gui_router_back(void) {
     display_manager_run_on_lvgl(run_back, NULL);
+}
+
+static void run_refresh(void *arg) {
+    (void)arg;
+    render_current();
+}
+
+void gui_router_refresh(void) {
+    /* Deliberately not display_manager_run_on_lvgl(): that runs inline when the
+     * caller is already on the LVGL task, which is exactly the case here (input
+     * callbacks and LVGL event handlers). Destroying the view that is
+     * currently dispatching an event would pull the tree out from under it, so
+     * always go through the async queue instead. */
+    display_manager_lvgl_async_call(run_refresh, NULL);
 }
 
 const gui_route_t *gui_router_current(void) {

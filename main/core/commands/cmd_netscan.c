@@ -8,6 +8,7 @@
 #include "core/memory_debug.h"
 #include "managers/status_display_manager.h"
 #include "managers/wifi_manager.h"
+#include "scans/wifi/wifi_channels.h"
 #include "managers/sd_card_manager.h"
 #include "scans/wifi/port_scan.h"
 #include "scans/wifi/ssh_scan.h"
@@ -16,6 +17,7 @@
 #include "scans/wifi/snmp_scan.h"
 #include "scans/wifi/enum4linux_scan.h"
 #include "scans/wifi/arp_scan.h"
+#include "scans/wifi/name_sniff.h"
 #include "vendor/pcap.h"
 #include "esp_wifi.h"
 #include "sdkconfig.h"
@@ -310,6 +312,50 @@ void handle_enum_scan(int argc, char **argv) {
     status_display_show_status("Enum Done");
 }
 
+void handle_mdns_sniff(int argc, char **argv) {
+    if (argc >= 2 && (strcmp(argv[1], "stop") == 0 || strcmp(argv[1], "-s") == 0 ||
+                      strcmp(argv[1], "-stop") == 0)) {
+        if (!name_sniff_is_running()) {
+            glog("Name sniff is not running.\n");
+            return;
+        }
+        name_sniff_stop();
+        status_display_show_status("Names Stop");
+        return;
+    }
+
+    if (argc < 2) {
+        glog("Usage:\n");
+        glog("  mdnssniff <IP|all>\n");
+        glog("  mdnssniff stop\n");
+        if (name_sniff_is_running()) {
+            const char *f = name_sniff_get_filter();
+            glog("Sniffing now: %s\n", f[0] ? f : "all");
+        }
+        status_display_show_status("Names Usage");
+        return;
+    }
+
+    const char *target = argv[1];
+    if (strcmp(target, "all") != 0) {
+        unsigned int a = 0, b = 0, c = 0, d = 0;
+        char extra = '\0';
+        if (sscanf(target, "%u.%u.%u.%u%c", &a, &b, &c, &d, &extra) != 4 ||
+            a > 255 || b > 255 || c > 255 || d > 255) {
+            glog("Error: Invalid IP. Use <IP|all>.\n");
+            status_display_show_status("Names Bad IP");
+            return;
+        }
+    }
+
+    if (name_sniff_start(target) != ESP_OK) {
+        glog("Error: Could not start name sniff.\n");
+        status_display_show_status("Names Failed");
+        return;
+    }
+    status_display_show_status("Names Listen");
+}
+
 void handle_congestion_cmd(int argc, char **argv) {
     wifi_manager_start_scan();
     status_display_show_status("Congest Scan");
@@ -416,7 +462,8 @@ void handle_listen_probes_cmd(int argc, char **argv) {
     if (argc > 1) {
         char *endptr;
         long ch = strtol(argv[1], &endptr, 10);
-        if (*endptr == '\0' && ch >= 1 && ch <= MAX_WIFI_CHANNEL) {
+        if (*endptr == '\0' && ch >= 1 && ch <= 177 &&
+            wifi_channels_is_monitor_channel((uint8_t)ch)) {
             channel = (uint8_t)ch;
             channel_hopping = false;
             glog("Starting to listen for probe requests on channel %d...\n", channel);
@@ -424,7 +471,7 @@ void handle_listen_probes_cmd(int argc, char **argv) {
             snprintf(status_msg, sizeof(status_msg), "Probes Ch %02d", channel);
             status_display_show_status(status_msg);
         } else {
-            glog("Invalid channel: %s. Valid range: 1-%d\n", argv[1], MAX_WIFI_CHANNEL);
+            glog("Invalid or country-disallowed channel: %s\n", argv[1]);
             status_display_show_status("Channel Bad");
             return;
         }
@@ -449,8 +496,16 @@ void handle_listen_probes_cmd(int argc, char **argv) {
 
     if (channel_hopping) {
         wifi_manager_start_monitor_mode(wifi_listen_probes_callback);
+        wifi_manager_start_wireshark_channel_hop();
     } else {
-        esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
+        esp_err_t channel_err = esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
+        if (channel_err != ESP_OK) {
+            glog("Failed to set probe channel %d: %s\n", channel,
+                 esp_err_to_name(channel_err));
+            wifi_manager_stop_monitor_mode();
+            pcap_file_close();
+            return;
+        }
         wifi_manager_start_monitor_mode(wifi_listen_probes_callback);
     }
 }

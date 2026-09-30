@@ -1,0 +1,14 @@
+Title: Ethernet
+Description: Overview of GhostESP&#39;s Ethernet capabilities
+URL: /v1.9.3/ethernet/
+Version: v1.9.3
+Section: GhostESP: Revival
+Search index: /search-index.json
+
+# Ethernet
+
+> Overview of GhostESP&#39;s Ethernet capabilities
+
+---
+
+GhostESP provides Ethernet connectivity with network scanning, device fingerprinting, and service discovery tools. Here you can find help on how to use these features.

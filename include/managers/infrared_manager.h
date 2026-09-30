@@ -8,6 +8,7 @@
 #include "freertos/task.h"
 #include "driver/rmt_types.h"
 #include "driver/rmt_rx.h"
+#include "driver/gpio.h"
 
 typedef struct {
     char name[32];
@@ -28,6 +29,18 @@ typedef struct {
 } infrared_signal_t;
 
 bool infrared_manager_init(void);
+
+/**
+ * @brief Effective IR TX pin: settings override (ir_tx_pin) or CONFIG_INFRARED_LED_PIN.
+ * Resolved once per boot on first call; settings changes take effect after reboot.
+ */
+gpio_num_t infrared_get_tx_pin(void);
+
+/**
+ * @brief Effective IR RX pin: settings override (ir_rx_pin) or CONFIG_INFRARED_RX_PIN.
+ * Re-evaluated on each RX session start (infrared_manager_rx_init).
+ */
+gpio_num_t infrared_get_rx_pin(void);
 bool infrared_manager_read_file(const char *path, infrared_signal_t *signal);
 void infrared_manager_free_signal(infrared_signal_t *signal);
 bool infrared_manager_parse_buffer_single(const char *buf, infrared_signal_t *signal);

@@ -24,6 +24,7 @@
 #include "core/callbacks.h"
 #include "core/glog.h"
 #include "scans/wifi/station_scan.h"
+#include "scans/wifi/hop_profile.h"
 #include "scans/wifi/wifi_channels.h"
 #include "vendor/pcap.h"
 #include "esp_wifi.h"
@@ -140,7 +141,10 @@ static void handshake_deauth_task(void *param);
 // gone by the time any attack task runs. This helper just handles transient
 // channel-set failures with one quick retry.
 static esp_err_t deauth_set_channel_robust(int channel) {
-    if (channel < 1 || channel > MAX_WIFI_CHANNEL) return ESP_ERR_INVALID_ARG;
+    if (channel < 1 || channel > 255 ||
+        !wifi_channels_is_tx_channel((uint8_t)channel)) {
+        return ESP_ERR_INVALID_ARG;
+    }
     uint8_t cur_ch = 0;
     wifi_second_chan_t cur_sec = WIFI_SECOND_CHAN_NONE;
     if (esp_wifi_get_channel(&cur_ch, &cur_sec) == ESP_OK && cur_ch == (uint8_t)channel) {
@@ -172,8 +176,7 @@ esp_err_t deauth_attack_broadcast(uint8_t bssid[6], int channel, uint8_t mac[6])
     esp_err_t err = deauth_set_channel_robust(channel);
     if (err != ESP_OK) {
         deauth_log_channel_error_throttled(channel, err);
-        // Don't abort TX: still try to inject on current channel (may still affect co-channel targets)
-        // But if channel mismatch, effectiveness will be reduced
+        return err;
     }
 
     // Create packets from templates
@@ -259,7 +262,7 @@ static void deauth_task(void *param) {
         deauth_task_running = false;
         deauth_task_handle = NULL;
         deauth_stop_requested = false;
-        vTaskDelete(NULL);
+        vTaskDeleteWithCaps(NULL);
         return;
     }
 
@@ -269,7 +272,7 @@ static void deauth_task(void *param) {
         deauth_task_running = false;
         deauth_task_handle = NULL;
         deauth_stop_requested = false;
-        vTaskDelete(NULL);
+        vTaskDeleteWithCaps(NULL);
         return;
     }
 
@@ -342,17 +345,23 @@ static void deauth_task(void *param) {
     deauth_task_running = false;
     deauth_stop_requested = false;
     deauth_task_handle = NULL;
-    vTaskDelete(NULL);
+    vTaskDeleteWithCaps(NULL);
+}
+
+/* Prints a note about whether deauth is expected to get through, if there is
+ * anything worth saying. The messages are already written as plain sentences,
+ * so no "WARNING:" prefix is added on top. */
+static void deauth_print_effectiveness_note(const char *note) {
+    if (note != NULL && *note) {
+        glog("%s\n", note);
+        TERMINAL_VIEW_ADD_TEXT("%s\n", note);
+    }
 }
 
 void deauth_attack_start(void) {
     if (!deauth_task_running) {
         extern wifi_ap_record_t selected_ap;
-        const char *pmf_warning = wpa3_deauth_warning(&selected_ap);
-        if (pmf_warning) {
-            glog("WARNING: %s\n", pmf_warning);
-            TERMINAL_VIEW_ADD_TEXT("WARNING: %s\n", pmf_warning);
-        }
+        deauth_print_effectiveness_note(wpa3_deauth_warning(&selected_ap));
         ap_manager_stop_services();
         ghostchi_manager_add_xp(3);
 
@@ -369,8 +378,14 @@ void deauth_attack_start(void) {
         status_display_show_attack("Deauth", "starting");
 #endif
         
-        // Build country-appropriate channel list for deauth
-        wireshark_channels_count = wifi_channels_build_country_list(wireshark_channels, sizeof(wireshark_channels));
+        // Build channel list for broadcast deauth (user hop profile or the
+        // country-appropriate default list).
+        hop_profile_resolve(wireshark_channels, sizeof(wireshark_channels),
+                            &wireshark_channels_count);
+        if (wireshark_channels_count == 0) {
+            wireshark_channels_count = wifi_channels_build_country_list(
+                wireshark_channels, sizeof(wireshark_channels));
+        }
         
         // Copy selected AP info from wifi_manager globals
         extern wifi_ap_record_t selected_ap;
@@ -475,7 +490,8 @@ void deauth_attack_start_station(void) {
         deauth_attack_start();
         return;
     }
-    glog("WARNING: PMF posture is not available for the selected station; deauth effectiveness is unverified.\n");
+    deauth_print_effectiveness_note(wpa3_deauth_warning_for_authmode(
+        (wifi_auth_mode_t)selected_station_local.ap_authmode));
     if (deauth_station_task_handle) {
         printf("Station deauth already running.\n");
         return;
@@ -511,22 +527,28 @@ void deauth_attack_start_station(void) {
 // Background task for deauthenticating a selected station and logging packet rate
 static void deauth_station_task(void *param) {
     // Get the channel from the scanned AP that matches the target BSSID
-    int deauth_channel = 1;
+    int deauth_channel = 0;
     for (int i = 0; i < ap_count; i++) {
         if (memcmp(scanned_aps[i].bssid, selected_station_local.ap_bssid, 6) == 0) {
             deauth_channel = scanned_aps[i].primary;
             break;
         }
     }
-    
-    // Validate channel is within allowed range
-    if (deauth_channel < 1 || deauth_channel > MAX_WIFI_CHANNEL) {
-        deauth_channel = 1; // fallback channel
+
+    if (deauth_channel < 1 ||
+        !wifi_channels_is_tx_channel((uint8_t)deauth_channel)) {
+        glog("Unable to find a legal TX channel for selected station\n");
+        station_selected_local = false;
+        deauth_station_stop_requested = true;
+        return;
     }
     // Initial channel set with retry and throttled error logging
     esp_err_t init_ch_err = deauth_set_channel_robust(deauth_channel);
     if (init_ch_err != ESP_OK) {
         deauth_log_channel_error_throttled(deauth_channel, init_ch_err);
+        station_selected_local = false;
+        deauth_station_stop_requested = true;
+        return;
     }
     uint32_t last_log = xTaskGetTickCount() * portTICK_PERIOD_MS;
     while (!deauth_station_stop_requested) {
@@ -548,7 +570,7 @@ static void deauth_station_task(void *param) {
         }
     }
     deauth_station_task_handle = NULL;
-    vTaskDelete(NULL);
+    vTaskDeleteWithCaps(NULL);
 }
 
 bool deauth_attack_stop_station(void) {
@@ -562,7 +584,7 @@ bool deauth_attack_stop_station(void) {
         }
         
         if (deauth_station_task_handle != NULL) {
-            vTaskDelete(deauth_station_task_handle);
+            vTaskDeleteWithCaps(deauth_station_task_handle);
             deauth_station_task_handle = NULL;
         }
         deauth_station_stop_requested = false;
@@ -594,7 +616,7 @@ static void handshake_deauth_task(void *param) {
         handshake_deauth_task_running = false;
         handshake_deauth_task_handle = NULL;
         handshake_deauth_stop_requested = false;
-        vTaskDelete(NULL);
+        vTaskDeleteWithCaps(NULL);
         return;
     }
 
@@ -675,7 +697,7 @@ static void handshake_deauth_task(void *param) {
     handshake_deauth_task_running = false;
     handshake_deauth_stop_requested = false;
     handshake_deauth_task_handle = NULL;
-    vTaskDelete(NULL);
+    vTaskDeleteWithCaps(NULL);
 }
 
 void deauth_attack_start_handshake_deauth(void) {
@@ -705,10 +727,13 @@ void deauth_attack_start_handshake_deauth(void) {
 #endif
             return;
         }
-        const char *pmf_warning = wpa3_deauth_warning(&selected_ap_local);
-        if (pmf_warning) glog("WARNING: %s\n", pmf_warning);
+        deauth_print_effectiveness_note(wpa3_deauth_warning(&selected_ap_local));
     } else {
-        glog("WARNING: PMF posture is not available for the selected station; deauth effectiveness is unverified.\n");
+        /* A station record carries the security type of the AP it was seen on,
+         * so the network can still be described even though there is no AP
+         * record to hand. */
+        deauth_print_effectiveness_note(wpa3_deauth_warning_for_authmode(
+            (wifi_auth_mode_t)selected_station_local.ap_authmode));
     }
 
     ap_manager_stop_services();
@@ -737,8 +762,14 @@ void deauth_attack_start_handshake_deauth(void) {
         glog("PCAP capture enabled for handshake recording\n");
     }
 
-    // Build country-appropriate channel list
-    wireshark_channels_count = wifi_channels_build_country_list(wireshark_channels, sizeof(wireshark_channels));
+    // Build channel list for handshake deauth (user hop profile or the
+    // country-appropriate default list).
+    hop_profile_resolve(wireshark_channels, sizeof(wireshark_channels),
+                        &wireshark_channels_count);
+    if (wireshark_channels_count == 0) {
+        wireshark_channels_count = wifi_channels_build_country_list(
+            wireshark_channels, sizeof(wireshark_channels));
+    }
 
     if (hs_station_selected) {
         char sanitized_ssid[33];
@@ -814,6 +845,7 @@ void deauth_attack_start_handshake_deauth(void) {
         handshake_deauth_task_handle = NULL;
         handshake_deauth_stop_requested = false;
         esp_wifi_set_promiscuous(false);
+        pcap_file_close();
         esp_wifi_stop();
         (void)ap_manager_restore_after_attack("hs+deauth start");
         return;

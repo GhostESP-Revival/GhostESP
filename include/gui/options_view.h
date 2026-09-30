@@ -2,6 +2,7 @@
 
 #include "lvgl.h"
 #include <stdbool.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -17,6 +18,22 @@ options_view_t *options_view_create(lv_obj_t *parent, const char *title);
 // Create an opaque options list that does not load or display an asset-pack background.
 options_view_t *options_view_create_no_bg(lv_obj_t *parent, const char *title);
 
+/* Create an options list with explicit behaviour.
+ * - transparent: drop the list background entirely, so a canvas or card art
+ *   underneath stays visible. Implies no asset-pack background.
+ * - When `parent` is a real widget rather than NULL/screen, the list is sized
+ *   to that parent's content area instead of the full screen below the status
+ *   bar. That is what lets a list live inside a card or overlay without the
+ *   caller having to re-measure and reposition it.
+ * - Pass a NULL or empty `title` to skip the status bar.
+ * Existing create variants are unaffected; they route through here unchanged. */
+options_view_t *options_view_create_flags(lv_obj_t *parent, const char *title, bool transparent);
+
+// Index of the row whose bounds contain the screen point, or -1 if none.
+// Uses each row's post-scroll coordinates, so it stays correct for a list
+// taller than its viewport.
+int options_view_item_at(const options_view_t *ov, int32_t x, int32_t y);
+
 // Destroy the options view and its internal objects.
 void options_view_destroy(options_view_t *ov);
 
@@ -29,6 +46,16 @@ void options_view_add_items(options_view_t *ov, const char **labels, lv_event_cb
 
 // Add a standard "< Back" row at the end with the provided callback (optional user_data).
 lv_obj_t *options_view_add_back_row(options_view_t *ov, lv_event_cb_t on_click, void *user_data);
+
+// Override the row height for this view (default follows the shared menu policy).
+// Call before adding items. Existing rows and their label font are updated too,
+// so a row re-heighted by the caller afterwards still wins.
+void options_view_set_item_height(options_view_t *ov, int height);
+
+// Scale a base row height by the user's Row Height setting (clamped to a usable range).
+// Applied by default to every options list; callers with bespoke row bases should route
+// them through this so the setting stays the single source of truth.
+int options_view_scale_row_height(int base);
 
 // Selection helpers (wrap-around). Index is 0-based across added items.
 void options_view_set_selected(options_view_t *ov, int index);

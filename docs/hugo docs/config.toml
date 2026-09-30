@@ -45,10 +45,28 @@ enableRobotsTXT = true
   name = "v1.8"
 
 
+[outputFormats.searchindex]
+  mediaType = "application/json"
+  baseName = "search-index"
+  isPlainText = true
+  notAlternative = true
+
+[outputFormats.aitext]
+  mediaType = "text/plain"
+  baseName = "index"
+  isPlainText = true
+  notAlternative = true
+
+[outputFormats.llmstxt]
+  mediaType = "text/plain"
+  baseName = "llms"
+  isPlainText = true
+  notAlternative = true
+
 [outputs]
-  home = ["HTML", "JSON"]
-  section = ["HTML", "JSON"]
-  page = ["HTML"]
+  home = ["HTML", "JSON", "searchindex", "llmstxt"]
+  section = ["HTML", "JSON", "searchindex", "aitext"]
+  page = ["HTML", "aitext"]
 
 [sitemap]
   changefreq = "weekly"

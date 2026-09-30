@@ -507,6 +507,25 @@ bool gps_manager_get_local_gps_snapshot(gps_t *out_gps) {
     return true;
 }
 
+bool gps_manager_get_wardrive_snapshot(gps_t *out_gps, bool *using_peer) {
+    if (!out_gps) return false;
+    taskENTER_CRITICAL(&gps_state_lock);
+    gps_t local = gps_local_snapshot;
+    bool local_ok = gps_last_update_tick != 0 &&
+                    xTaskGetTickCount() - gps_last_update_tick <= pdMS_TO_TICKS(GPS_STALE_UPDATE_TIMEOUT_MS) &&
+                    local.valid && local.fix >= GPS_FIX_GPS && local.fix_mode >= GPS_MODE_2D && local.sats_in_use >= 3;
+    bool peer_ok = gps_peer_last_update_tick != 0 &&
+                   xTaskGetTickCount() - gps_peer_last_update_tick <= pdMS_TO_TICKS(GPS_STALE_UPDATE_TIMEOUT_MS) &&
+                   gps_peer_fix_snapshot.valid && gps_peer_fix_snapshot.fix >= GPS_FIX_GPS &&
+                   gps_peer_fix_snapshot.fix_mode >= GPS_MODE_2D && gps_peer_fix_snapshot.sats_in_use >= 3;
+    bool use_peer = peer_ok && (gps_peer_preferred || !local_ok);
+    if (use_peer) *out_gps = gps_peer_fix_snapshot;
+    taskEXIT_CRITICAL(&gps_state_lock);
+    if (!use_peer && local_ok) *out_gps = local;
+    if (using_peer) *using_peer = use_peer;
+    return use_peer || local_ok;
+}
+
 bool gps_manager_get_active_gps_snapshot(gps_t *out_gps, bool *using_peer) {
     if (!out_gps) {
         return false;
@@ -1364,7 +1383,7 @@ static esp_err_t gps_manager_log_wardriving_data_impl(wardriving_data_t *data,
                      gps_get_absolute_year(gps.date.year), gps.date.month, gps.date.day, gps.fix,
                      gps.fix_mode, gps.sats_in_use);
         }
-        return ESP_OK;
+        return ESP_ERR_INVALID_STATE;
     }
 
     if (is_valid_date(&gps.date) && !has_valid_cached_date) {
@@ -1375,29 +1394,29 @@ static esp_err_t gps_manager_log_wardriving_data_impl(wardriving_data_t *data,
     if (!is_valid_time(&gps.tim)) {
         ESP_LOGW(GPS_TAG, "Invalid time: %02d:%02d:%02d", gps.tim.hour, gps.tim.minute,
                  gps.tim.second);
-        return ESP_OK;
+        return ESP_ERR_INVALID_STATE;
     }
 
     if (gps.latitude < -90.0 || gps.latitude > 90.0 || gps.longitude < -180.0 ||
         gps.longitude > 180.0) {
         ESP_LOGW(GPS_TAG, "Out-of-range coords: Lat=%f Lon=%f", gps.latitude, gps.longitude);
-        return ESP_OK;
+        return ESP_ERR_INVALID_STATE;
     }
 
     if (gps.speed < 0.0 || gps.speed > 340.0) {
         ESP_LOGW(GPS_TAG, "Out-of-range speed: %f m/s", gps.speed);
-        return ESP_OK;
+        return ESP_ERR_INVALID_STATE;
     }
 
     if (gps.dop_h < 0.0 || gps.dop_p < 0.0 || gps.dop_v < 0.0 || gps.dop_h > 50.0 ||
         gps.dop_p > 50.0 || gps.dop_v > 50.0) {
         ESP_LOGW(GPS_TAG, "Out-of-range DOP: H=%f P=%f V=%f", gps.dop_h, gps.dop_p, gps.dop_v);
-        return ESP_OK;
+        return ESP_ERR_INVALID_STATE;
     }
 
     if (data->latitude == 0.0 && data->longitude == 0.0) {
         ESP_LOGD(GPS_TAG, "Skipping log: final coordinates are (0,0)");
-        return ESP_OK;
+        return ESP_ERR_INVALID_STATE;
     }
 
     esp_err_t ret = csv_write_data_to_buffer(data);

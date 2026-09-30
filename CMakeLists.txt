@@ -13,6 +13,37 @@ add_compile_options(-Wno-error=unused-label)
 if(NOT DEFINED SDKCONFIG_DEFAULTS)
     set(SDKCONFIG_DEFAULTS "sdkconfig.defaults")
 endif()
+
+# ESP-IDF 6.1 can discard an explicit Wi-Fi cache TX buffer count when it
+# differs from the Kconfig default, leaving the generated macro empty. Align
+# the defaults before project.cmake evaluates Kconfig so local idf.py builds
+# behave like the GitHub matrix build.
+if(DEFINED PYTHON)
+    set(GHOSTESP_PYTHON "${PYTHON}")
+else()
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    set(GHOSTESP_PYTHON "${Python3_EXECUTABLE}")
+endif()
+if(IS_ABSOLUTE "${SDKCONFIG_DEFAULTS}")
+    set(GHOSTESP_SDKCONFIG_DEFAULTS "${SDKCONFIG_DEFAULTS}")
+else()
+    set(GHOSTESP_SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_LIST_DIR}/${SDKCONFIG_DEFAULTS}")
+endif()
+execute_process(
+    COMMAND "${GHOSTESP_PYTHON}" "${CMAKE_CURRENT_LIST_DIR}/scripts/prepare_idf_wifi_kconfig.py"
+            --idf-path "$ENV{IDF_PATH}" --config "${GHOSTESP_SDKCONFIG_DEFAULTS}"
+    RESULT_VARIABLE GHOSTESP_KCONFIG_RESULT
+    OUTPUT_VARIABLE GHOSTESP_KCONFIG_OUTPUT
+    ERROR_VARIABLE GHOSTESP_KCONFIG_ERROR
+)
+if(NOT GHOSTESP_KCONFIG_RESULT EQUAL 0)
+    message(FATAL_ERROR
+        "Failed to align ESP-IDF Wi-Fi Kconfig defaults:\n${GHOSTESP_KCONFIG_ERROR}")
+elseif(GHOSTESP_KCONFIG_OUTPUT)
+    string(STRIP "${GHOSTESP_KCONFIG_OUTPUT}" GHOSTESP_KCONFIG_OUTPUT)
+    message(STATUS "GhostESP: ${GHOSTESP_KCONFIG_OUTPUT}")
+endif()
+
 add_compile_definitions(HOLD_LIMIT=1000) # For joystick hold duration
 add_compile_definitions(LED_ORDER=0)     # 2 for RGB, 0 for GRB
 add_compile_definitions(DNS_SERVER_MAX_ITEMS=1)

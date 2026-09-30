@@ -817,7 +817,18 @@ wifi_interface_t ap_manager_get_tx_iface(void) {
 
 esp_err_t ap_manager_apply_normal_ap_profile(void) {
     // be conservative for client compatibility (2.4GHz only, HT20)
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+    // IDF 6.x uses WIFI_BAND_MODE_AUTO on the C5. The singular
+    // esp_wifi_set_bandwidth() API rejects that mode, so configure both bands
+    // through the multi-band API instead.
+    wifi_bandwidths_t bandwidths = {
+        .ghz_2g = WIFI_BW20,
+        .ghz_5g = WIFI_BW20,
+    };
+    (void)esp_wifi_set_bandwidths(WIFI_IF_AP, &bandwidths);
+#else
     (void)esp_wifi_set_bandwidth(WIFI_IF_AP, WIFI_BW20);
+#endif
 
 #if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
     // No LR anywhere in the normal profile; a persisted LR config makes AP
@@ -882,7 +893,7 @@ esp_err_t ap_manager_init(void) {
 
     // Check if AP is disabled in settings
     if (!settings_get_ap_enabled(&G_Settings)) {
-        glog("Access Point disabled in settings, skipping AP initialization\n");
+        glog("Access point: off\n");
         return ESP_OK;
     }
 
@@ -1043,9 +1054,14 @@ esp_err_t ap_manager_init(void) {
 // Deinitialize and stop the servers
 void ap_manager_deinit(void) {
     ESP_LOGI(TAG, "Deinitializing AP Manager");
-    
+
     stop_http_server();
     reset_server_config();
+
+    // Quiesce mDNS BEFORE the WiFi driver goes down: a pending responder
+    // announce/probe fired after esp_wifi_stop() crashes in the WiFi ROM
+    // (LoadProhibited in ieee80211_search_node on tcpip_thread).
+    teardown_mdns();
 
     {
         esp_err_t err_reg = esp_event_handler_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler);
@@ -1073,9 +1089,7 @@ void ap_manager_deinit(void) {
         esp_netif_destroy(netif);
         netif = NULL;
     }
-    
-    teardown_mdns();
-    
+
     ESP_LOGI(TAG, "AP Manager deinitialized successfully");
 }
 

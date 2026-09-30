@@ -21,6 +21,11 @@ typedef struct dns_server_handle *dns_server_handle_t;
 typedef struct {
   uint8_t station_mac[6]; // MAC address of the station (client)
   uint8_t ap_bssid[6];    // BSSID (MAC address) of the access point
+  /* Security type of the AP this station was seen on, as a wifi_auth_mode_t.
+   * Filled in when the station is selected, by looking the parent BSSID up in
+   * the AP scan results. Left as WIFI_AUTH_UNKNOWN when the AP was not in the
+   * scan, which is why callers must treat it as advisory. */
+  uint8_t ap_authmode;
 } station_ap_pair_t;
 
 extern station_ap_pair_t station_ap_list[MAX_STATIONS];
@@ -358,6 +363,10 @@ void wifi_manager_stop_tracking(void);
 // when neither AP nor STA tracking is active. When active, *out_rssi receives the
 // most recent matched RSSI and *out_fresh whether a packet arrived recently.
 bool wifi_manager_get_track_status(int8_t *out_rssi, bool *out_fresh);
+
+// Closeness of the smoothed tracking RSSI within this session's observed
+// [min, max] range, 0-100. Returns -1 when not tracking or no range yet.
+int wifi_manager_get_track_closeness(void);
 
 dns_server_handle_t dns_handle_take(void);
 

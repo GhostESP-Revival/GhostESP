@@ -24,7 +24,7 @@
  * and builds a list of valid channels for scanning/capture.
  * 
  * For 2.4GHz: prioritizes non-overlapping channels (1, 6, 11)
- * For 5GHz (ESP32C5/C6): adds country-appropriate 5GHz channels
+ * For 5GHz (ESP32-C5): adds country-appropriate 5GHz channels
  * 
  * @param channels Output array to store channel list
  * @param max_count Maximum number of channels to store
@@ -46,6 +46,19 @@ uint8_t wifi_channels_build_country_list(uint8_t *channels, uint8_t max_count);
 uint8_t wifi_channels_build_from_ap_results(uint8_t *channels, uint8_t max_count);
 
 /**
+ * @brief Parse a channel list string like "1,6,11" (also accepts spaces)
+ *
+ * Deduplicates entries, stops at max_count, and returns the number of
+ * channels parsed. Returns 0 on invalid input.
+ *
+ * @param text Input string of comma/space separated channel numbers
+ * @param channels Output array to store parsed channels
+ * @param max_count Maximum number of channels to store
+ * @return Number of channels parsed, or 0 on invalid input
+ */
+uint8_t wifi_channels_parse_list(const char *text, uint8_t *channels, uint8_t max_count);
+
+/**
  * @brief Check if a channel is 5GHz
  * 
  * @param channel Channel number to check
@@ -56,8 +69,9 @@ bool wifi_channels_is_5ghz(uint8_t channel);
 /**
  * @brief Check if a channel is in a DFS range.
  *
- * DFS channels can be unreliable for rapid passive monitor hopping because
- * the driver may reject repeated channel changes while parked on them.
+ * DFS receive is supported by the C5 sniffer. Transmit-capable features are gated
+ * by wifi_channels_is_tx_channel(), which permits DFS channels when the active
+ * country allows them; this predicate still drives passive scan decisions.
  *
  * @param channel Channel number to check
  * @return true if the channel is DFS, false otherwise
@@ -65,12 +79,46 @@ bool wifi_channels_is_5ghz(uint8_t channel);
 bool wifi_channels_is_dfs(uint8_t channel);
 
 /**
- * @brief Check if a channel is safe for realtime monitor hopping.
+ * @brief Check whether a scan must be passive for the active country policy.
  *
- * Allows 2.4GHz channels and non-DFS 5GHz channels supported by the target.
+ * DFS 5 GHz channels and AUTO-policy 2.4 GHz channels 12-14 are passive.
+ */
+bool wifi_channels_requires_passive_scan(uint8_t channel);
+
+/**
+ * @brief Check if a channel is a valid primary channel for this target.
  *
- * @param channel Channel number to check
- * @return true if suitable for realtime monitor hopping
+ * This checks target capability only; the active country is checked separately.
+ */
+bool wifi_channels_is_target_channel(uint8_t channel);
+
+/**
+ * @brief Check if a channel is allowed by the active Wi-Fi country.
+ *
+ * Uses the effective country returned by ESP-IDF. If the driver has not been
+ * initialized, falls back to the safe world-domain channels.
+ */
+bool wifi_channels_is_country_channel(uint8_t channel);
+
+/**
+ * @brief Check if a channel can be used by receive-only monitor features.
+ *
+ * This includes C5 DFS channels. The driver remains the final authority when
+ * setting the channel.
+ */
+bool wifi_channels_is_monitor_channel(uint8_t channel);
+
+/**
+ * @brief Check if a channel can be used by transmit-capable features.
+ *
+ * DFS channels are permitted when the active country allows them, so attacks
+ * work on DFS targets. The driver remains the final authority when setting
+ * the channel.
+ */
+bool wifi_channels_is_tx_channel(uint8_t channel);
+
+/**
+ * @brief Backwards-compatible name for receive-only monitor validation.
  */
 bool wifi_channels_is_safe_monitor_channel(uint8_t channel);
 

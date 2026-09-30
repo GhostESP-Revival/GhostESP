@@ -1,0 +1,15 @@
+Title: Apps
+Description: Standalone apps and interactive tools available on GhostESP
+URL: /v1.9.9/apps/
+Version: v1.9.9
+Section: GhostESP: Revival
+Keywords: apps, rave mode, visualizer, tools
+Search index: /search-index.json
+
+# Apps
+
+> Standalone apps and interactive tools available on GhostESP
+
+---
+
+GhostESP includes app-style views that are meant to run interactively from the on-device menu. This section covers setup and usage for those apps.

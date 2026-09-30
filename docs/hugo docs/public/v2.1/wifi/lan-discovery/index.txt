@@ -1,0 +1,45 @@
+Title: Find Devices on Your Wi-Fi Network
+Description: Discover devices and services on a network you own or are authorized to test.
+URL: /v2.1/wifi/lan-discovery/
+Version: v2.1
+Section: Wi-Fi
+Search index: /search-index.json
+
+# Find Devices on Your Wi-Fi Network
+
+> Discover devices and services on a network you own or are authorized to test.
+
+## On this page
+
+- [What this does](#what-this-does)
+- [Before you start](#before-you-start)
+- [On-device steps](#on-device-steps)
+- [CLI steps](#cli-steps)
+- [Expected result](#expected-result)
+- [Troubleshooting](#troubleshooting)
+- [Related tasks](#related-tasks)
+
+---
+
+## What this does
+LAN discovery lists devices and advertised services on the Wi-Fi network GhostESP is currently connected to.
+## Before you start
+- Connect GhostESP to the network with [Connect to a Wi-Fi Network](/v2.1/wifi/connect/).
+- Only scan networks you own or have explicit permission to test.
+## On-device steps
+- Open Menu → WiFi → Scanning while GhostESP is connected.
+- Choose Scan LAN Devices.
+- Review the discovered devices and services.
+## CLI steps
+- Run scanlocal to discover devices and services.
+- Run scanarp to list active devices by IP address.
+## Expected result
+GhostESP lists available hostnames, service types, ports, or IP addresses. Results depend on the devices that respond and the network’s isolation settings.
+## Troubleshooting
+- No devices appear: Confirm GhostESP is connected to the intended network and that client isolation is not enabled.
+- Only some devices appear: Retry after devices are active; not every device advertises services or responds to discovery requests.
+- The connection drops: Reconnect GhostESP, then repeat the discovery scan.
+## Related tasks
+- [Connect to a Wi-Fi network](/v2.1/wifi/connect/)
+- [Check open ports on an authorized device](/v2.1/wifi/port-scanning/)
+- [Scan nearby Wi-Fi networks](/v2.1/wifi/survey/)

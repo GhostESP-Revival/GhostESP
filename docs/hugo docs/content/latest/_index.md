@@ -25,6 +25,8 @@ keywords: ["ESP32", "security testing", "WiFi", "NFC", "infrared", "penetration 
   </a>
 </div>
 
+**Stuck?** The [FAQ]({{< relref "getting-started/faq.md" >}}) covers setup, credentials, and common failures. If you are adding a module or changing pins, see [Wiring Modules and Peripherals]({{< relref "getting-started/peripheral-wiring.md" >}}).
+
 ## Explore capabilities
 
 Choose a section below when you already know what you want to do.
@@ -54,13 +56,17 @@ Choose a section below when you already know what you want to do.
     <h2>GPS</h2>
     <p>Log wardrives and tag captures with location data.</p>
   </a>
-  <a class="doc__card" href="{{< relref "camera/_index.md" >}}">
-    <h2>Camera</h2>
-    <p>Stream MJPEG video and run motion detection.</p>
+  <a class="doc__card" href="{{< relref "lora/_index.md" >}}">
+    <h2>LoRa</h2>
+    <p>Meshtastic chat on SX1262, BLE app link, stock radio interop.</p>
   </a>
   <a class="doc__card" href="{{< relref "ethernet/_index.md" >}}">
     <h2>Ethernet</h2>
     <p>Fingerprint hosts and scan the wired network.</p>
+  </a>
+  <a class="doc__card" href="{{< relref "camera/_index.md" >}}">
+    <h2>Camera</h2>
+    <p>Stream MJPEG video and run motion detection.</p>
   </a>
   <a class="doc__card" href="{{< relref "usb/_index.md" >}}">
     <h2>USB</h2>

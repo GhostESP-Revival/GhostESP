@@ -52,6 +52,8 @@ void gps_manager_update_local_snapshot(const gps_t *fix);
 void gps_manager_update_peer_fix(const gps_peer_fix_t *fix);
 bool gps_manager_get_local_gps_snapshot(gps_t *out_gps);
 bool gps_manager_get_active_gps_snapshot(gps_t *out_gps, bool *using_peer);
+// Wardrive chooses a recent valid fix independently of radio helper readiness.
+bool gps_manager_get_wardrive_snapshot(gps_t *out_gps, bool *using_peer);
 bool gps_manager_get_recent_active_gps_snapshot(gps_t *out_gps, bool *using_peer);
 GPSManager g_gpsManager;
 

@@ -1,0 +1,50 @@
+Title: Scanning networks
+Description: Passively find and review nearby Wi-Fi access points.
+URL: /v2.1/wifi/survey/
+Version: v2.1
+Section: Wi-Fi
+Search index: /search-index.json
+
+# Scanning networks
+
+> Passively find and review nearby Wi-Fi access points.
+
+## On this page
+
+- [What this does](#what-this-does)
+- [Before you start](#before-you-start)
+- [On-device steps](#on-device-steps)
+- [CLI steps](#cli-steps)
+- [Expected result](#expected-result)
+- [Troubleshooting](#troubleshooting)
+- [Related tasks](#related-tasks)
+
+---
+
+## What this does
+This passive scan lists nearby Wi-Fi access points without connecting to them or transmitting network traffic.
+## Before you start
+- GhostESP flashed device, powered on with a wireless antenna.
+- Use the on-device UI or serial CLI. On a single-board setup, the WebUI cannot remain connected while the Wi-Fi radio scans.
+## On-device steps
+- Open Menu → WiFi → Scanning.
+- Choose Scan Access Points.
+- Wait for the scan to finish.
+- Select List Access Points.
+- Review each network’s name, channel, signal strength, and manufacturer.
+Use Scan APs Live to see access points as they appear, or Channel Congestion to review activity by channel.
+## CLI steps
+- Open the GhostESP terminal (serial connection or on-device terminal).
+- Run scanap to start a scan.
+- Run list -a to see the cached list of networks.
+Run scanap -live to watch networks appear as they are discovered.
+## Expected result
+GhostESP displays nearby access points and their available details. No network connection is created.
+## Troubleshooting
+- No networks found: Move closer to wireless routers and try scanning again.
+- “You Need to Scan APs First” message: Run a scan before trying to select a network.
+- Live scan stops right away: Stop any active Wi-Fi attacks or portals from the menu and try again.
+## Related tasks
+- [Connect GhostESP to a Wi-Fi network](/v2.1/wifi/connect/)
+- [Find devices on your Wi-Fi network](/v2.1/wifi/lan-discovery/)
+- [Run a full environment sweep](/v2.1/wifi/environment-sweep/)

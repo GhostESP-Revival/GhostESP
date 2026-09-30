@@ -75,3 +75,20 @@ description: Frequently asked questions about GhostESP setup, credentials, and t
 - "Generic" firmware builds include SD card support by default; use `sd_config` to see the pins or `sd_pins_spi <cs> <clk> <miso> <mosi>` to set SPI pins and `sd_save_config` to save the pin config to NVS.
 - Ensure your SD card is formatted as **FAT32**.
 - Try using a SanDisk brand SD card 32GB or less.
+
+---
+
+### 11. Do I need to install ESP-IDF or build from source?
+- No. Flashing a released build needs nothing but a browser: see the [Installation Guide]({{< relref "installation-guide.md" >}}).
+- Building from source is only required if you are changing firmware code or adding a board. See [Environment Setup]({{< relref "../development/environment-setup.md" >}}) if that is what you want to do.
+
+---
+
+### 12. Which variant do I choose in the web flasher?
+- The flasher asks for the **chip family**, not the board name. Look your board up in the **Chip** column of [Supported Hardware]({{< relref "supported-hardware.md" >}}).
+- Choosing the wrong chip is the most common reason a board flashes but never boots.
+
+---
+
+### 13. I already flashed an older version. How do I update?
+- See [Firmware Updates]({{< relref "firmware-updates.md" >}}) for the OTA and manual options available for your board.

@@ -1,4 +1,8 @@
+#include "sdkconfig.h"
 #include "boot_banner_text.h"
+#if defined(CONFIG_IDF_TARGET_ESP32) && defined(CONFIG_BT_ENABLED)
+#include "esp_bt.h"
+#endif
 #include "core/shell.h"
 #include "core/commandline.h"
 #include "core/callbacks.h"
@@ -25,6 +29,7 @@
 #include "managers/plugin_manager.h"
 #include "esp_wifi.h"
 #include "core/esp_comm_manager.h"
+#include "core/ghostlink_bench.h"
 #include "managers/status_display_manager.h"
 #if defined(CONFIG_IDF_TARGET_ESP32P4)
 #include "esp_hosted.h"
@@ -51,6 +56,8 @@
 #include "esp_heap_caps.h"
 #include "managers/usb_keyboard_manager.h"
 #include "managers/subghz_remote_manager.h"
+#include "managers/lora_manager.h"
+#include "managers/meshcore_manager.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -76,7 +83,7 @@
 #include "managers/motion_detector_manager.h"
 #include "managers/camera_stream_manager.h"
 #endif
-#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER) || defined(CONFIG_HAS_CROWPANEL_NS4168)
+#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER) || defined(CONFIG_HAS_CROWPANEL_NS4168) || defined(CONFIG_HAS_TDECK_SPEAKER)
 #include "managers/audio_receiver_manager.h"
 #endif
 
@@ -209,6 +216,32 @@ RGBManager_t rgb_manager;  // Global instance for entire project
 int ieee80211_raw_frame_sanity_check(int32_t arg, int32_t arg2, int32_t arg3) { return 0; }
 static const char *TAG = "Main.c";
 
+/* Opt-in boot auto-start: start the remembered mesh protocol (NVS "mesh"/"mode"
+ * selects Meshtastic vs MeshCore). On display boards this runs late in
+ * app_main — after the AP manager, display and SD-init task have claimed their
+ * internal RAM — so a radio start can never price boot-critical allocations
+ * (like the 8 KiB SD task stack) out of the internal heap. Headless USB builds
+ * keep the early position. Idempotent: both managers no-op when running. */
+static void mesh_auto_start_boot(void) {
+#ifdef CONFIG_HAS_LORA
+    if (!lora_manager_auto_start_enabled()) return;
+#ifdef CONFIG_HAS_MESHCORE
+    if (mc_manager_default_backend_meshcore()) {
+        if (!mc_manager_is_running() && !mc_manager_start()) {
+            ESP_LOGW(TAG, "MeshCore auto-start failed: %s", mc_manager_last_error());
+        }
+        return;
+    }
+#endif
+    if (lora_manager_is_running()) return;
+    if (lora_manager_needs_setup()) {
+        ESP_LOGW(TAG, "Meshtastic auto-start skipped: region is not set");
+    } else if (!lora_manager_start()) {
+        ESP_LOGW(TAG, "Meshtastic auto-start failed: %s", lora_manager_last_error());
+    }
+#endif
+}
+
 /* timegm() is not available in ESP-IDF's newlib for ESP32-C5 (RISC-V).
  * Provide a minimal implementation that both main.c (RTC sync) and
  * minmea.c (GPS timestamp conversion) can link against. */
@@ -216,6 +249,10 @@ time_t timegm(struct tm *tm) {
     int y = tm->tm_year + 1900;
     int m = tm->tm_mon + 1;
     int d = tm->tm_mday;
+    // Callers (RTC restore, minmea) can hand us unvalidated fields; clamp the
+    // month so days_before_month[] can never be indexed out of range.
+    if (m < 1) m = 1;
+    if (m > 12) m = 12;
     // Days from 1970-01-01 to year y, month m, day d
     static const int days_before_month[12] = {
         0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334
@@ -604,6 +641,20 @@ static void deferred_sd_init_task(void *arg) {
     // Short initial delay: the splash holds the screen during boot work, so we
     // only need enough time for splash_create to render the progress bar.
     vTaskDelay(pdMS_TO_TICKS(200));
+#if defined(CONFIG_HAS_LORA) && (defined(CONFIG_CROWPANEL_ADVANCE_RGB_LCD) || \
+                                defined(CONFIG_CROWPANEL_ADVANCE_SMALL_SPI_LCD))
+    // CrowPanel Advance wireless-module mode owns a SPI host/function-mux
+    // path. The 4.3 board shares GPIO4/5/6 with TF; the 2.4/2.8 boards keep
+    // the display on SPI2 and reserve SPI3 for the radio. In either case SD
+    // probing would claim or reconfigure the radio path, so leave SD off.
+    ESP_LOGI(TAG, "SD init skipped: CrowPanel wireless-module mode owns shared pins");
+#ifdef CONFIG_WITH_SCREEN
+    boot_status_set_progress(100.0f, "LoRa wireless module mode");
+    boot_status_signal_completion();
+#endif
+    vTaskDelete(NULL);
+    return;
+#endif
     ESP_LOGI(TAG, "Deferred SD Card init starting");
 
 #ifdef CONFIG_WITH_SCREEN
@@ -665,6 +716,12 @@ static void deferred_sd_init_task(void *arg) {
 }
 
 void app_main(void) {
+#if defined(CONFIG_IDF_TARGET_ESP32) && defined(CONFIG_BT_ENABLED)
+    /* BLE is only used on demand, but the Classic BT controller's ~15KB DRAM
+     * is otherwise held until the first ble_init(). Nothing uses Classic BT
+     * (ble_manager releases it anyway), so return it to the heap now. */
+    (void)esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT);
+#endif
     memory_debug_init();
     memory_debug_start_boot_trace();
     MEASURE_INIT_RAM("Ghostchi Mood init", ghostchi_mood_init());
@@ -799,6 +856,13 @@ void app_main(void) {
 #if !defined(CONFIG_IDF_TARGET_ESP32S2)
     // MEASURE_INIT_RAM("BLE Manager", ble_init());
 #endif
+#ifdef CONFIG_HAS_LORA
+    MEASURE_INIT_RAM("LoRa Manager", lora_manager_early_init_off_main());
+#endif
+#ifdef CONFIG_HAS_MESHCORE
+    // Loads/generates the Ed25519 identity from NVS; no radio access.
+    mc_manager_early_init();
+#endif
 #ifdef CONFIG_HAS_BADUSB
     MEASURE_INIT_RAM("BadUSB Manager", badusb_manager_init());
 #endif
@@ -821,6 +885,9 @@ void app_main(void) {
 #endif
 
 #ifdef USB_MODULE
+    // Headless USB builds exit below; start the mesh before leaving, while the
+    // display-path memory pressure this board never sees does not apply.
+    mesh_auto_start_boot();
     wifi_manager_auto_deauth();
     return;
 #endif
@@ -965,6 +1032,7 @@ void app_main(void) {
 #endif
     wardriving_register_stream_handler();
     usb_keyboard_manager_register_stream_handler();
+    ghostlink_bench_init();
 #ifdef CONFIG_HAS_BADUSB
     badusb_manager_register_stream_handler();
 #endif
@@ -983,13 +1051,24 @@ void app_main(void) {
     // include guard at the top of this file.
     MEASURE_INIT_RAM("M5 audio codec init", m5_audio_codec_init());
 #endif
+#if !defined(CONFIG_WITH_SCREEN)
+    // Headless boards (e.g. somethingsomething2) don't run mic capture at boot;
+    // the visualizer self-initializes on first mic_visualizer_start call.
+#else
     // Initialize MIC visualizer (will start sending amplitude over GhostLink when connected)
     MEASURE_INIT_RAM("Mic Visualizer init", mic_visualizer_init());
     mic_visualizer_start();
 #endif
-#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER) || defined(CONFIG_HAS_CROWPANEL_NS4168)
+#endif
+#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER) || defined(CONFIG_HAS_CROWPANEL_NS4168) || defined(CONFIG_HAS_TDECK_SPEAKER)
+#if !defined(CONFIG_WITH_SCREEN)
+    // Headless boards only need the receiver when `audio start` runs; it
+    // self-initializes there. Skip the boot-time I2S + decode task + 96KB
+    // ringbuf registration to preserve internal RAM.
+#else
     ESP_LOGI(TAG, "Initializing audio receiver");
     MEASURE_INIT_RAM("Audio Receiver", audio_receiver_manager_init());
+#endif
 #endif
 #ifdef CONFIG_HAS_CAMERA
     MEASURE_INIT_RAM("Motion Detector init", motion_detector_init());
@@ -1027,7 +1106,7 @@ void app_main(void) {
     esp_err_t io_ret;
     MEASURE_INIT_RAM("Joystick IO Expander init", io_ret = joystick_io_expander_init());
     if (io_ret == ESP_OK) {
-        printf("IO Expander initialized successfully for joystick input\n");
+        printf("Joystick: IO expander\n");
         // Map to display manager expectations: [0]=Left, [1]=Select, [2]=Up, [3]=Right, [4]=Down
         joystick_init(&joysticks[0], 3, HOLD_LIMIT, true);  // Left button (P03) -> joysticks[0]
         joystick_init(&joysticks[1], 2, HOLD_LIMIT, true);  // Select button (P02) -> joysticks[1]
@@ -1062,6 +1141,7 @@ void app_main(void) {
     joystick_init(&joysticks[3], CONFIG_R_BTN, HOLD_LIMIT, true);  // Right
     joystick_init(&joysticks[4], CONFIG_D_BTN, HOLD_LIMIT, true);  // Down
 #endif
+    printf("Joystick: GPIO buttons\n");
 #if defined(CONFIG_JOYSTICK_COM_PIN) && CONFIG_JOYSTICK_COM_PIN >= 0
     {
         gpio_config_t com_conf = {
@@ -1076,7 +1156,6 @@ void app_main(void) {
     }
 #endif
 #endif
-    printf("Joystick Setup Successfully...\n");
 #endif
     ESP_LOGI(TAG, "Initializing display manager");
     MEASURE_INIT_RAM("Display Manager", display_manager_init() );
@@ -1138,6 +1217,12 @@ void app_main(void) {
                                             tskIDLE_PRIORITY + 1, NULL);
         if (sd_task_rc != pdPASS) {
             ESP_LOGE(TAG, "Failed to create SD Init task");
+#ifdef CONFIG_WITH_SCREEN
+            /* The splash only dismisses when this task signals completion.
+             * If the task could not be created (internal heap exhausted),
+             * release the splash here so boot can never wedge on the loader. */
+            boot_status_signal_completion();
+#endif
         }
     }
 
@@ -1232,6 +1317,13 @@ void app_main(void) {
 #endif
     }
 
+    // Auto-start the remembered mesh protocol here, after every boot-critical
+    // internal allocation (AP manager, display/LVGL, splash, SD-init task
+    // stack) has been made. A failed start is logged and simply leaves the
+    // radio off instead of starving the boot.
+    mesh_auto_start_boot();
+
+    printf("\n");
     ESP_LOGI(TAG, "Build config used: %s", CONFIG_BUILD_CONFIG_TEMPLATE);
     printf("Build Name: %s\n", CONFIG_BUILD_CONFIG_TEMPLATE);
     
@@ -1267,10 +1359,21 @@ void app_main(void) {
     // the fields as local time, shifting the restored clock by the timezone
     // offset; timegm() interprets the fields as UTC instead.
     RTC_Date rtc_time;
-    if (rtc_get_datetime(&rtc_time) == ESP_OK) {
+    bool rtc_valid = false;
+    bool fields_ok = false;
+    if (rtc_check_time_valid(&rtc_valid) != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to read RTC validity flags, keeping default time");
+    } else if (!rtc_valid) {
+        ESP_LOGW(TAG, "RTC time not valid (power lost/oscillator stopped), keeping default time");
+    } else if (rtc_get_datetime(&rtc_time) == ESP_OK) {
         struct timeval tv = {0};
         struct tm tm = {0};
-        
+
+        fields_ok = rtc_time.month >= 1 && rtc_time.month <= 12 &&
+                    rtc_time.day >= 1 && rtc_time.day <= 31 &&
+                    rtc_time.hour <= 23 && rtc_time.minute <= 59 &&
+                    rtc_time.second <= 59;
+
         tm.tm_year = rtc_time.year - 1900;
         tm.tm_mon = rtc_time.month - 1;
         tm.tm_mday = rtc_time.day;
@@ -1282,7 +1385,7 @@ void app_main(void) {
         tv.tv_sec = timegm(&tm);
         tv.tv_usec = 0;
         
-        if (tv.tv_sec > 1600000000) { // Valid time (after Sept 2020)
+        if (fields_ok && tv.tv_sec > 1600000000) { // Valid time (after Sept 2020)
             settimeofday(&tv, NULL);
             ESP_LOGI(TAG, "System time synchronized from RTC: %04d-%02d-%02d %02d:%02d:%02d", 
                      rtc_time.year, rtc_time.month, rtc_time.day, 
@@ -1304,6 +1407,7 @@ void app_main(void) {
     if (mem_monitor_err != ESP_OK) {
         ESP_LOGW(TAG, "Periodic RAM monitor failed to start: %s", esp_err_to_name(mem_monitor_err));
     }
+    printf("\n");
     print_boot_banner();
     printf("\n");
     printf("Type 'help' for available commands\n");

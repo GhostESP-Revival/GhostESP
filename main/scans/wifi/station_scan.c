@@ -12,6 +12,7 @@
 #include "scans/wifi/station_scan.h"
 #include "scans/wifi/ap_scan.h"
 #include "scans/wifi/wifi_channels.h"
+#include "scans/wifi/hop_profile.h"
 #include "core/scan_saver.h"
 #include "core/ouis.h"
 #include "core/glog.h"
@@ -57,6 +58,10 @@ static uint8_t scansta_channel_index = 0;
 
 // External dependencies
 extern RGBManager_t rgb_manager;
+
+// Kept local to avoid making this internal restore helper part of the public
+// wifi_manager API.
+void wifi_manager_configure_sta_from_settings(void);
 
 // Forward declarations
 static bool station_exists(const uint8_t *station_mac, const uint8_t *ap_bssid);
@@ -297,6 +302,27 @@ static bool station_exists(const uint8_t *station_mac, const uint8_t *ap_bssid) 
 }
 
 /**
+ * @brief Fill in the parent AP's security type for a station record
+ *
+ * Looks the station's AP BSSID up in the AP scan results. The AP is not
+ * necessarily in the scan (a station can be seen on a network that was never
+ * scanned), so this is best effort and leaves the field as WIFI_AUTH_UNKNOWN
+ * when the lookup fails.
+ */
+static void station_fill_ap_authmode(station_ap_pair_t *pair) {
+    if (pair == NULL) return;
+    pair->ap_authmode = (uint8_t)WIFI_AUTH_UNKNOWN;
+
+    uint16_t ap_count = 0;
+    wifi_ap_record_t *aps = NULL;
+    ap_scan_get_results(&ap_count, &aps);
+    int ap_idx = find_ap_by_bssid(pair->ap_bssid, aps, ap_count, NULL, 0);
+    if (ap_idx >= 0) {
+        pair->ap_authmode = (uint8_t)aps[ap_idx].authmode;
+    }
+}
+
+/**
  * @brief Add a station-AP pair to the list
  * 
  * @param station_mac Station MAC address
@@ -306,6 +332,8 @@ static void add_station_ap_pair(const uint8_t *station_mac, const uint8_t *ap_bs
     if (station_count < STATION_SCAN_MAX_RESULTS) {
         memcpy(station_ap_list[station_count].station_mac, station_mac, 6);
         memcpy(station_ap_list[station_count].ap_bssid, ap_bssid, 6);
+        /* Resolved later, at selection time, when the AP scan is available. */
+        station_ap_list[station_count].ap_authmode = (uint8_t)WIFI_AUTH_UNKNOWN;
         station_count++;
     } else {
         glog("Station list full\nCan't add more stations.\n");
@@ -341,15 +369,36 @@ static esp_err_t start_scansta_channel_hopping(void) {
         scansta_channel_hop_timer = NULL;
     }
 
-    uint8_t planned_count = wifi_channels_build_from_ap_results(scansta_channels,
-                                                                 WIFI_CHANNELS_MAX);
-    if (planned_count == 0) {
-        planned_count = wifi_channels_build_country_list(scansta_channels,
-                                                         WIFI_CHANNELS_MAX);
+    uint8_t planned_count = 0;
+    size_t profile_count = 0;
+    hop_profile_resolve_monitor(scansta_channels, WIFI_CHANNELS_MAX, &profile_count);
+    if (profile_count > 0) {
+        planned_count = (uint8_t)profile_count;
+    } else {
+        // HOP_MODE_DEFAULT: AP-result channels first, then the complete
+        // country-allowed plan. This keeps a 2.4-only AP cache from hiding
+        // valid C5 5 GHz channels.
+        planned_count = wifi_channels_build_from_ap_results(scansta_channels,
+                                                            WIFI_CHANNELS_MAX);
+        uint8_t country_channels[WIFI_CHANNELS_MAX];
+        uint8_t country_count = wifi_channels_build_country_list(
+            country_channels, WIFI_CHANNELS_MAX);
+        for (uint8_t i = 0; i < country_count && planned_count < WIFI_CHANNELS_MAX; i++) {
+            bool seen = false;
+            for (uint8_t j = 0; j < planned_count; j++) {
+                if (scansta_channels[j] == country_channels[i]) {
+                    seen = true;
+                    break;
+                }
+            }
+            if (!seen) {
+                scansta_channels[planned_count++] = country_channels[i];
+            }
+        }
     }
     scansta_channel_count = 0;
     for (uint8_t i = 0; i < planned_count; i++) {
-        if (wifi_channels_is_safe_monitor_channel(scansta_channels[i])) {
+        if (wifi_channels_is_monitor_channel(scansta_channels[i])) {
             scansta_channels[scansta_channel_count++] = scansta_channels[i];
         }
     }
@@ -361,7 +410,12 @@ static esp_err_t start_scansta_channel_hopping(void) {
     }
     scansta_channel_index = 0;
     scansta_current_channel = scansta_channels[scansta_channel_index];
-    esp_wifi_set_channel(scansta_current_channel, WIFI_SECOND_CHAN_NONE);
+    esp_err_t channel_err = esp_wifi_set_channel(scansta_current_channel, WIFI_SECOND_CHAN_NONE);
+    if (channel_err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set station scan channel %u: %s",
+                 (unsigned)scansta_current_channel, esp_err_to_name(channel_err));
+        return channel_err;
+    }
 
     esp_timer_create_args_t timer_args = {
         .callback = scansta_channel_hop_timer_callback,
@@ -498,6 +552,115 @@ void wifi_stations_sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type)
 // Scan Operations
 // ============================================================================
 
+/**
+ * @brief Put the radio into the STA-only state required by station scanning.
+ *
+ * AP scans restore GhostNet before returning. Promiscuous capture and channel
+ * hopping must not be attempted while the radio is still in APSTA mode: on
+ * dual-band targets (notably the ESP32-C5) that transition can fail or leave
+ * the driver waiting for an AP/STA state change.
+ */
+static esp_err_t station_scan_prepare_monitor(void) {
+    ap_manager_stop_services();
+
+    esp_err_t err = esp_wifi_set_mode(WIFI_MODE_STA);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set STA mode for station scan: %s",
+                 esp_err_to_name(err));
+        return err;
+    }
+
+    err = esp_wifi_start();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start Wi-Fi for station scan: %s",
+                 esp_err_to_name(err));
+        return err;
+    }
+
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+    // The C5 uses WIFI_BAND_MODE_AUTO by default. Configure both bands via
+    // the IDF 6.x multi-band APIs so monitor mode does not inherit a 40 MHz
+    // profile that conflicts with 11ax/11ac.
+    wifi_bandwidths_t bandwidths = {
+        .ghz_2g = WIFI_BW20,
+        .ghz_5g = WIFI_BW20,
+    };
+    err = esp_wifi_set_bandwidths(WIFI_IF_STA, &bandwidths);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set C5 station bandwidths: %s",
+                 esp_err_to_name(err));
+        return err;
+    }
+
+    wifi_protocols_t protocols = {
+        .ghz_2g = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N |
+                  WIFI_PROTOCOL_LR,
+        .ghz_5g = WIFI_PROTOCOL_11A | WIFI_PROTOCOL_11N |
+                  WIFI_PROTOCOL_11AC | WIFI_PROTOCOL_11AX,
+    };
+    err = esp_wifi_set_protocols(WIFI_IF_STA, &protocols);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set C5 station protocols: %s",
+                 esp_err_to_name(err));
+        return err;
+    }
+#endif
+
+    // Do not leave an association active: an associated STA locks the radio
+    // to one channel and prevents the channel-hop timer from changing it.
+    err = esp_wifi_disconnect();
+    if (err != ESP_OK &&
+        err != ESP_ERR_WIFI_NOT_STARTED &&
+        err != ESP_ERR_WIFI_NOT_CONNECT) {
+        ESP_LOGW(TAG, "Failed to disconnect STA before monitor setup: %s",
+                 esp_err_to_name(err));
+    }
+
+    wifi_promiscuous_filter_t filter = {
+        .filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT | WIFI_PROMIS_FILTER_MASK_DATA
+    };
+    err = esp_wifi_set_promiscuous_filter(&filter);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set station scan promiscuous filter: %s",
+                 esp_err_to_name(err));
+        return err;
+    }
+
+    err = esp_wifi_set_promiscuous(true);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to enable promiscuous mode for station scan: %s",
+                 esp_err_to_name(err));
+        return err;
+    }
+
+    err = esp_wifi_set_promiscuous_rx_cb(wifi_stations_sniffer_callback);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set station scan callback: %s",
+                 esp_err_to_name(err));
+        (void)esp_wifi_set_promiscuous(false);
+        return err;
+    }
+
+    err = start_scansta_channel_hopping();
+    if (err != ESP_OK) {
+        (void)esp_wifi_set_promiscuous_rx_cb(NULL);
+        (void)esp_wifi_set_promiscuous(false);
+        return err;
+    }
+
+    return ESP_OK;
+}
+
+static void station_scan_abort_start(void) {
+    stop_scansta_channel_hopping();
+    (void)esp_wifi_set_promiscuous_rx_cb(NULL);
+    (void)esp_wifi_set_promiscuous(false);
+    (void)esp_wifi_stop();
+    (void)ap_manager_restore_after_attack("station scan start failure");
+    wifi_manager_configure_sta_from_settings();
+    wifi_manager_set_reconnect_hold(false);
+}
+
 void station_scan_start(void) {
     if (scan_active) {
         return;
@@ -525,18 +688,32 @@ void station_scan_start(void) {
 
         // Perform a synchronous scan
         ap_manager_stop_services();
-        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-        ESP_ERROR_CHECK(esp_wifi_start());
+        esp_err_t err = esp_wifi_set_mode(WIFI_MODE_STA);
+        if (err != ESP_OK) {
+            glog("Failed to set STA mode for initial scan: %s\n", esp_err_to_name(err));
+            station_scan_abort_start();
+            return;
+        }
+        err = esp_wifi_start();
+        if (err != ESP_OK) {
+            glog("Failed to start Wi-Fi for initial scan: %s\n", esp_err_to_name(err));
+            station_scan_abort_start();
+            return;
+        }
 
         wifi_scan_config_t scan_config = {
             .ssid = NULL,
             .bssid = NULL,
             .channel = 0,
             .show_hidden = true,
+#ifdef CONFIG_IDF_TARGET_ESP32C5
+            .scan_time = {.active.min = 250, .active.max = 300, .passive = 300}
+#else
             .scan_time = {.active.min = 450, .active.max = 500, .passive = 500}
+#endif
         };
 
-        esp_err_t err = esp_wifi_scan_start(&scan_config, true);
+        err = esp_wifi_scan_start(&scan_config, true);
 
         if (err == ESP_OK) {
             uint16_t initial_ap_count = 0;
@@ -571,27 +748,37 @@ void station_scan_start(void) {
         }
 
         // Stop STA mode before setting monitor mode
-        ESP_ERROR_CHECK(esp_wifi_stop());
+        err = esp_wifi_stop();
+        if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_STARTED) {
+            glog("Failed to stop Wi-Fi after initial scan: %s\n", esp_err_to_name(err));
+            station_scan_abort_start();
+            return;
+        }
+        if (scanned_aps == NULL || ap_count == 0) {
+            glog("No APs available for station matching; scan not started\n");
+            station_scan_abort_start();
+            return;
+        }
     } else {
         glog("Using previously scanned AP list (%d APs).\n", ap_count);
     }
 
-    // Set scan active flag
+    // The initial-scan path may have restored Wi-Fi and cleared the hold while
+    // harvesting results. Re-assert it before handing the radio to monitor mode
+    // so auto-reconnect cannot race channel hopping.
+    wifi_manager_set_reconnect_hold(true);
+
+    // The AP scan may have restored GhostNet before this function was called.
+    // Always perform a clean STA-only transition before enabling promiscuous
+    // mode, regardless of whether the AP list came from the cache or fallback.
+    if (station_scan_prepare_monitor() != ESP_OK) {
+        station_scan_abort_start();
+        return;
+    }
+
+    // Only advertise an active scan after the driver accepted every monitor
+    // setup call. This prevents the UI/CLI from waiting on a failed start.
     scan_active = true;
-
-    // Restart WiFi for promiscuous mode (STA was stopped above)
-    esp_wifi_start();
-
-    // Start monitor mode with management + data frame filtering for station discovery
-    wifi_promiscuous_filter_t filter = {
-        .filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT | WIFI_PROMIS_FILTER_MASK_DATA
-    };
-    esp_wifi_set_promiscuous_filter(&filter);
-    esp_wifi_set_promiscuous(true);
-    esp_wifi_set_promiscuous_rx_cb(wifi_stations_sniffer_callback);
-
-    // Start channel hopping for station scan
-    start_scansta_channel_hopping();
 
     glog("Started Station Scan (Channel Hopping Enabled)...\n");
 }
@@ -606,8 +793,13 @@ void station_scan_stop(void) {
     // Stop channel hopping
     stop_scansta_channel_hopping();
 
-    // Stop monitor mode
-    esp_wifi_set_promiscuous(false);
+    // Stop monitor mode and fully stop the radio before restoring APSTA.
+    // ap_manager_start_services() treats ESP_ERR_WIFI_STATE from esp_wifi_start()
+    // as a restore failure, so leaving the radio running makes cleanup
+    // nondeterministic (especially on the ESP32-C5).
+    (void)esp_wifi_set_promiscuous_rx_cb(NULL);
+    (void)esp_wifi_set_promiscuous(false);
+    (void)esp_wifi_stop();
 
     // If station_scan_start ran the initial-AP-scan path, it called
     // ap_manager_stop_services() and never restored the AP. Restore it now
@@ -698,8 +890,13 @@ esp_err_t station_scan_select(int index) {
     ap_scan_get_results(&ap_count, &scanned_aps);
 
     char sanitized_ssid[33] = "(Unknown AP)";
-    find_ap_by_bssid(selected_station.ap_bssid, scanned_aps, ap_count, 
+    find_ap_by_bssid(selected_station.ap_bssid, scanned_aps, ap_count,
                      sanitized_ssid, sizeof(sanitized_ssid));
+
+    /* Carry the parent AP's security type along with the selection so the
+     * deauth path can say whether this network enforces protected management
+     * frames, instead of reporting the posture as unknown. */
+    station_fill_ap_authmode(&selected_station);
 
     // Log selection using helper
     char sta_mac_str[18], ap_mac_str[18];
@@ -750,6 +947,7 @@ esp_err_t station_scan_select_multiple(int *indices, int count) {
 
     for (int i = 0; i < count; i++) {
         selected_stations[i] = station_ap_list[indices[i]];
+        station_fill_ap_authmode(&selected_stations[i]);
     }
 
     char sta_mac_str[18], ap_mac_str[18];

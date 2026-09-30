@@ -1,0 +1,64 @@
+Title: Keyboard Control
+Description: Using a USB keyboard to control GhostESP
+URL: /latest/usb/keyboard/
+Version: latest
+Section: USB
+Search index: /search-index.json
+
+# Keyboard Control
+
+> Using a USB keyboard to control GhostESP
+
+## On this page
+
+- [Requirements](#requirements)
+- [Enabling USB Host Mode](#enabling-usb-host-mode)
+- [Via Settings Menu](#via-settings-menu)
+- [Via Command](#via-command)
+- [Keyboard Controls](#keyboard-controls)
+- [Remote Keyboard](#remote-keyboard)
+- [Important Notes](#important-notes)
+
+---
+
+ESP32-S3 devices can use USB Host mode to accept input from a USB keyboard.
+## Requirements
+- ESP32-S3 based device (Cardputer ADV, T-Deck, etc.)
+- USB OTG adapter (Type-C to USB-A)
+- USB keyboard
+- USE_USB_KEYBOARD enabled in build config (ESP32-S3 only)
+## Enabling USB Host Mode
+USB Host mode can be enabled in two ways:
+### Via Settings Menu
+- Navigate to Settings → General → Power
+- Find USB Host Mode
+- Toggle to On
+### Via Command
+usbkbd on
+To disable:
+usbkbd off
+To check status:
+usbkbd status
+## Keyboard Controls
+Once enabled, the following keys control navigation:
+Key |
+Action |
+↑ Arrow |
+Navigate up |
+↓ Arrow |
+Navigate down |
+← Arrow |
+Back / Left |
+→ Arrow |
+Right |
+Enter |
+Select |
+ESC |
+Back / Exit |
+All other keys work as normal keyboard input for text fields.
+## Remote Keyboard
+When two GhostESP devices are connected via Dual Comm, keyboard events are transmitted between them. This allows one device with a USB keyboard to control another device remotely.
+## Important Notes
+- CDC Console: USB console is unavailable while in Host mode (port switches from Device to Host).
+- Flashing: You must disable USB Host mode (or reboot) to flash new firmware via USB
+- Not Persistent: The USB Host mode setting is runtime-only and resets on reboot

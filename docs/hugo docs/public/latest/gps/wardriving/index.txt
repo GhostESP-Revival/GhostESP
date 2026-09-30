@@ -1,0 +1,146 @@
+Title: Wardriving
+Description: Capture Wi-Fi and BLE observations with GPS data for mapping and analysis
+URL: /latest/gps/wardriving/
+Version: latest
+Section: GPS &amp; Wardriving
+Search index: /search-index.json
+
+# Wardriving
+
+> Capture Wi-Fi and BLE observations with GPS data for mapping and analysis
+
+## On this page
+
+- [Before You Start](#before-you-start)
+- [Quick Start (Display)](#quick-start-display)
+- [Wi-Fi](#wi-fi)
+- [BLE](#ble)
+- [CLI Quick Start](#cli-quick-start)
+- [Wi-Fi (CLI)](#wi-fi-cli)
+- [BLE (CLI)](#ble-cli)
+- [What It Captures](#what-it-captures)
+- [Wi-Fi Wardriving (&lt;code&gt;startwd&lt;/code&gt;)](#wi-fi-wardriving-startwd)
+- [BLE Wardriving (&lt;code&gt;blewardriving&lt;/code&gt;)](#ble-wardriving-blewardriving)
+- [How Wi-Fi Scanning Works](#how-wi-fi-scanning-works)
+- [Dedupe Rules (Exact Behavior)](#dedupe-rules-exact-behavior)
+- [Wi-Fi dedupe (&lt;code&gt;BSSID&lt;/code&gt; key)](#wi-fi-dedupe-bssid-key)
+- [BLE dedupe (&lt;code&gt;MAC&lt;/code&gt; key)](#ble-dedupe-mac-key)
+- [Practical implications](#practical-implications)
+- [Channel Hopping and Split-Channel Helper](#channel-hopping-and-split-channel-helper)
+- [Output Files](#output-files)
+- [Reading Wardriving Status Output](#reading-wardriving-status-output)
+- [Data Quality Tips](#data-quality-tips)
+- [Troubleshooting](#troubleshooting)
+- [Next Step](#next-step)
+
+---
+
+Wardriving in GhostESP records nearby wireless observations with GPS coordinates into WiGLE-compatible CSV files on SD.
+## Before You Start
+- GPS module connected and receiving NMEA data
+- SD card mounted (recommended for persistent CSV files)
+- For BLE wardriving: a non-ESP32-S2 build
+- Optional for split-channel mode: a second GhostESP linked via GhostLink
+For best results, wait for a valid 2D/3D fix before expecting CSV growth. Indoor starts and poor sky visibility usually cause heavy GPS rejection.
+## Quick Start (Display)
+### Wi-Fi
+- Connect GPS and insert SD card
+- Open GPS → Start Wardriving
+- Wait for GPS lock (2D/3D preferred)
+- Move through your route and let channel hopping run
+- End with Stop Wardriving
+### BLE
+- Connect GPS and insert SD card
+- Open GPS → BLE Wardriving
+- Wait for GPS lock
+- Move through your route
+- Stop BLE wardriving from the same menu
+## CLI Quick Start
+### Wi-Fi (CLI)
+startwd [--hop &lt;ms&gt;] [--weighted]
+Stop:
+startwd -s
+### BLE (CLI)
+blewardriving
+Stop:
+blewardriving -s
+Global stop for active scans/tasks:
+stop
+## What It Captures
+### Wi-Fi Wardriving (startwd)
+- Wi-Fi AP observations (BSSID, SSID, auth mode, channel, RSSI)
+- GPS position/quality fields with each accepted observation
+- Hidden SSIDs logged as &lt;hidden&gt;
+Wi-Fi logging is intentionally deduped: an AP is re-logged only when the observation is materially better.
+### BLE Wardriving (blewardriving)
+- BLE MAC, name (when present), appearance/manufacturer metadata, RSSI
+- GPS position/quality fields with each accepted observation
+BLE logging is also deduped to reduce noise and file bloat.
+## How Wi-Fi Scanning Works
+During startwd, GhostESP:
+- Starts monitor mode and listens to management frames
+- Processes beacon/probe-response style AP observations
+- Parses SSID, BSSID, channel, and security IEs from frames
+- Hops channels on a timer (default 100 ms)
+- Sends a wildcard probe request on each hop to stimulate AP responses
+- Applies GPS validity gates (valid fix, at least 2D, enough satellites) before accepting rows
+If GPS quality drops, observations are rejected (counted in gpsrej) rather than writing low-quality rows.
+## Dedupe Rules (Exact Behavior)
+### Wi-Fi dedupe (BSSID key)
+An observation is logged when at least one condition is true:
+- First time this BSSID is seen
+- Previous SSID was hidden/empty and now SSID is known
+- RSSI differs by more than 3 dBm vs best seen value (triggers on both improvement and degradation)
+### BLE dedupe (MAC key)
+An observation is logged when at least one condition is true:
+- First time this BLE MAC is seen
+- Device name was previously empty and now available
+- RSSI differs by more than 5 dBm (either improvement or degradation)
+### Practical implications
+- Revisiting the same APs/devices with weaker or similar RSSI usually does not grow CSV fast
+- Dedupe state is committed only after a successful CSV write (prevents losing entries on failed writes)
+- Dedupe tables are bounded (larger with PSRAM), so very long sessions can eventually evict older entries
+## Channel Hopping and Split-Channel Helper
+- Default hop interval is 100 ms
+- Channel list is built from current Wi-Fi country configuration (with safe fallback channels if unavailable)
+- In single-device mode, primary scans the full local channel list
+- In split-channel mode with GhostLink:
+Primary prefers 5 GHz when both 2.4 and 5 GHz are available
+- Helper prefers 2.4 GHz (or configured helper channels)
+- Helper observations are streamed back and merged into the primary CSV pipeline
+- If GhostLink drops mid-session, primary automatically continues local-only scanning
+Advanced helper commands:
+startwd --helper
+startwd --helper --channels 1,6,11
+startwd -s --helper
+## Output Files
+- CSV directory: /mnt/ghostesp/gps/
+- Wi-Fi files: wardriving_&lt;n&gt;.csv
+- BLE files: ble_wardriving_&lt;n&gt;.csv
+- Format: WiGLE-compatible CSV headers/rows
+Use normal stop actions (startwd -s, blewardriving -s, or stop) so buffered rows are flushed before ending a session.
+## Reading Wardriving Status Output
+You may see log lines similar to:
+Wardrive: ap=421 logged=133/192 gpsrej=59 helper=12/20 ch=6 up=3m10s gps=3D/9 pending=0B heap=182000/120000B
+- ap is total Wi-Fi observations seen by wardriving callbacks, not unique AP count
+- logged=x/y is accepted logging calls vs attempts (CSV growth may still be slower because of dedupe and GPS/date gates)
+- gpsrej counts observations rejected because GPS validity checks failed
+- helper=merged/received shows peer contributions accepted on primary
+- pending and heap help diagnose buffering pressure and memory headroom
+In helper mode, status lines include helper transmit counters (tx(...)) and stream send success/fail (send(ok/fail)).
+## Data Quality Tips
+- Allow GPS to settle before route start (open sky, minimal obstructions)
+- Drive/walk at steady speed so channel hops can revisit channels consistently
+- Watch gpsrej; high values usually mean weak fix or poor satellite geometry
+- Use stop/-s commands before power-off so final buffered rows are flushed
+- If AP growth seems “stuck,” remember dedupe suppresses repeated weak sightings
+## Troubleshooting
+- No AP growth: confirm monitor mode is active and you are not only revisiting already-logged APs at weaker RSSI
+- High gpsrej count: move to a better sky view, wait for stable lock, verify GPS wiring/power
+- BLE wardriving unavailable: BLE wardriving is not supported on ESP32-S2 builds
+- Standalone while expecting GhostLink: connect peer before startwd and verify link stability
+- Low helper merge ratio (helper=merged/received): check GPS quality on primary and GhostLink signal quality
+- No CSV output: verify /mnt/ghostesp/gps/ exists, SD is writable, and sessions are stopped cleanly
+## Next Step
+After capture, see [WiGLE Upload](/latest/gps/wigle/) to upload CSV files.
+For wardriving without a GPS module on your GhostESP device, see [Companion Phone GPS Wardriving](/latest/gps/companion-phone-wardriving/).

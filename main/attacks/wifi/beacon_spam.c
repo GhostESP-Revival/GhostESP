@@ -24,8 +24,10 @@
 #include "managers/settings_manager.h"
 #include "managers/views/terminal_screen.h"
 #include "scans/wifi/wifi_channels.h"
+#include "scans/wifi/hop_profile.h"
 #include "core/glog.h"
 #include "esp_wifi.h"
+#include "esp_log.h"
 #include "esp_random.h"
 #include "freertos/task.h"
 #include "freertos/portmacro.h"
@@ -39,6 +41,7 @@
 #define RANDOM_SSID_LEN 8
 #define BEACON_RANDOM_BURST 4
 #define BEACON_FRAME_MAX 104
+static const char *TAG = "BeaconSpam";
 
 // External globals from wifi_manager.c
 extern RGBManager_t rgb_manager;
@@ -54,6 +57,7 @@ static char (*g_beacon_list)[BEACON_SSID_MAX_LEN + 1];
 static int g_beacon_list_count = 0;
 static TaskHandle_t beacon_task_handle = NULL;
 static volatile bool beacon_task_running = false;
+static char *beacon_task_ssid = NULL;
 
 // Forward declarations
 static void beacon_spam_task(void *param);
@@ -118,25 +122,46 @@ esp_err_t beacon_spam_broadcast(const char *ssid) {
         0x00, 0x00,                                     // SSID IE tag, length (set later)
     };
     
-    // if a station on the AP has an IP, don't hop channels; send on current channel only
-    int start_channel = 1;
-    int end_channel = 11;
+    // Use the active country plan for raw beacon transmission. DFS is
+    // intentionally excluded by the TX policy because ESP32-C5 has no active
+    // radar detection for transmit operations.
+    uint8_t channels[WIFI_CHANNELS_MAX] = {0};
+    uint8_t channel_count = 0;
+    if (!ap_sta_has_ip) {
+        size_t profile_count = 0;
+        hop_profile_resolve(channels, sizeof(channels), &profile_count);
+        if (profile_count > 0) {
+            channel_count = (uint8_t)profile_count;
+        } else {
+            channel_count = wifi_channels_build_country_list(
+                channels, sizeof(channels));
+        }
+    }
     if (ap_sta_has_ip) {
         uint8_t primary_channel;
         wifi_second_chan_t second_channel;
         esp_wifi_get_channel(&primary_channel, &second_channel);
-        start_channel = primary_channel;
-        end_channel = primary_channel;
+        channels[0] = primary_channel;
+        channel_count = 1;
     }
 
-    for (int ch = start_channel; ch <= end_channel; ch++) {
+    for (uint8_t channel_index = 0;
+         channel_index < channel_count && beacon_task_running;
+         channel_index++) {
+        uint8_t ch = channels[channel_index];
+        if (!wifi_channels_is_tx_channel(ch)) continue;
         // Check if we should stop
         if (!beacon_task_running) {
             return ESP_OK;
         }
         
         if (!ap_sta_has_ip) {
-            esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE);
+            esp_err_t channel_err = esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE);
+            if (channel_err != ESP_OK) {
+                ESP_LOGW(TAG, "Beacon channel %u unavailable: %s",
+                         (unsigned)ch, esp_err_to_name(channel_err));
+                continue;
+            }
         }
 
         // Burst multiple random SSIDs per channel hop to amortize the cost of
@@ -284,31 +309,39 @@ esp_err_t beacon_spam_broadcast_karma(const char *ssid) {
 
     size_t packet_size = (38 + ssid_len + 10 + 3 + 13);
 
-    // If AP has connected client, only send on current channel
+    // If AP has connected client, only send on current channel.
     if (ap_sta_has_ip) {
+        if (!wifi_channels_is_tx_channel(primary_channel)) {
+            return ESP_ERR_INVALID_STATE;
+        }
         esp_err_t err = esp_wifi_80211_tx(WIFI_IF_AP, packet, packet_size, false);
         return err;
     }
 
-    // Build country-appropriate channel list
+    // Build channel list: user hop profile when set, otherwise the
+    // country-appropriate list.
     uint8_t channels[WIFI_CHANNELS_MAX];
-    uint8_t channel_count = wifi_channels_build_country_list(channels, sizeof(channels));
+    uint8_t channel_count = 0;
+    size_t resolved_count = 0;
+    hop_profile_resolve(channels, sizeof(channels), &resolved_count);
+    if (resolved_count > 0) {
+        channel_count = (uint8_t)resolved_count;
+    } else {
+        channel_count = wifi_channels_build_country_list(channels, sizeof(channels));
+    }
 
-    // Hop through all country-appropriate channels
+    // Hop through the channel list
     for (int i = 0; i < channel_count; i++) {
         uint8_t ch = channels[i];
+        if (!wifi_channels_is_tx_channel(ch)) continue;
         if (!wifi_manager_karma_is_running()) {
             return ESP_OK;
         }
 
-        // Set appropriate secondary channel for 5GHz HT40
+        // The normal C5 AP profile is 20 MHz; do not request HT40 here.
         wifi_second_chan_t sec_chan = WIFI_SECOND_CHAN_NONE;
-#if defined(CONFIG_IDF_TARGET_ESP32C5)
-        if (ch > 14) {
-            sec_chan = WIFI_SECOND_CHAN_ABOVE;
-        }
-#endif
-        esp_wifi_set_channel(ch, sec_chan);
+        esp_err_t channel_err = esp_wifi_set_channel(ch, sec_chan);
+        if (channel_err != ESP_OK) continue;
 
         // Update DS parameter set with current channel
         ds_param_set_ie[2] = ch;
@@ -358,10 +391,10 @@ static void beacon_spam_task(void *param) {
         vTaskDelay(pdMS_TO_TICKS(settings_get_broadcast_speed(&G_Settings)));
     }
     
-    free(param);
-    // Clear handle before self-deletion to prevent race condition
+    // Clear handle before freeing so stop() never frees a param we already own
     beacon_task_handle = NULL;
-    vTaskDelete(NULL);
+    free(param);
+    vTaskDeleteWithCaps(NULL);
 }
 
 // Beacon list spam task
@@ -376,7 +409,7 @@ static void beacon_spam_list_task(void *param) {
     }
     // Clear handle before self-deletion to prevent race condition
     beacon_task_handle = NULL;
-    vTaskDelete(NULL);
+    vTaskDeleteWithCaps(NULL);
 }
 
 // Start beacon spam with a specific SSID
@@ -410,6 +443,7 @@ void beacon_spam_start(const char *ssid) {
             ap_manager_init();
             return;
         }
+        beacon_task_ssid = ssid_copy;
         rgb_manager_set_color(&rgb_manager, 0, 255, 0, 0, false);
         ghostscript_emit_event("attack_started", "beacon");
     } else {
@@ -426,7 +460,7 @@ void beacon_spam_stop(void) {
         // Signal the task to stop
         beacon_task_running = false;
         
-        // Wait for the task to delete itself (task clears handle and calls vTaskDelete(NULL))
+        // Wait for the task to delete itself (task clears handle and calls vTaskDeleteWithCaps(NULL))
         // Maximum wait time: 2 seconds (task should exit much faster)
         int wait_count = 0;
         while (beacon_task_handle != NULL && wait_count < 20) {
@@ -435,9 +469,14 @@ void beacon_spam_stop(void) {
         }
 
         if (beacon_task_handle != NULL) {
-            vTaskDelete(beacon_task_handle);
+            vTaskDeleteWithCaps(beacon_task_handle);
             beacon_task_handle = NULL;
+            if (beacon_task_ssid) {
+                free(beacon_task_ssid);
+                beacon_task_ssid = NULL;
+            }
         }
+        beacon_task_ssid = NULL;
 
         // Turn off RGB indicator
         rgb_manager_set_color(&rgb_manager, -1, 0, 0, 0, false);

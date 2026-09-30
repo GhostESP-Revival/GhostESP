@@ -49,14 +49,20 @@
 #define CLOUD_CATALOG_MAX_SIZE (256 * 1024)
 #define CLOUD_DOWNLOAD_RANGE_CHUNK_SIZE (32 * 1024)
 #define CLOUD_DOWNLOAD_RANGE_ATTEMPTS 5
-#ifdef CONFIG_SPIRAM
-#define CLOUD_INSTALL_TASK_STACK_BYTES 12288
-#else
-// The Cloud Store keeps the AP stopped on no-PSRAM boards, but their heap can
-// still be fragmented enough that a 12 KB task stack cannot be allocated.
-#define CLOUD_INSTALL_TASK_STACK_BYTES 8192
-#endif
-#define CLOUD_INSTALL_TASK_FALLBACK_STACK_BYTES 6144
+// Both Cloud Store tasks run a full mbedTLS handshake before any HTTP data
+// flows: X.509 chain parsing plus ECDSA P-256 verification. The stack cost is
+// call-chain depth (esp_http_client -> esp_tls -> ssl_handshake -> x509 -> ecp),
+// not big-integer scratch: that lands on the heap in this mbedTLS, and on
+// no-PSRAM boards the heap is the scarce resource. Measured peak on an ESP32 CYD
+// build is 5900 bytes, so 8 KB keeps ~2 KB spare while handing 4 KB back to the
+// heap the handshake itself needs. The 12288 this replaced matched
+// OTA_DOWNLOAD_TASK_STACK_BYTES by analogy, not by measurement. log_stack_hwm()
+// re-reports the real peak on every run; the 5900 figure came from a handshake
+// that aborted at chain verification, so a successful one goes a little deeper.
+// The install task is aliased here but is not measured yet -- split it out if
+// its high-water mark comes back thin.
+#define CLOUD_TLS_TASK_STACK_BYTES 8192
+#define CLOUD_INSTALL_TASK_STACK_BYTES CLOUD_TLS_TASK_STACK_BYTES
 #define CLOUD_DOWNLOAD_DIR "/mnt/ghostesp/downloads"
 #define CLOUD_THEMES_DIR "/mnt/ghostesp/themes"
 #define CLOUD_SCRIPTS_DIR GHOSTSCRIPT_ROOT_DIR
@@ -1153,6 +1159,99 @@ static void recover_script_install(const char *final_gsb, const char *manifest_p
     }
 }
 
+// Kept out of install_item so its ~1 KB of path buffers are not part of the
+// frame every install (notably .gapp apps, which recurse deeper) runs under.
+static __attribute__((noinline)) esp_err_t install_script_item(const cloud_store_item_t *item, const char *download_path) {
+    esp_err_t err = ESP_OK;
+    char script_dir[128];
+    int n = snprintf(script_dir, sizeof(script_dir), "%s/%s", CLOUD_SCRIPTS_DIR, item->id);
+    if (n <= 0 || (size_t)n >= sizeof(script_dir)) {
+        err = ESP_ERR_INVALID_SIZE;
+        ESP_LOGW(TAG, "script dir path too long for %s", item->id);
+    } else {
+        mkdir_if_missing(script_dir);
+        char final_gsb[160];
+        snprintf(final_gsb, sizeof(final_gsb), "%s/%s.gsb", script_dir, item->id);
+        char entry_name[CLOUD_STORE_ID_MAX + 8];
+        snprintf(entry_name, sizeof(entry_name), "%s.gsb", item->id);
+        char manifest_path[160];
+        snprintf(manifest_path, sizeof(manifest_path), "%s/manifest.json", script_dir);
+        char manifest_tmp_path[164];
+        snprintf(manifest_tmp_path, sizeof(manifest_tmp_path), "%s.tmp", manifest_path);
+        recover_script_install(final_gsb, manifest_path);
+        cJSON *manifest = cJSON_CreateObject();
+        cJSON *permissions = manifest ? cJSON_AddArrayToObject(manifest, "permissions") : NULL;
+        bool manifest_ok = manifest && permissions &&
+                           cJSON_AddStringToObject(manifest, "id", item->id) &&
+                           cJSON_AddStringToObject(manifest, "name", item->name) &&
+                           cJSON_AddStringToObject(manifest, "entry", entry_name) &&
+                           cJSON_AddNumberToObject(manifest, "memory_limit", item->script_memory_limit);
+        for (uint32_t bit = 0; manifest_ok && bit < 32; ++bit) {
+            uint32_t permission = 1u << bit;
+            if ((item->script_permissions & permission) == 0) continue;
+            const char *name = script_permission_name(permission);
+            if (!name || !cJSON_AddItemToArray(permissions, cJSON_CreateString(name))) {
+                manifest_ok = false;
+            }
+        }
+        unlink(manifest_tmp_path);
+        char *manifest_json = manifest_ok ? cJSON_PrintUnformatted(manifest) : NULL;
+        FILE *mf = manifest_json ? fopen(manifest_tmp_path, "w") : NULL;
+        if (!mf) {
+            manifest_ok = false;
+        } else {
+            bool write_ok = fputs(manifest_json, mf) >= 0;
+            bool close_ok = fclose(mf) == 0;
+            manifest_ok = manifest_ok && write_ok && close_ok;
+        }
+        free(manifest_json);
+        cJSON_Delete(manifest);
+
+        char gsb_backup[164];
+        char manifest_backup[164];
+        snprintf(gsb_backup, sizeof(gsb_backup), "%s.bak", final_gsb);
+        snprintf(manifest_backup, sizeof(manifest_backup), "%s.bak", manifest_path);
+        struct stat st;
+        bool had_gsb = stat(final_gsb, &st) == 0;
+        bool had_manifest = stat(manifest_path, &st) == 0;
+        bool backed_gsb = false;
+        bool backed_manifest = false;
+        bool installed_gsb = false;
+        bool installed_manifest = false;
+        if (manifest_ok) {
+            unlink(gsb_backup);
+            unlink(manifest_backup);
+            if (had_gsb && rename(final_gsb, gsb_backup) != 0) manifest_ok = false;
+            else backed_gsb = had_gsb;
+            if (manifest_ok && had_manifest && rename(manifest_path, manifest_backup) != 0) manifest_ok = false;
+            else if (manifest_ok) backed_manifest = had_manifest;
+            if (manifest_ok && rename(download_path, final_gsb) != 0) manifest_ok = false;
+            else if (manifest_ok) installed_gsb = true;
+            if (manifest_ok && rename(manifest_tmp_path, manifest_path) != 0) manifest_ok = false;
+            else if (manifest_ok) installed_manifest = true;
+        }
+        if (!manifest_ok) {
+            unlink(manifest_tmp_path);
+            if (installed_manifest) unlink(manifest_path);
+            if (installed_gsb) unlink(final_gsb);
+            if (backed_manifest && rename(manifest_backup, manifest_path) != 0) {
+                ESP_LOGW(TAG, "manifest rollback failed for script %s", item->id);
+            }
+            if (backed_gsb && rename(gsb_backup, final_gsb) != 0) {
+                ESP_LOGW(TAG, "bytecode rollback failed for script %s", item->id);
+            }
+            ESP_LOGW(TAG, "script install failed for %s", item->id);
+            err = ESP_FAIL;
+        } else {
+            unlink(gsb_backup);
+            unlink(manifest_backup);
+            ESP_LOGI(TAG, "script installed: %s -> %s", item->id, final_gsb);
+            err = ESP_OK;
+        }
+    }
+    return err;
+}
+
 static esp_err_t install_item(const cloud_store_item_t *item) {
     if (!safe_id(item->id)) return ESP_ERR_INVALID_ARG;
     if (!sd_card_manager.is_initialized && !sd_card_needs_jit_mount()) {
@@ -1220,92 +1319,7 @@ static esp_err_t install_item(const cloud_store_item_t *item) {
         err = plugin_installer_install_gapp(download_path);
         if (err == ESP_OK) plugin_manager_reload();
     } else if (item->type == CLOUD_STORE_TYPE_SCRIPT) {
-        char script_dir[128];
-        int n = snprintf(script_dir, sizeof(script_dir), "%s/%s", CLOUD_SCRIPTS_DIR, item->id);
-        if (n <= 0 || (size_t)n >= sizeof(script_dir)) {
-            err = ESP_ERR_INVALID_SIZE;
-            ESP_LOGW(TAG, "script dir path too long for %s", item->id);
-        } else {
-            mkdir_if_missing(script_dir);
-            char final_gsb[160];
-            snprintf(final_gsb, sizeof(final_gsb), "%s/%s.gsb", script_dir, item->id);
-            char entry_name[CLOUD_STORE_ID_MAX + 8];
-            snprintf(entry_name, sizeof(entry_name), "%s.gsb", item->id);
-            char manifest_path[160];
-            snprintf(manifest_path, sizeof(manifest_path), "%s/manifest.json", script_dir);
-            char manifest_tmp_path[164];
-            snprintf(manifest_tmp_path, sizeof(manifest_tmp_path), "%s.tmp", manifest_path);
-            recover_script_install(final_gsb, manifest_path);
-            cJSON *manifest = cJSON_CreateObject();
-            cJSON *permissions = manifest ? cJSON_AddArrayToObject(manifest, "permissions") : NULL;
-            bool manifest_ok = manifest && permissions &&
-                               cJSON_AddStringToObject(manifest, "id", item->id) &&
-                               cJSON_AddStringToObject(manifest, "name", item->name) &&
-                               cJSON_AddStringToObject(manifest, "entry", entry_name) &&
-                               cJSON_AddNumberToObject(manifest, "memory_limit", item->script_memory_limit);
-            for (uint32_t bit = 0; manifest_ok && bit < 32; ++bit) {
-                uint32_t permission = 1u << bit;
-                if ((item->script_permissions & permission) == 0) continue;
-                const char *name = script_permission_name(permission);
-                if (!name || !cJSON_AddItemToArray(permissions, cJSON_CreateString(name))) {
-                    manifest_ok = false;
-                }
-            }
-            unlink(manifest_tmp_path);
-            char *manifest_json = manifest_ok ? cJSON_PrintUnformatted(manifest) : NULL;
-            FILE *mf = manifest_json ? fopen(manifest_tmp_path, "w") : NULL;
-            if (!mf) {
-                manifest_ok = false;
-            } else {
-                bool write_ok = fputs(manifest_json, mf) >= 0;
-                bool close_ok = fclose(mf) == 0;
-                manifest_ok = manifest_ok && write_ok && close_ok;
-            }
-            free(manifest_json);
-            cJSON_Delete(manifest);
-
-            char gsb_backup[164];
-            char manifest_backup[164];
-            snprintf(gsb_backup, sizeof(gsb_backup), "%s.bak", final_gsb);
-            snprintf(manifest_backup, sizeof(manifest_backup), "%s.bak", manifest_path);
-            struct stat st;
-            bool had_gsb = stat(final_gsb, &st) == 0;
-            bool had_manifest = stat(manifest_path, &st) == 0;
-            bool backed_gsb = false;
-            bool backed_manifest = false;
-            bool installed_gsb = false;
-            bool installed_manifest = false;
-            if (manifest_ok) {
-                unlink(gsb_backup);
-                unlink(manifest_backup);
-                if (had_gsb && rename(final_gsb, gsb_backup) != 0) manifest_ok = false;
-                else backed_gsb = had_gsb;
-                if (manifest_ok && had_manifest && rename(manifest_path, manifest_backup) != 0) manifest_ok = false;
-                else if (manifest_ok) backed_manifest = had_manifest;
-                if (manifest_ok && rename(download_path, final_gsb) != 0) manifest_ok = false;
-                else if (manifest_ok) installed_gsb = true;
-                if (manifest_ok && rename(manifest_tmp_path, manifest_path) != 0) manifest_ok = false;
-                else if (manifest_ok) installed_manifest = true;
-            }
-            if (!manifest_ok) {
-                unlink(manifest_tmp_path);
-                if (installed_manifest) unlink(manifest_path);
-                if (installed_gsb) unlink(final_gsb);
-                if (backed_manifest && rename(manifest_backup, manifest_path) != 0) {
-                    ESP_LOGW(TAG, "manifest rollback failed for script %s", item->id);
-                }
-                if (backed_gsb && rename(gsb_backup, final_gsb) != 0) {
-                    ESP_LOGW(TAG, "bytecode rollback failed for script %s", item->id);
-                }
-                ESP_LOGW(TAG, "script install failed for %s", item->id);
-                err = ESP_FAIL;
-            } else {
-                unlink(gsb_backup);
-                unlink(manifest_backup);
-                ESP_LOGI(TAG, "script installed: %s -> %s", item->id, final_gsb);
-                err = ESP_OK;
-            }
-        }
+        err = install_script_item(item, download_path);
     } else {
         char final_name[CLOUD_STORE_ID_MAX + 16];
         snprintf(final_name, sizeof(final_name), "%s.gtheme", item->id);
@@ -1332,6 +1346,23 @@ bool cloud_store_is_available(void) {
 
 bool cloud_store_apps_available(void) {
     return heap_caps_get_total_size(MALLOC_CAP_SPIRAM) > 0;
+}
+
+// Report how deep this task actually got. The stack budget above is only a
+// guess until something measures it: FreeRTOS lowers the high-water mark as a
+// task runs deeper, so reading it just before the task deletes itself gives the
+// deepest point of the whole fetch/download -- the mbedTLS handshake included.
+// On no-PSRAM boards the stack is charged to the same internal heap that
+// handshake needs, so this number is what decides how much of
+// CLOUD_TLS_TASK_STACK_BYTES can be handed back. Undershoots by the depth of
+// this log call itself, so leave a margin when trimming.
+static void log_stack_hwm(const char *label, uint32_t stack_bytes) {
+    UBaseType_t free_bytes = uxTaskGetStackHighWaterMark(NULL);
+    ESP_LOGI(TAG, "%s stack hwm: peak used %u of %u bytes (%u left)",
+             label,
+             (unsigned)(stack_bytes - free_bytes),
+             (unsigned)stack_bytes,
+             (unsigned)free_bytes);
 }
 
 static void refresh_task(void *arg) {
@@ -1363,6 +1394,7 @@ static void refresh_task(void *arg) {
     }
     s_ctx->task_running = false;
     xSemaphoreGive(s_ctx->mutex);
+    log_stack_hwm("cloud_refresh", CLOUD_TLS_TASK_STACK_BYTES);
     if (caps_task) {
         vTaskDeleteWithCaps(NULL);
     } else {
@@ -1386,10 +1418,11 @@ esp_err_t cloud_store_refresh_async(void) {
     s_ctx->status.error[0] = '\0';
     xSemaphoreGive(s_ctx->mutex);
     cloud_store_pause_ap_if_needed();
-    BaseType_t rc = xTaskCreateWithCaps(refresh_task, "cloud_refresh", 8192, (void *)1, 5,
-                                        NULL, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    BaseType_t rc = xTaskCreateWithCaps(refresh_task, "cloud_refresh", CLOUD_TLS_TASK_STACK_BYTES,
+                                        (void *)1, 5, NULL, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (rc != pdPASS) {
-        rc = xTaskCreate(refresh_task, "cloud_refresh", 8192, NULL, 5, NULL);
+        // Same size from internal RAM -- no smaller retry, see CLOUD_TLS_TASK_STACK_BYTES.
+        rc = xTaskCreate(refresh_task, "cloud_refresh", CLOUD_TLS_TASK_STACK_BYTES, NULL, 5, NULL);
     }
     if (rc != pdPASS) {
         xSemaphoreTake(s_ctx->mutex, portMAX_DELAY);
@@ -1473,6 +1506,7 @@ static void install_task(void *arg) {
     xSemaphoreTake(s_ctx->mutex, portMAX_DELAY);
     s_ctx->task_running = false;
     xSemaphoreGive(s_ctx->mutex);
+    log_stack_hwm("cloud_install", CLOUD_INSTALL_TASK_STACK_BYTES);
     if (req.caps_task) {
         vTaskDeleteWithCaps(NULL);
     } else {
@@ -1504,20 +1538,18 @@ esp_err_t cloud_store_install_async(cloud_store_item_type_t type, const char *id
     BaseType_t rc = xTaskCreateWithCaps(install_task, "cloud_install",
                                         CLOUD_INSTALL_TASK_STACK_BYTES, req, 5, NULL,
                                         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (rc != pdPASS && CLOUD_INSTALL_TASK_STACK_BYTES != CLOUD_INSTALL_TASK_FALLBACK_STACK_BYTES) {
-        ESP_LOGW(TAG, "install task stack allocation failed (%u bytes; free=%u largest=%u); retrying with %u bytes",
+    if (rc != pdPASS) {
+        // Retry at the same size out of internal RAM. Deliberately do not fall
+        // back to a smaller stack: anything under CLOUD_TLS_TASK_STACK_BYTES
+        // cannot survive the handshake on no-PSRAM boards, so a smaller retry
+        // would just trade a clean failure for a stack overflow reboot.
+        ESP_LOGW(TAG, "PSRAM install task stack allocation failed (%u bytes; free=%u largest=%u); retrying from internal RAM",
                  (unsigned)CLOUD_INSTALL_TASK_STACK_BYTES,
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
-                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
-                 (unsigned)CLOUD_INSTALL_TASK_FALLBACK_STACK_BYTES);
-        rc = xTaskCreateWithCaps(install_task, "cloud_install",
-                                 CLOUD_INSTALL_TASK_FALLBACK_STACK_BYTES, req, 5, NULL,
-                                 MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    }
-    if (rc != pdPASS) {
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
         req->caps_task = false;
         rc = xTaskCreate(install_task, "cloud_install",
-                         CLOUD_INSTALL_TASK_FALLBACK_STACK_BYTES, req, 5, NULL);
+                         CLOUD_INSTALL_TASK_STACK_BYTES, req, 5, NULL);
     }
     if (rc != pdPASS) {
         ESP_LOGE(TAG, "install task failed to start (free=%u largest=%u)",

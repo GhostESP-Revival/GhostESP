@@ -10,6 +10,7 @@
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "esp_log.h"
+#include "soc/soc_caps.h"
 #include <stdbool.h>
 #if defined(CONFIG_IDF_TARGET_ESP32S3) && defined(CONFIG_LV_DISPLAY_USE_SPI_MISO) && \
     defined(CONFIG_LV_DISP_PIN_DC) && defined(CONFIG_LV_DISP_SPI_MISO) && \
@@ -94,6 +95,7 @@
  *  STATIC PROTOTYPES
  **********************/
 static void spi_ready (spi_transaction_t *trans);
+static void disp_spi_signal_flush_ready(void);
 static int disp_spi_get_mode(void);
 #if defined(DISP_SPI_SHARED_DC_MISO)
 static void IRAM_ATTR disp_spi_shared_dc_pre(spi_transaction_t *trans);
@@ -290,6 +292,16 @@ void disp_spi_transaction(const uint8_t *data, size_t length,
     /* Save flags for pre/post transaction processing */
     t.base.user = (void *) flags;
 
+#if defined(SPI_TRANS_DMA_USE_PSRAM) && defined(SOC_PSRAM_DMA_CAPABLE) && SOC_PSRAM_DMA_CAPABLE
+    /* LVGL draw buffers live in PSRAM on SPIRAM builds. Without this flag the
+     * SPI driver bounces every chunk through a fresh internal DMA buffer at
+     * queue time; once BLE/Wi-Fi have eaten the internal heap that alloc fails
+     * and a dropped DISP_SPI_SIGNAL_FLUSH transaction freezes LVGL for good.
+     * The flag is only consulted for external-RAM pointers, so internal
+     * buffers (and chips without PSRAM DMA) are unaffected. */
+    t.base.flags |= SPI_TRANS_DMA_USE_PSRAM;
+#endif
+
     /* Poll/Complete/Queue transaction */
     if (flags & DISP_SPI_SEND_POLLING) {
 		disp_wait_for_pending_transactions();	/* before polling, all previous pending transactions need to be serviced */
@@ -314,6 +326,13 @@ void disp_spi_transaction(const uint8_t *data, size_t length,
         memcpy(pTransaction, &t, sizeof(t));
         if (spi_device_queue_trans(spi, (spi_transaction_t *) pTransaction, portMAX_DELAY) != ESP_OK) {
 			xQueueSend(TransactionPool, &pTransaction, portMAX_DELAY);	/* send failed transaction back to the pool to be reused */
+			if (flags & DISP_SPI_SIGNAL_FLUSH) {
+				/* The flush-complete callback rides on this transaction's
+				 * post_cb; if it never runs, LVGL waits on the flush forever.
+				 * Signal ready so a failed queue drops a frame instead of
+				 * freezing the UI. */
+				disp_spi_signal_flush_ready();
+			}
         }
     }
 }
@@ -349,6 +368,27 @@ void disp_spi_release(void)
  *   STATIC FUNCTIONS
  **********************/
 
+static void disp_spi_signal_flush_ready(void)
+{
+    lv_disp_t * disp = NULL;
+
+#if (LVGL_VERSION_MAJOR >= 7)
+    disp = _lv_refr_get_disp_refreshing();
+#else /* Before v7 */
+    disp = lv_refr_get_disp_refreshing();
+#endif
+
+    if (!disp) {
+        return;
+    }
+
+#if LVGL_VERSION_MAJOR < 8
+    lv_disp_flush_ready(&disp->driver);
+#else
+    lv_disp_flush_ready(disp->driver);
+#endif
+}
+
 static void IRAM_ATTR spi_ready(spi_transaction_t *trans)
 {
     disp_spi_send_flag_t flags = (disp_spi_send_flag_t) trans->user;
@@ -360,20 +400,7 @@ static void IRAM_ATTR spi_ready(spi_transaction_t *trans)
 #endif
 
     if (flags & DISP_SPI_SIGNAL_FLUSH) {
-        lv_disp_t * disp = NULL;
-
-#if (LVGL_VERSION_MAJOR >= 7)
-        disp = _lv_refr_get_disp_refreshing();
-#else /* Before v7 */
-        disp = lv_refr_get_disp_refreshing();
-#endif
-
-#if LVGL_VERSION_MAJOR < 8
-        lv_disp_flush_ready(&disp->driver);
-#else
-        lv_disp_flush_ready(disp->driver);
-#endif
-
+        disp_spi_signal_flush_ready();
     }
 
     if (chained_post_cb) {

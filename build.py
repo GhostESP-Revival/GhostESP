@@ -14,6 +14,33 @@ import tempfile
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 
+# partition layout is derived, never restated here. the ci workflow imports
+# the same module, so both produce the same merged image.
+sys.path.insert(0, str(Path(__file__).resolve().parent / "scripts"))
+try:
+    import partition_table
+except ImportError:  # keep the rest of the script usable on its own
+    partition_table = None
+
+# the esp-idf version in use, tracked by the badge in README.md. keep these in
+# step with it when migrating; CI clones the same tag in compile_all.yml.
+ESP_IDF_VERSION = "6.1"
+# older releases stay downloadable/autodetectable, just not recommended
+ESP_IDF_LEGACY = ("6.0.2", "5.5.1", "5.5", "5.4.1")
+_IDF_RELEASE_URL = "https://github.com/espressif/esp-idf/releases/download/v{v}/esp-idf-v{v}.zip"
+
+
+def _partition_layout():
+    """read the partition table this build produced"""
+    if partition_table is None:
+        raise RuntimeError(
+            "scripts/partition_table.py not found; cannot derive image offsets")
+    path = Path("build") / "partition_table" / "partition-table.bin"
+    if not path.exists():
+        raise RuntimeError(f"partition table missing at {path}; build first")
+    return path, partition_table.app_layout(path.read_bytes())
+
+
 class Colors:
     HEADER = '\033[95m'
     OKBLUE = '\033[94m'
@@ -37,17 +64,13 @@ def print_banner():
     print("       +======================================+")
     print()
 
-def download_esp_idf(version: str = "6.0.2") -> Optional[str]:
+def download_esp_idf(version: str = ESP_IDF_VERSION) -> Optional[str]:
     """Download and extract ESP-IDF"""
     print(f"\nDownloading ESP-IDF v{version}...")
-    
-    # ESP-IDF download URLs
-    urls = {
-        "6.0.2": "https://github.com/espressif/esp-idf/releases/download/v6.0.2/esp-idf-v6.0.2.zip",
-        "5.5.1": "https://github.com/espressif/esp-idf/releases/download/v5.5.1/esp-idf-v5.5.1.zip",
-        "5.5": "https://github.com/espressif/esp-idf/releases/download/v5.5/esp-idf-v5.5.zip",
-        "5.4.1": "https://github.com/espressif/esp-idf/releases/download/v5.4.1/esp-idf-v5.4.1.zip"
-    }
+
+    # current version first, then older releases
+    urls = {ESP_IDF_VERSION: _IDF_RELEASE_URL.format(v=ESP_IDF_VERSION)}
+    urls.update({v: _IDF_RELEASE_URL.format(v=v) for v in ESP_IDF_LEGACY})
     
     if version not in urls:
         print(f"ERROR: Unsupported ESP-IDF version {version}")
@@ -174,13 +197,11 @@ def find_esp_idf(auto_download: bool = False) -> Optional[str]:
             r"C:\Program Files\esp-idf",
             r"C:\Program Files (x86)\esp-idf",
             r"C:\tools\esp-idf",
-            r"C:\esp\esp-idf-v6.0.2",
-            # r"S:\Espressif\frameworks\esp-idf-v5.5",
-            r"C:\esp\esp-idf-v5.5",
-            r"C:\esp\esp-idf-v5.4.1",
-            os.path.join(script_dir, "esp-idf-v6.0.2"),
-            os.path.join(script_dir, "esp-idf-v5.5"),
-            os.path.join(script_dir, "esp-idf-v5.4.1"),
+            rf"C:\esp\esp-idf-v{ESP_IDF_VERSION}",
+            rf"C:\esp\v{ESP_IDF_VERSION}\esp-idf",
+            *[rf"C:\esp\esp-idf-v{v}" for v in ESP_IDF_LEGACY],
+            os.path.join(script_dir, f"esp-idf-v{ESP_IDF_VERSION}"),
+            *[os.path.join(script_dir, f"esp-idf-v{v}") for v in ESP_IDF_LEGACY],
             os.path.join(script_dir, "esp-idf")
         ]
     else:  # Unix-like systems
@@ -193,14 +214,13 @@ def find_esp_idf(auto_download: bool = False) -> Optional[str]:
             "/opt/esp-idf",
             "/usr/local/esp-idf",
             "/opt/espressif/esp-idf",
-            f"{home}/esp/esp-idf-v5.5",
-            f"{home}/esp/esp-idf-v5.4.1",
-            f"{home}/esp/esp-idf-v6.0.2",
+            f"{home}/esp/esp-idf-v{ESP_IDF_VERSION}",
+            f"{home}/esp/v{ESP_IDF_VERSION}/esp-idf",
+            *[f"{home}/esp/esp-idf-v{v}" for v in ESP_IDF_LEGACY],
             f"{home}/esp/v5.5/esp-idf",
             f"{home}/esp/v5.4.1/esp-idf",
-            os.path.join(script_dir, "esp-idf-v6.0.2"),
-            os.path.join(script_dir, "esp-idf-v5.5"),
-            os.path.join(script_dir, "esp-idf-v5.4.1"),
+            os.path.join(script_dir, f"esp-idf-v{ESP_IDF_VERSION}"),
+            *[os.path.join(script_dir, f"esp-idf-v{v}") for v in ESP_IDF_LEGACY],
             os.path.join(script_dir, "esp-idf")
         ]
     
@@ -248,23 +268,23 @@ def find_esp_idf(auto_download: bool = False) -> Optional[str]:
     
     # If auto-download is enabled, offer to download ESP-IDF
     if auto_download:
+        legacy = list(ESP_IDF_LEGACY)[:2]
         print("\nESP-IDF not found. Would you like to download it automatically?")
         print("Available versions:")
-        print("  1. ESP-IDF v6.0.2 (recommended)")
-        print("  2. ESP-IDF v5.5.1")
-        print("  3. ESP-IDF v5.4.1")
-        print("  4. Manual path input")
-        print("  5. Exit")
-        
-        choice = input("Enter your choice (1-5): ").strip()
-        
+        print(f"  1. ESP-IDF v{ESP_IDF_VERSION} (recommended)")
+        for i, v in enumerate(legacy, start=2):
+            print(f"  {i}. ESP-IDF v{v}")
+        manual = len(legacy) + 2
+        print(f"  {manual}. Manual path input")
+        print(f"  {manual + 1}. Exit")
+
+        choice = input(f"Enter your choice (1-{manual + 1}): ").strip()
+
         if choice == '1':
-            return download_esp_idf("6.0.2")
-        elif choice == '2':
-            return download_esp_idf("5.5.1")
-        elif choice == '3':
-            return download_esp_idf("5.4.1")
-        elif choice == '4':
+            return download_esp_idf(ESP_IDF_VERSION)
+        elif choice.isdigit() and 2 <= int(choice) <= manual:
+            return download_esp_idf(legacy[int(choice) - 2])
+        elif choice == str(manual):
             pass  # Fall through to manual input
         else:
             print("Exiting build script.")
@@ -297,10 +317,9 @@ def validate_esp_idf(idf_path: str) -> bool:
     
     if not os.path.exists(export_path):
         print(f"ERROR: Invalid ESP-IDF path. {export_script} not found in {idf_path}")
-        print("Please ensure you have ESP-IDF v6.0.2 (recommended), v5.5.1, or v5.4.1 installed.")
-        print("Download v6.0.2: https://github.com/espressif/esp-idf/releases/tag/v6.0.2")
-        print("Download v5.5.1: https://github.com/espressif/esp-idf/releases/tag/v5.5.1")
-        print("Download v5.4.1: https://github.com/espressif/esp-idf/releases/tag/v5.4.1")
+        print(f"Please ensure you have ESP-IDF v{ESP_IDF_VERSION} installed "
+              f"(see the badge in README.md for the version in use).")
+        print(f"Download: {_IDF_RELEASE_URL.format(v=ESP_IDF_VERSION)}")
         return False
     
     tools_path = os.path.join(idf_path, "tools")
@@ -403,6 +422,7 @@ def get_build_targets() -> List[Dict[str, str]]:
         {"name": "T-Deck", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.tdeck", "zip_name": "LilyGo-T-Deck.zip"},
         {"name": "TEmbedC1101", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.TEmbedC1101", "zip_name": "LilyGo-TEmbedC1101.zip"},
         {"name": "S3TWatch", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.S3TWatch", "zip_name": "LilyGo-S3TWatch-2020.zip"},
+        {"name": "Elecrow CrowPanel 1.28-inch Rotary", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.crowpanel_1p28_rotary", "zip_name": "CrowPanel_1.28inch_Rotary.zip"},
         {"name": "TDisplayS3-Touch", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.TDisplayS3-Touch", "zip_name": "LilyGo-TDisplayS3-Touch.zip"},
         {"name": "JCMK_DevBoardPro", "idf_target": "esp32", "sdkconfig_file": "configs/sdkconfig.JCMK_DevBoardPro", "zip_name": "JCMK_DevBoardPro.zip"},
         {"name": "RabbitLabs_Minion", "idf_target": "esp32", "sdkconfig_file": "configs/sdkconfig.minion", "zip_name": "RabbitLabs_Minion.zip"},
@@ -719,10 +739,26 @@ def build_target(target: Dict[str, str], env: Dict[str, str], cmd_prefix: str = 
             break
 
     if firmware_bin:
-        # Determine offsets (adjust if needed for your project)
-        boot_offset = "0x1000" if target['idf_target'] in ["esp32", "esp32s2"] else "0x0"
-        partition_offset = "0x8000"
-        firmware_offset = "0x10000"
+        # offsets come from the table the build produced. firmware_offset used
+        # to be pinned to 0x10000, which is where the ota tables put otadata, so
+        # the merged image overwrote otadata and every app slot came up empty
+        # ("No bootable app partitions"). ci had worked around that; this had
+        # not. the bootloader offset is a per-chip constant and cannot be
+        # derived, so it comes from the shared table.
+        table_path, layout = _partition_layout()
+        partition_offset = "0x%x" % partition_table.PARTITION_TABLE_OFFSET
+        firmware_offset = "0x%x" % layout.factory_offset
+        boot_offset = "0x%x" % partition_table.bootloader_offset(
+            target['idf_target'])
+        print(f"Partition table: {table_path}")
+        print(f"  bootloader @ {boot_offset}   partitions @ {partition_offset}"
+              f"   app @ {firmware_offset}")
+        print(f"  smallest app partition: {layout.min_app_size} bytes")
+        if os.path.getsize(firmware_bin) >= layout.min_app_size:
+            print(f"ERROR: firmware ({os.path.getsize(firmware_bin)} bytes) does "
+                  f"not fit the smallest app partition "
+                  f"({layout.min_app_size} bytes)")
+            return False
         import re
         import sys
 
@@ -760,8 +796,18 @@ def build_target(target: Dict[str, str], env: Dict[str, str], cmd_prefix: str = 
             firmware_offset, firmware_bin
         ]
         if target['idf_target'] == 'esp32p4':
+            # the c6 network adapter lives in the slave_fw partition. its offset
+            # was pinned to 0xbe0000, but partitions_crowpanel_p4.csv leaves
+            # every offset blank for idf to auto-assign, so that was a guess.
+            try:
+                slave_part = partition_table.find_by_label(
+                    table_path.read_bytes(), "slave_fw")
+            except partition_table.PartitionError as exc:
+                print(f"ERROR: {exc}")
+                return False
+            print(f"  slave_fw (C6 image) @ 0x{slave_part.offset:x}")
             merge_cmd.extend([
-                "0xbe0000",
+                "0x%x" % slave_part.offset,
                 os.path.join("firmware", "crowpanel_p4", "network_adapter.bin")
             ])
         print(f"Merging binaries with: {' '.join(merge_cmd)}")

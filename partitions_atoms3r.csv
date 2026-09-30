@@ -2,13 +2,16 @@
 #
 # Release build: OTA is disabled for this board, so a single factory app slot
 # is used (mirrors partitions_s3twatch.csv scaled to 8MB with 1MB storage).
-# The app slot stays at 0x3D0000 - the same size the previous OTA table used -
-# and the 1MB 'storage' FAT partition sits at the same 0x400000 offset the
+# The 1MB 'storage' FAT partition sits at the same 0x400000 offset the
 # S3TWatch builds use, giving the on-device VFS (/mnt) for IR captures and
 # asset packs without an SD card.
 #
+# app0 is 0x3E0000, matching partitions.csv. This board has spare flash after
+# 'storage' (8MB part, table ends at 0x520000), so coredump keeps its full
+# 128KB by moving past storage instead of being squeezed against the app.
+#
 # Name,     Type, SubType, Offset,  Size,    Flags
 nvs,        data, nvs,     0x9000,  0x7000,
-app0,       app,  factory, 0x10000, 0x3D0000,
-coredump,   data, coredump,0x3E0000,0x20000,
+app0,       app,  factory, 0x10000, 0x3E0000,
 storage,    data, fat,     0x400000,0x100000,
+coredump,   data, coredump,0x500000,0x20000,

@@ -1,6 +1,6 @@
 #include "managers/audio_i2s_output.h"
 
-#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER) || defined(CONFIG_HAS_CROWPANEL_NS4168)
+#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER) || defined(CONFIG_HAS_CROWPANEL_NS4168) || defined(CONFIG_HAS_TDECK_SPEAKER)
 
 #include "esp_log.h"
 #include "esp_heap_caps.h"
@@ -157,7 +157,7 @@ static size_t audio_i2s_resample_stereo(const int16_t *in, size_t in_bytes,
     if (s_rs_buf_bytes < need) {
         int16_t *nb = (int16_t *)heap_caps_realloc(s_rs_buf, need,
                                                    MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        if (!nb) nb = (int16_t *)heap_caps_realloc(s_rs_buf, need, MALLOC_CAP_8BIT);
+        if (!nb) nb = (int16_t *)heap_caps_realloc(s_rs_buf, need, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (!nb) return 0;
         s_rs_buf = nb;
         s_rs_buf_bytes = need;
@@ -247,6 +247,15 @@ esp_err_t audio_i2s_output_init(void)
     const gpio_num_t bclk_pin = GPIO_NUM_22;
     const gpio_num_t ws_pin = GPIO_NUM_21;
     const gpio_num_t dout_pin = GPIO_NUM_23;
+#elif defined(CONFIG_HAS_TDECK_SPEAKER)
+    /* LilyGo T-Deck onboard MAX98357A (per the official pin mapping: I2S
+     * BCK=7, WS=5, DOUT=6). The amp is fixed-wired with SD/MODE strapped, so
+     * there is no enable line, no gain pin and no I2C control - it plays as
+     * soon as BCLK/WCLK/DIN are driven, and volume is handled in software by
+     * the generic scaling path below. */
+    const gpio_num_t bclk_pin = GPIO_NUM_7;
+    const gpio_num_t ws_pin = GPIO_NUM_5;
+    const gpio_num_t dout_pin = GPIO_NUM_6;
 #else
     const gpio_num_t bclk_pin = (gpio_num_t)CONFIG_TLV320DAC_I2S_BCLK_PIN;
     const gpio_num_t ws_pin = (gpio_num_t)CONFIG_TLV320DAC_I2S_WCLK_PIN;
@@ -444,7 +453,7 @@ esp_err_t audio_i2s_output_write(const int16_t *data, size_t len)
         if (s_vol_buf_bytes < out_len) {
             int16_t *nb = (int16_t *)heap_caps_realloc(s_vol_buf, out_len,
                                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-            if (!nb) nb = (int16_t *)heap_caps_realloc(s_vol_buf, out_len, MALLOC_CAP_8BIT);
+            if (!nb) nb = (int16_t *)heap_caps_realloc(s_vol_buf, out_len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
             if (nb) { s_vol_buf = nb; s_vol_buf_bytes = out_len; }
         }
         if (s_vol_buf && s_vol_buf_bytes >= out_len) {
@@ -578,4 +587,4 @@ bool audio_i2s_output_is_initialized(void) { return false; }
 void audio_i2s_output_set_volume(uint8_t percent) { (void)percent; }
 uint8_t audio_i2s_output_get_volume(void) { return 100; }
 
-#endif /* CONFIG_HAS_TLV320DAC_I2S || CONFIG_HAS_AW88298_SPEAKER || CONFIG_HAS_CROWPANEL_NS4168 */
+#endif /* CONFIG_HAS_TLV320DAC_I2S || CONFIG_HAS_AW88298_SPEAKER || CONFIG_HAS_CROWPANEL_NS4168 || CONFIG_HAS_TDECK_SPEAKER */

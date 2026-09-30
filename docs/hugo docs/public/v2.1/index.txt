@@ -1,0 +1,38 @@
+Title: GhostESP: Revival
+Description: GhostESP is a Wi-Fi pentesting and multi-protocol wireless security platform for ESP32 devices. Scan Wi-Fi networks, capture handshakes, launch attacks, read NFC tags, learn and transmit IR signals, and more.
+URL: /v2.1/
+Version: v2.1
+Section: GhostESP Documentation
+Keywords: ESP32, security testing, WiFi, NFC, infrared, penetration testing, toolkit, wireless security
+Search index: /search-index.json
+
+# GhostESP: Revival
+
+> GhostESP is a Wi-Fi pentesting and multi-protocol wireless security platform for ESP32 devices. Scan Wi-Fi networks, capture handshakes, launch attacks, read NFC tags, learn and transmit IR signals, and more.
+
+## On this page
+
+- [Start here](#start-here)
+- [Explore capabilities](#explore-capabilities)
+
+---
+
+## Start here
+[
+## 1. Check your board
+Confirm your board, supported features, and the firmware build you need.
+](/v2.1/getting-started/supported-hardware/)
+[
+## 2. Flash GhostESP
+Use the recommended web flasher or choose a manual USB or Flipper Zero method.
+](/v2.1/getting-started/installation-guide/)
+[
+## 3. Connect to GhostESP
+Choose the on-device UI, WebUI, serial CLI, Flipper app, or desktop control app.
+](/v2.1/getting-started/control-methods/)
+[
+## 4. Try your first scan
+Run a passive Wi-Fi scan and confirm that your device is working.
+](/v2.1/getting-started/first-scan/)
+## Explore capabilities
+Choose a section below when you already know what you want to do.

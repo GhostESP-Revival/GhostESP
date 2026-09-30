@@ -1,0 +1,14 @@
+Title: Getting Started
+Description: Initial setup guidance for GhostESP
+URL: /v1.8.1/getting-started/
+Version: v1.8.1
+Section: GhostESP: Revival
+Search index: /search-index.json
+
+# Getting Started
+
+> Initial setup guidance for GhostESP
+
+---
+
+Learn how to flash your device, connect and run commands.

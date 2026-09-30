@@ -44,6 +44,12 @@ typedef struct {
 #define INPUT_ITEM_SIZE sizeof(InputEvent)
 extern QueueHandle_tt input_queue;
 
+/* Drop every input event still queued. Views call this when opening a modal
+ * overlay that treats any input as "dismiss": events queued before the overlay
+ * existed (e.g. taps that landed while a long scan held the UI) would
+ * otherwise arrive afterwards and immediately cancel it. */
+void display_manager_flush_input_queue(void);
+
 #define MUTEX_TIMEOUT_MS 10
 
 #define HARDWARE_INPUT_TASK_PRIORITY (14)
@@ -81,6 +87,11 @@ extern View lockscreen_view;
  * @brief Initialize the Display Manager.
  */
 void display_manager_init(void);
+
+#ifdef CONFIG_USE_ENCODER
+/* Apply persisted encoder-specific settings to the live decoder. */
+void display_manager_apply_encoder_settings(void);
+#endif
 
 /**
  * @brief Register a new view.
@@ -202,6 +213,7 @@ lv_color_t hex_to_lv_color(const char *hex_str);
 void update_status_bar(bool wifi_enabled, bool bt_enabled, bool sd_card_mounted, int batteryPercentage, bool power_save_enabled, bool is_ap_active, bool is_charging);
 
 void display_manager_add_status_bar(const char *CurrentMenuName);
+void display_manager_set_status_bar_hidden(bool hidden);
 
 /* Current status-bar title text ("" if none). Valid until the next
  * add_status_bar call - copy if you need to keep it. */

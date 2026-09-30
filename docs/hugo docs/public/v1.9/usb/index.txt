@@ -1,0 +1,14 @@
+Title: USB
+Description: USB Host features for ESP32-S3 devices
+URL: /v1.9/usb/
+Version: v1.9
+Section: GhostESP: Revival
+Search index: /search-index.json
+
+# USB
+
+> USB Host features for ESP32-S3 devices
+
+---
+
+GhostESP supports USB Host mode on ESP32-S3 devices, allowing you to connect USB peripherals like keyboards for input control.

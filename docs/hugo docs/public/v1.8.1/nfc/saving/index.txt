@@ -1,0 +1,54 @@
+Title: Saving Tags
+Description: Store scanned NFC tags as Flipper-compatible files
+URL: /v1.8.1/nfc/saving/
+Version: v1.8.1
+Section: NFC
+Search index: /search-index.json
+
+# Saving Tags
+
+> Store scanned NFC tags as Flipper-compatible files
+
+## On this page
+
+- [Prerequisites](#prerequisites)
+- [Steps](#steps)
+- [Chameleon Ultra Saves](#chameleon-ultra-saves)
+- [Verify](#verify)
+- [Troubleshooting](#troubleshooting)
+- [FAQ](#faq)
+
+---
+
+## Prerequisites
+- A PN532 or Chameleon Ultra enabled build.
+- SD card mounted with free space.
+## Steps
+-
+Scan a tag. Complete the process in the Scan NFC Tags guide so the popup shows detailed results.
+You should see the Save button enabled once data is cached.
+-
+Tap Save. Select Save in the scan popup.
+You should see the title change to “Saving…” and the button disable while GhostESP writes the file.
+-
+Wait for confirmation. Leave the device alone until the tit reads “Saved!”.
+You should see the title change if the save fails (for example, “Save Failed!”).
+-
+Repeat as needed. Saved files remain accessible even after you leave the scan popup.
+You should see the filename follow the pattern &lt;Model&gt;_&lt;UID&gt;.nfc in /mnt/ghostesp/nfc/.
+## Chameleon Ultra Saves
+- Use the CLI. After finishing chameleon scanhf, stay in the terminal and run chameleon savehf &lt;name&gt;. Files land in /mnt/ghostesp/chameleon/.
+- Name files clearly. Pick short descriptive filenames without spaces, for example office_door.
+- Verify later. Saved Chameleon dumps can be copied to a PC from your SD Card exactly like PN532 captures.
+## Verify
+- Browse the SD card and confirm the new file exists with the expected timestamp.
+- Re-open the scan popup and use More to ensure details still match the saved dump.
+- Optional: load the .nfc file in a Flipper Zero to confirm compatibility.
+## Troubleshooting
+- Save button disabled. Re-scan the tag and wait for the title to show “NFC Tag”.
+- “No SD card” error. Check card seating and filesystem. The path /mnt/ghostesp/ must be writeable.
+- File overwriting unexpectedly. GhostESP auto-generates names and will overwrite if the same model/UID combination is scanned repeatedly.
+## FAQ
+- Can I save after removing the tag? Yes. Once the scan completes, the device keeps data in RAM, allowing offline saves.
+- What if the tag is MIFARE Classic? GhostESP saves all recovered sectors and keys, so you can reopen the file later without re-running the dictionary attack.
+- Where are the files stored? Under /mnt/ghostesp/nfc/.

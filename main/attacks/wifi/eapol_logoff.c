@@ -16,6 +16,7 @@
 #include "managers/views/terminal_screen.h"
 #include "core/system_manager.h"
 #include "core/glog.h"
+#include "scans/wifi/wifi_channels.h"
 #include "esp_wifi.h"
 #include "esp_random.h"
 #include "freertos/task.h"
@@ -67,12 +68,16 @@ static void eapol_logoff_task(void *param) {
             uint8_t *sta_mac = selected_station.station_mac;
             
             // set channel to ap's channel
+            bool channel_ok = false;
             for (int i = 0; i < ap_count; i++) {
                 if (memcmp(scanned_aps[i].bssid, ap_bssid, 6) == 0) {
-                    esp_wifi_set_channel(scanned_aps[i].primary, WIFI_SECOND_CHAN_NONE);
+                    channel_ok = wifi_channels_is_tx_channel(scanned_aps[i].primary) &&
+                        esp_wifi_set_channel(scanned_aps[i].primary,
+                                              WIFI_SECOND_CHAN_NONE) == ESP_OK;
                     break;
                 }
             }
+            if (!channel_ok) continue;
             
             memcpy(&frame[4], ap_bssid, 6);     // dest: ap
             memcpy(&frame[10], sta_mac, 6);     // src: station
@@ -86,7 +91,11 @@ static void eapol_logoff_task(void *param) {
             uint8_t *ap_bssid = selected_ap.bssid;
             
             // set channel
-            esp_wifi_set_channel(selected_ap.primary, WIFI_SECOND_CHAN_NONE);
+            if (!wifi_channels_is_tx_channel(selected_ap.primary) ||
+                esp_wifi_set_channel(selected_ap.primary,
+                                     WIFI_SECOND_CHAN_NONE) != ESP_OK) {
+                continue;
+            }
             
             // send logoff for each known station on this ap
             bool sent_any = false;
@@ -146,7 +155,7 @@ static void eapol_logoff_task(void *param) {
         vTaskDelay(pdMS_TO_TICKS(eapol_attack_delay_ms));
     }
     eapol_logoff_task_handle = NULL;
-    vTaskDelete(NULL);
+    vTaskDeleteWithCaps(NULL);
 }
 
 void eapol_logoff_start(void) {
@@ -182,7 +191,7 @@ void eapol_logoff_start(void) {
         glog("EAPOL Logoff failed to start (attack=%ld)\n", (long)attack_rc);
         eapol_logoff_running = false;
         if (eapol_logoff_task_handle) {
-            vTaskDelete(eapol_logoff_task_handle);
+            vTaskDeleteWithCaps(eapol_logoff_task_handle);
             eapol_logoff_task_handle = NULL;
         }
         esp_wifi_stop();
@@ -213,7 +222,7 @@ void eapol_logoff_stop(void) {
     if (eapol_logoff_task_handle) {
         TaskHandle_t temp_handle = eapol_logoff_task_handle;
         eapol_logoff_task_handle = NULL;
-        vTaskDelete(temp_handle);
+        vTaskDeleteWithCaps(temp_handle);
     }
     
     esp_wifi_stop();

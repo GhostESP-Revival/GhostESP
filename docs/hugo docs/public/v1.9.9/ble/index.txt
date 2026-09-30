@@ -1,0 +1,15 @@
+Title: Bluetooth LE
+Description: Overview of GhostESP&#39;s BLE capabilities
+URL: /v1.9.9/ble/
+Version: v1.9.9
+Section: GhostESP: Revival
+Keywords: Bluetooth, BLE, scanning, attacks, wireless security
+Search index: /search-index.json
+
+# Bluetooth LE
+
+> Overview of GhostESP&#39;s BLE capabilities
+
+---
+
+GhostESP includes Bluetooth Low Energy (BLE) scanning and attack tools. Here you can find help on how to use these features.

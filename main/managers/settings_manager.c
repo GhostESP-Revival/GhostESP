@@ -12,14 +12,25 @@
 #include <time.h>
 #include <nvs.h>
 #include "sdkconfig.h"
+#include "driver/gpio.h"
 
 #define S_TAG "SETTINGS"
 
 static bool settings_should_use_noop_dualcomm_pins(void) {
-#if defined(CONFIG_CROWPANEL_ADVANCE_S3_LCD)
+#if defined(CONFIG_CROWPANEL_ADVANCED_P4) && defined(CONFIG_HAS_LORA)
+  // CrowPanel P4 wireless-module mode: the GhostLink UART defaults (TX GPIO6 /
+  // RX GPIO7) are the SX1262 SPI MOSI/MISO. Park them instead of fighting the
+  // radio; this board's expansion UART is on GPIO47/48 (J2).
+  return true;
+#elif defined(CONFIG_CROWPANEL_ADVANCE_S3_LCD)
   // Standalone SD profile: the generic UART pins overlap SD MOSI and RGB R0.
   // Override saved defaults too, so existing installations need no NVS erase.
   return true;
+#elif defined(CONFIG_HAS_LORA) && defined(CONFIG_BUILD_CONFIG_TEMPLATE)
+  // Heltec V3 + LoRa: GhostLink UART RX (GPIO7) is the LoRa NSS pin in
+  // hardware. A single headless board has no GhostLink peer anyway, so park
+  // both pins rather than fight the radio (and break old saved 6/7 too).
+  return strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "Heltec WiFi Kit 32 V3") == 0;
 #elif defined(CONFIG_BUILD_CONFIG_TEMPLATE)
   return strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "Pancake") == 0 ||
          strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "MarauderV8") == 0;
@@ -32,6 +43,8 @@ static bool settings_should_use_noop_dualcomm_pins(void) {
 static const char *NVS_RGB_MODE_KEY = "rgb_mode";
 static const char *NVS_CHANNEL_DELAY_KEY = "channel_delay";
 static const char *NVS_BROADCAST_SPEED_KEY = "broadcast_speed";
+static const char *NVS_HOP_MODE_KEY = "hop_mode";
+static const char *NVS_HOP_CUSTOM_KEY = "hop_custom";
 static const char *NVS_AP_SSID_KEY = "ap_ssid";
 static const char *NVS_AP_PASSWORD_KEY = "ap_password";
 static const char *NVS_RGB_SPEED_KEY = "rgb_speed";
@@ -50,6 +63,8 @@ static const char *NVS_BOARD_TYPE_KEY = "board_type";
 static const char *NVS_CUSTOM_PIN_CONFIG_KEY = "custom_pin_config";
 static const char *NVS_FLAPPY_GHOST_NAME = "flap_name";
 static const char *NVS_TIMEZONE_NAME = "sel_tz";
+static const char *NVS_CLOCK_STYLE_KEY = "clock_style";
+static const char *NVS_STATUS_BAR_CLOCK_KEY = "statusbar_clk";
 static const char *NVS_ACCENT_COLOR = "sel_ac";
 static const char *NVS_GPS_RX_PIN = "gps_rx_pin";
 static const char *NVS_GPS_BAUD_KEY = "gps_baud";
@@ -68,7 +83,10 @@ static const char *NVS_TERMINAL_TEXT_COLOR_KEY = "term_color";
 static const char *NVS_TERMINAL_FONT_SIZE_KEY = "term_font";
 static const char *NVS_INVERT_COLORS_KEY = "invert_colors";
 static const char *NVS_INFRARED_EASY_MODE_KEY = "ir_easy_mode";
+static const char *NVS_IR_TX_PIN_KEY = "ir_tx_pin";
+static const char *NVS_IR_RX_PIN_KEY = "ir_rx_pin";
 static const char *NVS_WEB_AUTH_KEY = "web_auth";
+static const char *NVS_USB_MSC_KEY = "usb_msc";
 static const char *NVS_WEBUI_AP_ONLY_KEY = "webui_ap";
 static const char *NVS_ESP_COMM_TX_PIN_KEY = "esp_comm_tx";
 static const char *NVS_ESP_COMM_RX_PIN_KEY = "esp_comm_rx";
@@ -82,6 +100,7 @@ static const char *NVS_CAROUSEL_INVERT_KEY = "carr_inv";
 static const char *NVS_NEOPIXEL_MAX_BRIGHTNESS_KEY = "neopixel_bright";
 static const char *NVS_RGB_LED_COUNT_KEY = "rgb_led_cnt";
 static const char *NVS_ENCODER_INVERT_KEY = "enc_inv";
+static const char *NVS_ENCODER_LATCH_KEY = "enc_latch";
 static const char *NVS_AUTO_SAVE_SCANS_KEY = "auto_save_sc";
 static const char *NVS_SETUP_COMPLETE_KEY = "setup_done";
 static const char *NVS_WIFI_COUNTRY_KEY = "wifi_country";
@@ -122,6 +141,7 @@ static const char *NVS_THEME_BG_EFFECTS_KEY = "theme_bg_fx";
 static const char *NVS_MENU_ROUNDED_KEY = "menu_rounded";
 static const char *NVS_EPILEPSY_WARNING_KEY = "epil_warn";
 static const char *NVS_FONT_SIZE_KEY = "font_size";
+static const char *NVS_ROW_HEIGHT_KEY = "row_height";
 static const char *NVS_REDUCED_MOTION_KEY = "reduce_motion";
 static const char *NVS_INPUT_REPEAT_SPEED_KEY = "repeat_spd";
 static const char *NVS_HIGH_CONTRAST_KEY = "high_contrast";
@@ -191,6 +211,8 @@ void settings_set_defaults(FSettings *settings) {
   settings->rgb_mode = RGB_MODE_NORMAL;
   settings->channel_delay = 1.0f;
   settings->broadcast_speed = 1;
+  settings->hop_mode = 0; // HOP_MODE_DEFAULT
+  settings->hop_custom_channels[0] = '\0';
   // default to the 'Bright' palette (index 3)
   settings->menu_theme = 3;
   strcpy(settings->ap_ssid, "GhostNet");
@@ -213,6 +235,8 @@ void settings_set_defaults(FSettings *settings) {
   strcpy(settings->flappy_ghost_name, "Bob");
   strcpy(settings->selected_hex_accent_color, "#ffffff");
   strcpy(settings->selected_timezone, "MST7MDT,M3.2.0,M11.1.0");
+  settings->clock_style = 0;      // Digital
+  settings->status_bar_clock = true;
   settings->gps_rx_pin = 0;
   settings->gps_baud_rate = 0; // 0 = use CONFIG_GPS_UART_BAUD_RATE
   settings->display_timeout_ms = 30000; // Default to 30 seconds
@@ -225,10 +249,11 @@ void settings_set_defaults(FSettings *settings) {
   settings->rgb_green_pin = -1;
   settings->rgb_blue_pin = -1;
   settings->third_control_enabled = false;
-  settings->terminal_text_color = 0x00FF00;
-  settings->terminal_font_size = 1; // Normal (0=Small, 1=Normal, 2=Large)
+  settings->terminal_text_color = 0xFFFFFF; // White
+  settings->terminal_font_size = 0; // Small (0=Small, 1=Normal, 2=Large)
   settings->invert_colors = false;
   settings->web_auth_enabled = false;
+  settings->usb_msc_enabled = false;
   settings->webui_restrict_to_ap = true;
   if (settings_should_use_noop_dualcomm_pins()) {
     settings->esp_comm_tx_pin = -1;
@@ -247,11 +272,16 @@ void settings_set_defaults(FSettings *settings) {
   settings->zebra_menus_enabled = false; // or true if you want it enabled by default
   settings->max_screen_brightness = 100; // Default to 100% brightness
   settings->infrared_easy_mode = false; // Default to disabled
+  settings->ir_tx_pin = -1;             // -1 = use CONFIG_INFRARED_LED_PIN
+  settings->ir_rx_pin = -1;             // -1 = use CONFIG_INFRARED_RX_PIN
   settings->nav_buttons_enabled = true; // Default to enabled
   settings->menu_layout = 1; // Default to adaptive paginated grid
   settings->carousel_invert_direction = false; // Default to non-inverted carousel slide direction
   settings->neopixel_max_brightness = 100; // Default to 100% brightness
   settings->encoder_invert_direction = false;
+#ifdef CONFIG_USE_ENCODER
+  settings->encoder_legacy_latch = false;
+#endif
   settings->rgb_led_count = CONFIG_NUM_LEDS;
   settings->auto_save_scans = true;
   settings->setup_complete = false;
@@ -281,6 +311,7 @@ void settings_set_defaults(FSettings *settings) {
 #ifdef CONFIG_IS_ATOMS3R
   settings->font_size = 0; // Small is the default on the AtomS3R display
 #endif
+  settings->row_height = 1; // Normal options-list row size
   settings->reduced_motion = false;
   settings->input_repeat_speed = 1; // Normal (0=Slow, 1=Normal, 2=Fast)
   settings->high_contrast = false;
@@ -349,6 +380,18 @@ void settings_load(FSettings *settings) {
   err = nvs_get_u16(nvsHandle, NVS_BROADCAST_SPEED_KEY, &value_u16);
   if (err == ESP_OK) {
     settings->broadcast_speed = value_u16;
+  }
+
+  // Load Hop channel profile
+  err = nvs_get_u8(nvsHandle, NVS_HOP_MODE_KEY, &value_u8);
+  if (err == ESP_OK) {
+    settings->hop_mode = value_u8;
+  }
+  str_size = sizeof(settings->hop_custom_channels);
+  err = nvs_get_str(nvsHandle, NVS_HOP_CUSTOM_KEY, settings->hop_custom_channels,
+                    &str_size);
+  if (err != ESP_OK) {
+    settings->hop_custom_channels[0] = '\0';
   }
 
   // Load AP SSID
@@ -456,6 +499,18 @@ void settings_load(FSettings *settings) {
                     &str_size);
   if (err != ESP_OK) {
     printf("Failed to load Timezone String\n");
+  }
+
+  uint8_t clock_style_u8 = 0;
+  err = nvs_get_u8(nvsHandle, NVS_CLOCK_STYLE_KEY, &clock_style_u8);
+  if (err == ESP_OK) {
+    settings->clock_style = clock_style_u8;
+  }
+
+  uint8_t status_bar_clock_u8 = 1;
+  err = nvs_get_u8(nvsHandle, NVS_STATUS_BAR_CLOCK_KEY, &status_bar_clock_u8);
+  if (err == ESP_OK) {
+    settings->status_bar_clock = (bool)status_bar_clock_u8;
   }
 
   str_size = sizeof(settings->selected_hex_accent_color);
@@ -647,6 +702,11 @@ void settings_load(FSettings *settings) {
     settings->web_auth_enabled = value_u8;
   }
 
+  err = nvs_get_u8(nvsHandle, NVS_USB_MSC_KEY, &value_u8);
+  if (err == ESP_OK) {
+    settings->usb_msc_enabled = value_u8;
+  }
+
   err = nvs_get_u8(nvsHandle, NVS_WEBUI_AP_ONLY_KEY, &value_u8);
   if (err == ESP_OK) {
     settings->webui_restrict_to_ap = value_u8;
@@ -715,6 +775,20 @@ void settings_load(FSettings *settings) {
     settings->infrared_easy_mode = false; // Default to disabled if not found
   }
 
+  // Load IR pin overrides (-1 = use compiled default)
+  err = nvs_get_i32(nvsHandle, NVS_IR_TX_PIN_KEY, &tmp);
+  if (err == ESP_OK) {
+    settings->ir_tx_pin = tmp;
+  } else {
+    settings->ir_tx_pin = -1;
+  }
+  err = nvs_get_i32(nvsHandle, NVS_IR_RX_PIN_KEY, &tmp);
+  if (err == ESP_OK) {
+    settings->ir_rx_pin = tmp;
+  } else {
+    settings->ir_rx_pin = -1;
+  }
+
   // Load Navigation Buttons Enabled
   err = nvs_get_u8(nvsHandle, NVS_NAV_BUTTONS_KEY, &value_u8);
   if (err == ESP_OK) {
@@ -762,6 +836,14 @@ void settings_load(FSettings *settings) {
   } else {
     settings->encoder_invert_direction = false;
   }
+#ifdef CONFIG_USE_ENCODER
+  err = nvs_get_u8(nvsHandle, NVS_ENCODER_LATCH_KEY, &value_u8);
+  if (err == ESP_OK) {
+    settings->encoder_legacy_latch = (bool)value_u8;
+  } else {
+    settings->encoder_legacy_latch = false;
+  }
+#endif
 
   err = nvs_get_u8(nvsHandle, NVS_SETUP_COMPLETE_KEY, &value_u8);
   if (err == ESP_OK) {
@@ -881,6 +963,10 @@ void settings_load(FSettings *settings) {
   err = nvs_get_u8(nvsHandle, NVS_FONT_SIZE_KEY, &value_u8);
   if (err == ESP_OK) {
     settings->font_size = value_u8;
+  }
+  err = nvs_get_u8(nvsHandle, NVS_ROW_HEIGHT_KEY, &value_u8);
+  if (err == ESP_OK) {
+    settings->row_height = value_u8;
   }
   err = nvs_get_u8(nvsHandle, NVS_REDUCED_MOTION_KEY, &value_u8);
   if (err == ESP_OK) {
@@ -1170,6 +1256,12 @@ void settings_persist_setting(SettingsType setting) {
             err = nvs_set_u8(nvsHandle, NVS_WEB_AUTH_KEY, G_Settings.web_auth_enabled);
             key = NVS_WEB_AUTH_KEY;
             break;
+#ifdef CONFIG_HAS_USB_MSC_SD
+        case SETTING_USB_MSC:
+            err = nvs_set_u8(nvsHandle, NVS_USB_MSC_KEY, G_Settings.usb_msc_enabled);
+            key = NVS_USB_MSC_KEY;
+            break;
+#endif
         case SETTING_WEBUI_AP_ONLY:
             err = nvs_set_u8(nvsHandle, NVS_WEBUI_AP_ONLY_KEY, G_Settings.webui_restrict_to_ap);
             key = NVS_WEBUI_AP_ONLY_KEY;
@@ -1177,6 +1269,10 @@ void settings_persist_setting(SettingsType setting) {
         case SETTING_AP_ENABLED:
             err = nvs_set_u8(nvsHandle, NVS_AP_ENABLED_KEY, G_Settings.ap_enabled);
             key = NVS_AP_ENABLED_KEY;
+            break;
+        case SETTING_COUNTRY:
+            err = nvs_set_u8(nvsHandle, NVS_WIFI_COUNTRY_KEY, G_Settings.wifi_country);
+            key = NVS_WIFI_COUNTRY_KEY;
             break;
         case SETTING_POWER_SAVE:
             err = nvs_set_u8(nvsHandle, NVS_POWER_SAVE_KEY, G_Settings.power_save_enabled);
@@ -1225,6 +1321,10 @@ void settings_persist_setting(SettingsType setting) {
             err = nvs_set_u8(nvsHandle, NVS_ENCODER_INVERT_KEY, G_Settings.encoder_invert_direction);
             key = NVS_ENCODER_INVERT_KEY;
             break;
+        case SETTING_ENCODER_LATCH:
+            err = nvs_set_u8(nvsHandle, NVS_ENCODER_LATCH_KEY, G_Settings.encoder_legacy_latch);
+            key = NVS_ENCODER_LATCH_KEY;
+            break;
 #endif
 #if CONFIG_IDF_TARGET_ESP32S3
         case SETTING_USB_HOST_MODE:
@@ -1232,6 +1332,7 @@ void settings_persist_setting(SettingsType setting) {
 #endif
         case SETTING_RUN_SETUP_WIZARD:
         case SETTING_I2C_SCAN:
+        case SETTING_GL_BENCH:
         case SETTING_WIGLE_TEST_API:
         case SETTING_WIGLE_HELP:
         case SETTING_WIGLE_MANUAL_UPLOAD:
@@ -1348,6 +1449,10 @@ void settings_persist_setting(SettingsType setting) {
             err = nvs_set_u8(nvsHandle, NVS_FONT_SIZE_KEY, G_Settings.font_size);
             key = NVS_FONT_SIZE_KEY;
             break;
+        case SETTING_ROW_HEIGHT:
+            err = nvs_set_u8(nvsHandle, NVS_ROW_HEIGHT_KEY, G_Settings.row_height);
+            key = NVS_ROW_HEIGHT_KEY;
+            break;
         case SETTING_REDUCED_MOTION:
             err = nvs_set_u8(nvsHandle, NVS_REDUCED_MOTION_KEY, G_Settings.reduced_motion ? 1 : 0);
             key = NVS_REDUCED_MOTION_KEY;
@@ -1433,6 +1538,14 @@ void settings_persist_setting(SettingsType setting) {
             err = nvs_set_u32(nvsHandle, NVS_GPS_BAUD_KEY, G_Settings.gps_baud_rate);
             key = NVS_GPS_BAUD_KEY;
             break;
+        case SETTING_IR_TX_PIN:
+            err = nvs_set_i32(nvsHandle, NVS_IR_TX_PIN_KEY, G_Settings.ir_tx_pin);
+            key = NVS_IR_TX_PIN_KEY;
+            break;
+        case SETTING_IR_RX_PIN:
+            err = nvs_set_i32(nvsHandle, NVS_IR_RX_PIN_KEY, G_Settings.ir_rx_pin);
+            key = NVS_IR_RX_PIN_KEY;
+            break;
         case SETTING_AP_SSID:
             err = nvs_set_str(nvsHandle, NVS_AP_SSID_KEY, G_Settings.ap_ssid);
             key = NVS_AP_SSID_KEY;
@@ -1457,6 +1570,14 @@ void settings_persist_setting(SettingsType setting) {
         case SETTING_TIMEZONE:
             err = nvs_set_str(nvsHandle, NVS_TIMEZONE_NAME, G_Settings.selected_timezone);
             key = NVS_TIMEZONE_NAME;
+            break;
+        case SETTING_CLOCK_STYLE:
+            err = nvs_set_u8(nvsHandle, NVS_CLOCK_STYLE_KEY, G_Settings.clock_style);
+            key = NVS_CLOCK_STYLE_KEY;
+            break;
+        case SETTING_STATUS_BAR_CLOCK:
+            err = nvs_set_u8(nvsHandle, NVS_STATUS_BAR_CLOCK_KEY, G_Settings.status_bar_clock ? 1 : 0);
+            key = NVS_STATUS_BAR_CLOCK_KEY;
             break;
         default:
             ESP_LOGW(TAG, "Unknown setting type to persist: %d", setting);
@@ -1508,6 +1629,25 @@ uint16_t settings_get_broadcast_speed(const FSettings *settings) {
   return settings->broadcast_speed;
 }
 
+void settings_set_hop_mode(FSettings *settings, uint8_t mode) {
+  settings->hop_mode = mode;
+}
+
+uint8_t settings_get_hop_mode(const FSettings *settings) {
+  return settings->hop_mode;
+}
+
+void settings_set_hop_custom_channels(FSettings *settings, const char *channels) {
+  if (!settings || !channels) return;
+  strncpy(settings->hop_custom_channels, channels,
+          sizeof(settings->hop_custom_channels) - 1);
+  settings->hop_custom_channels[sizeof(settings->hop_custom_channels) - 1] = '\0';
+}
+
+const char *settings_get_hop_custom_channels(const FSettings *settings) {
+  return settings->hop_custom_channels;
+}
+
 void settings_set_flappy_ghost_name(FSettings *settings, const char *Name) {
   strncpy(settings->flappy_ghost_name, Name,
           sizeof(settings->flappy_ghost_name) - 1);
@@ -1526,6 +1666,27 @@ void settings_set_timezone_str(FSettings *settings, const char *Name) {
 
 const char *settings_get_timezone_str(const FSettings *settings) {
   return settings->selected_timezone;
+}
+
+void settings_set_clock_style(FSettings *settings, uint8_t style) {
+  if (settings) {
+    /* 0 = Digital, 1 = Analog, 2 = Segment */
+    settings->clock_style = (style > 2) ? 2 : style;
+  }
+}
+
+uint8_t settings_get_clock_style(const FSettings *settings) {
+  return settings ? settings->clock_style : 0;
+}
+
+void settings_set_status_bar_clock(FSettings *settings, bool enabled) {
+  if (settings) {
+    settings->status_bar_clock = enabled;
+  }
+}
+
+bool settings_get_status_bar_clock(const FSettings *settings) {
+  return settings ? settings->status_bar_clock : true;
 }
 
 void settings_set_accent_color_str(FSettings *settings, const char *Name) {
@@ -1550,6 +1711,8 @@ esp_err_t settings_save(const FSettings *settings) {
     float ch_delay = settings->channel_delay;
     NVS_SET(nvs_set_blob(nvsHandle, NVS_CHANNEL_DELAY_KEY, &ch_delay, sizeof(ch_delay)));
     NVS_SET(nvs_set_u16(nvsHandle, NVS_BROADCAST_SPEED_KEY, settings->broadcast_speed));
+    NVS_SET(nvs_set_u8(nvsHandle, NVS_HOP_MODE_KEY, settings->hop_mode));
+    NVS_SET(nvs_set_str(nvsHandle, NVS_HOP_CUSTOM_KEY, settings->hop_custom_channels));
     NVS_SET(nvs_set_str(nvsHandle, NVS_AP_SSID_KEY, settings->ap_ssid));
     NVS_SET(nvs_set_str(nvsHandle, NVS_AP_PASSWORD_KEY, settings->ap_password));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_RGB_SPEED_KEY, settings->rgb_speed));
@@ -1588,6 +1751,7 @@ esp_err_t settings_save(const FSettings *settings) {
     NVS_SET(nvs_set_u8(nvsHandle, NVS_TERMINAL_FONT_SIZE_KEY, settings->terminal_font_size));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_INVERT_COLORS_KEY, settings->invert_colors ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_WEB_AUTH_KEY, settings->web_auth_enabled ? 1 : 0));
+    NVS_SET(nvs_set_u8(nvsHandle, NVS_USB_MSC_KEY, settings->usb_msc_enabled ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_WEBUI_AP_ONLY_KEY, settings->webui_restrict_to_ap ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_AP_ENABLED_KEY, settings->ap_enabled ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_POWER_SAVE_KEY, settings->power_save_enabled ? 1 : 0));
@@ -1596,11 +1760,15 @@ esp_err_t settings_save(const FSettings *settings) {
     NVS_SET(nvs_set_u8(nvsHandle, NVS_ZEBRA_MENUS_KEY, settings->zebra_menus_enabled ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_MAX_SCREEN_BRIGHTNESS_KEY, settings->max_screen_brightness));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_INFRARED_EASY_MODE_KEY, settings->infrared_easy_mode ? 1 : 0));
+    NVS_SET(nvs_set_i32(nvsHandle, NVS_IR_TX_PIN_KEY, settings->ir_tx_pin));
+    NVS_SET(nvs_set_i32(nvsHandle, NVS_IR_RX_PIN_KEY, settings->ir_rx_pin));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_NAV_BUTTONS_KEY, settings->nav_buttons_enabled ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_AUTO_SAVE_SCANS_KEY, settings->auto_save_scans ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_MENU_LAYOUT_KEY, (uint8_t)settings->menu_layout));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_CAROUSEL_INVERT_KEY, settings->carousel_invert_direction ? 1 : 0));
     NVS_SET(nvs_set_str(nvsHandle, NVS_TIMEZONE_NAME, settings->selected_timezone));
+    NVS_SET(nvs_set_u8(nvsHandle, NVS_CLOCK_STYLE_KEY, settings->clock_style));
+    NVS_SET(nvs_set_u8(nvsHandle, NVS_STATUS_BAR_CLOCK_KEY, settings->status_bar_clock ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_WIFI_COUNTRY_KEY, settings->wifi_country));
     NVS_SET(nvs_set_str(nvsHandle, NVS_WIGLE_API_KEY, settings->wigle_api_key));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_WIGLE_DONATE_KEY, settings->wigle_donate ? 1 : 0));
@@ -1641,6 +1809,7 @@ esp_err_t settings_save(const FSettings *settings) {
     NVS_SET(nvs_set_u8(nvsHandle, NVS_MENU_ROUNDED_KEY, settings->menu_rounded ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_EPILEPSY_WARNING_KEY, settings->epilepsy_warning_enabled ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_FONT_SIZE_KEY, settings->font_size));
+    NVS_SET(nvs_set_u8(nvsHandle, NVS_ROW_HEIGHT_KEY, settings->row_height));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_REDUCED_MOTION_KEY, settings->reduced_motion ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_INPUT_REPEAT_SPEED_KEY, settings->input_repeat_speed));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_HIGH_CONTRAST_KEY, settings->high_contrast ? 1 : 0));
@@ -1925,7 +2094,7 @@ void settings_set_terminal_font_size(FSettings *settings, uint8_t size) {
 }
 
 uint8_t settings_get_terminal_font_size(const FSettings *settings) {
-  return settings ? settings->terminal_font_size : 1;
+  return settings ? settings->terminal_font_size : 0;
 }
 
 void settings_set_invert_colors(FSettings *settings, bool enabled) {
@@ -1942,6 +2111,14 @@ void settings_set_web_auth_enabled(FSettings *settings, bool enabled) {
 
 bool settings_get_web_auth_enabled(const FSettings *settings) {
   return settings->web_auth_enabled;
+}
+
+void settings_set_usb_msc_enabled(FSettings *settings, bool enabled) {
+  settings->usb_msc_enabled = enabled;
+}
+
+bool settings_get_usb_msc_enabled(const FSettings *settings) {
+  return settings->usb_msc_enabled;
 }
 
 void settings_set_webui_restrict_to_ap(FSettings *settings, bool enabled) {
@@ -1995,6 +2172,59 @@ void settings_set_infrared_easy_mode(FSettings *settings, bool enabled) {
 
 bool settings_get_infrared_easy_mode(const FSettings *settings) {
   return settings->infrared_easy_mode;
+}
+
+// IR pin overrides — single point of validation for both CLI and UI.
+// -1 = use compiled default; 0 is rejected (treated as "unset" elsewhere);
+// TX additionally requires an output-capable GPIO.
+static bool settings_pin_valid(int32_t pin, bool needs_output) {
+  if (pin == -1) return true; // Use compiled CONFIG_* default
+  if (pin <= 0 || pin >= GPIO_NUM_MAX) return false;
+  if (needs_output && !GPIO_IS_VALID_OUTPUT_GPIO((gpio_num_t)pin)) return false;
+  if (!needs_output && !GPIO_IS_VALID_GPIO((gpio_num_t)pin)) return false;
+  return true;
+}
+
+static bool settings_pin_is_strapping(int32_t pin) {
+#if CONFIG_IDF_TARGET_ESP32
+  return pin == 2 || pin == 12 || pin == 15;
+#else
+  return pin == 12 || pin == 15;
+#endif
+}
+
+static void settings_ir_pin_warn_strapping(int32_t pin, const char *which) {
+  if (pin > 0 && settings_pin_is_strapping(pin)) {
+    ESP_LOGW(TAG, "IR %s pin %ld is a strapping pin - device may not boot with it held", which, (long)pin);
+  }
+}
+
+bool settings_set_ir_tx_pin(FSettings *settings, int32_t pin) {
+  if (!settings_pin_valid(pin, true)) {
+    ESP_LOGE(TAG, "Invalid IR TX pin %ld (must be an output-capable GPIO or -1)", (long)pin);
+    return false;
+  }
+  settings_ir_pin_warn_strapping(pin, "TX");
+  settings->ir_tx_pin = pin;
+  return true;
+}
+
+int32_t settings_get_ir_tx_pin(const FSettings *settings) {
+  return settings->ir_tx_pin;
+}
+
+bool settings_set_ir_rx_pin(FSettings *settings, int32_t pin) {
+  if (!settings_pin_valid(pin, false)) {
+    ESP_LOGE(TAG, "Invalid IR RX pin %ld (must be a valid GPIO or -1)", (long)pin);
+    return false;
+  }
+  settings_ir_pin_warn_strapping(pin, "RX");
+  settings->ir_rx_pin = pin;
+  return true;
+}
+
+int32_t settings_get_ir_rx_pin(const FSettings *settings) {
+  return settings->ir_rx_pin;
 }
 
 void settings_get_nvs_stats(nvs_stats_t *stats) {
@@ -2134,6 +2364,16 @@ void settings_set_encoder_invert_direction(FSettings *settings, bool enabled) {
 bool settings_get_encoder_invert_direction(const FSettings *settings) {
   return settings->encoder_invert_direction;
 }
+
+#ifdef CONFIG_USE_ENCODER
+void settings_set_encoder_legacy_latch(FSettings *settings, bool enabled) {
+  settings->encoder_legacy_latch = enabled;
+}
+
+bool settings_get_encoder_legacy_latch(const FSettings *settings) {
+  return settings->encoder_legacy_latch;
+}
+#endif
 
 void settings_set_setup_complete(FSettings *settings, bool complete) {
   settings->setup_complete = complete;
@@ -2399,6 +2639,17 @@ void settings_set_menu_rounded(FSettings *settings, bool enabled) {
 
 bool settings_get_menu_rounded(const FSettings *settings) {
   return settings ? settings->menu_rounded : false;
+}
+
+void settings_set_row_height(FSettings *settings, uint8_t height) {
+  if (settings) {
+    settings->row_height = height < MENU_ROW_HEIGHT_OPTION_COUNT ? height : 1;
+  }
+}
+
+uint8_t settings_get_row_height(const FSettings *settings) {
+  if (!settings) return 1;
+  return settings->row_height < MENU_ROW_HEIGHT_OPTION_COUNT ? settings->row_height : 1;
 }
 
 void settings_set_epilepsy_warning_enabled(FSettings *settings, bool enabled) {

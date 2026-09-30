@@ -1,0 +1,28 @@
+Title: Infrared
+Description: Overview of GhostESP&#39;s infrared capabilities
+URL: /v1.8/infrared/
+Version: v1.8
+Section: GhostESP: Revival
+Search index: /search-index.json
+
+# Infrared
+
+> Overview of GhostESP&#39;s infrared capabilities
+
+## On this page
+
+- [Supported protocols](#supported-protocols)
+
+---
+
+GhostESP lets you learn IR signals, store them on the SD card, and retransmit them using the onboard LED.
+## Supported protocols
+- NEC / NECext
+- Kaseikyo
+- Pioneer
+- RCA
+- Samsung
+- SIRC (12-bit, 15-bit, 20-bit)
+- RC5
+- RC6
+If a remote uses an unsupported protocol, GhostESP still attempts to capture raw timings so you can replay the signal.

@@ -10,7 +10,11 @@
     "version": { "type": "string" },
     "author": { "type": "string" },
     "description": { "type": "string" },
-    "category": { "type": "string" },
+    "category": {
+      "type": "string",
+      "description": "Apps gallery folder. Must match one of the firmware's built-in folders so the app is filed alongside the built-ins; an unrecognised value leaves the app at the gallery root.",
+      "enum": ["Tools", "System", "Games", "Communication", "Media", "Sensors"]
+    },
     "entry": { "type": "string" },
     "target": { "type": "string" },
     "api_version": { "type": "integer", "const": 1 },
@@ -29,6 +33,7 @@
           "command",
           "tasks",
           "wifi",
+          "espnow",
           "ble",
           "nfc",
           "ir",
@@ -87,6 +92,7 @@
     "memory_limit": { "type": "integer", "minimum": 0 },
     "stack_size": { "type": "integer", "minimum": 0 },
     "tick_interval_ms": { "type": "integer", "minimum": 16, "maximum": 1000 },
+    "forward_back": { "type": "boolean" },
     "requires_psram": { "type": "boolean" },
     "requires_features": {
       "type": "array",

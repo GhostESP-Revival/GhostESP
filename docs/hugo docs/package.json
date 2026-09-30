@@ -1,0 +1,15 @@
+{
+  "name": "ghostesp-docs",
+  "version": "0.0.0",
+  "private": true,
+  "description": "GhostESP documentation site: Hugo build plus the Pagefind search index.",
+  "scripts": {
+    "build": "hugo --minify --cleanDestinationDir && pagefind --site public",
+    "search": "pagefind --site public",
+    "serve": "hugo server",
+    "preview": "node serve-local.mjs"
+  },
+  "devDependencies": {
+    "pagefind": "1.5.2"
+  }
+}

@@ -8,6 +8,7 @@
 #include "gui/gui_anim.h"
 #include "gui/ios_toggle.h"
 #include "lvgl.h"
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -20,12 +21,22 @@ typedef struct options_view_t {
     lv_obj_t *list;
     lv_style_t style_item;
     lv_style_t style_item_alt;
+    lv_style_t style_item_pressed;
+    lv_style_t style_item_alt_pressed;
     lv_style_t style_selected;
+    lv_style_t style_row;
+    lv_style_t style_label;
     lv_obj_t **items;
     int count;
     int capacity;
     int selected;
     int btn_h;
+    /* Vertical insets the list was built with. A full-screen list owns the space
+     * between the status bar and the screen edge itself, so it has none; keeping
+     * them stops a later theme/row-height refresh from adding an inset back and
+     * leaving a gap under the last row. */
+    lv_coord_t pad_top;
+    lv_coord_t pad_bottom;
     bool use_asset_pack_background;
 } options_view_t;
 
@@ -48,6 +59,40 @@ static inline lv_style_t *get_zebra_style(options_view_t *ov, int idx) {
 
 static inline bool get_menu_rounded(void) {
     return settings_get_menu_rounded(&G_Settings);
+}
+
+/* Row height presets offered by Settings. Percentages are used rather than
+ * absolute pixels so the proportional design intent survives on both the
+ * small panels and the large ones. */
+static const uint8_t k_row_height_percent[MENU_ROW_HEIGHT_OPTION_COUNT] = {80, 100, 120, 140};
+
+int options_view_scale_row_height(int base) {
+    if (base <= 0) return base;
+    uint8_t preset = settings_get_row_height(&G_Settings);
+    if (preset >= MENU_ROW_HEIGHT_OPTION_COUNT) preset = 1;
+    int scaled = (base * k_row_height_percent[preset] + 50) / 100;
+    if (scaled < 24) scaled = 24;
+    if (scaled > 120) scaled = 120;
+    return scaled;
+}
+
+/* Row height policy shared with options_screen.c so every menu-style list
+ * agrees: 40 px on the small panels, 55 px on the normal ones, 32 px on the
+ * 128 px Atom. Large panels keep their own control height. The user's Row
+ * Height setting then scales whichever base applies. Views that need a
+ * different row (hero rows, dense logs) call options_view_set_item_height()
+ * before adding items. */
+static int default_row_height(void) {
+#if GUI_LARGE_SCREEN
+    return options_view_scale_row_height(GUI_CONTROL_H);
+#elif defined(CONFIG_IS_ATOMS3R)
+    return options_view_scale_row_height(32);
+#else
+    int w = LV_HOR_RES;
+    int h = LV_VER_RES;
+    bool small = (w <= 240 || h <= 240);
+    return options_view_scale_row_height(small ? 40 : 55);
+#endif
 }
 
 static inline const lv_font_t *get_item_font(const options_view_t *ov) {
@@ -129,34 +174,65 @@ static void apply_selected_style(options_view_t *ov, lv_obj_t *item, bool on) {
 }
 
 static options_view_t *options_view_create_internal(lv_obj_t *parent, const char *title,
-                                                     bool use_asset_pack_background) {
+                                                     bool use_asset_pack_background,
+                                                     bool transparent) {
+    /* A real parent widget means the list is embedded, not a full screen. That
+       has to be decided before the NULL fallback, otherwise every caller would
+       look like it was parented to the screen. */
+    bool parented = parent && parent != lv_scr_act();
     if (!parent) parent = lv_scr_act();
     options_view_t *ov = (options_view_t *)calloc(1, sizeof(options_view_t));
     if (!ov) return NULL;
-    ov->use_asset_pack_background = use_asset_pack_background;
+    ov->use_asset_pack_background = use_asset_pack_background && !transparent;
 
-    int w = LV_HOR_RES;
     int h = LV_VER_RES;
     int status_bar_h = GUI_STATUS_BAR_H;
-    bool small = (w <= 240 || h <= 240);
-    ov->btn_h = small ? 40 : GUI_CONTROL_H;
+    ov->btn_h = default_row_height();
 
     lv_color_t bg, surface, surface_alt, text;
     get_theme_surface_colors(&bg, &surface, &surface_alt, &text);
 
     ov->list = lv_list_create(parent);
     int list_w = GUI_OPTIONS_LIST_WIDTH;
-    lv_obj_set_size(ov->list, list_w, h - status_bar_h);
-    lv_obj_align(ov->list, LV_ALIGN_TOP_MID, 0, status_bar_h);
+    if (parented) {
+        /* lv_obj_get_content_width/height() read the parent's coords, which are
+           only valid after a layout pass. Every view creates its host in the same
+           create() call that builds this list, so those coords are still the
+           post-constructor placeholder (0x0 -- lv_obj.c leaves y2 = y1 - 1) and
+           sizing from them produced an invisible 0x0 list. Measure after a
+           layout instead. */
+        lv_obj_update_layout(parent);
+        lv_coord_t host_w = lv_obj_get_content_width(parent);
+        lv_coord_t host_h = lv_obj_get_content_height(parent);
+        /* A full-screen host is not a content card: it has no margins or bottom
+           safe area of its own, so the list still takes the screen geometry and
+           leaves the status bar alone, which is what every caller relied on.
+           Only a genuinely inset host gets filled edge to edge. */
+        if (host_h >= h - status_bar_h || host_w <= 0 || host_h <= 0) {
+            lv_obj_set_size(ov->list, list_w, h - status_bar_h);
+            lv_obj_align(ov->list, LV_ALIGN_TOP_MID, 0, status_bar_h);
+        } else {
+            lv_obj_set_size(ov->list, host_w, host_h);
+            lv_obj_align(ov->list, LV_ALIGN_TOP_MID, 0, 0);
+        }
+    } else {
+        lv_obj_set_size(ov->list, list_w, h - status_bar_h);
+        lv_obj_align(ov->list, LV_ALIGN_TOP_MID, 0, status_bar_h);
+    }
     lv_obj_set_style_bg_color(ov->list, bg, 0);
     lv_obj_set_style_bg_opa(ov->list,
-                            ov->use_asset_pack_background && asset_pack_get_background_tile()
-                                ? LV_OPA_TRANSP : LV_OPA_COVER,
+                            transparent ? LV_OPA_TRANSP
+                                        : (ov->use_asset_pack_background &&
+                                           asset_pack_get_background_tile()
+                                               ? LV_OPA_TRANSP
+                                               : LV_OPA_COVER),
                             0);
     lv_obj_set_style_pad_left(ov->list, GUI_OPTIONS_LIST_PAD_HOR, 0);
     lv_obj_set_style_pad_right(ov->list, GUI_OPTIONS_LIST_PAD_HOR, 0);
-    lv_obj_set_style_pad_top(ov->list, GUI_SAFEAREA_VER, 0);
-    lv_obj_set_style_pad_bottom(ov->list, GUI_SAFEAREA_VER + GUI_HOME_SAFE_H, 0);
+    ov->pad_top = parented ? 0 : GUI_SAFEAREA_VER;
+    ov->pad_bottom = parented ? 0 : GUI_SAFEAREA_VER + GUI_HOME_SAFE_H;
+    lv_obj_set_style_pad_top(ov->list, ov->pad_top, 0);
+    lv_obj_set_style_pad_bottom(ov->list, ov->pad_bottom, 0);
     lv_obj_set_style_border_width(ov->list, 0, 0);
     lv_obj_set_style_radius(ov->list, 0, 0);
 
@@ -177,10 +253,41 @@ static options_view_t *options_view_create_internal(lv_obj_t *parent, const char
     lv_style_set_border_width(&ov->style_item_alt, 0);
     lv_style_set_radius(&ov->style_item_alt, item_radius);
 
+    lv_style_init(&ov->style_item_pressed);
+    lv_style_set_bg_color(&ov->style_item_pressed, lv_color_darken(surface, LV_OPA_30));
+    lv_style_set_bg_opa(&ov->style_item_pressed, LV_OPA_COVER);
+    lv_style_set_transform_width(&ov->style_item_pressed, 0);
+    lv_style_set_transform_height(&ov->style_item_pressed, 0);
+
+    lv_style_init(&ov->style_item_alt_pressed);
+    lv_style_set_bg_color(&ov->style_item_alt_pressed, lv_color_darken(surface_alt, LV_OPA_30));
+    lv_style_set_bg_opa(&ov->style_item_alt_pressed, LV_OPA_COVER);
+    lv_style_set_transform_width(&ov->style_item_alt_pressed, 0);
+    lv_style_set_transform_height(&ov->style_item_alt_pressed, 0);
+
     lv_style_init(&ov->style_selected);
     lv_style_set_bg_opa(&ov->style_selected, LV_OPA_COVER);
     lv_style_set_radius(&ov->style_selected, item_radius);
     lv_style_set_bg_grad_dir(&ov->style_selected, LV_GRAD_DIR_NONE);
+
+    /* Row geometry is identical for every item, so it lives in one shared
+     * style instead of a per-item local style. */
+    lv_style_init(&ov->style_row);
+    lv_style_set_height(&ov->style_row, ov->btn_h);
+    lv_style_set_pad_top(&ov->style_row, 0);
+    lv_style_set_pad_bottom(&ov->style_row, 0);
+    lv_style_set_pad_left(&ov->style_row, GUI_SAFEAREA_HOR);
+    lv_style_set_pad_right(&ov->style_row, GUI_SAFEAREA_VER);
+    lv_style_set_flex_flow(&ov->style_row, LV_FLEX_FLOW_ROW);
+    lv_style_set_flex_main_place(&ov->style_row, LV_FLEX_ALIGN_START);
+    lv_style_set_flex_cross_place(&ov->style_row, LV_FLEX_ALIGN_CENTER);
+    lv_style_set_flex_track_place(&ov->style_row, LV_FLEX_ALIGN_CENTER);
+
+    lv_style_init(&ov->style_label);
+    lv_style_set_text_font(&ov->style_label, get_item_font(ov));
+    lv_style_set_text_align(&ov->style_label, LV_TEXT_ALIGN_LEFT);
+    lv_style_set_text_color(&ov->style_label, text);
+    lv_style_set_width(&ov->style_label, LV_PCT(100));
 
     ov->selected = -1;
 
@@ -190,11 +297,32 @@ static options_view_t *options_view_create_internal(lv_obj_t *parent, const char
 }
 
 options_view_t *options_view_create(lv_obj_t *parent, const char *title) {
-    return options_view_create_internal(parent, title, true);
+    return options_view_create_internal(parent, title, true, false);
 }
 
 options_view_t *options_view_create_no_bg(lv_obj_t *parent, const char *title) {
-    return options_view_create_internal(parent, title, false);
+    return options_view_create_internal(parent, title, false, false);
+}
+
+options_view_t *options_view_create_flags(lv_obj_t *parent, const char *title, bool transparent) {
+    return options_view_create_internal(parent, title, !transparent, transparent);
+}
+
+int options_view_item_at(const options_view_t *ov, int32_t x, int32_t y) {
+    if (!ov || !ov->items) return -1;
+    /* ov->items already tracks every added row, so hit testing costs no extra
+       allocation. lv_obj_get_coords returns post-scroll coordinates, which is
+       what a touch point is expressed in. */
+    for (int i = 0; i < ov->count; i++) {
+        lv_obj_t *item = ov->items[i];
+        if (!item || !lv_obj_is_valid(item)) continue;
+        if (lv_obj_has_flag(item, LV_OBJ_FLAG_HIDDEN)) continue;
+        lv_area_t a;
+        lv_obj_get_coords(item, &a);
+        if (x < a.x1 || x > a.x2 || y < a.y1 || y > a.y2) continue;
+        return i;
+    }
+    return -1;
 }
 
 void options_view_destroy(options_view_t *ov) {
@@ -202,7 +330,11 @@ void options_view_destroy(options_view_t *ov) {
     if (ov->list && lv_obj_is_valid(ov->list)) lv_obj_del(ov->list);
     lv_style_reset(&ov->style_item);
     lv_style_reset(&ov->style_item_alt);
+    lv_style_reset(&ov->style_item_pressed);
+    lv_style_reset(&ov->style_item_alt_pressed);
     lv_style_reset(&ov->style_selected);
+    lv_style_reset(&ov->style_row);
+    lv_style_reset(&ov->style_label);
     free(ov->items);
     free(ov);
 }
@@ -212,34 +344,22 @@ lv_obj_t *options_view_add_item(options_view_t *ov, const char *label, lv_event_
     if (!ensure_capacity(ov, ov->count + 1)) return NULL;
     lv_obj_t *btn = lv_list_add_btn(ov->list, NULL, label ? label : "");
     if (!btn) return NULL;
+    /* lv_list_add_btn() sets a LOCAL height of LV_SIZE_CONTENT, and local
+     * styles outrank the shared row style, so the height must be overridden
+     * locally for the row to have any fixed height at all. */
     lv_obj_set_height(btn, ov->btn_h);
-    lv_obj_set_style_pad_top(btn, 0, 0);
-    lv_obj_set_style_pad_bottom(btn, 0, 0);
-    lv_obj_set_flex_flow(btn, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(btn, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_left(btn, GUI_SAFEAREA_HOR, 0);
-    lv_obj_set_style_pad_right(btn, GUI_SAFEAREA_VER, 0);
-    lv_obj_add_style(btn, get_zebra_style(ov, ov->count), 0);
     lv_style_t *zebra = get_zebra_style(ov, ov->count);
-    lv_style_value_t zebra_val;
-    if (lv_style_get_prop_inlined(zebra, LV_STYLE_BG_COLOR, &zebra_val) == LV_RES_OK) {
-        lv_obj_set_style_bg_color(btn, lv_color_darken(zebra_val.color, LV_OPA_30), LV_STATE_PRESSED);
-    }
-    lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, LV_STATE_PRESSED);
-    lv_obj_set_style_transform_width(btn, 0, LV_STATE_PRESSED);
-    lv_obj_set_style_transform_height(btn, 0, LV_STATE_PRESSED);
+    lv_obj_add_style(btn, &ov->style_row, 0);
+    lv_obj_add_style(btn, zebra, 0);
+    lv_obj_add_style(btn, zebra == &ov->style_item ? &ov->style_item_pressed
+                                                   : &ov->style_item_alt_pressed,
+                     LV_STATE_PRESSED);
     if (on_click) lv_obj_add_event_cb(btn, on_click, LV_EVENT_CLICKED, user_data);
     lv_obj_t *lbl = lv_obj_get_child(btn, 0);
     if (lbl) {
-        const lv_font_t *font = get_item_font(ov);
-        lv_color_t text_color;
-        get_theme_surface_colors(NULL, NULL, NULL, &text_color);
-        lv_obj_set_style_text_font(lbl, font, 0);
-        lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_LEFT, 0);
-        lv_obj_set_style_text_color(lbl, text_color, 0);
+        lv_obj_add_style(lbl, &ov->style_label, 0);
         lv_label_set_recolor(lbl, true);
         lv_label_set_long_mode(lbl, LV_LABEL_LONG_DOT);
-        lv_obj_set_width(lbl, LV_PCT(100));
         lv_obj_set_user_data(lbl, (void *)1);
     }
     ov->items[ov->count++] = btn;
@@ -277,6 +397,20 @@ void options_view_set_selected(options_view_t *ov, int index) {
     ov->selected = index;
     apply_selected_style(ov, ov->items[ov->selected], true);
     lv_obj_scroll_to_view(ov->items[ov->selected], LV_ANIM_OFF);
+}
+
+void options_view_set_item_height(options_view_t *ov, int height) {
+    if (!ov || height <= 0 || ov->btn_h == height) return;
+    ov->btn_h = height;
+    lv_style_set_height(&ov->style_row, height);
+    lv_style_set_text_font(&ov->style_label, get_item_font(ov));
+    for (int i = 0; i < ov->count; ++i) {
+        lv_obj_t *item = ov->items[i];
+        if (!item || !lv_obj_is_valid(item)) continue;
+        lv_obj_set_height(item, height);
+    }
+    lv_obj_report_style_change(&ov->style_row);
+    lv_obj_report_style_change(&ov->style_label);
 }
 
 void options_view_move_selection(options_view_t *ov, int delta) {
@@ -336,8 +470,11 @@ void options_view_refresh_styles(options_view_t *ov) {
         lv_obj_set_style_pad_row(ov->list, GUI_GRID, 0);
         lv_obj_set_style_pad_left(ov->list, GUI_OPTIONS_LIST_PAD_HOR, 0);
         lv_obj_set_style_pad_right(ov->list, GUI_OPTIONS_LIST_PAD_HOR, 0);
-        lv_obj_set_style_pad_top(ov->list, GUI_SAFEAREA_VER, 0);
-        lv_obj_set_style_pad_bottom(ov->list, GUI_SAFEAREA_VER, 0);
+        /* Same insets the list was built with, not a fresh guess: a full-screen
+         * list has none, and re-adding one would shorten the rows' area and
+         * open a gap under the last row. */
+        lv_obj_set_style_pad_top(ov->list, ov->pad_top, 0);
+        lv_obj_set_style_pad_bottom(ov->list, ov->pad_bottom, 0);
     }
 
     lv_style_set_bg_color(&ov->style_item, surface);
@@ -346,12 +483,27 @@ void options_view_refresh_styles(options_view_t *ov) {
     lv_style_set_radius(&ov->style_item_alt, item_radius);
     lv_style_set_radius(&ov->style_selected, item_radius);
 
+    lv_style_set_bg_color(&ov->style_item_pressed, lv_color_darken(surface, LV_OPA_30));
+    lv_style_set_radius(&ov->style_item_pressed, item_radius);
+    lv_style_set_bg_color(&ov->style_item_alt_pressed, lv_color_darken(surface_alt, LV_OPA_30));
+    lv_style_set_radius(&ov->style_item_alt_pressed, item_radius);
+    lv_style_set_text_font(&ov->style_label, get_item_font(ov));
+    lv_style_set_text_color(&ov->style_label, text);
+    lv_obj_report_style_change(&ov->style_label);
+    lv_obj_report_style_change(&ov->style_row);
+
     for (int i = 0; i < ov->count; ++i) {
         lv_obj_t *btn = ov->items[i];
         if (!btn || !lv_obj_is_valid(btn)) continue;
         lv_obj_remove_style(btn, &ov->style_item, 0);
         lv_obj_remove_style(btn, &ov->style_item_alt, 0);
-        lv_obj_add_style(btn, get_zebra_style(ov, i), 0);
+        lv_obj_remove_style(btn, &ov->style_item_pressed, LV_STATE_PRESSED);
+        lv_obj_remove_style(btn, &ov->style_item_alt_pressed, LV_STATE_PRESSED);
+        lv_style_t *zebra = get_zebra_style(ov, i);
+        lv_obj_add_style(btn, zebra, 0);
+        lv_obj_add_style(btn, zebra == &ov->style_item ? &ov->style_item_pressed
+                                                       : &ov->style_item_alt_pressed,
+                         LV_STATE_PRESSED);
 
         uint32_t child_cnt = lv_obj_get_child_cnt(btn);
         for (uint32_t j = 0; j < child_cnt; ++j) {
@@ -386,6 +538,8 @@ void options_view_relayout_item(options_view_t *ov, lv_obj_t *item) {
 }
 
 void options_view_refresh_selected_item(options_view_t *ov) {
-    if (!ov || ov->selected < 0 || ov->selected >= ov->count) return;
+    if (!ov) return;
+    if (ov->selected < 0 || ov->selected >= ov->count) return;
     apply_selected_style(ov, ov->items[ov->selected], true);
 }
+

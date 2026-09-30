@@ -10,6 +10,7 @@
 #include "core/esp_comm_manager.h"
 #include "core/glog.h"
 #include "gui/design_tokens.h"
+#include "gui/touch_bar.h"
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 #include "managers/ble_manager.h"
 #endif
@@ -19,6 +20,7 @@
 #include "gui/accessibility_fonts.h"
 #include "managers/settings_manager.h"
 #include "lvgl.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include <stdio.h>
@@ -37,6 +39,7 @@ static lv_obj_t *lbl_fix_status = NULL;
 static lv_obj_t *lbl_fix_icon = NULL;
 static lv_obj_t *lbl_sats = NULL;
 static lv_obj_t *lbl_aps = NULL;
+static lv_obj_t *aps_label = NULL;
 static lv_obj_t *lbl_speed = NULL;
 static lv_obj_t *lbl_heading = NULL;
 static lv_obj_t *lbl_coords = NULL;
@@ -50,12 +53,15 @@ static lv_obj_t *compass_needle = NULL;
 static bool wardriving_initialized_gps = false;
 static bool wardriving_scan_mode = false;
 static bool wardriving_ble_mode = false;
+static bool wardriving_dual_mode = false;
 static bool wardriving_owns_csv_session = false;
 static bool touch_press_active = false;
 
 #ifdef CONFIG_USE_TOUCHSCREEN
+/* Geometry aliases: canonical values now live in gui/touch_bar.h. */
 #define WD_SCROLL_BTN_SIZE 28
 #define WD_SCROLL_BTN_PADDING 3
+static gui_touch_bar_t s_touch_tb;
 static lv_obj_t *touch_bar = NULL;
 static lv_obj_t *wd_scroll_up_btn = NULL;
 static lv_obj_t *wd_scroll_down_btn = NULL;
@@ -69,12 +75,9 @@ static int wd_touch_drag_axis;
 static lv_obj_t *wd_touch_scroll_target;
 static const int WD_TAP_THRESHOLD = 14;
 
-static int wardriving_touch_bar_height(void) {
-#if GUI_LEGACY_TOUCH_BAR
-    return WD_SCROLL_BTN_SIZE + WD_SCROLL_BTN_PADDING * 2;
-#else
-    return 0;
-#endif
+static bool wd_point_in_obj(const lv_obj_t *obj, const lv_point_t *p) {
+    if (!p) return false;
+    return gui_touch_bar_hit(obj, p->x, p->y);
 }
 
 static int wd_resolve_drag_axis(int total_dx, int total_dy) {
@@ -99,13 +102,6 @@ static void wd_touch_reset(void) {
     wd_touch_drag_axis = 0;
     wd_touch_scroll_target = NULL;
 }
-
-static bool wd_point_in_obj(const lv_obj_t *obj, const lv_point_t *p) {
-    if (!obj || !lv_obj_is_valid(obj)) return false;
-    lv_area_t area;
-    lv_obj_get_coords(obj, &area);
-    return p->x >= area.x1 && p->x <= area.x2 && p->y >= area.y1 && p->y <= area.y2;
-}
 #endif
 
 /*
@@ -119,7 +115,8 @@ static int64_t wardriving_view_ready_us = 0;
 
 static bool should_force_gps_deinit_on_exit(void) {
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    return (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0);
+    return (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0 ||
+            strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething2") == 0);
 #else
     return false;
 #endif
@@ -127,7 +124,7 @@ static bool should_force_gps_deinit_on_exit(void) {
 
 static bool should_prefer_peer_only_in_view(void) {
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    return (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0);
+    return strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0;
 #else
     return false;
 #endif
@@ -308,14 +305,26 @@ static void update_display_cb(lv_timer_t *timer) {
     bool peer_preferred = gps_manager_is_peer_gps_preferred();
     gps_t gps_snapshot = {0};
     bool using_peer = false;
-    bool have_active_gps = gps_manager_get_active_gps_snapshot(&gps_snapshot, &using_peer);
+    bool have_active_gps = wardriving_scan_mode
+        ? gps_manager_get_wardrive_snapshot(&gps_snapshot, &using_peer)
+        : gps_manager_get_active_gps_snapshot(&gps_snapshot, &using_peer);
 
     if (!g_gpsManager.isinitilized && !have_active_gps && !peer_preferred) {
         if (lbl_fix_status) lv_label_set_text(lbl_fix_status, "No GPS");
         if (lbl_fix_icon) lv_label_set_text(lbl_fix_icon, LV_SYMBOL_CLOSE);
         if (lbl_fix_icon) lv_obj_set_style_text_color(lbl_fix_icon, lv_color_hex(error_color), 0);
         if (lbl_sats) lv_label_set_text(lbl_sats, "--/--");
-        if (lbl_aps) lv_label_set_text(lbl_aps, "0");
+        if (lbl_aps) {
+            uint32_t count = 0;
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
+            if (wardriving_ble_mode) {
+                count = ble_wardriving_get_unique_device_count();
+            }
+#endif
+            char count_buf[16];
+            snprintf(count_buf, sizeof(count_buf), "%u", (unsigned)count);
+            lv_label_set_text(lbl_aps, count_buf);
+        }
         if (lbl_speed) lv_label_set_text(lbl_speed, "---");
         if (lbl_heading) lv_label_set_text(lbl_heading, "--");
         if (lbl_coords) lv_label_set_text(lbl_coords, "---'N  ---'E");
@@ -499,14 +508,25 @@ static void update_display_cb(lv_timer_t *timer) {
         lv_label_set_text(lbl_sats, sats_buf);
     }
     
+    static uint8_t dual_ap_page = 0;
     if (lbl_aps) {
-        uint32_t ap_count = wardriving_ble_mode
+        bool show_ble_devs = wardriving_ble_mode;
+        if (wardriving_dual_mode) {
+            show_ble_devs = (dual_ap_page != 0);
+        }
+        uint32_t ap_count = show_ble_devs
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
             ? ble_wardriving_get_unique_device_count()
 #else
             ? 0
 #endif
             : csv_get_unique_wifi_ap_count_including_hidden();
+        if (aps_label && wardriving_dual_mode) {
+            lv_label_set_text(aps_label, show_ble_devs ? "BLE Devs" : "Unique APs");
+        }
+        if (wardriving_dual_mode) {
+            dual_ap_page ^= 1;
+        }
         char aps_buf[16];
         snprintf(aps_buf, sizeof(aps_buf), "%u", (unsigned int)ap_count);
         lv_label_set_text(lbl_aps, aps_buf);
@@ -689,69 +709,27 @@ static void wd_scroll_up_cb(lv_event_t *e) { (void)e; wardriving_scroll_content(
 static void wd_scroll_down_cb(lv_event_t *e) { (void)e; wardriving_scroll_content(1); }
 static void wd_back_cb(lv_event_t *e) { (void)e; display_manager_go_back(); }
 
-/* Bottom control bar styled identically to the other touch views: circular
- * scroll-up (left) and scroll-down (right) buttons flanking a Back button. */
+/* Bottom control bar: canonical helper bar (circular scroll-up on the left,
+ * Back in the center, circular scroll-down on the right). */
 static void create_touch_control_bar(lv_obj_t *root) {
     if (!root) return;
 
-    uint8_t theme = settings_get_menu_theme(&G_Settings);
-    lv_color_t bar_bg = lv_color_hex(theme_palette_get_background(theme));
-    lv_color_t ctrl_color = lv_color_hex(theme_palette_get_surface_alt(theme));
-    lv_color_t ctrl_text = lv_color_hex(theme_palette_get_text(theme));
-
-    const int bar_h = wardriving_touch_bar_height();
-    if (bar_h <= 0) return;
-
-    touch_bar = lv_obj_create(root);
-    lv_obj_remove_style_all(touch_bar);
-    lv_obj_set_size(touch_bar, LV_HOR_RES, bar_h);
-    lv_obj_align(touch_bar, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_set_style_bg_color(touch_bar, bar_bg, 0);
-    lv_obj_set_style_bg_opa(touch_bar, LV_OPA_COVER, 0);
-    lv_obj_clear_flag(touch_bar, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
-
-    wd_scroll_up_btn = lv_btn_create(touch_bar);
-    gui_apply_pressed_style(wd_scroll_up_btn);
-    lv_obj_set_size(wd_scroll_up_btn, WD_SCROLL_BTN_SIZE, WD_SCROLL_BTN_SIZE);
-    lv_obj_align(wd_scroll_up_btn, LV_ALIGN_LEFT_MID, WD_SCROLL_BTN_PADDING, 0);
-    lv_obj_set_style_bg_color(wd_scroll_up_btn, ctrl_color, LV_PART_MAIN);
-    lv_obj_set_style_radius(wd_scroll_up_btn, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-    lv_obj_set_style_border_width(wd_scroll_up_btn, 0, LV_PART_MAIN);
-    lv_obj_set_style_shadow_width(wd_scroll_up_btn, 0, LV_PART_MAIN);
-    lv_obj_add_event_cb(wd_scroll_up_btn, wd_scroll_up_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *up_label = lv_label_create(wd_scroll_up_btn);
-    lv_label_set_text(up_label, LV_SYMBOL_UP);
-    lv_obj_set_style_text_color(up_label, ctrl_text, 0);
-    lv_obj_center(up_label);
-
-    wd_back_btn = lv_btn_create(touch_bar);
-    gui_apply_pressed_style(wd_back_btn);
-    lv_obj_set_size(wd_back_btn, WD_SCROLL_BTN_SIZE + 24, WD_SCROLL_BTN_SIZE);
-    lv_obj_align(wd_back_btn, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_style_bg_color(wd_back_btn, ctrl_color, LV_PART_MAIN);
-    lv_obj_set_style_radius(wd_back_btn, 5, LV_PART_MAIN);
-    lv_obj_set_style_pad_hor(wd_back_btn, 8, LV_PART_MAIN);
-    lv_obj_set_style_border_width(wd_back_btn, 0, LV_PART_MAIN);
-    lv_obj_set_style_shadow_width(wd_back_btn, 0, LV_PART_MAIN);
-    lv_obj_add_event_cb(wd_back_btn, wd_back_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *back_label = lv_label_create(wd_back_btn);
-    lv_label_set_text(back_label, "Back");
-    lv_obj_set_style_text_color(back_label, ctrl_text, 0);
-    lv_obj_center(back_label);
-
-    wd_scroll_down_btn = lv_btn_create(touch_bar);
-    gui_apply_pressed_style(wd_scroll_down_btn);
-    lv_obj_set_size(wd_scroll_down_btn, WD_SCROLL_BTN_SIZE, WD_SCROLL_BTN_SIZE);
-    lv_obj_align(wd_scroll_down_btn, LV_ALIGN_RIGHT_MID, -WD_SCROLL_BTN_PADDING, 0);
-    lv_obj_set_style_bg_color(wd_scroll_down_btn, ctrl_color, LV_PART_MAIN);
-    lv_obj_set_style_radius(wd_scroll_down_btn, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-    lv_obj_set_style_border_width(wd_scroll_down_btn, 0, LV_PART_MAIN);
-    lv_obj_set_style_shadow_width(wd_scroll_down_btn, 0, LV_PART_MAIN);
-    lv_obj_add_event_cb(wd_scroll_down_btn, wd_scroll_down_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *down_label = lv_label_create(wd_scroll_down_btn);
-    lv_label_set_text(down_label, LV_SYMBOL_DOWN);
-    lv_obj_set_style_text_color(down_label, ctrl_text, 0);
-    lv_obj_center(down_label);
+    s_touch_tb = gui_touch_bar_create(root);
+    touch_bar = s_touch_tb.bar;
+    wd_scroll_up_btn = s_touch_tb.up_btn;
+    wd_back_btn = s_touch_tb.back_btn;
+    wd_scroll_down_btn = s_touch_tb.down_btn;
+    gui_touch_bar_set_callbacks(&s_touch_tb,
+                                wd_scroll_up_cb, NULL,
+                                wd_back_cb, NULL,
+                                wd_scroll_down_cb, NULL);
+    /* This view keeps the scroll arrows always visible (no overflow gating);
+     * the helper starts them hidden, so un-hide to preserve the original look.
+     * Button dispatch also stays manual (PR stage above). */
+    if (wd_scroll_up_btn && lv_obj_is_valid(wd_scroll_up_btn))
+        lv_obj_clear_flag(wd_scroll_up_btn, LV_OBJ_FLAG_HIDDEN);
+    if (wd_scroll_down_btn && lv_obj_is_valid(wd_scroll_down_btn))
+        lv_obj_clear_flag(wd_scroll_down_btn, LV_OBJ_FLAG_HIDDEN);
 }
 #endif
 
@@ -771,8 +749,9 @@ void wardriving_view_create(void) {
     const lv_font_t *small_font = get_small_font();
     
     bool peer_connected = esp_comm_manager_is_connected();
-    bool peer_only_mode = !wardriving_scan_mode && peer_connected && should_prefer_peer_only_in_view();
-    bool observing_existing_session = (wardriving_scan_mode || wardriving_ble_mode) && csv_file_is_open();
+    bool peer_only_mode = !wardriving_scan_mode && !wardriving_ble_mode && !wardriving_dual_mode &&
+                          peer_connected && should_prefer_peer_only_in_view();
+    bool observing_existing_session = (wardriving_scan_mode || wardriving_ble_mode || wardriving_dual_mode) && csv_file_is_open();
 
     if (observing_existing_session) {
         glog("Wardriving is already active; this view will not change its session.\n");
@@ -801,7 +780,53 @@ void wardriving_view_create(void) {
     }
 
     bool csv_ok = !observing_existing_session;
-    if (!observing_existing_session && wardriving_ble_mode) {
+    if (!observing_existing_session && wardriving_dual_mode) {
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE) && !defined(CONFIG_IDF_TARGET_ESP32P4)
+        if (heap_caps_get_total_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) == 0) {
+            glog("Dual wardriving requires a PSRAM device.\n");
+        } else {
+            bool use_peer_gps = peer_connected && should_prefer_peer_only_in_view();
+            gps_manager_set_peer_gps_preferred(use_peer_gps);
+            if (use_peer_gps) {
+                gps_manager_clear_peer_fix();
+                if (g_gpsManager.isinitilized) {
+                    gps_manager_deinit(&g_gpsManager);
+                    wardriving_initialized_gps = false;
+                }
+            }
+            ble_wardriving_reset_unique_device_count();
+            csv_ok = (csv_file_open("wardriving") == ESP_OK);
+            if (csv_ok) {
+                ble_set_suspend_allowed(false);
+                if (!ble_start_scanning()) {
+                    ble_set_suspend_allowed(true);
+                    csv_file_close();
+                    csv_ok = false;
+                    glog("Failed to start BLE scan for dual wardriving.\n");
+                } else {
+                    ble_register_handler(ble_wardriving_callback);
+                    wifi_manager_start_monitor_mode(wardriving_scan_callback);
+                    if (!start_wardriving()) {
+                        ble_unregister_handler(ble_wardriving_callback);
+                        ble_stop();
+                        wifi_manager_stop_monitor_mode();
+                        csv_file_close();
+                        ble_set_suspend_allowed(true);
+                        csv_ok = false;
+                        glog("Failed to start wardriving observation queue.\n");
+                    } else {
+                        // Session setup resets GPS source selection.  Scanning
+                        // remains local while the paired S3 supplies GPS.
+                        gps_manager_set_peer_gps_preferred(use_peer_gps);
+                    }
+                }
+            } else if (!csv_ok) {
+                gps_manager_set_peer_gps_preferred(false);
+                glog("Failed to open CSV for dual wardriving.\n");
+            }
+        }
+#endif
+    } else if (!observing_existing_session && wardriving_ble_mode) {
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
         ble_wardriving_reset_unique_device_count();
         csv_ok = (csv_file_open("ble_wardriving") == ESP_OK);
@@ -824,21 +849,7 @@ void wardriving_view_create(void) {
 
         bool peer_helper_ok = false;
         if (csv_ok && esp_comm_manager_is_connected()) {
-            char helper_command[256];
-            char helper_plan_csv[192] = {0};
-            uint16_t hop_ms = settings_get_wd_hop_helper_ms(&G_Settings);
-            bool weighted = settings_get_wd_weighted_5g(&G_Settings);
-            if (wardriving_get_helper_channel_plan_csv(helper_plan_csv, sizeof(helper_plan_csv))) {
-                snprintf(helper_command, sizeof(helper_command),
-                         "startwd --helper --channels %s --hop %u%s",
-                         helper_plan_csv, (unsigned)hop_ms, weighted ? " --weighted" : "");
-            } else {
-                snprintf(helper_command, sizeof(helper_command), "startwd --helper --hop %u%s",
-                         (unsigned)hop_ms, weighted ? " --weighted" : "");
-            }
-            wardriving_expect_peer_assist(true);
-            peer_helper_ok = esp_comm_manager_send_command_line(helper_command);
-            if (!peer_helper_ok) wardriving_expect_peer_assist(false);
+            peer_helper_ok = wardriving_start_peer_helper();
             glog(peer_helper_ok
                      ? "Wardrive helper start sent; waiting for ready status.\n"
                      : "Wardrive helper not started on peer; continuing local only.\n");
@@ -846,11 +857,16 @@ void wardriving_view_create(void) {
             glog("Wardrive helper unavailable: no GhostLink peer connected.\n");
         }
         if (!peer_helper_ok) wardriving_set_peer_assist(false);
+        if (peer_helper_ok && peer_connected && should_prefer_peer_only_in_view()) {
+            // start_wardriving() resets this; prefer the S3 GPS once its helper
+            // command has been accepted. Existing timeout handling falls back.
+            gps_manager_set_peer_gps_preferred(true);
+        }
     }
     wardriving_owns_csv_session = csv_ok && !observing_existing_session &&
-                                    (wardriving_scan_mode || wardriving_ble_mode);
+                                    (wardriving_scan_mode || wardriving_ble_mode || wardriving_dual_mode);
 
-    if (!observing_existing_session && !wardriving_scan_mode) {
+    if (!observing_existing_session && !wardriving_scan_mode && !wardriving_dual_mode) {
         gps_manager_set_peer_gps_preferred(peer_connected);
         if (!peer_connected) {
             gps_manager_clear_peer_fix();
@@ -869,7 +885,7 @@ void wardriving_view_create(void) {
 #ifdef CONFIG_USE_TOUCHSCREEN
     /* Leave room for the bottom control bar so the last card isn't hidden. */
     lv_obj_set_size(content, LV_HOR_RES,
-                    LV_VER_RES - GUI_STATUS_BAR_HEIGHT - wardriving_touch_bar_height());
+                    LV_VER_RES - GUI_STATUS_BAR_HEIGHT - gui_touch_bar_height());
 #endif
     lv_obj_add_flag(content, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scroll_dir(content, LV_DIR_VER);
@@ -924,8 +940,10 @@ void wardriving_view_create(void) {
     lv_obj_set_style_text_color(lbl_sats, lv_color_hex(text_color), 0);
     
     lv_obj_t *aps_card = create_card(stats_row, 48);
-    lv_obj_t *aps_label = lv_label_create(aps_card);
-    lv_label_set_text(aps_label, wardriving_ble_mode ? "BLE Devs" : "Unique APs");
+    aps_label = lv_label_create(aps_card);
+    lv_label_set_text(aps_label, wardriving_dual_mode ? "Unique APs"
+                              : wardriving_ble_mode ? "BLE Devs"
+                              : "Unique APs");
     lv_obj_set_style_text_font(aps_label, small_font, 0);
     lv_obj_set_style_text_color(aps_label, lv_color_hex(dim_color), 0);
     lbl_aps = lv_label_create(aps_card);
@@ -1007,7 +1025,8 @@ void wardriving_view_create(void) {
     lv_obj_set_width(lbl_accuracy, LV_PCT(100));
     set_label_long_mode(lbl_accuracy);
     
-    const char *bar_title = wardriving_ble_mode ? "BLE Wardriving"
+    const char *bar_title = wardriving_dual_mode ? "Dual Wardriving"
+                          : wardriving_ble_mode ? "BLE Wardriving"
                           : wardriving_scan_mode ? "Wardriving"
                           : "GPS Info";
     display_manager_add_status_bar(bar_title);
@@ -1016,7 +1035,7 @@ void wardriving_view_create(void) {
     create_touch_control_bar(root_container);
 #endif
 
-    if ((wardriving_scan_mode || wardriving_ble_mode) && !csv_ok && lbl_sd_status) {
+    if ((wardriving_scan_mode || wardriving_ble_mode || wardriving_dual_mode) && !csv_ok && lbl_sd_status) {
         lv_obj_clear_flag(lbl_sd_status, LV_OBJ_FLAG_HIDDEN);
     }
 
@@ -1027,7 +1046,7 @@ void wardriving_view_create(void) {
 }
 
 void wardriving_view_destroy(void) {
-    bool had_capture_mode = (wardriving_scan_mode || wardriving_ble_mode);
+    bool had_capture_mode = (wardriving_scan_mode || wardriving_ble_mode || wardriving_dual_mode);
     bool owned_csv_session = wardriving_owns_csv_session;
     bool force_deinit_for_template = should_force_gps_deinit_on_exit();
 
@@ -1036,7 +1055,20 @@ void wardriving_view_destroy(void) {
         update_timer = NULL;
     }
 
-    if (owned_csv_session && wardriving_ble_mode) {
+    if (owned_csv_session && wardriving_dual_mode) {
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE) && !defined(CONFIG_IDF_TARGET_ESP32P4)
+        ble_unregister_handler(ble_wardriving_callback);
+        ble_stop();
+        stop_wardriving();
+        wifi_manager_stop_monitor_mode();
+        if (csv_buffer_has_pending_data()) {
+            csv_flush_buffer_to_file();
+        }
+        csv_file_close();
+        ble_set_suspend_allowed(true);
+#endif
+        wardriving_dual_mode = false;
+    } else if (owned_csv_session && wardriving_ble_mode) {
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
         ble_stop();
         if (csv_buffer_has_pending_data()) {
@@ -1064,6 +1096,7 @@ void wardriving_view_destroy(void) {
     if (!owned_csv_session) {
         wardriving_ble_mode = false;
         wardriving_scan_mode = false;
+        wardriving_dual_mode = false;
     }
     wardriving_owns_csv_session = false;
 
@@ -1082,6 +1115,7 @@ void wardriving_view_destroy(void) {
     }
     wardriving_content = NULL;
 #ifdef CONFIG_USE_TOUCHSCREEN
+    gui_touch_bar_destroy(&s_touch_tb);
     touch_bar = NULL;
     wd_scroll_up_btn = NULL;
     wd_scroll_down_btn = NULL;
@@ -1093,6 +1127,7 @@ void wardriving_view_destroy(void) {
     lbl_fix_icon = NULL;
     lbl_sats = NULL;
     lbl_aps = NULL;
+    aps_label = NULL;
     lbl_speed = NULL;
     lbl_heading = NULL;
     lbl_coords = NULL;
@@ -1111,10 +1146,28 @@ void wardriving_view_destroy(void) {
 
 void wardriving_view_set_scan_mode(bool enabled) {
     wardriving_scan_mode = enabled;
+    if (enabled) {
+        wardriving_dual_mode = false;
+    }
 }
 
 void wardriving_view_set_ble_mode(bool enabled) {
     wardriving_ble_mode = enabled;
+    if (enabled) {
+        wardriving_dual_mode = false;
+    }
+}
+
+void wardriving_view_set_dual_mode(bool enabled) {
+    wardriving_dual_mode = enabled;
+    if (enabled) {
+        wardriving_scan_mode = false;
+        wardriving_ble_mode = false;
+    }
+}
+
+bool wardriving_view_is_dual_mode(void) {
+    return wardriving_dual_mode;
 }
 
 static void get_wardriving_callback(void **callback) {

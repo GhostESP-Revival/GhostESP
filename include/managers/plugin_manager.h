@@ -106,6 +106,10 @@ typedef struct {
     uint16_t icon_height;
     uint32_t launch_failure_count;
     plugin_permission_t permissions;
+    /* When true, BACK input is forwarded to the app instead of the runner's
+     * default 'exit the app' handling. Mirrors native view semantics, where
+     * go_back() pops a level and the view decides what that means. */
+    bool forward_back;
     bool requires_psram;
     bool allow_absolute_storage;
     bool quarantined;

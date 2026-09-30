@@ -3,9 +3,16 @@ file(GLOB_RECURSE app_sources
     "${CMAKE_SOURCE_DIR}/main/core/esp_comm_manager.c"
     "${CMAKE_SOURCE_DIR}/main/core/universal_ir.c"
 )
+# NOTE: this is a plain GLOB_RECURSE (no CONFIGURE_DEPENDS), so adding a new
+# source file under main/ requires a CMake reconfigure (`idf.py reconfigure`)
+# before the build will compile it.
 # Exclude all Flipper NFC parser sources from the glob so we can whitelist only
 # the parsers that are actually wired into the compat layer.
 list(FILTER app_sources EXCLUDE REGEX "managers/nfc/flipper_parsers/.*\\.c")
+
+# Vendored Ed25519 is only linked when MeshCore is enabled (see below); keep it
+# out of the unconditional glob so non-MeshCore builds don't carry it.
+list(FILTER app_sources EXCLUDE REGEX "vendor/ed25519/.*\\.c")
 
 # Exclude BLE sources for targets without local BLE hardware.
 # Use idf_build_get_property for reliable target detection in component CMake
@@ -124,6 +131,15 @@ endif()
 
 set(sources ${app_sources})
 
+# MeshCore companion (optional): stack sources are auto-globbed above; link the
+# vendored Ed25519 library and expose its headers only when enabled.
+if(CONFIG_HAS_MESHCORE)
+    file(GLOB meshcore_ed25519_sources "${CMAKE_SOURCE_DIR}/main/vendor/ed25519/*.c")
+    list(FILTER meshcore_ed25519_sources EXCLUDE REGEX "seed\\.c")
+    list(APPEND sources ${meshcore_ed25519_sources})
+    list(APPEND extra_includes "${CMAKE_SOURCE_DIR}/main/vendor/ed25519")
+endif()
+
 # The e-paper Reader decodes JPEG pages directly into its LVGL framebuffer.
 # Keep TJpgDec out of the other targets so their existing image pipelines and
 # binary sizes remain unchanged.
@@ -208,6 +224,12 @@ if(CONFIG_HAS_BADUSB)
     list(APPEND required_components esp_tinyusb)
 endif()
 
+# USB SD passthrough (MSC) also needs the TinyUSB device stack (S3 only).
+# The MSC class itself is gated by CONFIG_TINYUSB_MSC_ENABLED in sdkconfig.
+if(CONFIG_HAS_USB_MSC_SD)
+    list(APPEND required_components esp_tinyusb)
+endif()
+
 # BadBLE uses the shared transport-neutral DuckyScript parser and the IDF HID
 # component.  Keep this separate from BadUSB so non-S3 BLE targets do not pull
 # in TinyUSB.
@@ -285,11 +307,20 @@ if(FALSE)
 endif()
 
 if(CONFIG_HAS_NFC)
+    set(mfc_dict_packed "${CMAKE_CURRENT_BINARY_DIR}/mf_classic_dict_packed.bin")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+                 "${CMAKE_CURRENT_SOURCE_DIR}/mf_classic_dict.nfc")
+    execute_process(
+        COMMAND "${GHOSTESP_PYTHON}" "${CMAKE_SOURCE_DIR}/scripts/pack_mfc_dict.py"
+                "${CMAKE_CURRENT_SOURCE_DIR}/mf_classic_dict.nfc" "${mfc_dict_packed}"
+        RESULT_VARIABLE mfc_dict_pack_result)
+    if(NOT mfc_dict_pack_result EQUAL 0)
+        message(FATAL_ERROR "Failed to pack embedded MIFARE Classic dictionary")
+    endif()
     idf_component_register(SRCS ${sources}
                            INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/include" ${extra_includes}
                            REQUIRES ${required_components}
-                           EMBED_TXTFILES "mf_classic_dict.nfc"
-                           EMBED_FILES ${embed_files_list})
+                           EMBED_FILES ${embed_files_list} "${mfc_dict_packed}")
     target_compile_definitions(${COMPONENT_LIB} PRIVATE CONFIG_MFC_DICT_EMBEDDED=1)
 else()
     idf_component_register(SRCS ${sources}

@@ -1,0 +1,15 @@
+Title: GhostESP: Revival
+Description: GhostESP firmware and hardware documentation
+URL: /v1.8/
+Version: v1.8
+Section: GhostESP Documentation
+Search index: /search-index.json
+
+# GhostESP: Revival
+
+> GhostESP firmware and hardware documentation
+
+---
+
+Welcome to the Official GhostESP: Revival documentation!
+Use the sidebar to navigate sections.

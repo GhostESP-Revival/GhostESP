@@ -453,9 +453,14 @@ static esp_err_t remove_recursive(const char *path) {
     struct dirent *entry;
     while ((entry = readdir(dir)) != NULL) {
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
-        char child[PATH_MAX_LOCAL];
-        if (!join_path(child, sizeof(child), path, entry->d_name)) { closedir(dir); return ESP_FAIL; }
-        if (remove_recursive(child) != ESP_OK) { closedir(dir); return ESP_FAIL; }
+        /* Heap, not stack: this recurses once per directory level and runs on
+           the 8 KB cloud_install task stack. */
+        char *child = malloc(PATH_MAX_LOCAL);
+        if (!child) { closedir(dir); return ESP_ERR_NO_MEM; }
+        esp_err_t rc = join_path(child, PATH_MAX_LOCAL, path, entry->d_name)
+                           ? remove_recursive(child) : ESP_FAIL;
+        free(child);
+        if (rc != ESP_OK) { closedir(dir); return ESP_FAIL; }
     }
     closedir(dir);
     return rmdir(path) == 0 ? ESP_OK : ESP_FAIL;
@@ -486,14 +491,16 @@ static esp_err_t copy_recursive(const char *src, const char *dst) {
     struct dirent *entry;
     while ((entry = readdir(dir)) != NULL) {
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
-        char child_src[PATH_MAX_LOCAL];
-        char child_dst[PATH_MAX_LOCAL];
-        if (!join_path(child_src, sizeof(child_src), src, entry->d_name) ||
-            !join_path(child_dst, sizeof(child_dst), dst, entry->d_name)) {
-            closedir(dir);
-            return ESP_FAIL;
-        }
-        if (copy_recursive(child_src, child_dst) != ESP_OK) { closedir(dir); return ESP_FAIL; }
+        /* Heap, not stack: recurses once per directory level on the 8 KB
+           cloud_install task stack. */
+        char *child_src = malloc(PATH_MAX_LOCAL * 2);
+        if (!child_src) { closedir(dir); return ESP_ERR_NO_MEM; }
+        char *child_dst = child_src + PATH_MAX_LOCAL;
+        esp_err_t rc = (join_path(child_src, PATH_MAX_LOCAL, src, entry->d_name) &&
+                        join_path(child_dst, PATH_MAX_LOCAL, dst, entry->d_name))
+                           ? copy_recursive(child_src, child_dst) : ESP_FAIL;
+        free(child_src);
+        if (rc != ESP_OK) { closedir(dir); return ESP_FAIL; }
     }
     closedir(dir);
     return ESP_OK;
@@ -520,7 +527,32 @@ static bool parse_manifest_identity(const char *package_path, char *app_id, size
     return ok;
 }
 
+typedef struct {
+    char entry_path[PATH_MAX_LOCAL];
+    char staging[PATH_MAX_LOCAL];
+    char app_dst[PATH_MAX_LOCAL];
+    char backup[PATH_MAX_LOCAL];
+} install_paths_t;
+
+static esp_err_t install_package_with_paths(const char *package_path, bool validate_package_checksums,
+                                            install_paths_t *paths);
+
+/* The four path buffers live on the heap so the cloud_install task's 8 KB
+   stack has room for the copy_recursive/FATFS depth below this call. */
 static esp_err_t install_package(const char *package_path, bool validate_package_checksums) {
+    if (has_gapp_extension(package_path) && !path_is_dir(package_path)) {
+        s_last_error[0] = '\0';
+        return plugin_installer_install_gapp(package_path);
+    }
+    install_paths_t *paths = malloc(sizeof(*paths));
+    if (!paths) return set_error(ESP_ERR_NO_MEM, "out of memory for install paths");
+    esp_err_t err = install_package_with_paths(package_path, validate_package_checksums, paths);
+    free(paths);
+    return err;
+}
+
+static esp_err_t install_package_with_paths(const char *package_path, bool validate_package_checksums,
+                                            install_paths_t *paths) {
     s_last_error[0] = '\0';
     if (has_gapp_extension(package_path) && !path_is_dir(package_path)) {
         return plugin_installer_install_gapp(package_path);
@@ -536,8 +568,8 @@ static esp_err_t install_package(const char *package_path, bool validate_package
         return set_error(ESP_ERR_INVALID_CRC, "package checksum validation failed");
     }
 
-    char entry_path[PATH_MAX_LOCAL];
-    if (!join_path(entry_path, sizeof(entry_path), package_path, entry) || !path_exists(entry_path)) {
+    char *entry_path = paths->entry_path;
+    if (!join_path(entry_path, PATH_MAX_LOCAL, package_path, entry) || !path_exists(entry_path)) {
         return set_error(ESP_ERR_NOT_FOUND, "package entry binary missing");
     }
 
@@ -546,12 +578,12 @@ static esp_err_t install_package(const char *package_path, bool validate_package
     mkdir_if_missing(STAGING_DIR);
     mkdir_if_missing(BACKUP_DIR);
 
-    char staging[PATH_MAX_LOCAL];
-    char app_dst[PATH_MAX_LOCAL];
-    char backup[PATH_MAX_LOCAL];
-    if (!join_path(staging, sizeof(staging), STAGING_DIR, app_id) ||
-        !join_path(app_dst, sizeof(app_dst), APPS_DIR, app_id) ||
-        !join_path(backup, sizeof(backup), BACKUP_DIR, app_id)) {
+    char *staging = paths->staging;
+    char *app_dst = paths->app_dst;
+    char *backup = paths->backup;
+    if (!join_path(staging, PATH_MAX_LOCAL, STAGING_DIR, app_id) ||
+        !join_path(app_dst, PATH_MAX_LOCAL, APPS_DIR, app_id) ||
+        !join_path(backup, PATH_MAX_LOCAL, BACKUP_DIR, app_id)) {
         return set_error(ESP_ERR_INVALID_SIZE, "install path too long");
     }
 

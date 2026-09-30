@@ -162,6 +162,8 @@ void splash_create(void) {
     build_name = "CrowPanel Advance 5-inch";
   } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "crowpanel_advance7") == 0) {
     build_name = "CrowPanel Advance 7-inch";
+  } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "tdeck") == 0) {
+    build_name = "LilyGO T-Deck";
   }
   lv_label_set_text_fmt(label2, "%s", build_name);
   lv_obj_set_style_text_color(label2, lv_color_hex(0xFFFFFF), 0);
@@ -305,7 +307,9 @@ void splash_set_progress(float pct, const char *label) {
     } else {
         msg->label[0] = '\0';
     }
-    display_manager_run_on_lvgl(splash_progress_apply, msg);
+    if (!display_manager_run_on_lvgl(splash_progress_apply, msg)) {
+        free(msg);
+    }
 }
 
 static void splash_progress_apply(void *arg) {

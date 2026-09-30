@@ -1,0 +1,46 @@
+Title: Mouse Jiggler
+Description: Keep your PC awake with periodic mouse movements
+URL: /latest/usb/mouse-jiggler/
+Version: latest
+Section: USB
+Search index: /search-index.json
+
+# Mouse Jiggler
+
+> Keep your PC awake with periodic mouse movements
+
+## On this page
+
+- [How It Works](#how-it-works)
+- [Usage](#usage)
+- [From the Display Menu](#from-the-display-menu)
+- [Via CLI](#via-cli)
+- [Remote (Dual Comm)](#remote-dual-comm)
+- [Notes](#notes)
+
+---
+
+Mouse Jiggler moves the mouse cursor back and forth periodically, preventing your computer from going idle or triggering screen lockers.
+## How It Works
+When activated, the ESP32-S3 presents itself as a USB HID mouse to the host PC. A background task sends alternating left/right mouse movements at half-second intervals. The movement is small (8px) so it won’t interfere with your work but is large enough to reliably keep the host awake.
+## Usage
+### From the Display Menu
+- Navigate to BadUSB
+- Select Mouse Jiggler
+- The device installs as a USB mouse and begins jiggling
+- Select Cancel on the popup to stop
+### Via CLI
+Start:
+badusb jiggle_start
+Stop:
+badusb jiggle_stop
+### Remote (Dual Comm)
+From a C5 display controller paired with an S3 over GhostLink:
+- Navigate to BadUSB → Mouse Jiggler
+- The C5 sends badusb jiggle_start to the S3
+- The S3 activates USB HID mouse mode and jiggles
+- Status updates are shown on the C5 display
+## Notes
+- USB required: The device must be plugged into the host PC before starting. If VSENSE is configured, it waits for USB connection automatically.
+- Mutually exclusive: Mouse Jiggler cannot run at the same time as BadUSB script execution or USB Keyboard mode — they share the same USB HID interface.
+- Stops on cancel: Selecting Cancel on the display halts the jiggler and uninstalls the USB driver. Running badusb stop halts the jiggler but leaves the USB HID device connected (the CDC console is not restored until the device is re-plugged or rebooted).
