@@ -3,6 +3,7 @@
 ## Attribution
 Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A trailing `@handle` credits a guest contributor for that specific line. "Ported from / adapted from" credits the upstream source a feature was based on, not GhostESP authorship.
 
+
 ## v2.2
 
 ### Added
@@ -103,7 +104,17 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Fixed SD apps built for another chip showing in the Apps gallery and then failing to launch
 - Fixed `capture -raw` and `capture -wireshark` dropping data frames over 768 bytes, stripping the FCS only from some frame types, and discarding every ACK/CTS as too short
 
+
+## Revival v2.1.3
+
+### Bug Fixes
+- Fixed boot crash on Cardputer (and other M5GFX boards) under ESP-IDF 6.1 by resetting the new spi_bus_config_t.dma_burst_size field to the driver default after M5GFX fills the config with 0xFF
+- Raised the SD Init task stack from 6K to 8K, fixing a boot-time stack overflow on Cardputer ADV
+
+
+
 ## Revival v2.1.2 - 2026-09-03
+
 
 ### Added
 - Added support for more devices including ESP32-P4 boards with ESP32-C6 ESP-Hosted Wi-Fi and Bluetooth  (huge thank you to M5Stack and Elecrow for providing hardware to work on)
