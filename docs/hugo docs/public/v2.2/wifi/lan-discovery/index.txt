@@ -1,0 +1,45 @@
+Title: Find Devices on Your Wi-Fi Network
+Description: Discover devices and services on a network you own or are authorized to test
+URL: /v2.2/wifi/lan-discovery/
+Version: v2.2
+Section: Wi-Fi
+Search index: /search-index.json
+
+# Find Devices on Your Wi-Fi Network
+
+> Discover devices and services on a network you own or are authorized to test
+
+## On this page
+
+- [Discovering devices](#discovering-devices)
+- [Govee lights and Wake-on-LAN](#govee-lights-and-wake-on-lan)
+- [Troubleshooting](#troubleshooting)
+- [Related tasks](#related-tasks)
+
+---
+
+LAN discovery lists devices and advertised services on the Wi-Fi network GhostESP is currently connected to. [Connect to a Wi-Fi Network](/v2.2/wifi/connect/) first. Only scan networks you own or have permission to test; see [Legal and ethical rules](/v2.2/wifi/basics/#legal-and-ethical-rules).
+Discovery sequence
+1
+Reuse the last ARP sweep, or run a new oneCatches Windows hosts that block ICMP ping
+2
+Discover services per hostmDNS, LLMNR, SSDP, and NetBIOS
+3
+Probe specific protocolsNetBIOS, HTTP banners, SNMP, and SMB
+4
+List hosts and servicesHostnames, service types, ports, and IP addresses
+LAN scans reuse the most recent ARP sweep as the host list.
+## Discovering devices
+On-device, open Menu → Wi-Fi → Network while connected and choose an item: mDNS Discovery, ARP Sweep, List Hosts (ARP), Scan Open Ports, SSH Banner Scan, NetBIOS Scan, HTTP Banner Scan, SNMP Probe, SMB Enum (enum4linux), or SNMP Walk. The … Subnet… variants target a specific subnet. Review the discovered devices and services.
+From the CLI, run scanlocal to discover devices and services, or scanarp to list active devices by IP address and MAC vendor (scanarp monitor [seconds] watches for new hosts over time). Run netbiosscan [subnet &lt;a.b.c.&gt;] and httpbannerscan [subnet &lt;a.b.c.&gt;] to enumerate NetBIOS and HTTP hosts. Run snmpprobe &lt;IP&gt; (or snmpprobe walk &lt;IP&gt; [OID], snmpprobe communities &lt;c1,c2,...|file&gt;) to probe and walk SNMP devices, and enumscan for SMB hosts. Run mdnssniff &lt;IP|all&gt; to watch mDNS traffic for a host or the whole subnet (stop with mdnssniff stop). Run scanports local to port-scan the local subnet, or see [Check Open Ports](/v2.2/wifi/port-scanning/) for single-host scans.
+LAN scans automatically reuse the most recent ARP sweep results as the host list (with MAC vendor labels) instead of ICMP-pinging every address, which catches Windows hosts that block ping. When no ARP results are available, scans use the actual subnet mask up to /20 rather than assuming /24.
+GhostESP lists available hostnames, service types, ports, or IP addresses; results depend on which devices respond and the network’s isolation settings.
+## Govee lights and Wake-on-LAN
+- For a supported Govee light, enable LAN Control in the Govee Home app, then open Wi-Fi → Gadgets → Govee Lights → Scan Govee Devices. Select a result to turn it on or off, set brightness, or set an RGB color.
+- To wake a compatible PC, open Wi-Fi → Gadgets → Wake on LAN, enter its MAC address or its live LAN IP, and submit. The PC must have Wake-on-LAN enabled and remain connected to power and the network.
+## Troubleshooting
+- No devices appear: Confirm GhostESP is connected to the intended network and that client isolation is not enabled.
+- Only some devices appear: Retry after devices are active; not every device advertises services or responds to discovery requests.
+- The connection drops: Reconnect GhostESP, then repeat the discovery scan.
+## Related tasks
+- [Scan nearby Wi-Fi networks](/v2.2/wifi/survey/)

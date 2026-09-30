@@ -1,0 +1,190 @@
+Title: SD Card Configuration
+Description: Automatically load Wi-Fi and WiGLE settings from SD card
+URL: /v2.2/gps/sd-card-config/
+Version: v2.2
+Section: GPS &amp; Wardriving
+Search index: /search-index.json
+
+# SD Card Configuration
+
+> Automatically load Wi-Fi and WiGLE settings from SD card
+
+## On this page
+
+- [Configuration File Format](#configuration-file-format)
+- [Configuration Fields](#configuration-fields)
+- [Notes](#notes)
+- [Getting Your WiGLE Token](#getting-your-wigle-token)
+- [Loading Configuration](#loading-configuration)
+- [Via GUI (Display Builds)](#via-gui-display-builds)
+- [Via CLI](#via-cli)
+- [How it works](#how-it-works)
+- [Settings Storage](#settings-storage)
+- [Use Cases](#use-cases)
+- [Quick Device Setup](#quick-device-setup)
+- [Field Deployment](#field-deployment)
+- [Token Updates](#token-updates)
+- [Backup Configuration](#backup-configuration)
+- [Troubleshooting](#troubleshooting)
+- [&amp;ldquo;SD Mount Failed&amp;rdquo;](#sd-mount-failed)
+- [&amp;ldquo;Config File Not Found&amp;rdquo;](#config-file-not-found)
+- [&amp;ldquo;Failed to Parse Config&amp;rdquo;](#failed-to-parse-config)
+- [Settings Not Applying](#settings-not-applying)
+- [Example Configurations](#example-configurations)
+- [Minimal Wi-Fi Only](#minimal-wi-fi-only)
+- [WiGLE Only](#wigle-only)
+- [Complete Configuration](#complete-configuration)
+- [Legacy API Format](#legacy-api-format)
+- [Security Considerations](#security-considerations)
+- [Related commands](#related-commands)
+- [Related tasks](#related-tasks)
+
+---
+
+Load Wi-Fi credentials and WiGLE settings from config.cfg in the root of your SD card: create the file, then load it with Settings → WiGLE → Load Config from SD or the loadconfig CLI command and confirm the settings in the popup/output.
+## Configuration File Format
+Create config.cfg in the root directory of your SD card (/mnt/ghostesp/config.cfg):
+#-------------
+#-----WIFI----
+#-------------
+SSID=YourNetworkName
+PASSKEY=YourWiFiPassword
+AutoReconnect=true
+#------------
+#------Wigle-
+#------------
+# Encoded for Use token from Wigle.net/account
+# Auto Upload Values = true/false
+# Donate values = true/false (true preferred)
+EncodedForUseToken=YourBase64EncodedToken
+AutoUpload=true
+Donate=true
+## Configuration Fields
+Field |
+Required |
+Description |
+SSID |
+Optional |
+Wi-Fi network name to connect to |
+PASSKEY |
+Optional |
+Wi-Fi password |
+EncodedForUseToken |
+Optional |
+WiGLE “Encoded for Use” token from [wigle.net/account](https://wigle.net/account) |
+AutoUpload |
+Optional |
+Enable automatic upload when Wi-Fi connects (true/false) |
+Donate |
+Optional |
+Share wardriving data with WiGLE (true/false, recommended: true) |
+AutoReconnect |
+Optional |
+Automatically reconnect to Wi-Fi when the connection drops (true/false) |
+### Notes
+- All fields are optional - only include what you want to configure
+- Lines starting with # are comments and ignored
+- Blank lines are ignored
+- Field names are case-insensitive (SSID = ssid = Ssid)
+- Boolean fields (AutoUpload, Donate, AutoReconnect) accept true, on, or 1; any other value is treated as false
+## Getting Your WiGLE Token
+See [WiGLE Upload](/v2.2/gps/wigle/) for how to obtain the “Encoded for Use” token from [wigle.net/account](https://wigle.net/account) or the legacy APIName:APIToken credentials.
+When read from config.cfg, EncodedForUseToken accepts either form and detects it automatically:
+- No colon: Treated as pre-encoded token (used directly)
+- With colon: Treated as APIName:APIToken (base64 encoded automatically)
+## Loading Configuration
+### Via GUI (Display Builds)
+- Insert SD card with config.cfg in root directory
+- Navigate to Settings → WiGLE
+- Select “Load Config from SD”
+- Review the confirmation popup showing loaded settings:
+Wi-Fi SSID (if configured)
+- WiGLE token status (set/not set)
+- AutoUpload status
+- Donate status
+### Via CLI
+loadconfig
+Example Output:
+Loading config from SD card...
+WiFi SSID: MyHomeNetwork
+Wigle token: Set
+AutoUpload: true
+Donate: true
+Configuration loaded successfully
+## How it works
+On JIT-mount boards the SD card is mounted just long enough to read config.cfg, then unmounted again. See [Storage Layout](/v2.2/getting-started/storage-layout/) for how mounting works across boards.
+### Settings Storage
+All settings from config.cfg are saved to Non-Volatile Storage (NVS), so they persist across reboots even if the SD card is removed.
+## Use Cases
+### Quick Device Setup
+Set up multiple devices quickly by copying the same config.cfg to each SD card.
+### Field Deployment
+Pre-configure devices before deployment - no need to connect to CLI or navigate menus.
+### Token Updates
+Easily update WiGLE credentials across multiple devices by updating config.cfg.
+### Backup Configuration
+Keep a backup config.cfg with your preferred settings for easy restoration.
+## Troubleshooting
+### “SD Mount Failed”
+- Ensure SD card is properly inserted
+- Check that SD card is formatted (FAT32 recommended)
+- Verify SD card is not corrupted
+### “Config File Not Found”
+- Verify file is named exactly config.cfg (case-sensitive)
+- Ensure file is in the root directory of SD card, not in a subfolder
+- Check that file path is /mnt/ghostesp/config.cfg
+### “Failed to Parse Config”
+- Check file format matches the example above
+- Ensure no invalid characters in values
+- Verify field names are spelled correctly
+### Settings Not Applying
+- Check NVS storage is not full (run settings list to verify CLI access)
+- Verify values are valid (e.g., true/false for boolean fields)
+- Try loading config again
+## Example Configurations
+### Minimal Wi-Fi Only
+SSID=MyNetwork
+PASSKEY=MyPassword123
+### WiGLE Only
+EncodedForUseToken=QUlEMTIzNDU2Nzg5MDphYmNkZWZnaGlqa2xtbm9wcXJzdHV2d3h5eg==
+AutoUpload=true
+Donate=true
+### Complete Configuration
+#-------------
+#-----WIFI----
+#-------------
+SSID=WarDriveNet
+PASSKEY=SecurePassword456!
+AutoReconnect=true
+#------------
+#------Wigle-
+#------------
+EncodedForUseToken=QUlEMTIzNDU2Nzg5MDphYmNkZWZnaGlqa2xtbm9wcXJzdHV2d3h5eg==
+AutoUpload=true
+Donate=true
+### Legacy API Format
+# Using legacy APIName:APIToken format
+EncodedForUseToken=AID0123456789:abcdefghijklmnopqrstuvwxyz123456
+AutoUpload=false
+Donate=true
+## Security Considerations
+- Config file contains sensitive information (Wi-Fi password, API tokens)
+- Keep SD card secure when not in device
+- Consider encrypting sensitive values if sharing config files
+- Delete config.cfg after loading if you’re concerned about physical access
+- Remember: Settings persist in NVS after loading, so config.cfg can be removed
+## Related commands
+Command |
+Description |
+loadconfig |
+Load settings from config.cfg on SD card |
+wigle show |
+Display current WiGLE settings |
+wifistatus |
+Display current Wi-Fi connection and saved SSID status |
+settings list |
+List all available settings |
+## Related tasks
+- [WiGLE Upload Guide](/v2.2/gps/wigle/) - Complete WiGLE integration documentation
+- [SD card setup](/v2.2/getting-started/sd-card/) - SD card formatting and mounting
+- [Wi-Fi Configuration](/v2.2/wifi/) - Wi-Fi setup and management

@@ -1,5 +1,5 @@
 Title: Wi-Fi Features
-Description: Wi-Fi operations available in the Flipper Zero companion app.
+Description: Wi-Fi operations available in the Flipper Zero companion app
 URL: /latest/flipper-app/wifi-features/
 Version: latest
 Section: Flipper Zero App
@@ -8,7 +8,7 @@ Search index: /search-index.json
 
 # Wi-Fi Features
 
-> Wi-Fi operations available in the Flipper Zero companion app.
+> Wi-Fi operations available in the Flipper Zero companion app
 
 ## On this page
 
@@ -66,12 +66,12 @@ List mode (spam from predefined list)
 Note: The Aerial Detector submenu is under the Wi-Fi category in the Flipper UI (not BLE). On-device displays keep it under BLE.
 ## Custom Portal HTML
 - Create your HTML file (max 2048 bytes for app upload)
-- Navigate to WiFi → Evil Portal &amp; Network → Set Evil Portal HTML
+- Navigate to Wi-Fi → Evil Portal &amp; Network → Set Evil Portal HTML
 - Select upload method
 - Enter HTML content or select file
 - Portal will use custom HTML on next start
 ## Beacon List Management
-- Navigate to WiFi → Attacks → Show Beacon List
+- Navigate to Wi-Fi → Attacks → Show Beacon List
 - Choose action:
 Add: Add new SSID to list
 - Remove: Remove SSID from list

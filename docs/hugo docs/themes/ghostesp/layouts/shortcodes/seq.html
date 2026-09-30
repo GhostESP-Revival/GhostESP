@@ -1,0 +1,80 @@
+{{- /* Sequence / packet-flow diagram.
+       DSL:
+         participant Client        (optional; sets column order)
+         Client -> AP : label | detail shown on hover
+       Separate multiple detail lines with ";;". Arrow direction follows the
+       from/to order, so write the pair either way. */ -}}
+{{- $title := .Get "title" -}}
+{{- $caption := .Get "caption" -}}
+{{- $lines := split (.Inner | strings.TrimSpace) "\n" -}}
+{{- $participants := slice -}}
+{{- $messages := slice -}}
+{{- range $lines -}}
+  {{- $line := strings.TrimSpace . -}}
+  {{- if $line -}}
+    {{- $p := split $line " " -}}
+    {{- if eq (index $p 0) "participant" -}}
+      {{- $name := strings.TrimSpace (delimit (after 1 $p) " ") -}}
+      {{- if not (in $participants $name) -}}{{- $participants = $participants | append $name -}}{{- end -}}
+    {{- else -}}
+      {{- $parts := split $line "->" -}}
+      {{- if eq (len $parts) 2 -}}
+        {{- $from := strings.TrimSpace (index $parts 0) -}}
+        {{- $rest := strings.TrimSpace (index $parts 1) -}}
+        {{- $tip := "" -}}
+        {{- if in $rest "|" -}}
+          {{- $rps := split $rest "|" -}}
+          {{- $rest = strings.TrimSpace (index $rps 0) -}}
+          {{- $tip = strings.TrimSpace (delimit (after 1 $rps) "|") -}}
+        {{- end -}}
+        {{- $to := $rest -}}
+        {{- $label := "" -}}
+        {{- if in $rest ":" -}}
+          {{- $rp := split $rest ":" -}}
+          {{- $to = strings.TrimSpace (index $rp 0) -}}
+          {{- $label = strings.TrimSpace (delimit (after 1 $rp) ":") -}}
+        {{- end -}}
+        {{- if not (in $participants $from) -}}{{- $participants = $participants | append $from -}}{{- end -}}
+        {{- if not (in $participants $to) -}}{{- $participants = $participants | append $to -}}{{- end -}}
+        {{- $messages = $messages | append (dict "from" $from "to" $to "label" $label "tip" $tip) -}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- $n := len $participants -}}
+{{- $idx := dict -}}
+{{- range $i, $name := $participants -}}{{- $idx = merge $idx (dict $name $i) -}}{{- end -}}
+<figure class="diagram diagram--seq" style="--n:{{ $n }}">
+  {{- with $title }}<figcaption class="diagram__title">{{ . }}</figcaption>{{ end }}
+  <div class="diagram__actors">
+    {{- range $name := $participants -}}
+      {{- $ln := lower $name -}}
+      {{- $role := "neutral" -}}
+      {{- if or (in $ln "attacker") (in $ln "ghostesp") -}}{{- $role = "attacker" -}}
+      {{- else if or (eq $ln "ap") (in $ln "access point") (in $ln "router") -}}{{- $role = "ap" -}}
+      {{- else if or (in $ln "client") (in $ln "station") (in $ln "victim") (in $ln "device") -}}{{- $role = "client" -}}
+      {{- end -}}
+      <span class="diagram__actor diagram__actor--{{ $role }}">{{ $name }}</span>
+    {{- end }}
+  </div>
+  <div class="diagram__track">
+    {{- range $i, $name := $participants -}}
+      <span class="diagram__lifeline" style="--i:{{ $i }}"></span>
+    {{- end -}}
+    {{- range $messages -}}
+      {{- $ai := index $idx .from -}}
+      {{- $bi := index $idx .to -}}
+      {{- $l := $ai -}}{{- $r := $bi -}}{{- $dir := "ltr" -}}
+      {{- if gt $ai $bi -}}{{- $l = $bi -}}{{- $r = $ai -}}{{- $dir = "rtl" -}}{{- end -}}
+      {{- $labelHTML := "" -}}
+      {{- if .label -}}{{- $labelHTML = .label | markdownify | replaceRE "</?p>" "" -}}{{- end -}}
+      <div class="diagram__msg diagram__msg--{{ $dir }}" style="--l:{{ $l }}; --r:{{ $r }}">
+        <span class="diagram__arrow{{ if .tip }} diagram__arrow--info{{ end }}"{{ if .tip }} tabindex="0" aria-label="{{ printf "%s to %s: %s. %s" .from .to .label .tip }}"{{ end }}>
+          <span class="diagram__arrow-label">{{ $labelHTML | safeHTML }}</span>
+          {{- if .tip }}<span class="diagram__tip">{{ replace .tip ";;" "\n" }}</span>{{ end }}
+        </span>
+      </div>
+    {{- end }}
+  </div>
+  {{- with $caption }}<p class="diagram__caption">{{ . | markdownify | replaceRE "</?p>" "" | safeHTML }}</p>{{ end }}
+</figure>

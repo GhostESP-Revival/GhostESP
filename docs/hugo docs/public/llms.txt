@@ -3,7 +3,7 @@
 > GhostESP is an open-source Wi-Fi and multi-protocol wireless security platform for ESP32 devices. This site documents flashing, the on-device UI, the WebUI, the serial CLI, and every wireless feature.
 
 Documentation base URL: /
-Firmware versions documented: latest, v2.1, v1.9.9, v1.9.8, v1.9.3, v1.9, v1.8.1, v1.8
+Firmware versions documented: latest, v2.2, v2.1, v1.9.9, v1.9.8, v1.9.3, v1.9, v1.8.1, v1.8
 
 ## For AI agents and tooling
 
@@ -54,109 +54,215 @@ Useful URL patterns:
 
 ### latest
 
-- [Camera Stream](/latest/camera/camera-stream/): Live MJPEG camera stream viewable in a browser via the GhostESP web interface.
+- [Camera Stream](/latest/camera/camera-stream/): Live MJPEG camera stream viewable in a browser via the GhostESP web interface
 - [Chameleon Ultra](/latest/nfc/chameleon-ultra/): Connect GhostESP to a Chameleon Ultra reader
-- [Connection Management](/latest/ethernet/connection/): Connect and configure your Ethernet interface.
-- [Environment Setup](/latest/development/environment-setup/): Install ESP-IDF and configure your development environment for GhostESP.
+- [Connection Management](/latest/ethernet/connection/): Connect and configure your Ethernet interface
+- [Environment Setup](/latest/development/environment-setup/): Install ESP-IDF and configure your development environment for GhostESP
 - [MP3 Playback](/latest/audio/playback/): Play MP3 files over GhostLink using the Audio app
 - [Visualizer (Rave Mode)](/latest/apps/visualizer/): Stream desktop audio to GhostESP and render a live spectrum visualizer
 - [Wardriving](/latest/gps/wardriving/): Capture Wi-Fi and BLE observations with GPS data for mapping and analysis
-- [Wi-Fi Basics](/latest/wifi/basics/): Learn what Wi-Fi attacks are and how they work before diving into tools.
-- [Adjusting build options](/latest/development/build-py-kconfig/): Use the build helper to edit GhostESP configuration options.
+- [Wi-Fi Basics](/latest/wifi/basics/): Learn what Wi-Fi attacks are and how they work before diving into tools
+- [Adjusting build options](/latest/development/build-py-kconfig/): Use the build helper to edit GhostESP configuration options
 - [Asset Packs](/latest/customization/asset-packs/): Customize GhostESP icons, colors, and backgrounds with asset packs
 - [Companion Phone GPS Wardriving](/latest/gps/companion-phone-wardriving/): Use your phone's GPS to wardrive with the GhostESP Companion app
-- [Control App](/latest/companion-tools/control-app/): Use the Control App desktop application to control your device via serial connection.
+- [Control App](/latest/companion-tools/control-app/): Use the Control App desktop application to control your device via serial connection
 - [Frequency Analyzer](/latest/nrf24/analyzer/): Use the NRF24 analyzer from the UI or CLI
-- [GhostLink P1](/latest/hardware/ghostlink-p1/): Owner's guide for the GhostLink P1 handheld: battery safety, charging, ports, wiring, pinouts, flashing and maintenance.
-- [Installation](/latest/flipper-app/installation/): Install the GhostESP companion app on your Flipper Zero device.
+- [GhostLink P1](/latest/hardware/ghostlink-p1/): Owner's guide for the GhostLink P1 handheld: battery safety, charging, ports, wiring, pinouts, flashing and maintenance
+- [Installation](/latest/flipper-app/installation/): Install the GhostESP companion app on your Flipper Zero device
 - [Keyboard Control](/latest/usb/keyboard/): Using a USB keyboard to control GhostESP
 - [Learning Signals](/latest/infrared/learning/): Capture IR buttons and remotes with GhostESP
 - [LoRa First Run](/latest/lora/getting-started/): Set up GhostESP LoRa and send your first message
-- [Motion Detector](/latest/camera/motion-detector/): On-device motion detection using the onboard camera, with optional SD snapshots and Discord alerts.
-- [Network Fingerprinting](/latest/ethernet/fingerprinting/): Scan and identify devices on your Ethernet network.
-- [Scanning](/latest/ble/scanning/): Discover and analyze nearby Bluetooth Low Energy devices.
+- [Motion Detector](/latest/camera/motion-detector/): On-device motion detection using the onboard camera, with optional SD snapshots and Discord alerts
+- [Network Fingerprinting](/latest/ethernet/fingerprinting/): Scan and identify devices on your Ethernet network
+- [Scanning](/latest/ble/scanning/): Discover and analyze nearby Bluetooth Low Energy devices
 - [Scanning](/latest/nfc/scanning/): Read GhostESP-compatible NFC tags and understand the on-screen feedback
 - [Scanning](/latest/subghz/scanning/): Monitor SubGHz radio activity across frequency bands
-- [Scanning networks](/latest/wifi/survey/): Passively find and review nearby Wi-Fi access points.
+- [Scanning networks](/latest/wifi/survey/): Discover and review nearby Wi-Fi access points
 - [Supported Hardware](/latest/getting-started/supported-hardware/): Device compatibility matrix for GhostESP features
 - [WiGLE Upload](/latest/gps/wigle/): Configure WiGLE API integration for uploading wardriving data
-- [Connect to a Wi-Fi Network](/latest/wifi/connect/): Connect GhostESP to a network you own or are authorized to use.
-- [Advertiser Scan](/latest/ble/advertisers/): Scan and parse BLE advertisements, including iBeacon packets, without connecting to devices.
-- [Find Devices on Your Wi-Fi Network](/latest/wifi/lan-discovery/): Discover devices and services on a network you own or are authorized to test.
-- [Check Open Ports](/latest/wifi/port-scanning/): Check a device you own or are authorized to test for responding network ports.
-- [Run a Full Environment Sweep](/latest/wifi/environment-sweep/): Collect nearby Wi-Fi, BLE, 802.15.4, and GPS observations into a CSV file.
-- [GATT Discovery](/latest/ble/gatt/): Connect to BLE devices and enumerate their services and characteristics.
-- [Network Scanning](/latest/ethernet/scanning/): Discover and scan devices on your Ethernet network.
-- [SD Card Configuration](/latest/gps/sd-card-config/): Automatically load WiFi and WiGLE settings from SD card
-- [Attacks](/latest/ble/attacks/): Send BLE advertisement spam and spoof AirTags.
+- [Connect to a Wi-Fi Network](/latest/wifi/connect/): Connect GhostESP to a network you own or are authorized to use
+- [Advertiser Scan](/latest/ble/advertisers/): Scan and parse BLE advertisements, including iBeacon packets, without connecting to devices
+- [Find Devices on Your Wi-Fi Network](/latest/wifi/lan-discovery/): Discover devices and services on a network you own or are authorized to test
+- [Check Open Ports](/latest/wifi/port-scanning/): Check a device you own or are authorized to test for responding network ports
+- [Run a Full Environment Sweep](/latest/wifi/environment-sweep/): Collect nearby Wi-Fi, BLE, 802.15.4, and GPS observations into a CSV file
+- [GATT Discovery](/latest/ble/gatt/): Connect to BLE devices and enumerate their services and characteristics
+- [Network Scanning](/latest/ethernet/scanning/): Discover and scan devices on your Ethernet network
+- [SD Card Configuration](/latest/gps/sd-card-config/): Automatically load Wi-Fi and WiGLE settings from SD card
+- [Attacks](/latest/ble/attacks/): Send BLE advertisement spam and spoof AirTags
 - [BadUSB](/latest/usb/badusb/): Run DuckyScript over USB HID
-- [Capturing packets](/latest/wifi/capture/): Record Wi-Fi traffic to a PCAP for later analysis.
+- [Capturing packets](/latest/wifi/capture/): Record Wi-Fi traffic to a PCAP for later analysis
 - [Capturing Signals](/latest/subghz/capturing/): Record and decode SubGHz signals from remotes and transmitters
-- [Connection Setup](/latest/flipper-app/connection/): Configure the serial connection between your Flipper Zero and GhostESP device.
-- [Custom Board Configurations](/latest/development/custom-board-configs/): Create and customize board profiles for GhostESP.
+- [Connection Setup](/latest/flipper-app/connection/): Configure the serial connection between your Flipper Zero and GhostESP device
+- [Custom Board Configurations](/latest/development/custom-board-configs/): Create and customize board profiles for GhostESP
 - [E-paper Reader](/latest/apps/reader/): Read comics and books from an SD card on CrowPanel e-paper displays
-- [HTTP Requests](/latest/ethernet/http/): Perform HTTP GET requests from the command line.
+- [HTTP Requests](/latest/ethernet/http/): Perform HTTP GET requests from the CLI
 - [Installation Guide](/latest/getting-started/installation-guide/): Flash GhostESP with the recommended web flasher
 - [LoRa Commands](/latest/lora/commands/): Command reference for GhostESP LoRa: Meshtastic, MeshCore and boot auto-start
-- [M5Stack AtomS3R](/latest/hardware/atoms3r/): Using the M5Stack AtomS3R with GhostESP, including its button navigation and Grove port.
+- [M5Stack AtomS3R](/latest/hardware/atoms3r/): Using the M5Stack AtomS3R with GhostESP, including its button navigation and Grove port
 - [Saving Tags](/latest/nfc/saving/): Store scanned NFC tags as Flipper-compatible files
-- [Screen Mirroring](/latest/companion-tools/screen-mirroring/): Mirror your GhostESP display to your desktop for easier viewing and remote control.
+- [Screen Mirroring](/latest/companion-tools/screen-mirroring/): Mirror your GhostESP display to your desktop for easier viewing and remote control
 - [Setup and Remote Mode](/latest/nrf24/setup-and-remote/): Configure NRF24 hardware pins and GhostLink remote analyzer control
 - [Transmitting Signals](/latest/infrared/transmitting/): Send captured or universal IR commands
-- [ARP Poisoning](/latest/ethernet/arp-poisoning/): Man-in-the-middle attack via ARP spoofing with DNS, SNI, HTTP, and FTP interception.
-- [BadBLE](/latest/ble/badble/): Bluetooth HID keyboard — DuckyScript over BLE
-- [Deauthentication Attacks](/latest/wifi/deauth/): Force devices to disconnect from a Wi-Fi network.
+- [ARP Poisoning](/latest/ethernet/arp-poisoning/): Man-in-the-middle attack via ARP spoofing with DNS, SNI, HTTP, and FTP interception
+- [BadBLE](/latest/ble/badble/): Bluetooth HID keyboard - DuckyScript over BLE
+- [Deauthentication Attacks](/latest/wifi/deauth/): Force devices to disconnect from a Wi-Fi network
 - [IR Dazzler](/latest/infrared/dazzler/): Continuous IR flood mode for camera interference
 - [MeshCore Mode](/latest/lora/meshcore/): Run GhostESP as a MeshCore node on the same SX1262 radio
 - [USB Keyboard Mode](/latest/usb/usb-keyboard-mode/): Use your ESP32-S3 as a real USB keyboard
-- [USB Dongle Mode (Wireshark)](/latest/wifi/wireshark/): Use GhostESP as a wireless capture dongle for Wireshark.
-- [Waterfall Spectrum Analyzer](/latest/subghz/waterfall/): Use the SubGHz waterfall to visualize CC1101 RSSI activity across common RF bands.
-- [Capturing handshakes](/latest/wifi/handshakes/): Record Wi-Fi authentication data for analysis.
-- [Connect to GhostESP](/latest/getting-started/control-methods/): Choose the best way to control your GhostESP device.
-- [Hardware Integration](/latest/development/hardware-integration/): Understanding hardware quirks and bus conflicts in GhostESP.
+- [USB Dongle Mode (Wireshark)](/latest/wifi/wireshark/): Use GhostESP as a wireless capture dongle for Wireshark
+- [Waterfall Spectrum Analyzer](/latest/subghz/waterfall/): Use the SubGHz waterfall to visualize CC1101 RSSI activity across common RF bands
+- [Capturing handshakes](/latest/wifi/handshakes/): Record Wi-Fi authentication data for analysis
+- [Connect to GhostESP](/latest/getting-started/control-methods/): Choose the best way to control your GhostESP device
+- [Hardware Integration](/latest/development/hardware-integration/): Understanding hardware quirks and bus conflicts in GhostESP
 - [Infrared Files](/latest/infrared/files/): Organize, rename, and edit GhostESP IR files
 - [LoRa BLE App Link](/latest/lora/ble-app/): Pair the official Meshtastic app to GhostESP over BLE
 - [Mouse Jiggler](/latest/usb/mouse-jiggler/): Keep your PC awake with periodic mouse movements
-- [Native SD Apps](/latest/development/native-sd-apps/): Build and run native plug-in apps from the SD card with the GhostESP SDK.
+- [Native SD Apps](/latest/development/native-sd-apps/): Build and run native plug-in apps from the SD card with the GhostESP SDK
 - [Transmitting Signals](/latest/subghz/transmitting/): Replay captured SubGHz signals to control devices
-- [Wi-Fi Features](/latest/flipper-app/wifi-features/): Wi-Fi operations available in the Flipper Zero companion app.
+- [Wi-Fi Features](/latest/flipper-app/wifi-features/): Wi-Fi operations available in the Flipper Zero companion app
 - [Writing NTAG](/latest/nfc/writing/): Program NTAG and Ultralight cards from saved dumps
-- [GBT (Ghost Build Tool)](/latest/development/gbt/): Build and package Native SD Apps, compile GhostScript, and manage GhostESP firmware.
-- [Ghostchi](/latest/wifi/ghostchi/): An autonomous Wi-Fi hunting tamagotchi that learns, adapts, and has opinions.
-- [BLE Features](/latest/flipper-app/ble-features/): Bluetooth Low Energy operations available in the Flipper Zero companion app.
-- [Evil Portal](/latest/wifi/evil-portal/): Host a fake Wi-Fi login page to test security awareness.
+- [GBT (Ghost Build Tool)](/latest/development/gbt/): Build and package Native SD Apps, compile GhostScript, and manage GhostESP firmware
+- [Ghostchi](/latest/wifi/ghostchi/): An autonomous Wi-Fi hunting tamagotchi that learns, adapts, and has opinions
+- [BLE Features](/latest/flipper-app/ble-features/): Bluetooth Low Energy operations available in the Flipper Zero companion app
+- [Evil Portal](/latest/wifi/evil-portal/): Host a fake Wi-Fi login page to test security awareness
 - [Frequency Analyzer](/latest/subghz/freq-analyzer/): Visualize signal strength across SubGHz bands to find active frequencies
 - [Hardware Support](/latest/infrared/hardware/): Boards and peripherals required for GhostESP infrared
 - [LoRa Mesh Details](/latest/lora/mesh/): Meshtastic wire format, channels, and flood routing on GhostESP
 - [Supported Tags](/latest/nfc/supported/): Reference for NFC tag support in GhostESP
-- [Try Your First Scan](/latest/getting-started/first-scan/): Confirm GhostESP is working with a passive Wi-Fi scan.
+- [Try Your First Scan](/latest/getting-started/first-scan/): Confirm GhostESP is working with a passive Wi-Fi scan
 - [USB SD Passthrough](/latest/usb/sd-passthrough/): Use your device as a USB SD card reader
-- [GTK Abuse Test](/latest/wifi/gtk-abuse/): Test if Wi-Fi client isolation can be bypassed using the Group Temporal Key.
-- [GPS Features](/latest/flipper-app/gps-features/): GPS tracking and wardriving capabilities in the Flipper Zero companion app.
-- [Karma Attack](/latest/wifi/karma/): Automatically respond to device probes with fake networks.
+- [GTK Abuse Test](/latest/wifi/gtk-abuse/): Test if Wi-Fi client isolation can be bypassed using the Group Temporal Key
+- [GPS Features](/latest/flipper-app/gps-features/): GPS tracking and wardriving capabilities in the Flipper Zero companion app
+- [Karma Attack](/latest/wifi/karma/): Automatically respond to device probes with fake networks
 - [LoRa Hardware](/latest/lora/hardware/): SX1262 wiring, power, and board notes for GhostESP LoRa
-- [Manual USB Flashing](/latest/getting-started/manual-flashing/): Flash a downloaded GhostESP release when the web flasher is unavailable.
+- [Manual USB Flashing](/latest/getting-started/manual-flashing/): Flash a downloaded GhostESP release when the web flasher is unavailable
 - [Supported Protocols](/latest/subghz/protocols/): Reference for SubGHz protocols decoded by GhostESP
-- [DNS Sinkhole](/latest/wifi/dns-sinkhole/): Block ads and unwanted domains by running a DNS sinkhole on your GhostESP device.
-- [Aerial Detection](/latest/wifi/aerial-detection/): Detect drones, controllers, and OpenDroneID broadcasts with sequential Wi-Fi/BLE sweeps.
-- [Configuration & System](/latest/flipper-app/configuration/): LED control, SD card configuration, and system settings in the Flipper Zero companion app.
+- [DNS Sinkhole](/latest/wifi/dns-sinkhole/): Block ads and unwanted domains by running a DNS sinkhole on your GhostESP device
+- [Aerial Detection](/latest/wifi/aerial-detection/): Detect drones, controllers, and OpenDroneID broadcasts with sequential Wi-Fi/BLE sweeps
+- [Configuration & System](/latest/flipper-app/configuration/): LED control, SD card configuration, and system settings in the Flipper Zero companion app
 - [Files and Management](/latest/subghz/files/): SubGHz file format and signal management
-- [Flash with Flipper Zero](/latest/getting-started/flipper-flashing/): Use a Flipper Zero and the GhostESP app to flash a compatible ESP32 board.
-- [DIAL Connect](/latest/wifi/dial-connect/): Cast YouTube videos to smart TVs on your network.
-- [Flock Detection](/latest/wifi/flock-detection/): Detect Flock Safety surveillance cameras and related infrastructure on 2.4 GHz Wi-Fi.
+- [Flash with Flipper Zero](/latest/getting-started/flipper-flashing/): Use a Flipper Zero and the GhostESP app to flash a compatible ESP32 board
+- [DIAL Connect](/latest/wifi/dial-connect/): Cast YouTube videos to smart TVs on your network
+- [Flock Detection](/latest/wifi/flock-detection/): Detect Flock Safety surveillance cameras and related infrastructure on 2.4 GHz Wi-Fi
 - [Hardware Support](/latest/subghz/hardware/): Boards and peripherals required for GhostESP SubGHz
-- [Usage Guide](/latest/flipper-app/usage/): Basic navigation and common workflows for the Flipper Zero companion app.
-- [WebUI](/latest/getting-started/webui-guide/): Access and control GhostESP through the web interface.
-- [Wiring Modules and Peripherals](/latest/getting-started/peripheral-wiring/): Find the pins your board uses for CC1101, NRF24, NFC, GPS, and SD cards, and wire add-on modules safely.
-- [CLI Reference](/latest/getting-started/command-line-reference/): Common GhostESP CLI commands grouped by category.
-- [Troubleshooting](/latest/flipper-app/troubleshooting/): Solve common issues with the Flipper Zero companion app.
-- [SD Card](/latest/getting-started/sd-card/): Using SD card storage with GhostESP for file management, captures, and configuration.
-- [Storage Layout](/latest/getting-started/storage-layout/): Where GhostESP saves captures, reports, applications, and settings on the SD card.
-- [GhostLink](/latest/getting-started/dual-communication/): GhostLink connects two ESP32 devices for remote control while maintaining continuous AP hosting.
-- [BLE Bridge](/latest/getting-started/ble-bridge/): Use a second ESP32 as a Bluetooth bridge between a main GhostESP device and the Android companion app.
-- [Firmware Updates](/latest/getting-started/firmware-updates/): How GhostESP firmware update checks, installs, peer updates and SD card updates work.
+- [Usage Guide](/latest/flipper-app/usage/): Basic navigation and common workflows for the Flipper Zero companion app
+- [WebUI](/latest/getting-started/webui-guide/): Access and control GhostESP through the web interface
+- [Wiring Modules and Peripherals](/latest/getting-started/peripheral-wiring/): Find the pins your board uses for CC1101, NRF24, NFC, GPS, and SD cards, and wire add-on modules safely
+- [CLI Reference](/latest/getting-started/command-line-reference/): Common GhostESP CLI commands grouped by category
+- [Troubleshooting](/latest/flipper-app/troubleshooting/): Solve common issues with the Flipper Zero companion app
+- [SD Card](/latest/getting-started/sd-card/): Using SD card storage with GhostESP for file management, captures, and configuration
+- [Storage Layout](/latest/getting-started/storage-layout/): Where GhostESP saves captures, reports, applications, and settings on the SD card
+- [GhostLink](/latest/getting-started/dual-communication/): GhostLink connects two ESP32 devices for remote control while maintaining continuous AP hosting
+- [BLE Bridge](/latest/getting-started/ble-bridge/): Use a second ESP32 as a Bluetooth bridge between a main GhostESP device and the Android companion app
+- [Firmware Updates](/latest/getting-started/firmware-updates/): How GhostESP firmware update checks, installs, peer updates and SD card updates work
 - [FAQ](/latest/getting-started/faq/): Frequently asked questions about GhostESP setup, credentials, and troubleshooting.
-- [GhostScript](/latest/ghostscript/): Write Lua scripts that chain CLI commands, react to events, and automate multi-step workflows on GhostESP.
+- [GhostScript](/latest/ghostscript/): Write Lua scripts that chain CLI commands, react to events, and automate multi-step workflows on GhostESP
+
+### v2.2
+
+- [Camera Stream](/v2.2/camera/camera-stream/): Live MJPEG camera stream viewable in a browser via the GhostESP web interface
+- [Chameleon Ultra](/v2.2/nfc/chameleon-ultra/): Connect GhostESP to a Chameleon Ultra reader
+- [Connection Management](/v2.2/ethernet/connection/): Connect and configure your Ethernet interface
+- [Environment Setup](/v2.2/development/environment-setup/): Install ESP-IDF and configure your development environment for GhostESP
+- [MP3 Playback](/v2.2/audio/playback/): Play MP3 files over GhostLink using the Audio app
+- [Visualizer (Rave Mode)](/v2.2/apps/visualizer/): Stream desktop audio to GhostESP and render a live spectrum visualizer
+- [Wardriving](/v2.2/gps/wardriving/): Capture Wi-Fi and BLE observations with GPS data for mapping and analysis
+- [Wi-Fi Basics](/v2.2/wifi/basics/): Learn what Wi-Fi attacks are and how they work before diving into tools
+- [Adjusting build options](/v2.2/development/build-py-kconfig/): Use the build helper to edit GhostESP configuration options
+- [Asset Packs](/v2.2/customization/asset-packs/): Customize GhostESP icons, colors, and backgrounds with asset packs
+- [Companion Phone GPS Wardriving](/v2.2/gps/companion-phone-wardriving/): Use your phone's GPS to wardrive with the GhostESP Companion app
+- [Control App](/v2.2/companion-tools/control-app/): Use the Control App desktop application to control your device via serial connection
+- [Frequency Analyzer](/v2.2/nrf24/analyzer/): Use the NRF24 analyzer from the UI or CLI
+- [GhostLink P1](/v2.2/hardware/ghostlink-p1/): Owner's guide for the GhostLink P1 handheld: battery safety, charging, ports, wiring, pinouts, flashing and maintenance
+- [Installation](/v2.2/flipper-app/installation/): Install the GhostESP companion app on your Flipper Zero device
+- [Keyboard Control](/v2.2/usb/keyboard/): Using a USB keyboard to control GhostESP
+- [Learning Signals](/v2.2/infrared/learning/): Capture IR buttons and remotes with GhostESP
+- [LoRa First Run](/v2.2/lora/getting-started/): Set up GhostESP LoRa and send your first message
+- [Motion Detector](/v2.2/camera/motion-detector/): On-device motion detection using the onboard camera, with optional SD snapshots and Discord alerts
+- [Network Fingerprinting](/v2.2/ethernet/fingerprinting/): Scan and identify devices on your Ethernet network
+- [Scanning](/v2.2/ble/scanning/): Discover and analyze nearby Bluetooth Low Energy devices
+- [Scanning](/v2.2/nfc/scanning/): Read GhostESP-compatible NFC tags and understand the on-screen feedback
+- [Scanning](/v2.2/subghz/scanning/): Monitor SubGHz radio activity across frequency bands
+- [Scanning networks](/v2.2/wifi/survey/): Discover and review nearby Wi-Fi access points
+- [Supported Hardware](/v2.2/getting-started/supported-hardware/): Device compatibility matrix for GhostESP features
+- [WiGLE Upload](/v2.2/gps/wigle/): Configure WiGLE API integration for uploading wardriving data
+- [Connect to a Wi-Fi Network](/v2.2/wifi/connect/): Connect GhostESP to a network you own or are authorized to use
+- [Advertiser Scan](/v2.2/ble/advertisers/): Scan and parse BLE advertisements, including iBeacon packets, without connecting to devices
+- [Find Devices on Your Wi-Fi Network](/v2.2/wifi/lan-discovery/): Discover devices and services on a network you own or are authorized to test
+- [Check Open Ports](/v2.2/wifi/port-scanning/): Check a device you own or are authorized to test for responding network ports
+- [Run a Full Environment Sweep](/v2.2/wifi/environment-sweep/): Collect nearby Wi-Fi, BLE, 802.15.4, and GPS observations into a CSV file
+- [GATT Discovery](/v2.2/ble/gatt/): Connect to BLE devices and enumerate their services and characteristics
+- [Network Scanning](/v2.2/ethernet/scanning/): Discover and scan devices on your Ethernet network
+- [SD Card Configuration](/v2.2/gps/sd-card-config/): Automatically load Wi-Fi and WiGLE settings from SD card
+- [Attacks](/v2.2/ble/attacks/): Send BLE advertisement spam and spoof AirTags
+- [BadUSB](/v2.2/usb/badusb/): Run DuckyScript over USB HID
+- [Capturing packets](/v2.2/wifi/capture/): Record Wi-Fi traffic to a PCAP for later analysis
+- [Capturing Signals](/v2.2/subghz/capturing/): Record and decode SubGHz signals from remotes and transmitters
+- [Connection Setup](/v2.2/flipper-app/connection/): Configure the serial connection between your Flipper Zero and GhostESP device
+- [Custom Board Configurations](/v2.2/development/custom-board-configs/): Create and customize board profiles for GhostESP
+- [E-paper Reader](/v2.2/apps/reader/): Read comics and books from an SD card on CrowPanel e-paper displays
+- [HTTP Requests](/v2.2/ethernet/http/): Perform HTTP GET requests from the CLI
+- [Installation Guide](/v2.2/getting-started/installation-guide/): Flash GhostESP with the recommended web flasher
+- [LoRa Commands](/v2.2/lora/commands/): Command reference for GhostESP LoRa: Meshtastic, MeshCore and boot auto-start
+- [M5Stack AtomS3R](/v2.2/hardware/atoms3r/): Using the M5Stack AtomS3R with GhostESP, including its button navigation and Grove port
+- [Saving Tags](/v2.2/nfc/saving/): Store scanned NFC tags as Flipper-compatible files
+- [Screen Mirroring](/v2.2/companion-tools/screen-mirroring/): Mirror your GhostESP display to your desktop for easier viewing and remote control
+- [Setup and Remote Mode](/v2.2/nrf24/setup-and-remote/): Configure NRF24 hardware pins and GhostLink remote analyzer control
+- [Transmitting Signals](/v2.2/infrared/transmitting/): Send captured or universal IR commands
+- [ARP Poisoning](/v2.2/ethernet/arp-poisoning/): Man-in-the-middle attack via ARP spoofing with DNS, SNI, HTTP, and FTP interception
+- [BadBLE](/v2.2/ble/badble/): Bluetooth HID keyboard - DuckyScript over BLE
+- [Deauthentication Attacks](/v2.2/wifi/deauth/): Force devices to disconnect from a Wi-Fi network
+- [IR Dazzler](/v2.2/infrared/dazzler/): Continuous IR flood mode for camera interference
+- [MeshCore Mode](/v2.2/lora/meshcore/): Run GhostESP as a MeshCore node on the same SX1262 radio
+- [USB Keyboard Mode](/v2.2/usb/usb-keyboard-mode/): Use your ESP32-S3 as a real USB keyboard
+- [USB Dongle Mode (Wireshark)](/v2.2/wifi/wireshark/): Use GhostESP as a wireless capture dongle for Wireshark
+- [Waterfall Spectrum Analyzer](/v2.2/subghz/waterfall/): Use the SubGHz waterfall to visualize CC1101 RSSI activity across common RF bands
+- [Capturing handshakes](/v2.2/wifi/handshakes/): Record Wi-Fi authentication data for analysis
+- [Connect to GhostESP](/v2.2/getting-started/control-methods/): Choose the best way to control your GhostESP device
+- [Hardware Integration](/v2.2/development/hardware-integration/): Understanding hardware quirks and bus conflicts in GhostESP
+- [Infrared Files](/v2.2/infrared/files/): Organize, rename, and edit GhostESP IR files
+- [LoRa BLE App Link](/v2.2/lora/ble-app/): Pair the official Meshtastic app to GhostESP over BLE
+- [Mouse Jiggler](/v2.2/usb/mouse-jiggler/): Keep your PC awake with periodic mouse movements
+- [Native SD Apps](/v2.2/development/native-sd-apps/): Build and run native plug-in apps from the SD card with the GhostESP SDK
+- [Transmitting Signals](/v2.2/subghz/transmitting/): Replay captured SubGHz signals to control devices
+- [Wi-Fi Features](/v2.2/flipper-app/wifi-features/): Wi-Fi operations available in the Flipper Zero companion app
+- [Writing NTAG](/v2.2/nfc/writing/): Program NTAG and Ultralight cards from saved dumps
+- [GBT (Ghost Build Tool)](/v2.2/development/gbt/): Build and package Native SD Apps, compile GhostScript, and manage GhostESP firmware
+- [Ghostchi](/v2.2/wifi/ghostchi/): An autonomous Wi-Fi hunting tamagotchi that learns, adapts, and has opinions
+- [BLE Features](/v2.2/flipper-app/ble-features/): Bluetooth Low Energy operations available in the Flipper Zero companion app
+- [Evil Portal](/v2.2/wifi/evil-portal/): Host a fake Wi-Fi login page to test security awareness
+- [Frequency Analyzer](/v2.2/subghz/freq-analyzer/): Visualize signal strength across SubGHz bands to find active frequencies
+- [Hardware Support](/v2.2/infrared/hardware/): Boards and peripherals required for GhostESP infrared
+- [LoRa Mesh Details](/v2.2/lora/mesh/): Meshtastic wire format, channels, and flood routing on GhostESP
+- [Supported Tags](/v2.2/nfc/supported/): Reference for NFC tag support in GhostESP
+- [Try Your First Scan](/v2.2/getting-started/first-scan/): Confirm GhostESP is working with a passive Wi-Fi scan
+- [USB SD Passthrough](/v2.2/usb/sd-passthrough/): Use your device as a USB SD card reader
+- [GTK Abuse Test](/v2.2/wifi/gtk-abuse/): Test if Wi-Fi client isolation can be bypassed using the Group Temporal Key
+- [GPS Features](/v2.2/flipper-app/gps-features/): GPS tracking and wardriving capabilities in the Flipper Zero companion app
+- [Karma Attack](/v2.2/wifi/karma/): Automatically respond to device probes with fake networks
+- [LoRa Hardware](/v2.2/lora/hardware/): SX1262 wiring, power, and board notes for GhostESP LoRa
+- [Manual USB Flashing](/v2.2/getting-started/manual-flashing/): Flash a downloaded GhostESP release when the web flasher is unavailable
+- [Supported Protocols](/v2.2/subghz/protocols/): Reference for SubGHz protocols decoded by GhostESP
+- [DNS Sinkhole](/v2.2/wifi/dns-sinkhole/): Block ads and unwanted domains by running a DNS sinkhole on your GhostESP device
+- [Aerial Detection](/v2.2/wifi/aerial-detection/): Detect drones, controllers, and OpenDroneID broadcasts with sequential Wi-Fi/BLE sweeps
+- [Configuration & System](/v2.2/flipper-app/configuration/): LED control, SD card configuration, and system settings in the Flipper Zero companion app
+- [Files and Management](/v2.2/subghz/files/): SubGHz file format and signal management
+- [Flash with Flipper Zero](/v2.2/getting-started/flipper-flashing/): Use a Flipper Zero and the GhostESP app to flash a compatible ESP32 board
+- [DIAL Connect](/v2.2/wifi/dial-connect/): Cast YouTube videos to smart TVs on your network
+- [Flock Detection](/v2.2/wifi/flock-detection/): Detect Flock Safety surveillance cameras and related infrastructure on 2.4 GHz Wi-Fi
+- [Hardware Support](/v2.2/subghz/hardware/): Boards and peripherals required for GhostESP SubGHz
+- [Usage Guide](/v2.2/flipper-app/usage/): Basic navigation and common workflows for the Flipper Zero companion app
+- [WebUI](/v2.2/getting-started/webui-guide/): Access and control GhostESP through the web interface
+- [Wiring Modules and Peripherals](/v2.2/getting-started/peripheral-wiring/): Find the pins your board uses for CC1101, NRF24, NFC, GPS, and SD cards, and wire add-on modules safely
+- [CLI Reference](/v2.2/getting-started/command-line-reference/): Common GhostESP CLI commands grouped by category
+- [Troubleshooting](/v2.2/flipper-app/troubleshooting/): Solve common issues with the Flipper Zero companion app
+- [SD Card](/v2.2/getting-started/sd-card/): Using SD card storage with GhostESP for file management, captures, and configuration
+- [Storage Layout](/v2.2/getting-started/storage-layout/): Where GhostESP saves captures, reports, applications, and settings on the SD card
+- [GhostLink](/v2.2/getting-started/dual-communication/): GhostLink connects two ESP32 devices for remote control while maintaining continuous AP hosting
+- [BLE Bridge](/v2.2/getting-started/ble-bridge/): Use a second ESP32 as a Bluetooth bridge between a main GhostESP device and the Android companion app
+- [Firmware Updates](/v2.2/getting-started/firmware-updates/): How GhostESP firmware update checks, installs, peer updates and SD card updates work
+- [FAQ](/v2.2/getting-started/faq/): Frequently asked questions about GhostESP setup, credentials, and troubleshooting.
+- [GhostScript](/v2.2/ghostscript/): Write Lua scripts that chain CLI commands, react to events, and automate multi-step workflows on GhostESP
 
 ### v2.1
 

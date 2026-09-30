@@ -1,5 +1,5 @@
 Title: Flock Detection
-Description: Detect Flock Safety surveillance cameras and related infrastructure on 2.4 GHz Wi-Fi.
+Description: Detect Flock Safety surveillance cameras and related infrastructure on 2.4 GHz Wi-Fi
 URL: /latest/wifi/flock-detection/
 Version: latest
 Section: Wi-Fi
@@ -7,50 +7,51 @@ Search index: /search-index.json
 
 # Flock Detection
 
-> Detect Flock Safety surveillance cameras and related infrastructure on 2.4 GHz Wi-Fi.
+> Detect Flock Safety surveillance cameras and related infrastructure on 2.4 GHz Wi-Fi
 
 ## On this page
 
-- [Overview](#overview)
-- [Prerequisites](#prerequisites)
-- [How to Use](#how-to-use)
-- [Via Terminal](#via-terminal)
-- [Via Display](#via-display)
-- [What Gets Detected](#what-gets-detected)
-- [Confidence Levels](#confidence-levels)
-- [Detection Methods](#detection-methods)
+- [Using the detector](#using-the-detector)
+- [Via terminal](#via-terminal)
+- [Via display](#via-display)
+- [What gets detected](#what-gets-detected)
+- [Confidence levels](#confidence-levels)
+- [Detection methods](#detection-methods)
 - [Troubleshooting](#troubleshooting)
 
 ---
 
-GhostESP’s Flock detector monitors 2.4 GHz Wi-Fi traffic for Flock Safety cameras, extended battery units, and Penguin surveillance devices. It uses OUI prefix matching, wildcard probe detection, and SSID keyword matching to identify devices with tiered confidence levels.
+GhostESP’s Flock detector monitors 2.4 GHz Wi-Fi traffic for Flock Safety cameras, extended battery units, and Penguin surveillance devices. It matches transmitter, receiver, and BSSID addresses against 38 known Flock/Penguin MAC prefixes, flags wildcard probe requests, and matches SSID keywords such as flock, FS Ext Battery, Penguin, or Pigvision, ranking each detection by confidence. It hops the active channel plan (the hop profile, or your country’s channel list; a fresh default is US, channels 1-11) with 250 ms dwell time, and runs from any ESP32 board with Wi-Fi capability via serial, GhostLink, or the display.
 Based on [bennjordan/flock-you](https://github.com/bennjordan/flock-you).
-## Overview
-- OUI matching — Checks transmitter, receiver, and BSSID addresses against 38 known Flock/Penguin MAC prefixes.
-- Wildcard probe detection — Flock cameras channel-hop and broadcast probe requests with an empty SSID; combining this with an OUI match yields a high-confidence signature.
-- SSID keyword matching — Beacons and probe responses carrying keywords like flock, FS Ext Battery, Penguin, or Pigvision are flagged regardless of OUI.
-- Confidence tiers — Only high-confidence detections (wildcard probe or SSID keyword) trigger real-time alerts and RGB pulse. Low-confidence OUI-only matches are recorded silently and visible in the device list.
-- Channel hopping — Scans all 14 Wi-Fi channels with 250 ms dwell time to catch devices that hop between channels.
-## Prerequisites
-- Any ESP32 board with Wi-Fi capability.
-- Serial, GhostLink or Display access.
-## How to Use
-### Via Terminal
+How a Flock detection is made
+1
+Hop the active channel plan250 ms dwell per channel
+2
+Match MAC addresses against 38 known Flock/Penguin prefixesChecked as transmitter, receiver, and BSSID
+3
+Flag wildcard probe requestsA probe with no SSID asking for any network
+4
+Match SSID keywords`flock`, `FS Ext Battery`, `Penguin`, `Pigvision`
+5
+Rank confidenceHIGH for a wildcard or SSID match, LOW for OUI alone; frames weaker than -95 dBm are ignored
+Each frame is checked against known OUIs, SSID keywords, and the wildcard-probe pattern.
+## Using the detector
+### Via terminal
 - Start scanning for surveillance devices:
 flockscan
 - List detected devices:
 flocklist
 - Stop scanning:
 flockstop
-### Via Display
+### Via display
 - Open the on-device Wi-Fi menu.
-- Select Flock Detection.
+- Select Flock Camera Detection.
 - The scan starts automatically and detections appear in the terminal pane.
-## What Gets Detected
+## What gets detected
 Category |
 OUI Count |
 Examples |
-Flock WiFi cameras |
+Flock Wi-Fi cameras |
 9 |
 70:c9:4e, 3c:91:80, d8:f3:bc |
 FS Ext Battery units |
@@ -60,7 +61,7 @@ Penguin surveillance |
 19 |
 cc:09:24, ed:c7:63, e8:ce:56 |
 Each detection record stores MAC, detection method, confidence level, signal strength, channel, hit count, and SSID (if available).
-## Confidence Levels
+## Confidence levels
 Level |
 Trigger |
 Behavior |
@@ -71,13 +72,13 @@ LOW |
 OUI match only (no wildcard probe or SSID) |
 Recorded silently, visible in flocklist |
 A device initially seen at LOW confidence will be upgraded to HIGH if it later exhibits a high-confidence signal (e.g., sends a wildcard probe).
-## Detection Methods
+## Detection methods
 Method |
 Description |
 OUI (transmitter) |
 Source MAC matches a known prefix |
 OUI (receiver) |
-Destination MAC matches — catches sleeping cameras that don’t transmit |
+Destination MAC matches - catches sleeping cameras that don’t transmit |
 OUI (BSSID) |
 Access point BSSID matches |
 Wildcard probe |

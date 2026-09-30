@@ -1,5 +1,5 @@
 Title: CLI Reference
-Description: Common GhostESP CLI commands grouped by category.
+Description: Common GhostESP CLI commands grouped by category
 URL: /latest/getting-started/command-line-reference/
 Version: latest
 Section: Getting Started
@@ -7,14 +7,15 @@ Search index: /search-index.json
 
 # CLI Reference
 
-> Common GhostESP CLI commands grouped by category.
+> Common GhostESP CLI commands grouped by category
 
 ## On this page
 
-- [Connecting to the CLI interface](#connecting-to-the-cli-interface)
+- [Connecting to the CLI Interface](#connecting-to-the-cli-interface)
 - [Core](#core)
-- [Core dumps (flash builds only)](#core-dumps-flash-builds-only)
-- [WiFi](#wifi)
+- [Core Dumps (Flash Builds Only)](#core-dumps-flash-builds-only)
+- [Shell &amp;amp; Coreutils](#shell--coreutils)
+- [Wi-Fi](#wi-fi)
 - [Scanning](#scanning)
 - [Targeting](#targeting)
 - [Offense](#offense)
@@ -43,8 +44,9 @@ Search index: /search-index.json
 - [Flock Detection](#flock-detection)
 - [Camera](#camera)
 - [RGB](#rgb)
-- [Status display (if present)](#status-display-if-present)
-- [IO expander buttons (if present)](#io-expander-buttons-if-present)
+- [Status Display (If Present)](#status-display-if-present)
+- [IO Expander Buttons (If Present)](#io-expander-buttons-if-present)
+- [NFC](#nfc)
 - [Infrared](#infrared)
 - [GPS](#gps)
 - [Ethernet](#ethernet)
@@ -56,285 +58,364 @@ Search index: /search-index.json
 - [WiGLE](#wigle)
 - [Settings](#settings)
 - [Native SD Apps](#native-sd-apps)
+- [GhostScript](#ghostscript)
+- [Peer Firmware Update (OTA)](#peer-firmware-update-ota)
+- [P4 Hosted C6 Update](#p4-hosted-c6-update)
 - [BadUSB](#badusb)
 - [USB Keyboard](#usb-keyboard)
+- [USB SD Passthrough](#usb-sd-passthrough)
 
 ---
 
-## Connecting to the CLI interface
+## Connecting to the CLI Interface
 - Use a [serial console](https://ghostesp.net/serial) (115200 baud is recommended) with a USB data cable or the built-in Terminal app on touch-enabled boards.
-- From the web UI, open the Terminal panel for remote access. When you launch a Wi-Fi or BLE command, the device suspends the GhostNet AP until the radio work finishes; once you run stop (or the command completes), BLE deinitializes and Wi-Fi returns automatically.
+- From the WebUI, open the Terminal panel for remote access. When you launch a Wi-Fi or BLE command, the device suspends the GhostNet AP until the radio work finishes; once you run stop (or the command completes), BLE deinitializes and Wi-Fi returns automatically.
 - Send help to confirm connectivity; output appears prefixed with &gt; in the console.
 ## Core
-- help [category|all] — List commands by category (wifi, ble, chameleon, comm, sd, led, gps, misc, portal, printer, cast, capture, beacon, attack, ir, ethernet, camera, shell, gadgets). Use help all to list every command.
-- chipinfo — Print SoC model, cores, features, and IDF version. When core dumps are enabled to flash, it also shows coredump partition status and (when available) the panic reason from the last crash.
-- (for developers) mem [dump|trace &lt;start|stop|dump&gt;] — Print heap stats, dump allocation state, or control heap tracing.
-- reboot — Soft restart the device.
-- timezone &lt;TZ&gt; — Set timezone, e.g., timezone EST5EDT,M3.2.0,M11.1.0.
-- stop — Stops all active attacks, scans, and background tasks, including BLE device detect and tracking. Also restarts Wi-Fi if it was suspended by BLE.
-- stopscan — Alias for scanap -stop; stops an active AP scan.
-- congestion — Display Wi-Fi channel congestion chart showing activity across all channels.
-### Core dumps (flash builds only)
+- help [category|all] - List commands by category (wifi, ble, chameleon, comm, sd, led, gps, misc, portal, printer, cast, capture, beacon, attack, ir, ethernet, camera, shell, gadgets). Use help all to list every command in the standard categories.
+- chipinfo - Print SoC model, cores, features, and IDF version. When core dumps are enabled to flash, it also shows coredump partition status and (when available) the panic reason from the last crash.
+- (for developers) mem [heaps|tasks|regions|check|dump|trace &lt;start|leaks|all|stop|dump&gt;] - Print heap stats, show task stack marks or heap regions, run a heap integrity check, dump allocation state, or control heap tracing.
+- reboot - Soft restart the device.
+- timezone &lt;TZ&gt; - Set timezone, e.g., timezone EST5EDT,M3.2.0,M11.1.0.
+- stop - Stops all active attacks, scans, and background tasks, including BLE device detect and tracking. Also restarts Wi-Fi if it was suspended by BLE.
+- stopscan - Alias for scanap -stop; stops an active AP scan.
+- congestion - Display Wi-Fi channel congestion chart showing activity across all channels.
+### Core Dumps (Flash Builds Only)
 These commands are only present on builds that enable ESP-IDF core dumps to flash (CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH).
-- coredump — Print a quick summary (partition size and whether a coredump is present).
-- coredump dump — Stream the coredump partition as base64. Save the output body to coredump.b64 (omit the start/end marker lines), then decode on your host with idf.py coredump-info -c coredump.b64.
-- coredump erase — Erase the coredump partition (clears the saved crash).
-## WiFi
+- coredump - Print a quick summary (partition size and whether a coredump is present).
+- coredump dump - Stream the coredump partition as base64. Save the output body to coredump.b64 (omit the start/end marker lines), then decode on your host with idf.py coredump-info -c coredump.b64.
+- coredump erase - Erase the coredump partition (clears the saved crash).
+## Shell &amp; Coreutils
+These headless commands make up the help shell category, plus a few related system helpers (crash, loglevel, devices, fav).
+- echo &lt;text&gt; - Print text; supports \n, \t, and \r escapes.
+- ifconfig - Show STA, AP, and Ethernet interface state (IP, netmask, gateway, MAC).
+- ping &lt;host&gt; [count] - Send ICMP echo requests (count 1-20, default 4).
+- version - Show firmware name/version/flavor, build date, git branch/commit, and IDF version.
+- uuid - Print a stable device UUID derived from the STA MAC.
+- macaddr [all|sta|ap] - Print the STA and/or AP MAC address (default: both).
+- uptime - Show time since boot.
+- date - Show the current system time (alias of time).
+- whoami - Print hostname, UUID, version, uptime, and interface info.
+- status - Print a system summary (uptime, heap, Wi-Fi, SD, portal).
+- clear - Clear an ANSI terminal and the on-device terminal history.
+- hostname [name] - View or set the shell prompt hostname.
+- color [name|0-255|off] / cli_color - View or set the ANSI prompt color.
+- banner [on|off|status] - Control the boot banner.
+- alias [name] [command] / unalias &lt;name|all&gt; - Create or remove persistent command shortcuts.
+- history [-c] - Print or clear the command history.
+- didyoumean &lt;command&gt; - Suggest the closest registered command.
+- ps / top - Show FreeRTOS task count and, when task tracing is enabled, the task list.
+- df - Show /mnt filesystem usage.
+- tail &lt;file&gt; [lines] - Print the last N lines of an SD file (default 10, max 32).
+- grep &lt;pattern&gt; &lt;file&gt; - Print lines of an SD file containing the pattern.
+- source &lt;file&gt; - Run CLI commands from an SD file (max nesting depth 4).
+- tee &lt;file&gt; &lt;text&gt; - Append text to an SD file and echo it.
+- env / export NAME=value - View or persist simple shell variables used by $NAME expansion.
+- watch &lt;seconds&gt; &lt;command&gt; / watch stop - Repeat a command every N seconds.
+- crash - Intentionally trigger a crash for coredump testing (flash-coredump builds).
+- loglevel [none|error|warn|info|debug|verbose] - View or change the global ESP-IDF log level.
+- devices - List enabled hardware devices with their active pins and state.
+- fav [list|add &lt;name&gt;|remove &lt;name&gt;|toggle &lt;name&gt;|clear|bypass &lt;on|off|toggle&gt;] / favorites - Manage favourite menu entries and files.
+## Wi-Fi
 ### Scanning
-- scanap [seconds|-live|-stop] — Run an AP scan, optionally for a set duration, live channel hop, or stop (-stop).
-- scansta — Hop channels and log associated stations.
-- scanall [seconds] — Combined AP and STA scan with summary.
-- sweep [-w wifi_sec] [-b ble_sec] — Full environment sweep: scans WiFi APs, stations, and BLE devices, then saves a CSV report to SD (/mnt/ghostesp/sweeps/sweep_N.csv).
-- list [-a|-s|-airtags] — Show AP scan results, associated stations, or AirTags.
-- listenprobes [channel|stop] — Monitor probe requests and log to PCAP if SD is present.
-- wpa3check — Run a WPA3 compliance check on the selected AP (select -a &lt;idx&gt; first). If no AP is selected, scans all APs and prints a summary per AP showing WPA3 presence, transition mode, PMF posture, and a short finding. Available from WiFi → Scan &amp; Select on-device.
+- scanap [1-120|-live|-stop] - Run an AP scan, optionally for a set duration (1-120 seconds), live channel hop, or stop (-stop).
+- scansta - Hop channels and log associated stations.
+- scanall [seconds] - Combined AP and STA scan with summary.
+- hop [auto|all|basic|custom &lt;channels&gt;|&lt;channels&gt;] - Set the global channel plan used by scans and monitors (hop shows the current plan; hop 1,6,11 hops a custom list, hop all every legal channel, hop basic fixed 1/6/11, hop auto the default per-feature plan).
+- sweep [-w wifi_sec] [-b ble_sec] - Full environment sweep: scans Wi-Fi APs, stations, and BLE devices, then saves a CSV report to SD (/mnt/ghostesp/sweeps/sweep_N.csv).
+- list [-a|-s|-airtags] - Show AP scan results, associated stations, or AirTags.
+- listenprobes [channel|stop] - Monitor probe requests and log to PCAP if SD is present.
+- wpa3check - Run a WPA3 compliance check on the selected AP (select -a &lt;idx&gt; first). If no AP is selected, scans all APs and prints a summary per AP showing WPA3 presence, transition mode, PMF posture, and a short finding. Available from Wi-Fi → Scan &amp; Select on-device.
 ### Targeting
-- select [-a|-s|-airtag] &lt;idx[,idx]&gt; — Queue APs, a station, or an AirTag by index for later actions.
-- connect &lt;ssid&gt; [pass] — Join an infrastructure network (saves credentials); wrap SSID/password in quotes when they contain spaces, e.g., connect &#34;My SSID&#34; &#34;My Password&#34;.
-- disconnect — Leave the current STA connection.
-- apcred &lt;ssid&gt; &lt;pass&gt; or apcred -r — Change or reset GhostNet AP credentials.
-- apenable on|off — Toggle AP persistence across reboots.
-- trackap — Track selected AP signal strength (RSSI) in real-time.
-- tracksta — Track selected station signal strength (RSSI) in real-time.
-- wifistatus — Show current WiFi connection status, including SSID, signal strength, IP address, and saved network info.
+- select [-a|-s|-airtag] &lt;idx[,idx]&gt; - Queue APs, a station, or an AirTag by index for later actions.
+- connect &lt;ssid&gt; [pass] - Join an infrastructure network (saves credentials); wrap SSID/password in quotes when they contain spaces, e.g., connect &#34;My SSID&#34; &#34;My Password&#34;.
+- disconnect - Leave the current STA connection.
+- autoreconnect &lt;on|off&gt; - Enable or disable Wi-Fi station auto-reconnect after involuntary disconnects.
+- apcred &lt;ssid&gt; &lt;pass&gt; or apcred -r - Change or reset GhostNet AP credentials.
+- apenable on|off - Toggle AP persistence across reboots.
+- setcountry &lt;CC&gt; - Set the Wi-Fi country code (two-letter ISO, e.g. US, or 01 for the world-safe plan); channel plans follow the active country rules.
+- trackap - Track selected AP signal strength (RSSI) in real-time.
+- tracksta - Track selected station signal strength (RSSI) in real-time.
+- wifistatus - Show current Wi-Fi connection status, including SSID, signal strength, IP address, and saved network info.
 ### Offense
-- attack -d|-c|-e|-s|-g|-hsd|-p|-b|-a &lt;args&gt; — Trigger various Wi-Fi attacks.
--d — Deauthentication attack on selected AP(s).
-- -c — Channel Switch Announcement (CSA) attack. Sends forged 802.11 beacons with the AP’s real SSID/BSSID and a Channel Switch Element (IE 37) directing clients to a different channel, causing disconnection.
-- -e — EAPOL logoff attack.
-- -s &lt;password&gt; — SAE flood attack (ESP32-C5/C6 only, requires target PSK).
-- -g &lt;ssid&gt; &lt;password&gt; — GTK abuse attack on the selected AP.
-- -hsd — Combined handshake capture &#43; deauth. Simultaneously sends deauth bursts and captures EAPOL frames for WPA handshake extraction.
-- -p — Probe request flood. Broadcasts spoofed probe requests.
-- -b — Bad message attack (EAPOL key install).
-- -a — Authentication flood. Sends mass authentication frames to the AP.
-- stop — Stops all active attacks, scans, and background tasks, including BLE device detect and tracking.
-- stopdeauth / stopspam — Halt active attacks or beacon floods.
-- beaconspam [mode] — Broadcast spoof SSIDs (-r, -rr, -l, or custom text).
-- beaconadd &lt;ssid&gt; — Add an SSID to the beacon spam list.
-- beaconremove &lt;ssid&gt; — Remove an SSID from the beacon spam list.
-- beaconclear — Clear all SSIDs from the beacon spam list.
-- beaconshow — Show current beacon spam list.
-- beaconspamlist — Show the beacon spam list with details.
-- karma start [ssid...] / karma stop — Respond to client probes with saved or provided SSIDs.
-- pineap [-s] — Monitor Pineapple-style beacons; -s stops detection.
-- saeflood &lt;password&gt; / stopsaeflood / saefloodhelp — Start, stop, or show help for SAE flood attacks.
+- attack -d|-c|-e|-s|-g|-hsd|-p|-b|-a &lt;args&gt; - Trigger various Wi-Fi attacks.
+-d - Deauthentication attack on selected AP(s).
+- -c - Channel Switch Announcement (CSA) attack. Sends forged 802.11 beacons with the AP’s real SSID/BSSID and a Channel Switch Element (IE 37) directing clients to a different channel, causing disconnection.
+- -e - EAPOL logoff attack.
+- -s &lt;password&gt; - SAE flood attack (ESP32-C5/C6 only, requires target PSK).
+- -g &lt;ssid&gt; &lt;password&gt; - GTK abuse attack on the selected AP.
+- -hsd - Combined handshake capture &#43; deauth. Simultaneously sends deauth bursts and captures EAPOL frames for WPA handshake extraction.
+- -p - Probe request flood. Broadcasts spoofed probe requests.
+- -b - Bad message attack (EAPOL key install).
+- -a - Authentication flood. Sends mass authentication frames to the AP.
+- stop - Stops all active attacks, scans, and background tasks, including BLE device detect and tracking.
+- stopdeauth / stopspam - Halt active attacks or beacon floods.
+- beaconspam [mode] - Broadcast spoof SSIDs (-r, -rr, -l, or custom text).
+- beaconadd &lt;ssid&gt; - Add an SSID to the beacon spam list.
+- beaconremove &lt;ssid&gt; - Remove an SSID from the beacon spam list.
+- beaconclear - Clear all SSIDs from the beacon spam list.
+- beaconshow - Show current beacon spam list.
+- beaconspamlist - Show the beacon spam list with details.
+- karma start [ssid...] / karma stop - Respond to client probes with saved or provided SSIDs.
+- pineap [-s] - Monitor Pineapple-style beacons; -s stops detection.
+- saeflood &lt;password&gt; / stopsaeflood / saefloodhelp - Start, stop, or show help for SAE flood attacks.
 ### Network
-- scanports &lt;local|ip&gt; [all|start-end], scanarp, scanlocal, scanssh &lt;ip&gt; — Scan the subnet, a target host, or run mDNS/SSH discovery utilities.
-- netbiosscan [&lt;ip&gt;|subnet &lt;a.b.c[.0|.]&gt;] — Discover Windows hosts via NetBIOS Name Service (NBNS) queries on UDP port 137. Without arguments, scans the current subnet. With an IP, scans a specific host. With subnet &lt;prefix&gt;, scans a /24 prefix.
-- httpbannerscan [&lt;ip&gt;|subnet &lt;a.b.c[.0|.]&gt;] — Probe common HTTP/HTTPS ports (80, 8080, 8000, 443, 8443) and grab Server banners to identify web servers and applications.
-- snmpprobe [&lt;ip&gt;|subnet &lt;a.b.c[.0|.]&gt;|walk &lt;ip&gt; [OID]|communities &lt;list|file&gt;] — Probe SNMP v1/v2c on UDP port 161 with the built-in community list (public, private, and more) and retrieve sysDescr to identify network devices (routers, switches, printers). walk dumps a MIB subtree (default system). communities overrides the list for the session, either as c1,c2,... or a path to a file; /mnt/ghostesp/snmp_communities.txt (one community per line) is loaded automatically when present.
-- enumscan [subnet [a.b.c.]]|&lt;ip&gt; — SMB enumeration: negotiates SMB1/SMB2, reports OS, hostname, domain, dialect, and whether SMB signing is required, then lists shares and users via null-session RAP where the server allows it.
-- dhcpstarve &lt;start [threads]|stop|display&gt; — Flood a DHCP server or show collected leases.
-- mdnssniff &lt;IP|all&gt; / mdnssniff stop — Passively sniff local names (mDNS/LLMNR/SSDP/NetBIOS) per host; no spoofing, auto-saves when Auto Save Scans is on.
-- capture &lt;-probe|-deauth|-beacon|-raw|-eapol|-wps|-pwn|-list|-export|-wireshark|-wiresharkble|-ble|-skimmer|-stop&gt; — Start packet captures for the specified frame type to SD. ESP32-C5/C6 also supports -802154 for 802.15.4 capture.
+- scanports &lt;local|ip&gt; [all|start-end], scanlocal, scanssh &lt;ip&gt; - Scan the subnet, a target host, or run mDNS/SSH discovery utilities.
+- scanarp [monitor [duration]] - ARP-scan the subnet for active hosts; monitor runs it continuously for an optional duration in seconds.
+- netbiosscan [&lt;ip&gt;|subnet &lt;a.b.c[.0|.]&gt;] - Discover Windows hosts via NetBIOS Name Service (NBNS) queries on UDP port 137. Without arguments, scans the current subnet. With an IP, scans a specific host. With subnet &lt;prefix&gt;, scans a /24 prefix.
+- httpbannerscan [&lt;ip&gt;|subnet &lt;a.b.c[.0|.]&gt;] - Probe common HTTP/HTTPS ports (80, 8080, 8000, 443, 8443) and grab Server banners to identify web servers and applications.
+- snmpprobe [&lt;ip&gt;|subnet &lt;a.b.c[.0|.]&gt;|walk &lt;ip&gt; [OID]|communities &lt;list|file&gt;] - Probe SNMP v1/v2c on UDP port 161 with the built-in community list (public, private, and more) and retrieve sysDescr to identify network devices (routers, switches, printers). walk dumps a MIB subtree (default system). communities overrides the list for the session, either as c1,c2,... or a path to a file; /mnt/ghostesp/snmp_communities.txt (one community per line) is loaded automatically when present.
+- enumscan [subnet [a.b.c.]]|&lt;ip&gt; - SMB enumeration: negotiates SMB1/SMB2, reports OS, hostname, domain, dialect, and whether SMB signing is required, then lists shares and users via null-session RAP where the server allows it.
+- dhcpstarve &lt;start [threads]|stop|display&gt; - Flood a DHCP server or show collected leases.
+- mdnssniff &lt;IP|all&gt; / mdnssniff stop - Passively sniff local names (mDNS/LLMNR/SSDP/NetBIOS) per host; no spoofing, auto-saves when Auto Save Scans is on.
+- capture &lt;-probe|-deauth|-beacon|-raw|-eapol|-wps|-pwn|-list|-export|-wireshark|-wiresharkble|-ble|-skimmer|-stop&gt; - Start packet captures for the specified frame type to SD. ESP32-C5/C6 also supports -802154 for 802.15.4 capture.
+- capture -channel &lt;n&gt; / capture -c &lt;n&gt; - Lock the radio to a channel while capturing; without -c/-channel the capture hops.
+- capture -list - Browse saved PCAPs (with &#43;/- hc22000 markers).
+- capture -export &lt;pcap-file&gt; - Export a PCAP to hc22000 (PMKID &#43; M2/M3).
+- capture -wiresharkble - Stream BLE PCAP to USB/UART for Wireshark.
 ### Output
-- powerprinter [ip text font alignment] — Send formatted PCL text jobs to LAN printers; pull saved defaults when arguments are omitted.
-- dialconnect — Pair with a DIAL-capable device (e.g., Chromecast/YouTube).
-- wol &lt;MAC|IP&gt; [broadcast IP] — Send a Wake-on-LAN magic packet; an IP is resolved while its host is awake, and the broadcast address defaults to 255.255.255.255.
-- govee scan / govee &lt;IP&gt; on|off|brightness N|color RRGGBB — Discover and control LAN-enabled Govee lights.
+- powerprinter [ip text font alignment] - Send formatted PCL text jobs to LAN printers; pull saved defaults when arguments are omitted.
+- dialconnect [device|all|-a] - Pair with DIAL-capable devices (e.g., Chromecast/YouTube). With no argument it targets the first discovered device; all/-a casts to every TV found, or pass a device name.
+- wol &lt;MAC|IP&gt; [broadcast IP] - Send a Wake-on-LAN magic packet; an IP is resolved while its host is awake, and the broadcast address defaults to 255.255.255.255.
+- tplinktest &lt;on|off|loop&gt; - Broadcast TP-Link Kasa relay commands (encrypted UDP) for testing; loop alternates on/off ten times.
+- govee scan / govee &lt;IP&gt; on|off|status|brightness N|color RRGGBB - Discover and control LAN-enabled Govee lights.
 ## BLE
 (ESP32-S2 excluded)
 ### Discovery
 -
-blescan [-f|-ds|-a|-r|-adv|-g|-s] — Scan for BLE devices, Flippers, spam detectors, raw advertising, or GATT services. -s stops the active scan, including a running bledetect.
+blescan [-f|-ds|-a|-r|-adv|-g|-oui &lt;prefix&gt;|-vendor &lt;vendor&gt;|-s] - Scan for BLE devices, Flippers, spam detectors, raw advertising, GATT services, or OUI-filtered advertisers. -s stops the active scan, including a running bledetect.
 -
-bledetect [-s|-l|-c|-i|-t &lt;idx&gt;|-u|-sp &lt;idx&gt;|-h] — Detect trackers, skimmers, and beacons by advertisement signature (AirTags, Flippers, Tiles, SmartTags, Chipolo, AirPods, Fast Pair, exposure beacons, and more). Bare bledetect starts the scan.
--l — List discovered devices as [index] type | name or MAC | RSSI dBm. A * marks the tracked device.
-- -t &lt;idx&gt; / -u — Track a device by index (its live RSSI is logged as it is re-seen) or stop tracking.
-- -sp &lt;idx&gt; — Spoof a detected AirTag; use stopspoof to end it.
-- -s / -c / -i — Stop the scan but keep results, clear stored results (stop the scan first), or show scan state and device count.
-- -h — Show usage.
+bledetect [-s|-l|-c|-i|-t &lt;idx&gt;|-u|-sp &lt;idx&gt;|-h] - Detect trackers, skimmers, and beacons by advertisement signature (AirTags, Flippers, Tiles, SmartTags, Chipolo, AirPods, Fast Pair, exposure beacons, and more). Bare bledetect starts the scan.
+-l - List discovered devices as [index] type | name or MAC | RSSI dBm. A * marks the tracked device.
+- -t &lt;idx&gt; / -u - Track a device by index (its live RSSI is logged as it is re-seen) or stop tracking.
+- -sp &lt;idx&gt; - Spoof a detected AirTag; use stopspoof to end it.
+- -s / -c / -i - Stop the scan but keep results, clear stored results (stop the scan first), or show scan state and device count.
+- -h - Show usage.
 On-device: BLE → Detect Devices, then List Detected Devices, provides the same detection with per-device Track and Spoof actions.
 -
-blewardriving [-s] — Log BLE beacons with GPS metadata.
+blewardriving [-s] - Log BLE beacons with GPS metadata.
+-
+blebridge [start|stop|status|pair &lt;peer_name&gt;] - Start, stop, or inspect the BLE bridge that proxies the Android companion app to a GhostLink peer over UART. See the [BLE Bridge](/latest/getting-started/ble-bridge/) guide.
+-
+dualwd [start|-s] - Start or stop BLE &#43; Wi-Fi coexistence wardriving (PSRAM required; not available on ESP32-P4 or S2).
+-
+listadv - List parsed BLE advertisers captured by blescan -adv.
 ### Spoofing
-- blespam [mode|-s] — Emit spoofed BLE advertisements (Apple, Microsoft, Samsung, Google, random).
-- spoofairtag / stopspoof — Launch or stop AirTag spoofing.
+- blespam [-apple|-ms|-samsung|-google|-random] [-name &lt;text&gt;] [-s] - Emit spoofed BLE advertisements; -name sets a custom advertised name (max 31 characters), -s stops the spam.
+- spoofairtag / stopspoof - Launch or stop AirTag spoofing.
 ### Devices
-- listflippers — Scan for nearby Flipper Zero devices.
-- selectflipper &lt;idx&gt; — Choose a Flipper from the discovered list for interactions.
-- listairtags — Discover nearby AirTags.
-- selectairtag &lt;idx&gt; — Choose an AirTag for follow-up actions.
+- listflippers - Scan for nearby Flipper Zero devices.
+- selectflipper &lt;idx&gt; - Choose a Flipper from the discovered list for interactions.
+- listairtags - Discover nearby AirTags.
+- selectairtag &lt;idx&gt; - Choose an AirTag for follow-up actions.
 ### GATT
-- blescan -g — Scan for connectable BLE devices for GATT enumeration.
-- listgatt — List discovered GATT devices with tracker type detection.
-- selectgatt &lt;idx&gt; — Select a device by index for enumeration or tracking.
-- enumgatt — Connect to the selected device and enumerate its GATT services.
-- trackgatt — Track the selected device using real-time RSSI signal strength.
+- blescan -g - Scan for connectable BLE devices for GATT enumeration.
+- listgatt - List discovered GATT devices with tracker type detection.
+- selectgatt &lt;idx&gt; - Select a device by index for enumeration or tracking.
+- enumgatt - Connect to the selected device and enumerate its GATT services.
+- trackgatt - Track the selected device using real-time RSSI signal strength.
 ### BadBLE Keyboard
-Bluetooth HID keyboard mode (DuckyScript over BLE). BadBLE owns the BLE radio while active — stop it before using BLE scans or the bridge.
-- badble status — Show BadBLE state (advertising / connected / script), advertised name, and host status.
-- badble list — List DuckyScripts in /mnt/ghostesp/badble/.
-- badble run &lt;file&gt; — Wait for a paired host and run a DuckyScript. badble run &#34;Ghost Art (Built-in)&#34; runs the built-in payload without an SD card.
-- badble stop — Stop BadBLE; WiFi/AP are restored.
-- badble keyboard_start / keyboard_stop — Enable / disable live typing mode.
-- badble type &lt;text&gt; — Type text on the connected host.
-- badble keysend &lt;modifier&gt; &lt;keycode&gt; — Send a single HID keypress (numeric modifier and keycode values).
-- badble name — Show the advertised device name.
-- badble set_name &lt;text&gt; — Set the advertised name (max 31 characters, persisted in NVS).
+Available on boards with CONFIG_HAS_BADBLE.
+Bluetooth HID keyboard mode (DuckyScript over BLE). BadBLE owns the BLE radio while active - stop it before using BLE scans or the bridge.
+- badble status - Show BadBLE state (advertising / connected / script), advertised name, and host status.
+- badble list - List DuckyScripts in /mnt/ghostesp/badble/.
+- badble run &lt;file&gt; - Wait for a paired host and run a DuckyScript. badble run &#34;Ghost Art (Built-in)&#34; runs the built-in payload without an SD card.
+- badble stop - Stop BadBLE; Wi-Fi/AP are restored.
+- badble keyboard_start / keyboard_stop - Enable / disable live typing mode.
+- badble type &lt;text&gt; - Type text on the connected host.
+- badble keysend &lt;modifier&gt; &lt;keycode&gt; - Send a single HID keypress (numeric modifier and keycode values).
+- badble name - Show the advertised device name.
+- badble set_name &lt;text&gt; - Set the advertised name (max 31 characters, persisted in NVS).
 See [BadBLE](/latest/ble/badble/) for pairing and usage details.
 ### Aerial Detection
-- aerialscan [seconds] — Scan for aerial devices (drones, UAVs, RC controllers) using WiFi and BLE in sequential phases. Default: 30 seconds. Phase 1: WiFi scan (OpenDroneID WiFi, DJI WiFi, drone networks). Phase 2: BLE scan (OpenDroneID BLE, DJI BLE) — WiFi automatically suspended during BLE phase and restored after.
-- aeriallist — Display all detected aerial devices with full details including device ID, type, MAC address, vendor, signal strength (RSSI), GPS coordinates, altitude, speed, direction, operator location, and flight status.
-- aerialtrack &lt;idx|mac&gt; — Track a specific aerial device by index or MAC address (e.g., aerialtrack 0 or aerialtrack 12:34:56:78:9a:bc).
-- aerialstop — Stop aerial device scanning and tracking.
-- aerialspoof [device_id lat lon alt] — Broadcast fake drone RemoteID for testing via BLE. Without arguments, uses default test drone (GHOST-TEST at San Francisco, 100m altitude). With arguments: device ID, latitude, longitude, altitude in meters. Example: aerialspoof DRONE-1234 40.7128 -74.0060 100. Complies with ASTM F3411 OpenDroneID standard. Note: WiFi automatically suspended during broadcast, restored on stop.
-- aerialspoofstop — Stop broadcasting fake drone RemoteID and restore WiFi.
+- aerialscan [seconds] - Scan for aerial devices (drones, UAVs, RC controllers) using Wi-Fi and BLE in sequential phases. Default: 30 seconds. Phase 1: Wi-Fi scan (OpenDroneID Wi-Fi, DJI Wi-Fi, drone networks). Phase 2: BLE scan (OpenDroneID BLE, DJI BLE) - Wi-Fi automatically suspended during BLE phase and restored after.
+- aeriallist - Display all detected aerial devices with full details including device ID, type, MAC address, vendor, signal strength (RSSI), GPS coordinates, altitude, speed, direction, operator location, and flight status.
+- aerialtrack &lt;idx|mac&gt; - Track a specific aerial device by index or MAC address (e.g., aerialtrack 0 or aerialtrack 12:34:56:78:9a:bc).
+- aerialstop - Stop aerial device scanning and tracking.
+- aerialspoof [device_id lat lon alt] - Broadcast fake drone RemoteID for testing via BLE. Without arguments, uses default test drone (GHOST-TEST at San Francisco, 100m altitude). With arguments: device ID, latitude, longitude, altitude in meters. Example: aerialspoof DRONE-1234 40.7128 -74.0060 100. Complies with ASTM F3411 OpenDroneID standard. Note: Wi-Fi automatically suspended during broadcast, restored on stop.
+- aerialspoofstop - Stop broadcasting fake drone RemoteID and restore Wi-Fi.
 ## Portal
-- startportal &lt;path|default&gt; &lt;AP_SSID&gt; [PSK] — Serve an Evil Portal bundle from SD or flash (default uses the built-in portal).
-- stopportal — Shut down the active portal.
-- listportals — List bundles on SD card or flash.
-- evilportal -c &lt;sethtmlstr|clear&gt; — Manage the Evil Portal HTML buffer (-c sethtmlstr to capture inbound HTML, -c clear to revert to defaults).
-- webauth [on|off|toggle|status] — Require or disable web UI login. toggle flips the current state; status shows the current setting.
+- startportal &lt;path|default&gt; &lt;AP_SSID&gt; [PSK] - Serve an Evil Portal bundle from SD or flash (default uses the built-in portal).
+- stopportal - Shut down the active portal.
+- listportals - List bundles on SD card or flash.
+- evilportal -c &lt;sethtmlstr|clear&gt; - Manage the Evil Portal HTML buffer (-c sethtmlstr to capture inbound HTML, -c clear to revert to defaults).
+- webauth [on|off|toggle|status] - Require or disable WebUI login. toggle flips the current state; status shows the current setting.
+- webuiap [on|off|toggle|status] - Restrict the WebUI to clients connected to the onboard AP subnet (AP-only mode). Registered on all builds.
 ### DNS Sinkhole
-- sinkhole start [upstream_dns] [log] — Start the DNS sinkhole server. Default upstream DNS: 1.1.1.1. Use log to enable query logging.
-- sinkhole stop — Stop the DNS sinkhole server.
-- sinkhole status — Show sinkhole status and statistics.
-- sinkhole download [n] — Download blocklist. n selects the source: 1=Peter Lowe, 2=OISD Basic, 3=StevenBlack. Defaults to OISD Basic.
-- sinkhole load &lt;filename&gt; — Load a custom blocklist from SD.
-- sinkhole add &lt;domain&gt; — Add a domain to the blocklist.
-- sinkhole remove &lt;domain&gt; — Remove a domain from the blocklist.
-- sinkhole reload — Reload the blocklist from storage.
-- sinkhole log &lt;on|off&gt; — Toggle query logging.
+- sinkhole start [upstream_dns] [log] - Start the DNS sinkhole server. The default upstream is the interface’s configured DNS server, falling back to 8.8.8.8. Use log to enable query logging.
+- sinkhole stop - Stop the DNS sinkhole server.
+- sinkhole status - Show sinkhole status and statistics.
+- sinkhole download [n] - Download a blocklist. n selects the source: 1=Peter Lowe, 2=OISD Basic, 3=StevenBlack. Without n, it prints the source list and usage.
+- sinkhole load &lt;filename&gt; - Load a custom blocklist from SD.
+- sinkhole add &lt;domain&gt; - Add a domain to the blocklist.
+- sinkhole remove &lt;domain&gt; - Remove a domain from the blocklist.
+- sinkhole reload - Reload the blocklist from storage.
+- sinkhole log &lt;on|off&gt; - Toggle query logging.
 ## GhostLink (Dual Communication)
-- commdiscovery — Start discovery mode to find other GhostESP devices.
-- commconnect &lt;peer_name&gt; — Connect to a discovered peer (after commdiscovery).
-- commsetpins &lt;tx&gt; &lt;rx&gt; — Save preferred pins.
-- commsend &lt;command&gt; [data...] — Issue commands to the connected peer.
-- commstatus — Inspect current link state.
-- commdisconnect — Close the peer link.
+- commdiscovery - Start discovery mode to find other GhostESP devices.
+- commconnect &lt;peer_name&gt; - Connect to a discovered peer (after commdiscovery).
+- commsetpins &lt;tx&gt; &lt;rx&gt; - Save preferred pins.
+- commsend &lt;command&gt; [data...] - Issue commands to the connected peer.
+- commstatus - Inspect current link state.
+- commdisconnect - Close the peer link.
+- glbench [send|recv|both] [kb] / glbench stop / glbench status - Measure GhostLink throughput in either direction (e.g. glbench send 512).
 ## Storage
 ### File Operations
-- sd status — Show SD card mount status, type (physical/virtual), capacity, and usage percentage.
-- sd list [path] — List files and directories with indices for quick reference. Default path: /mnt/ghostesp.
-- sd info &lt;index|path&gt; — Display file or directory details (type, size, path).
-- sd size &lt;index|path&gt; — Get file size in bytes (for pre-download checks).
-- sd read &lt;index|path&gt; [offset] [length] — Read file with optional offset and length for chunked downloads. No size limit.
-- sd write &lt;path&gt; &lt;base64data&gt; — Create/overwrite file with base64-decoded data.
-- sd append &lt;path&gt; &lt;base64data&gt; — Append base64-decoded data to file.
-- sd mkdir &lt;path&gt; — Create a new directory.
-- sd rm &lt;index|path&gt; — Delete a file or empty directory.
-- sd tree [path] [depth] — Recursive directory listing (default depth: 2, max: 10).
+- sd status - Show SD card mount status, type (physical/virtual), capacity, and usage percentage.
+- sd list [path] - List files and directories with indices for quick reference. Default path: /mnt/ghostesp.
+- sd info &lt;index|path&gt; - Display file or directory details (type, size, path).
+- sd size &lt;index|path&gt; - Get file size in bytes (for pre-download checks).
+- sd read &lt;index|path&gt; [offset] [length] [--base64|--raw] / sd cat &lt;index|path&gt; - Read a file with optional offset and length for chunked downloads. --base64 emits base64 (the default), --raw emits raw bytes; sd cat is the raw alias. No size limit.
+- sd write &lt;path&gt; &lt;base64data&gt; - Create/overwrite file with base64-decoded data.
+- sd append &lt;path&gt; &lt;base64data&gt; - Append base64-decoded data to file.
+- sd mkdir &lt;path&gt; - Create a new directory.
+- sd rm &lt;index|path&gt; - Delete a file or empty directory.
+- sd tree [path] [depth] - Recursive directory listing (default depth: 2, max: 10).
 All sd commands return machine-parsable output with prefixes like SD:OK:, SD:ERR:, SD:FILE:[n] name size, SD:DIR:[n] name, SD:READ:BEGIN:, SD:READ:END:, SD:WRITE:.
 ### Pin Configuration
-- sd_config — Display SD mode, pins, and status.
-- sd_pins_spi &lt;cs&gt; &lt;clk&gt; &lt;miso&gt; &lt;mosi&gt; — Configure SPI wiring.
-- sd_pins_mmc &lt;clk&gt; &lt;cmd&gt; &lt;d0&gt; &lt;d1&gt; &lt;d2&gt; &lt;d3&gt; — Configure SDIO wiring.
-- sd_save_config — Persist SD settings to storage.
+- sd_config - Display SD mode, pins, and status.
+- sd_pins_spi &lt;cs&gt; &lt;clk&gt; &lt;miso&gt; &lt;mosi&gt; - Configure SPI wiring.
+- sd_pins_mmc &lt;clk&gt; &lt;cmd&gt; &lt;d0&gt; &lt;d1&gt; &lt;d2&gt; &lt;d3&gt; - Configure SDIO wiring.
+- sd_save_config - Persist SD settings to storage.
 ## NRF24 Analyzer
 Available on boards with CONFIG_HAS_NRF24 or CONFIG_HAS_NRF24_REMOTE.
-- nrf24 start — Start NRF24 frequency analysis and jamming detection.
-- nrf24 pause — Pause analysis without stopping.
-- nrf24 resume — Resume paused analysis.
-- nrf24 status — Show current frequency, channel, detected signals, and jamming status.
-- nrf24 stop — Stop NRF24 analysis.
+- nrf24 start - Start NRF24 frequency analysis and jamming detection.
+- nrf24 pause - Pause analysis without stopping.
+- nrf24 resume - Resume paused analysis.
+- nrf24 status - Show current frequency, channel, detected signals, and jamming status.
+- nrf24 stop - Stop NRF24 analysis.
 ## LoRa
 Available on boards with CONFIG_HAS_LORA (SX1262-family radio).
-- lora setup — Print the first-run questionnaire (region required before TX).
-- lora set region &lt;name&gt; — Persist the LoRa band plan (e.g., anz, us915, eu868). See [LoRa](/latest/lora/) for the full name list and frequencies.
-- lora set tx &lt;dbm&gt; / lora set sf &lt;5-12&gt; / lora set bw &lt;125|250|500&gt; — Radio parameters (presets recommended; set takes effect on next lora start).
-- lora set companion &lt;ble|wifi&gt; — Whether the BLE PhoneAPI app link rides alongside LoRa (no-PSRAM: WiFi XOR BLE).
-- lora start / lora stop — Start or stop the radio and BLE link.
-- lora autostart [meshtastic|meshcore|on|off] — Choose whether and which protocol starts on boot; no argument prints the current setting and boot protocol. mesh autostart &lt;meshtastic|meshcore|off&gt; and meshcore autostart on|off are equivalent.
-- mesh / mesh switch &lt;meshtastic|meshcore&gt; / mesh on [proto] / mesh off — Show, switch, start or stop the active mesh protocol (only one owns the radio). See [MeshCore](/latest/lora/meshcore/) for the second stack.
-- lora chat [text] — Without text, lists recent messages; with text, broadcasts TEXT_MESSAGE_APP on the mesh.
-- lora nodes — Show discovered peers with RSSI/SNR and short names.
-- lora ble [on|off|status] — Manage BLE advertising for the official Meshtastic app.
-- lora app / lora diag — Link stats and tx_ok/fail/relay rx_ok dups duty_drops.
-- lora cad — Run five channel-activity trials with RSSI.
-- lora reg &lt;hex-address&gt; [count] — Read up to eight consecutive SX1262 registers; lora reg 0740 2 verifies the SX1262-encoded Meshtastic sync word 24 B4.
+- lora setup - Print the first-run questionnaire (region required before TX).
+- lora dm &lt;nodehex&gt; &lt;text&gt; - Send a PKI direct message to a peer that has shared its public key.
+- lora pubkey - Show our Curve25519 public key.
+- lora nodeinfo [node] - Exchange NodeInfo immediately (broadcast by default).
+- lora pki-regen - Regenerate the PKI keypair (re-share NodeInfo afterwards).
+- lora pkinfo &lt;node&gt; - Show the peer’s stored public key and our own.
+- lora pkitest &lt;node&gt; - Run a PKI encrypt/decrypt loopback against a peer’s stored key (no TX).
+- lora pkselftest - Run X25519/SHA-256/AES-CCM known-answer tests.
+- lora pktry &lt;framehex&gt; - Probe decryption variants on a captured frame (no TX; details in the log).
+- lora channels - Show the eight channel slots (primary/secondary, role, PSK length).
+- lora region &lt;name&gt; - Shortcut for lora set region; sets the band plan while stopped (e.g., anz).
+- lora set preset &lt;0-16&gt; / lora set cr &lt;5-8&gt; / lora set hop &lt;n&gt; / lora set offset &lt;MHz&gt; / lora set ovrfreq &lt;MHz&gt; / lora set chnum &lt;0-512&gt; / lora set txen &lt;0|1&gt; / lora set role &lt;0-12&gt; / lora set owner &lt;long&gt; &lt;short&gt; - Additional radio and mesh parameters (presets recommended).
+- lora set region &lt;name&gt; - Persist the LoRa band plan (e.g., anz, us915, eu868). See [LoRa](/latest/lora/) for the full name list and frequencies.
+- lora set tx &lt;dbm&gt; / lora set sf &lt;5-12&gt; / lora set bw &lt;125|250|500&gt; - Radio parameters (presets recommended; set takes effect on next lora start).
+- lora set companion &lt;ble|wifi&gt; - Whether the BLE PhoneAPI app link rides alongside LoRa (no-PSRAM: Wi-Fi XOR BLE).
+- lora start / lora stop - Start or stop the radio and BLE link.
+- lora autostart [meshtastic|meshcore|on|off] - Choose whether and which protocol starts on boot; no argument prints the current setting and boot protocol. mesh autostart &lt;meshtastic|meshcore|off&gt; and meshcore autostart on|off are equivalent.
+- mesh / mesh switch &lt;meshtastic|meshcore&gt; / mesh on [proto] / mesh off - Show, switch, start or stop the active mesh protocol (only one owns the radio). See [MeshCore](/latest/lora/meshcore/) for the second stack.
+- lora chat [text] - Without text, lists recent messages; with text, broadcasts TEXT_MESSAGE_APP on the mesh.
+- lora nodes - Show discovered peers with RSSI/SNR and short names.
+- lora ble [on|off|status] - Manage BLE advertising for the official Meshtastic app.
+- lora app / lora diag - Link stats and tx_ok/fail/relay rx_ok dups duty_drops.
+- lora cad - Run five channel-activity trials with RSSI.
+- lora reg &lt;hex-address&gt; [count] - Read up to eight consecutive SX1262 registers; lora reg 0740 2 verifies the SX1262-encoded Meshtastic sync word 24 B4.
 On-device: Menu → LoRa mirrors these with selectable rows. See the [LoRa guides](/latest/lora/) for wiring, BLE pairing, and mesh framing details.
 ## SubGHz
 Available on boards with CONFIG_HAS_SUBGHZ (CC1101 hardware).
-- subghz start — Start scanning the current frequency band (alias: subghz waterfall_start for waterfall mode).
-- subghz stop — Stop scanning (alias: subghz waterfall_stop).
-- subghz pause / subghz resume — Pause or resume scanning.
-- subghz status — Show scanner state, active snapshot, and CC1101 pin configuration.
-- subghz cycle_freq — Cycle to the next frequency band.
-- subghz capture_begin &lt;normal|raw&gt; &lt;frequency_hz&gt; — Arm the CC1101 to capture a signal at a frequency (e.g., subghz capture_begin normal 433920000).
-- subghz capture_on / subghz capture_off — Toggle raw capture mode.
-- subghz capture [name_hint] — Capture the current signal as a snapshot (optionally hinting a name).
-- subghz save [name_hint] — Save the active snapshot to /mnt/ghostesp/subghz/&lt;name&gt;.sub.
-- subghz list — List snapshots on SD.
-- subghz load &lt;name&gt; — Load a snapshot for transmission (defaults to last).
-- subghz replay — Transmit the loaded snapshot.
+- subghz start - Start scanning the current frequency band (alias: subghz waterfall_start for waterfall mode).
+- subghz stop - Stop scanning (alias: subghz waterfall_stop).
+- subghz pause / subghz resume - Pause or resume scanning.
+- subghz status - Show scanner state, active snapshot, and CC1101 pin configuration.
+- subghz cycle_freq - Cycle to the next frequency band.
+- subghz capture_begin &lt;normal|raw&gt; &lt;frequency_hz&gt; - Arm the CC1101 to capture a signal at a frequency (e.g., subghz capture_begin normal 433920000).
+- subghz capture_on / subghz capture_off - Toggle raw capture mode.
+- subghz capture [name_hint] - Capture the current signal as a snapshot (optionally hinting a name).
+- subghz save [name_hint] - Save the active snapshot to /mnt/ghostesp/subghz/&lt;name&gt;.sub.
+- subghz list - List snapshots on SD.
+- subghz load &lt;name&gt; - Load an RSSI spectrum snapshot (defaults to last); this restores a saved spectrum view, not a decodable signal.
+- subghz replay - Replay the loaded RSSI spectrum snapshot; it does not transmit. Signal capture, .sub writing, and transmitting happen only in the on-device UI.
 For protocol documentation, see the [SubGHz Protocols](/latest/subghz/protocols/) guide.
 ## Audio
-Available on boards with CONFIG_HAS_AUDIO_PLAYER or CONFIG_HAS_MIC.
-- audio start — Start the audio receiver (boards with CONFIG_HAS_TLV320DAC_I2S).
-- audio stop — Stop the audio receiver.
-- audio pause — Pause the audio receiver.
-- audio flush — Flush the audio buffers.
-- audio state &lt;width&gt; &lt;height&gt; [played_ms] — Report receiver state (used by the companion app over GhostLink).
-- mic_cal — Restart microphone calibration (boards with CONFIG_HAS_MIC). Resets the MIC RGB visualizer baseline.
+Available on boards with CONFIG_HAS_TLV320DAC_I2S, CONFIG_HAS_AW88298_SPEAKER, CONFIG_HAS_AUDIO_PLAYER, or CONFIG_HAS_MIC.
+- audio start / audio stop / audio pause / audio resume / audio flush - Start, stop, pause, resume, or flush the audio receiver. These require CONFIG_HAS_TLV320DAC_I2S or CONFIG_HAS_AW88298_SPEAKER.
+- audio state &lt;width&gt; &lt;height&gt; [played_ms] - Report receiver state (used by the companion app over GhostLink). Available with CONFIG_HAS_AUDIO_PLAYER.
+- mic_cal - Restart microphone calibration (boards with CONFIG_HAS_MIC). Resets the MIC RGB visualizer baseline.
 ## Visualizer (Rave Mode)
-- rave on — Enable Rave Mode (display-based LED visualizer synced to music via microphone or line-in).
-- rave off — Disable Rave Mode.
-- raveport — Show the Rave UDP receiver port (default: 6677). Note: port-setting is currently a stub.
+- rave on - Enable Rave Mode (display-based LED visualizer synced to music via microphone or line-in).
+- rave off - Disable Rave Mode.
+- raveport - Print the fixed discovery string RAVE_SERIAL A55AC33C 79. (The Rave UDP receiver port is 6677, a separate constant.)
 Rave Mode streams visualization data over UDP. Use the rave_helper.bat or rave_tray.exe app on your PC to receive and display the visualizer. See the [Visualizer app](/latest/apps/visualizer/) guide.
 ## Screen Mirroring
-- mirror on — Start screen mirroring server (wired USB).
-- mirror off — Stop screen mirroring.
-- mirror refresh — Refresh the mirror connection.
-- mirror status — Show mirror server status.
+- mirror on - Start screen mirroring server (wired USB).
+- mirror off - Stop screen mirroring.
+- mirror refresh - Refresh the mirror connection.
+- mirror status - Show mirror server status.
 For wired mirroring, use python ghost_mirror.py on your PC with --baud 460800 for CYD devices or --list to see available ports. For web-based mirroring, visit [ghostesp.net/serial](https://ghostesp.net/serial) and use the Screen Mirror tab.
 ## Input &amp; Identity
-- input — Show current button/encoder input state.
-- identify — Display board identification info (model, MAC address, build config).
-- time — Show current system time.
-- settime &lt;unix_timestamp&gt; — Set system time manually (seconds since the Unix epoch, e.g., settime 1704067200).
+- input &lt;left|right|up|down|select&gt; - Pump a synthetic joystick event into the input queue (used for automation and GhostLink).
+- identify - Print the fixed discovery token GHOSTESP_OK (board details are in chipinfo).
+- time - Show current system time.
+- settime &lt;unix_timestamp&gt; - Set system time manually (seconds since the Unix epoch, e.g., settime 1704067200).
 ## Flock Detection
-- flockscan — Start scanning for Flock Safety camera wireless signals.
-- flocklist — List detected Flock cameras with MAC prefix, signal strength, and confidence level.
-- flockstop — Stop Flock camera detection.
-Flock Safety cameras use known MAC prefixes (e.g., FC:A1:3E, F0:A1:C0). Detection is confidence-based: HIGH if wildcard probe is sent or SSID keyword matches, LOW if only OUI match.
+- flockscan - Start scanning for Flock Safety camera wireless signals.
+- flocklist - List detected Flock cameras with MAC prefix, signal strength, and confidence level.
+- flockstop - Stop Flock camera detection.
+Flock Safety cameras use known MAC prefixes (e.g., 70:C9:4E, 3C:91:80, D8:F3:BC for Flock; 58:8E:81, CC:CC:CC, EC:1B:BD for FS Ext Battery; CC:09:24, ED:C7:63, E8:CE:56 for Penguin). Detection is confidence-based: HIGH if wildcard probe is sent or SSID keyword matches, LOW if only OUI match.
 ## Camera
 Available on boards with CONFIG_HAS_CAMERA (XIAO ESP32-S3 Sense and compatible boards).
-- camerastream start — Start the MJPEG camera stream server.
-- camerastream stop — Stop the camera stream.
-- camerastream status — Show stream status and settings.
-- camerastream quality &lt;1-100&gt; — Set JPEG quality.
-- camerastream resolution &lt;name&gt; — Set resolution: QQVGA, QVGA, VGA, SVGA, XGA, SXGA, UXGA.
-- camerastream fps &lt;1-30&gt; — Set target frames per second.
-- motion start|stop|status — Start or stop motion detection.
-- motion threshold &lt;1-255&gt; — Set pixel difference threshold (higher = less sensitive).
-- motion interval &lt;100-10000&gt; — Set minimum time between frames in ms.
-- motion percent &lt;1-100&gt; — Set motion trigger percentage (higher = more motion required).
-- motion sample &lt;1-32&gt; — Set pixel sampling rate.
-- motion snap &lt;on|off&gt; — Enable or disable SD card snapshots on motion.
-- motion image &lt;on|off&gt; — Attach snapshot image to Discord webhook alerts.
-- motion discord &lt;url&gt; — Set Discord webhook URL for motion alerts.
-- motion cooldown &lt;0-3600000&gt; — Set minimum time between webhook alerts in milliseconds (max 1 hour). Persists across reboots.
+- camerastream start - Start the MJPEG camera stream server.
+- camerastream stop - Stop the camera stream.
+- camerastream status - Show stream status and settings.
+- camerastream quality &lt;1-100&gt; - Set JPEG quality.
+- camerastream resolution &lt;name&gt; - Set resolution: QQVGA, QVGA, VGA, SVGA, XGA, SXGA, UXGA.
+- camerastream fps &lt;1-30&gt; - Set target frames per second.
+- motion start|stop|status - Start or stop motion detection.
+- motion threshold &lt;1-255&gt; - Set pixel difference threshold (higher = less sensitive).
+- motion interval &lt;100-10000&gt; - Set minimum time between frames in ms.
+- motion percent &lt;1-100&gt; - Set motion trigger percentage (higher = more motion required).
+- motion sample &lt;1-32&gt; - Set pixel sampling rate.
+- motion snap &lt;on|off&gt; - Enable or disable SD card snapshots on motion.
+- motion image &lt;on|off&gt; - Attach snapshot image to Discord webhook alerts.
+- motion discord &lt;url|off&gt; / motion webhook &lt;url|off&gt; - Set or clear the Discord webhook URL for motion alerts (webhook is an alias).
+- motion cooldown &lt;0-3600000&gt; - Set minimum time between webhook alerts in milliseconds (max 1 hour). Persists across reboots.
 For full setup, tuning, SD snapshots, and Discord webhook configuration, see the [Motion Detector](/latest/camera/motion-detector/) guide.
 ## RGB
-- rgbmode &lt;effect|color|off&gt; — Run an LED effect immediately. Effects: rainbow, police, strobe, knight, off. Solid colors: red, green, blue, yellow, twh-purple, cyan, orange, white, pink.
-- setrgbmode &lt;normal|rainbow|stealth&gt; — Persist the LED mode across reboots (only accepts normal, rainbow, or stealth). Use rgbmode to set any mode temporarily.
-- setrgbpins &lt;r&gt; &lt;g&gt; &lt;b&gt; — Override discrete RGB GPIOs; pass the same pin for all three values to switch into single-wire NeoPixel mode on that data pin.
-- setrgbcount &lt;1-512&gt; — Persist the number of RGB LEDs connected so effects span the correct length. Reinitializes immediately if pins are already configured.
-- setneopixelbrightness &lt;0-100&gt; / getneopixelbrightness — Control NeoPixel intensity.
-## Status display (if present)
+- rgbmode &lt;effect|color|off&gt; - Run an LED effect immediately. Effects: rainbow, police, strobe, knight, off. Solid colors: red, green, blue, yellow, twh-purple, cyan, orange, white, pink.
+- setrgbmode &lt;normal|rainbow|stealth&gt; - Persist the LED mode across reboots (only accepts normal, rainbow, or stealth). Use rgbmode to set any mode temporarily.
+- setrgbpins &lt;r&gt; &lt;g&gt; &lt;b&gt; - Override discrete RGB GPIOs; pass the same pin for all three values to switch into single-wire NeoPixel mode on that data pin.
+- setrgbcount &lt;1-512&gt; - Persist the number of RGB LEDs connected so effects span the correct length. Reinitializes immediately if pins are already configured.
+- setneopixelbrightness &lt;0-100&gt; / getneopixelbrightness - Control NeoPixel intensity.
+## Status Display (If Present)
 Available on boards with an onboard OLED status display or when an external status display is configured.
-- statusidle [list|set &lt;mode&gt;] — View or change the status OLED idle animation when CONFIG_WITH_STATUS_DISPLAY and a status display are enabled.
-statusidle — Show the current idle animation and timeout.
-- statusidle list — List available idle animations.
-- statusidle set &lt;mode&gt; — Select the idle animation mode. Available modes: life, ghost, starfield, hud, matrix, ghosts, spiral, leaves, bouncing, or numeric 0-8.
-## IO expander buttons (if present)
+- clockstyle [digital|analog|segment|toggle|status] - Switch or report the Clock view face.
+- statusbarclock [on|off|toggle|status] - Show or hide the clock in the status bar centre.
+- statusidle [list|set &lt;mode&gt;] - View or change the status OLED idle animation when CONFIG_WITH_STATUS_DISPLAY and a status display are enabled.
+statusidle - Show the current idle animation and timeout.
+- statusidle list - List available idle animations.
+- statusidle set &lt;mode&gt; - Select the idle animation mode. Available modes: life, ghost, starfield, hud, matrix, ghosts, spiral, leaves, bouncing, or numeric 0-8.
+## IO Expander Buttons (If Present)
 Available on boards with CONFIG_USE_IO_EXPANDER. Three physical buttons (P10, P11 “Right button”, P12) can each run a custom CLI command or act as a joystick button when no command is set.
-- iobtn &lt;1|2|3&gt; [command] — View or set the command for button 1 (P10), 2 (P11), or 3 (P12). Without command, prints the current command (or “(none)”). With command, saves it and runs it on the next press. Example: iobtn 1 nfc read.
-- settings get io_btn_p10_cmd / settings set io_btn_p10_cmd &lt;value&gt; — Same for P10; use io_btn_p11_cmd and io_btn_p12_cmd for P11 and P12.
+- iobtn &lt;1|2|3&gt; [command] - View or set the command for button 1 (P10), 2 (P11), or 3 (P12). Without command, prints the current command (or “(none)”). With command, saves it and runs it on the next press. Example: iobtn 1 nfc read.
+- settings get io_btn_p10_cmd / settings set io_btn_p10_cmd &lt;value&gt; - Same for P10; use io_btn_p11_cmd and io_btn_p12_cmd for P11 and P12.
 On press, the device switches to the terminal view and runs the command. To use a button as a normal joystick action instead, clear its command (e.g. iobtn 1 &#34;&#34; or settings set io_btn_p10_cmd &#34;&#34;).
 On-device UI: Settings → IO Buttons lets you edit each button’s command with the keyboard; the current command is pre-filled when editing.
+## NFC
+Available on boards with CONFIG_NFC_PN532 or CONFIG_NFC_ST25R3916.
+- nfc backend [auto|pn532|st25r] - Show or set the local NFC backend.
+- nfc scan [parse] - Start a continuous ISO14443-A scan.
+- nfc once [parse] - Scan until one tag is found or 10 seconds elapse.
+- nfc save / nfc dump - Scan one tag and save a Flipper .nfc file.
+- nfc hardnested ... / nfc hn - Run a hardnested attack (known-key form).
+- nfc picopass [save] / nfc iclass - Scan for PicoPass/iCLASS tags (ST25R only).
+- nfc status / nfc stop - Show NFC task state or stop the current scan/emulation.
+- nfc emulate ... - Emulate a UID/ATQA/SAK, an NDEF URL/text, or a .nfc file (ST25R only).
+- nfctest [loop|parse|dump] - Single-shot or continuous scan for testing.
+Chameleon support requires CONFIG_NFC_CHAMELEON (default on for BLE builds):
+- chameleon ... - Talk to a Chameleon Ultra over BLE: connect/disconnect/status, firmware, devicemode, activeslot, setslot, slotinfo, battery, scanhf/scanlf/scanlfall/scanhidprox, mfdetect/mfprng, ntagdetect/ntagdump/saventag, reader/emulator, and readhf/savehf/savelf/savedump.
 ## Infrared
-- ir list [path] — List .ir files (default: /mnt/ghostesp/infrared/remotes).
-- ir show &lt;path|remote_index&gt; — Parse and display signals from an IR file. After ir list, you can pass a numeric remote index.
-- ir send &lt;path|remote_index&gt; [button_index] — Transmit a signal from a file. Use remote_index from ir list and optional button_index from ir show.
-- ir universals list [-all] — List universal IR files and, with -all, all built‑in universal signals.
-- ir universals send &lt;index&gt; — Transmit a built‑in universal signal by index (see ir universals list -all).
-- ir universals sendall &lt;file|TURNHISTVOFF&gt; &lt;button_name&gt; [delay_ms] — Transmit all signals for a named button from a universal file or the built‑in TURNHISTVOFF set. The built-in signals use the name POWER (e.g., ir universals sendall TURNHISTVOFF POWER). Can be stopped with stop.
-- ir rx [timeout] — Wait up to timeout seconds (default 60) for a single IR signal, print it (decoded or RAW), then stop.
-- ir learn [path] — Wait for a signal (10s). Without path, auto-create a new .ir file under /mnt/ghostesp/infrared/remotes; with path, append the learned signal to that file.
-- ir dazzler [stop] — Start/stop continuous IR dazzler flood. Responses are machine-parsable: IR_DAZZLER:STARTED, IR_DAZZLER:FAILED, IR_DAZZLER:ALREADY_RUNNING, IR_DAZZLER:STOPPING, IR_DAZZLER:NOT_RUNNING.
+Available on boards with CONFIG_HAS_INFRARED (RX added when CONFIG_HAS_INFRARED_RX is set).
+- ir list [path] - List .ir files (default: /mnt/ghostesp/infrared/remotes).
+- ir show &lt;path|remote_index&gt; - Parse and display signals from an IR file. After ir list, you can pass a numeric remote index.
+- ir send &lt;path|remote_index&gt; [button_index] - Transmit a signal from a file. Use remote_index from ir list and optional button_index from ir show.
+- ir universals list [-all] - List universal IR files and, with -all, all built‑in universal signals.
+- ir universals send &lt;index&gt; - Transmit a built‑in universal signal by index (see ir universals list -all).
+- ir universals sendall &lt;file|TURNHISTVOFF&gt; &lt;button_name&gt; [delay_ms] - Transmit all signals for a named button from a universal file or the built‑in TURNHISTVOFF set. The built-in signals use the name POWER (e.g., ir universals sendall TURNHISTVOFF POWER). Can be stopped with stop.
+- ir rx [timeout] - Wait up to timeout seconds (default 60) for a single IR signal, print it (decoded or RAW), then stop.
+- ir inline - Show usage for inline mode, where a single IR message is sent between [IR/BEGIN] and [IR/CLOSE] markers on the UART stream.
+- irpin [tx|rx &lt;pin|-1&gt;] - Show or override the IR TX/RX GPIO (persisted; -1 clears the override). TX changes apply after reboot; RX changes apply at the next IR learn.
+- ir learn [path] - Wait for a signal (10s). Without path, auto-create a new .ir file under /mnt/ghostesp/infrared/remotes; with path, append the learned signal to that file.
+- ir dazzler [stop] - Start/stop continuous IR dazzler flood. Responses are machine-parsable: IR_DAZZLER:STARTED, IR_DAZZLER:FAILED, IR_DAZZLER:ALREADY_RUNNING, IR_DAZZLER:STOPPING, IR_DAZZLER:NOT_RUNNING.
 - [IR/BEGIN] / [IR/CLOSE] (UART IR envelope)
 Usage: Send [IR/BEGIN], then a single IR message body, then [IR/CLOSE] on the same UART stream to trigger a one‑off transmit.
 -
@@ -358,82 +439,112 @@ CLI response on success: IR: send OK, followed by a compact summary:
 Parsed: IR: signal [Name] protocol=NEC addr=0x0000FFFF cmd=0x0000E718
 - Raw: IR: signal raw len=N freq=38000Hz duty=0.33
 ## GPS
-- gpspin [pin] — View or set the GPS RX pin for external GPS modules. Without arguments, shows current pin. Setting persists to NVS; restart GPS commands to apply.
-- gpsinfo [-s] — Stream current fix, satellites, and speed; pass -s to stop the display task.
-- startwd [-s] [--helper] [--channels &lt;csv&gt;] [--hop &lt;ms&gt;] [--weighted] — Start wardriving (logs Wi-Fi/GPS to CSV). Use -s to stop. Use --helper to enable the GhostLink split-channel helper. Use --channels to specify a CSV of channels to hop (e.g., 1,6,11). Use --hop to set the channel hop interval in ms (default: 125). Use --weighted to enable 5GHz weighted scanning.
+- gpspin [pin] - View or set the GPS RX pin for external GPS modules. Without arguments, shows current pin. Setting persists to NVS; restart GPS commands to apply.
+- gpsbaud &lt;auto|0|4800|9600|19200|38400|57600|115200&gt; - Set the GPS baud rate or enable auto-detect; 0 resets to the build default. Restart GPS to apply.
+- gpsinfo [-s] - Stream current fix, satellites, and speed; pass -s to stop the display task.
+- startwd [-s] [--active|--monitor] [--helper] [--channels &lt;csv&gt;] [--hop &lt;ms&gt;] [--weighted] [--primary-channels &lt;csv&gt;] - Start wardriving (logs Wi-Fi/GPS to CSV). Use -s to stop. --active (default) uses driver active scans; --monitor selects beacon/probe capture. --helper enables the GhostLink split-channel helper and honours --channels (CSV to hop, e.g. 1,6,11), --hop (hop interval ms, default 125), --weighted (5 GHz weighted scanning), and --primary-channels; a primary startwd ignores the hop/weighted options.
+- wdstream start [-wifi] [-ble] [-i &lt;ms&gt;] [-ch auto|1|1,6,11] / wdstream stop / wdstream status - Stream Wi-Fi/BLE observations over serial for companion-app wardriving (default Wi-Fi only; -ble selects BLE, and both flags together need PSRAM).
 ## Ethernet
 (Requires CONFIG_WITH_ETHERNET)
 ### Connection Management
-- ethup — Initialize and bring up Ethernet interface; waits for link establishment and DHCP assignment.
-- ethdown — Deinitialize and bring down Ethernet interface.
-- ethinfo — Display Ethernet connection information (status, IP address, netmask, gateway, DNS servers, DHCP server).
-- webuiap [on|off|toggle|status] — Restrict the web UI to clients connected to the onboard AP subnet (AP-only mode).
+- ethup - Initialize and bring up Ethernet interface; waits for link establishment and DHCP assignment.
+- ethdown - Deinitialize and bring down Ethernet interface.
+- ethinfo - Display Ethernet connection information (status, IP address, netmask, gateway, DNS servers, DHCP server).
 ### Network Scanning
-- ethfp — Fingerprint network hosts using mDNS, NetBIOS, and SSDP (discovers Apple devices, Chromecasts, printers, Windows PCs, routers, smart TVs).
-- etharp — Perform ARP scan on local Ethernet network subnet (1-254) to discover active hosts.
-- ethping — Perform ICMP ping scan on local Ethernet network subnet (1-254) to find alive hosts.
-- ethports [ip] [all|start-end] — Scan TCP ports on a target IP address.
+- ethfp - Fingerprint network hosts using mDNS, NetBIOS, and SSDP (discovers Apple devices, Chromecasts, printers, Windows PCs, routers, smart TVs).
+- etharp - Perform ARP scan on local Ethernet network subnet (1-254) to discover active hosts.
+- ethping - Perform ICMP ping scan on local Ethernet network subnet (1-254) to find alive hosts.
+- ethports [ip] [all|start-end] - Scan TCP ports on a target IP address.
 Without arguments: scans common ports on the gateway.
-- local: scan the local device itself.
+- local: scan the gateway (same target as no arguments); local all scans the full 1-65535 range on the gateway.
 - all: scan all ports (1-65535).
 - start-end: custom port range (e.g., 80-443).
 - Examples: ethports, ethports 192.168.1.1, ethports 192.168.1.1 all, ethports 192.168.1.1 80-443.
 ### Network Tools
-- ethdns &lt;hostname&gt; — Perform forward DNS lookup.
-- ethdns reverse &lt;ip_address&gt; — Perform reverse DNS lookup.
-- ethtrace &lt;hostname_or_ip&gt; [max_hops] — Perform traceroute to a target host (default: 30 hops, max: 64).
-- ethserv [ip_address] — Service discovery and banner grabbing on a target IP (default: gateway). Scans common services (FTP, SSH, Telnet, SMTP, HTTP, HTTPS, etc.).
-- ethhttp &lt;url&gt; [lines|all] — Send HTTP/HTTPS GET request to a server and display response.
+- ethdns &lt;hostname&gt; - Perform forward DNS lookup.
+- ethdns reverse &lt;ip_address&gt; - Perform reverse DNS lookup.
+- ethtrace &lt;hostname_or_ip&gt; [max_hops] - Perform traceroute to a target host (default: 30 hops, max: 64).
+- ethserv [ip_address] - Service discovery and banner grabbing on a target IP (default: gateway). Scans common services (FTP, SSH, Telnet, SMTP, HTTP, HTTPS, etc.).
+- ethhttp &lt;url&gt; [lines|all] - Send HTTP/HTTPS GET request to a server and display response.
 Default: shows first 25 lines
 - [lines]: show first N lines (e.g., ethhttp http://example.com 50)
 - all: show full response (e.g., ethhttp http://example.com all)
 - Supports both HTTP and HTTPS (TLS 1.2)
 - Examples: ethhttp http://example.com, ethhttp https://www.google.com 100, ethhttp http://192.168.1.1/index.html all
-- ethntp [ntp_server] — Query NTP server and synchronize system time. Default server: pool.ntp.org. Examples: ethntp, ethntp pool.ntp.org, ethntp time.google.com.
+- ethntp [ntp_server] - Query NTP server and synchronize system time. Default server: pool.ntp.org. Examples: ethntp, ethntp pool.ntp.org, ethntp time.google.com.
 ### Configuration
-- ethconfig dhcp — Use DHCP for automatic IP assignment.
-- ethconfig static &lt;ip&gt; &lt;netmask&gt; &lt;gateway&gt; — Set static IP configuration.
+- ethconfig dhcp - Use DHCP for automatic IP assignment.
+- ethconfig static &lt;ip&gt; &lt;netmask&gt; &lt;gateway&gt; - Set static IP configuration.
 Example: ethconfig static 192.168.1.100 255.255.255.0 192.168.1.1
-- ethconfig show — Show current IP configuration.
-- ethmac — Display current MAC address.
-- ethmac set &lt;xx:xx:xx:xx:xx:xx&gt; — Set Ethernet MAC address (may require reinitialization).
+- ethconfig show - Show current IP configuration.
+- ethmac - Display current MAC address.
+- ethmac set &lt;xx:xx:xx:xx:xx:xx&gt; - Set Ethernet MAC address (may require reinitialization).
 Example: ethmac set 02:00:00:00:00:01
 ### Statistics
-- ethstats — Display Ethernet network statistics (link status, IP info, MAC address, packet statistics, ARP statistics).
+- ethstats - Display Ethernet network statistics (link status, IP info, MAC address, packet statistics, ARP statistics).
+- ethpoison &lt;start|stop|list|cookies|creds|status&gt; - ARP-poison the Ethernet subnet for MITM. list, cookies, and creds show captured data; status reports whether it is running.
 ## WiGLE
-- wigle API &lt;APIName&gt;:&lt;APIToken&gt; — Set WiGLE credentials. Get your token from [wigle.net/account](https://wigle.net/account).
-- wigle auto &lt;on|off&gt; — Enable or disable automatic upload when WiFi STA connects.
-- wigle donate &lt;on|off&gt; — Enable or disable the donate flag (recommended: on).
-- wigle show — Display current WiGLE settings and API key status.
-- wigle list — List stored uploaded CSV memory.
-- wigle files — List pending CSV files in /mnt/ghostesp/gps/.
-- wigle upload &lt;filename&gt; — Upload a CSV file to WiGLE.
-- wigle upload all — Upload all pending CSV files.
-- wigle stats — Show WiGLE account statistics.
+- wigle API &lt;APIName&gt;:&lt;APIToken&gt; - Set WiGLE credentials. Get your token from [wigle.net/account](https://wigle.net/account).
+- wigle auto &lt;on|off&gt; - Enable or disable automatic upload when Wi-Fi STA connects.
+- wigle donate &lt;on|off&gt; - Enable or disable the donate flag (recommended: on).
+- wigle show - Display current WiGLE settings and API key status.
+- wigle list - List stored uploaded CSV memory.
+- wigle files [page] - List pending CSV files in /mnt/ghostesp/gps/ (8 per page).
+- wigle upload &lt;filename&gt; - Upload a CSV file to WiGLE.
+- wigle upload all - Upload all pending CSV files.
+- wigle stats - Show WiGLE account statistics.
 ## Settings
-- settings list — Dump available configuration keys.
-- settings help — Show supported subcommands.
-- settings get &lt;key&gt; / settings set &lt;key&gt; &lt;value&gt; — Inspect or change individual options.
-- settings reset [key] — Restore all settings or a specific key to defaults.
-- loadconfig — Load settings from config.cfg on the SD card (SSID, PASSKEY, WiGLE token, auto-upload, donate, auto-reconnect).
+- settings list - Dump available configuration keys.
+- settings help - Show supported subcommands.
+- settings get &lt;key&gt; / settings set &lt;key&gt; &lt;value&gt; - Inspect or change individual options.
+- settings reset [key] - Restore all settings or a specific key to defaults.
+- settings backup export|import - Export or import all settings to/from the SD card.
+- loadconfig - Load settings from config.cfg on the SD card (SSID, PASSKEY, WiGLE token, auto-upload, donate, auto-reconnect).
 ## Native SD Apps
 Available on builds with CONFIG_ENABLE_NATIVE_SD_APPS.
-- apps list — List all discovered SD apps.
-- apps reload — Rescan the apps and packages directories for new or removed apps.
-- apps info &lt;id&gt; — Show manifest details and failure diagnostic state for an app.
-- apps run &lt;id&gt; — Launch an app by ID.
-- apps stop — Stop the currently running app.
-- apps reset &lt;id&gt; — Clear failure diagnostic state for an app.
+- apps list - List all discovered SD apps.
+- apps reload - Rescan the apps and packages directories for new or removed apps.
+- apps info &lt;id&gt; - Show manifest details and failure diagnostic state for an app.
+- apps run &lt;id&gt; - Launch an app by ID.
+- apps stop - Stop the currently running app.
+- apps reset &lt;id&gt; - Clear failure diagnostic state for an app.
+## GhostScript
+Available on builds with CONFIG_ENABLE_GHOSTSCRIPT.
+- script list - List runnable GhostScripts on the SD card.
+- script run &lt;index&gt; - Launch a listed GhostScript.
+- script status - Show the active GhostScript state.
+- script stop - Stop the active GhostScript.
+## Peer Firmware Update (OTA)
+Available on OTA-capable builds. These are the peer-side protocol commands used over GhostLink:
+- otarecv &lt;size&gt; &lt;sha256&gt; - Prepare the peer to receive a firmware image.
+- otastatus - Report the peer’s update result (PENDING, DONE, or an error).
+- otaabort - Abort an in-progress peer update.
+- otainfo - Report the peer’s build number and firmware version.
+## P4 Hosted C6 Update
+- c6ota [force] - Check for and apply a firmware update to the C6 hosted by an ESP32-P4; force reflashes even when the C6 is already current. ESP32-P4 builds only.
 ## BadUSB
-- badusb list — List scripts in /mnt/ghostesp/badusb/.
-- badusb run &lt;filename&gt; — Run a script from /mnt/ghostesp/badusb/.
-- badusb stop — Stop the current BadUSB run.
-- badusb exec &lt;size&gt; — Prepare for a streamed script.
-- badusb set_vid &lt;hex&gt; — Set USB VID for the next run.
-- badusb set_pid &lt;hex&gt; — Set USB PID for the next run.
-- badusb set_mfr &lt;text&gt; — Set USB manufacturer for the next run.
-- badusb set_prod &lt;text&gt; — Set USB product for the next run.
-- badusb set_rand &lt;0|1&gt; — Toggle per-run USB detail randomization.
-- badusb set_layout &lt;n&gt; — Set keyboard layout for the next run (0 US, 1 DE, 2 FR, 3 UK, 4 ES).
+Available on boards with CONFIG_HAS_BADUSB (local HID mode; VSENSE detection is Banshee S3 only).
+- badusb list - List scripts in /mnt/ghostesp/badusb/.
+- badusb run &lt;filename&gt; / badusb run builtin - Run a script from /mnt/ghostesp/badusb/, or the built-in DuckyScript payload.
+- badusb stop - Stop the current BadUSB run.
+- badusb exec &lt;size&gt; - Prepare for a streamed script.
+- badusb type &lt;text&gt; - Type text through the active keyboard mode.
+- badusb type_char &lt;ascii&gt; - Type a single printable ASCII character (1-126).
+- badusb keysend &lt;modifier&gt; &lt;keycode&gt; - Send a single HID keypress (numeric modifier and keycode).
+- badusb jiggle_start / badusb jiggle_stop - Start or stop the mouse jiggler.
+- badusb keyboard_start / badusb keyboard_stop - Enable or disable USB keyboard mode.
+- badusb trackpad_start / badusb trackpad_stop - Start or stop USB trackpad (mouse) mode.
+- badusb trackpad_move &lt;dx&gt; &lt;dy&gt; - Send a relative mouse move (each axis clamped to int8).
+- badusb trackpad_button &lt;mask&gt; - Set held mouse buttons (1=L, 2=R, 4=M; 0 releases).
+- badusb trackpad_wheel &lt;delta&gt; - Send a vertical mouse wheel delta (int8).
+- badusb set_vid &lt;hex&gt; - Set USB VID for the next run.
+- badusb set_pid &lt;hex&gt; - Set USB PID for the next run.
+- badusb set_mfr &lt;text&gt; - Set USB manufacturer for the next run.
+- badusb set_prod &lt;text&gt; - Set USB product for the next run.
+- badusb set_rand &lt;0|1&gt; - Toggle per-run USB detail randomization.
+- badusb set_layout &lt;n&gt; - Set keyboard layout for the next run (0 US, 1 DE, 2 FR, 3 UK, 4 ES).
 ## USB Keyboard
-- usbkbd [on|off|status] — Enable, disable, or check USB HID keyboard host mode (ESP32-S3 only).
+- usbkbd [on|off|status] - Enable, disable, or check USB HID keyboard host mode (ESP32-S3 only).
+## USB SD Passthrough
+Available on boards with CONFIG_HAS_USB_MSC_SD.
+- usbsd [on|off|toggle|status] - Toggle USB SD passthrough. With no argument it toggles; when on, the SD card is handed to the USB host and the serial console detaches until usbsd off (use Wi-Fi/WebUI to exit).

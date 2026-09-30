@@ -11,7 +11,7 @@ Search index: /search-index.json
 
 ## On this page
 
-- [Decoded protocols](#decoded-protocols)
+- [Decoded Protocols](#decoded-protocols)
 - [Princeton](#princeton)
 - [CAME](#came)
 - [Nice Flo](#nice-flo)
@@ -42,15 +42,14 @@ Search index: /search-index.json
 - [Treadmill37](#treadmill37)
 - [KeyFinder](#keyfinder)
 - [Nord ICE](#nord-ice)
-- [Raw signal fallback](#raw-signal-fallback)
-- [Protocol detection](#protocol-detection)
+- [Raw Signal Fallback](#raw-signal-fallback)
 - [Notes](#notes)
 - [Troubleshooting](#troubleshooting)
 
 ---
 
-GhostESP automatically attempts to decode captured signals using 30&#43; common SubGHz protocols. When a signal is successfully decoded, it can be reconstructed and transmitted reliably.
-## Decoded protocols
+GhostESP automatically attempts to decode captured signals using 30&#43; common SubGHz protocols, testing a capture against all supported decoders simultaneously. When a protocol matches with sufficient confidence, the signal is decoded and its protocol name, bit count, and decoded code are displayed; it can then be reconstructed and transmitted reliably.
+## Decoded Protocols
 ### Princeton
 - Common use: Garage door remotes, wireless sensors
 - Frequency: 315 MHz, 433.92 MHz
@@ -179,13 +178,11 @@ GhostESP automatically attempts to decode captured signals using 30&#43; common 
 - Bit length: 33 bits
 - Decoded fields: Serial number and button
 Note: The newer fixed-code protocols above (Ansonic through Nord ICE) are decoded on any supported band, so a single fixed frequency is not listed.
-## Raw signal fallback
+## Raw Signal Fallback
 If a signal cannot be decoded with any known protocol, GhostESP saves it as raw timing data. Raw captures can still be transmitted but:
 - Require cleaner captures for reliable replay
 - Are more sensitive to timing and environmental factors
 - Cannot be edited or modified as easily as decoded signals
-## Protocol detection
-GhostESP uses a stream decoder engine that tests captured signals against all supported protocols simultaneously. When a protocol matches with sufficient confidence, the signal is decoded and the protocol name, bit count, and decoded code are displayed.
 ## Notes
 - Protocol detection is automatic; no manual selection is required.
 - Some protocols share similar timing; detection may not always be 100% accurate.

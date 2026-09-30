@@ -37,19 +37,19 @@ Native SD Apps
 LoRa
 Clear filters
 No boards match the selected filters.
-Board | 
-Bluetooth | 
-NFC (PN532) | 
-NFC (Chameleon) | 
-IR TX | 
-IR RX | 
-GPS Default | 
-Keyboard | 
-Display | 
-SD Default | 
-OTA | 
-Native SD Apps | 
-LoRa | 
+Board |
+Bluetooth |
+NFC (PN532) |
+NFC (Chameleon) |
+IR TX |
+IR RX |
+GPS Default |
+Keyboard |
+Display |
+SD Default |
+OTA |
+Native SD Apps |
+LoRa |
 CYD2USB | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✓ | Manual | ✗ | ✗ |
 CYDMicroUSB | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✓ | Manual | ✗ | ✗ |
 CYDDualUSB | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✓ | Manual | ✗ | ✗ |
@@ -57,8 +57,8 @@ CYD2432S028R | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✓ | Manual | �
 CYD 2.4″ variants | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✓ | Manual | ✗ | ✗ |
 Waveshare 7″ | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✗ |
 Crowtech 7″ | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✗ | Manual | ✗ | ✗ |
-CrowPanel 4.2″ E-paper | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | E-paper 400×300 | ✓ | Manual | ✗ | ✗ |
-CrowPanel 5.79″ E-paper | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | E-paper 792×272 | ✓ | Manual | ✗ | ✗ |
+CrowPanel 4.2″ E-paper | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✓ | E-paper 400×300 | ✓ | Manual | ✓ | ✗ |
+CrowPanel 5.79″ E-paper | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✓ | E-paper 792×272 | ✓ | Manual | ✓ | ✗ |
 CrowPanel Advance 2.4″ | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ |
 CrowPanel Advance 2.8″ | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ |
 CrowPanel Advance 3.5″ | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ✗ |
@@ -75,9 +75,9 @@ MarauderV4 | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✗ | ✓ | ✗ | �
 Marauder V8 | ✓ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✓ | ✓ | Manual | ✓ | ✗ |
 Marauder Pancake | ✓ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✓ | ✓ | Manual | ✓ | ✗ |
 MarauderV6 | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✗ | Manual | ✗ | ✗ |
-AwokMini | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✓ | ✗ | Manual | ✗ | ✗ |
+AwokMini | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✓ | ✗ | Manual | ✓ | ✗ |
 Awok V5 | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✗ | Manual | ✗ | ✗ |
-T-Dongle-S3 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ |
+T-Dongle-S3 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | ✗ | ✗ |
 T-Dongle-C5 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ✗ |
 T-Display S3 Touch | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✓ | Manual | ✗ | ✗ |
 S3TWatch | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ | ✗ | ✓ | has 4MB vfs partition | ✓ | ✗ | ✗ |
@@ -85,13 +85,13 @@ TEmbed C1101 | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ |
 Banshee | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | Manual | ✓ | ✗ |
 GhostBoard | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ | Manual | ✗ | ✗ |
 Poltergeist | ✓ | ✗ | ✓ | ✓ | ✓ | ✗ | ✗ | Status Display | ✓ | Manual | ✗ | ✗ |
-T-Deck | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | Manual | ✓ | ✗ |
-JCMK DevBoardPro | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✓ | Manual | ✗ | ✗ |
+T-Deck | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | Manual | ✓ | ✓ |
+JCMK DevBoardPro | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ | Manual | ✗ | ✗ |
 RabbitLabs Minion | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ | Manual | ✗ | ✗ |
 Lolin S3 Pro | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ | Manual | ✓ | ✗ |
 XIAO ESP32-S3 Sense | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✓ | ✗ | ✓ | ✓ | ✓ | ✗ |
 XIAO ESP32-C5 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | Manual | ✓ | ✗ |
-Flipper JCMK GPS | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ | Manual | ✗ | ✗ |
+Flipper JCMK GPS | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ | Manual | ✗ | ✗ |
 ESP32 (generic) | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ | Manual | ✗ | ✗ |
 ESP32-S2 (generic) | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ | Manual | ✗ | ✗ |
 ESP32-C3 (generic) | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ | Manual | ✗ | ✗ |
@@ -99,12 +99,18 @@ ESP32-S3 (generic) | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ | Manua
 ESP32-C5 (generic) | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ | Manual | ✗ | ✗ |
 ESP32-C6 (generic) | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ | Manual | ✗ | ✗ |
 Heltec V3 | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | Status Display | ✓ | Manual | ✗ | ✓ |
-M5Stack CoreS3-SE | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ |
-M5Stack AtomS3R | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ | ✓ | ✓ | has 1MB vfs partition | Manual | ✗ | ✗ |
-OTA: ✓ means the release build uses a dual-partition OTA layout. Manual means USB/manual flashing is required for that release build. Banshee C5 self-OTA (previously Updater &#43; peer) is disabled in v2.1.2 due to bad UX and flash overflow; use USB/manual flashing - OTA will return in a future leaner layout.
+M5Stack CoreS3-SE | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✗ |
+M5Stack AtomS3R | ✓ | ✗ | ✓ | ✓ | ✗ | ✓ | ✗ | ✓ | has 1MB vfs partition | Manual | ✗ | ✗ |
+OTA: ✓ means the release build uses a dual-partition OTA layout. Manual means USB/manual flashing is required for that release build. Banshee C5 self-OTA (previously Updater &#43; peer) is disabled in v2.2 BETA due to bad UX and flash overflow; use USB/manual flashing - OTA will return in a future leaner layout.
 Native SD Apps: ✓ means the release build supports loading native .gapp apps from SD.
 GPS Default / SD Default: these columns describe the release build’s default or known board wiring. GPS and SD card pins can be configured at runtime on most builds, so ✗ does not mean the feature is impossible on custom wiring.
-M5Stack Grove ports: the M5Stack CoreS3-SE and AtomS3R configs expose their HY2.0-4P Grove connectors on I2C port 1 (PORT.A: SDA=G2, SCL=G1; the CoreS3-SE also has PORT.B G8/G9 and PORT.C G17/G18). Plug an ST25R3916 NFC module (I2C, 0x50) and/or an M5Stack ENV III unit (SHT30 0x44 &#43; QMP6988 0x70) into Grove PORT.A and open the NFC or ENV III app — both devices share the same bus.
+M5Stack Grove ports: the M5Stack CoreS3-SE and AtomS3R configs expose their HY2.0-4P Grove connectors on I2C port 1 (PORT.A: SDA=G2, SCL=G1; the CoreS3-SE also has PORT.B G8/G9 and PORT.C G17/G18). Plug an ST25R3916 NFC module (I2C, 0x50) and/or an M5Stack ENV III unit (SHT30 0x44 &#43; QMP6988 0x70) into Grove PORT.A and open the NFC or ENV III app - both devices share the same bus.
+Additional feature availability: some features are not represented in the table above.
+- Ethernet (CONFIG_WITH_ETHERNET) is enabled only on Banshee S3.
+- Native USB SD passthrough (usbsd) is present only on builds with CONFIG_HAS_USB_MSC_SD.
+- USB keyboard host mode (usbkbd) is ESP32-S3 only.
+- Local BadUSB (CONFIG_HAS_BADUSB) is built for Cardputer, Cardputer ADV, CrowPanel 1.28″ Rotary, T-Dongle-S3, TEmbed C1101, and Banshee S3. VSENSE host detection is Banshee S3 only; Banshee C5 is a remote-HID build without local BadUSB.
+- Chameleon NFC (CONFIG_NFC_CHAMELEON) is on by default for builds with BLE unless a profile explicitly disables it.
 ## Camera Support
 - XIAO ESP32-S3 Sense currently has the dedicated camera-enabled build and supports the [Motion Detector](/latest/camera/motion-detector/) feature.
 - The current motion detector implementation uses QQVGA grayscale capture for low RAM usage and fast comparisons.

@@ -1,5 +1,5 @@
 Title: Hardware Integration
-Description: Understanding hardware quirks and bus conflicts in GhostESP.
+Description: Understanding hardware quirks and bus conflicts in GhostESP
 URL: /latest/development/hardware-integration/
 Version: latest
 Section: Development
@@ -7,7 +7,7 @@ Search index: /search-index.json
 
 # Hardware Integration
 
-> Understanding hardware quirks and bus conflicts in GhostESP.
+> Understanding hardware quirks and bus conflicts in GhostESP
 
 ## On this page
 
@@ -36,7 +36,6 @@ Search index: /search-index.json
 - [SPI Bus Sharing](#spi-bus-sharing)
 - [Infrared](#infrared)
 - [Pin Configuration (Infrared)](#pin-configuration-infrared)
-- [No Bus Conflicts](#no-bus-conflicts)
 - [Troubleshooting Bus Conflicts](#troubleshooting-bus-conflicts)
 - [Symptoms](#symptoms)
 - [Solutions](#solutions)
@@ -48,13 +47,13 @@ GhostESP supports many hardware configurations, but some combinations require sp
 Some boards use an I2C IO expander to provide additional GPIO pins for buttons, joysticks, or other peripherals.
 ### Shared I2C Bus
 The IO expander typically shares its I2C bus with:
-- Status display (OLED) — Secondary display on boards like Heltec V3
-- Compass (QMC6309) — If configured on the expander
+- Status display (OLED) - Secondary display on boards like Heltec V3
+- Compass (QMC6309) - If configured on the expander
 ### Configuration
 In menuconfig under Ghost ESP Options → Misc Options:
-- CONFIG_USE_IO_EXPANDER — Enable TCA9535 IO expander
-- CONFIG_IO_EXPANDER_SDA_PIN / CONFIG_IO_EXPANDER_SCL_PIN — I2C pins
-- CONFIG_IO_EXPANDER_I2C_ADDR — I2C address (default 0x74)
+- CONFIG_USE_IO_EXPANDER - Enable TCA9535 IO expander
+- CONFIG_IO_EXPANDER_SDA_PIN / CONFIG_IO_EXPANDER_SCL_PIN - I2C pins
+- CONFIG_IO_EXPANDER_I2C_ADDR - I2C address (default 0x74)
 ### Code Considerations
 When the compass is on the IO expander (CONFIG_COMPASS_ON_EXPANDER), I2C communication uses bit-banged GPIO through the expander rather than hardware I2C. This is slower but allows pin expansion.
 ## Shared TFT/SD SPI Bus
@@ -71,7 +70,7 @@ The SD card manager coordinates with LVGL to avoid bus conflicts by suspending t
 - Separate SPI buses are recommended for best performance
 ### Configuring
 In menuconfig under Ghost ESP Options → SPI and MMC Configuration:
-- CONFIG_SHARED_TFT_SD_SPI — Enable shared bus coordination
+- CONFIG_SHARED_TFT_SD_SPI - Enable shared bus coordination
 ## Multiple SPI Buses
 ESP32 chips have multiple SPI controllers, but they must be allocated carefully:
 SPI Host |
@@ -145,20 +144,19 @@ CONFIG_ETH_W5500_MISO_PIN=5
 CONFIG_ETH_W5500_SCK_PIN=4
 CONFIG_ETH_W5500_CS_PIN=15
 CONFIG_ETH_W5500_INT_PIN=7 # Optional, -1 to disable
+CONFIG_ETH_W5500_SPI_HOST=3 # SPI host: 2=SPI2, 3=SPI3 (default)
 ### SPI Bus Sharing
 If Ethernet shares SPI with display or SD:
 - Use a different CS pin for each device
 - Consider SPI clock speed compatibility
 - May require CONFIG_SHARED_TFT_SD_SPI style coordination
 ## Infrared
-IR TX/RX uses RMT (Remote Control Transceiver) peripheral, which is separate from SPI.
+IR TX/RX uses the RMT (Remote Control Transceiver) peripheral, which is independent of SPI and I2C, so IR can operate alongside display, SD, and other peripherals without coordination.
 ### Pin Configuration (Infrared)
 CONFIG_HAS_INFRARED=y
 CONFIG_INFRARED_LED_PIN=0 # TX pin
 CONFIG_HAS_INFRARED_RX=y
 CONFIG_INFRARED_RX_PIN=0 # RX pin
-### No Bus Conflicts
-RMT is independent of SPI and I2C, so IR can operate alongside display, SD, and other peripherals without coordination.
 ## Troubleshooting Bus Conflicts
 ### Symptoms
 - Display corruption during SD writes

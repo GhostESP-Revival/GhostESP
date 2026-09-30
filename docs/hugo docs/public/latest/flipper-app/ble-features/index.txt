@@ -1,5 +1,5 @@
 Title: BLE Features
-Description: Bluetooth Low Energy operations available in the Flipper Zero companion app.
+Description: Bluetooth Low Energy operations available in the Flipper Zero companion app
 URL: /latest/flipper-app/ble-features/
 Version: latest
 Section: Flipper Zero App
@@ -8,7 +8,7 @@ Search index: /search-index.json
 
 # BLE Features
 
-> Bluetooth Low Energy operations available in the Flipper Zero companion app.
+> Bluetooth Low Energy operations available in the Flipper Zero companion app
 
 ## On this page
 

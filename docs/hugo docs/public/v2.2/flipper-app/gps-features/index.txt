@@ -1,0 +1,31 @@
+Title: GPS Features
+Description: GPS tracking and wardriving capabilities in the Flipper Zero companion app
+URL: /v2.2/flipper-app/gps-features/
+Version: v2.2
+Section: Flipper Zero App
+Keywords: gps, wardriving, location, tracking, coordinates
+Search index: /search-index.json
+
+# GPS Features
+
+> GPS tracking and wardriving capabilities in the Flipper Zero companion app
+
+## On this page
+
+- [GPS Information](#gps-information)
+- [Wardriving Capabilities](#wardriving-capabilities)
+
+---
+
+## GPS Information
+- Real-time Position: View current latitude and longitude
+- Altitude Monitoring: Track elevation above sea level
+- Speed Tracking: Monitor current movement speed
+- Direction: Display heading/bearing
+- Signal Quality: View GPS signal strength and satellite count
+- Satellite Status: See connected satellites
+## Wardriving Capabilities
+- Wi-Fi Wardriving: Log Wi-Fi networks with GPS coordinates (CSV export)
+- BLE Wardriving: Log BLE devices with GPS coordinates (CSV export)
+- Combined Mapping: Map both networks and devices on a single view
+Start a session from GPS → Wardriving → Start Wardriving; see the [Usage Guide](/v2.2/flipper-app/usage/) for the full walkthrough. If GPS isn’t reporting, see [Troubleshooting](/v2.2/flipper-app/troubleshooting/).

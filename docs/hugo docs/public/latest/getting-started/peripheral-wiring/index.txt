@@ -1,5 +1,5 @@
 Title: Wiring Modules and Peripherals
-Description: Find the pins your board uses for CC1101, NRF24, NFC, GPS, and SD cards, and wire add-on modules safely.
+Description: Find the pins your board uses for CC1101, NRF24, NFC, GPS, and SD cards, and wire add-on modules safely
 URL: /latest/getting-started/peripheral-wiring/
 Version: latest
 Section: Getting Started
@@ -8,13 +8,12 @@ Search index: /search-index.json
 
 # Wiring Modules and Peripherals
 
-> Find the pins your board uses for CC1101, NRF24, NFC, GPS, and SD cards, and wire add-on modules safely.
+> Find the pins your board uses for CC1101, NRF24, NFC, GPS, and SD cards, and wire add-on modules safely
 
 ## On this page
 
-- [What this does](#what-this-does)
 - [Do I need this page?](#do-i-need-this-page)
-- [Before you start](#before-you-start)
+- [Prerequisites](#prerequisites)
 - [Find your board&amp;rsquo;s pins](#find-your-boards-pins)
 - [SD card (changeable at runtime)](#sd-card-changeable-at-runtime)
 - [CC1101 SubGHz](#cc1101-subghz)
@@ -33,17 +32,15 @@ Search index: /search-index.json
 
 ---
 
-## What this does
-This page explains how GhostESP maps add-on modules to ESP32 pins, and how to find the exact pins your board is already using.
+GhostESP maps add-on modules to ESP32 pins. Every release build ships with its pins already configured, so a board with a built-in CC1101, NRF24, NFC, or GPS works out of the box.
 ## Do I need this page?
-If you bought or already own a supported board, you probably don’t. Every release build ships with its pins already configured, so a board with a built-in CC1101, NRF24, NFC, or GPS works out of the box.
-You need this page when you are:
+If you bought or already own a supported board, you probably don’t. You need this page when you are:
 - Adding a module to a generic ESP32 board
 - Changing SD card pins
 - Building a custom board configuration
-## Before you start
+## Prerequisites
 - 3.3 V logic only. ESP32 GPIOs are not 5 V tolerant. Feeding 5 V into a pin can destroy the chip.
-- Check the [Supported Hardware](/latest/getting-started/supported-hardware/) table first — many “missing feature” problems are really “this board doesn’t have that hardware.”
+- Check the [Supported Hardware](/latest/getting-started/supported-hardware/) table first - many “missing feature” problems are really “this board doesn’t have that hardware.”
 - Have a way to read serial output at 115200 baud. Boot logs and status commands are how you confirm wiring.
 ## Find your board’s pins
 ### SD card (changeable at runtime)
@@ -69,10 +66,10 @@ Misc Options → NRF24 Options |
 NFC (PN532) |
 NFC Options |
 GPS |
-GPS Options |
+GPS Configuration |
 IR |
-Infrared Options |
-The Kconfig defaults for a CC1101 are MOSI 18, MISO 38, SCK 40, CSN 39, GDO0 41, and GDO2 disabled (-1). These are generic defaults, not a wiring recommendation for any specific board — confirm against your board’s own configuration before connecting anything.
+Misc Options (Infrared Support) |
+The Kconfig defaults for a CC1101 are MOSI 18, MISO 38, SCK 40, CSN 39, GDO0 41, and GDO2 disabled (-1). These are generic defaults, not a wiring recommendation for any specific board - confirm against your board’s own configuration before connecting anything.
 ## Module wiring reference
 These are the signals each module needs. Match them to the pin numbers from the section above.
 ### CC1101 (SubGHz)
@@ -112,7 +109,7 @@ CSN |
 ESP32 chip select |
 CE |
 ESP32 CE pin |
-Note: the PA&#43;LNA versions of the NRF24 draw far more current than the plain modules. A weak 3.3 V supply causes “radio not responding” failures that look like wiring bugs — add a decoupling capacitor across VCC/GND, or power it from a dedicated 3.3 V regulator.
+Note: the PA&#43;LNA versions of the NRF24 draw far more current than the plain modules. A weak 3.3 V supply causes “radio not responding” failures that look like wiring bugs - add a decoupling capacitor across VCC/GND, or power it from a dedicated 3.3 V regulator.
 ### PN532 (NFC)
 Most PN532 modules support I2C, SPI, and UART, and the onboard DIP switches select the mode. GhostESP uses I2C for PN532:
 PN532 pin |
@@ -142,7 +139,7 @@ VCC |
 3.3 V |
 GND |
 GND |
-Most modules default to 9600 baud. Some need a battery or a clear view of the sky before they output a fix — no data indoors is normal.
+Most modules default to 9600 baud. Some need a battery or a clear view of the sky before they output a fix - no data indoors is normal.
 ## Verified board wiring
 These pinouts are documented elsewhere in the docs and are safe to follow directly.
 ### Flipper Zero to ESP32
@@ -172,4 +169,4 @@ The GhostLink P1 handheld has a complete, board-specific wiring map for its disp
 - [Supported Hardware](/latest/getting-started/supported-hardware/)
 - [SD card storage](/latest/getting-started/sd-card/)
 - [Custom board configurations](/latest/development/custom-board-configs/)
-- [Command line reference](/latest/getting-started/command-line-reference/)
+- [CLI reference](/latest/getting-started/command-line-reference/)

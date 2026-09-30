@@ -1,0 +1,37 @@
+Title: Check Open Ports
+Description: Check a device you own or are authorized to test for responding network ports
+URL: /v2.2/wifi/port-scanning/
+Version: v2.2
+Section: Wi-Fi
+Search index: /search-index.json
+
+# Check Open Ports
+
+> Check a device you own or are authorized to test for responding network ports
+
+## On this page
+
+- [Scanning ports](#scanning-ports)
+- [Troubleshooting](#troubleshooting)
+
+---
+
+Port scanning checks which network ports on an authorized device respond to connection attempts, so you can inventory services on your own network. [Connect GhostESP](/v2.2/wifi/connect/) to the same network and identify the device with [LAN discovery](/v2.2/wifi/lan-discovery/). Only scan devices you own or have permission to test; see [Legal and ethical rules](/v2.2/wifi/basics/#legal-and-ethical-rules).
+## Scanning ports
+- Open Menu → Wi-Fi → Network while GhostESP is connected and choose Scan Open Ports, then review the responding ports.
+From the CLI, run scanports &lt;ip&gt; to check a specific device’s TCP and common UDP ports. Add all to check all ports, or a range such as 20-1024 to limit the scan. Run scanports local to scan every host on the local subnet (takes no arguments; uses the async sweep). Run scanssh &lt;ip&gt; to check whether SSH responds on a device, or scanssh with no argument to scan the local subnet. Run scanarp monitor [seconds] to watch the network for new hosts while you scan.
+What a port scan does
+1
+Resolve the target, or reuse a prior scan`scanports &lt;ip&gt;`, `local` for the subnet, or an ARP sweep first
+2
+Send TCP connection attemptsCommon ports by default, `all`, or a `start-end` range
+3
+Send UDP probes to common services`scanports &lt;ip&gt;` also checks common UDP ports
+4
+List the ports that respond`scanssh &lt;ip&gt;` checks SSH specifically
+A missing result does not prove a service is absent; firewalls and network policy can block scans.
+GhostESP lists the ports that respond. A missing result does not prove that a service is absent; firewalls and network policy can block scans.
+## Troubleshooting
+- No ports respond: Confirm the IP address, network connection, and whether the device has a firewall.
+- The wrong device is scanned: Run LAN discovery again and verify the IP address before retrying.
+- The scan is slow: Limit the port range to the services you need to inspect.

@@ -1,5 +1,5 @@
 Title: Companion Tools
-Description: Desktop tools for controlling and viewing your GhostESP device over USB.
+Description: Desktop tools for controlling and viewing your GhostESP device over USB
 URL: /latest/companion-tools/
 Version: latest
 Section: GhostESP: Revival
@@ -8,7 +8,7 @@ Search index: /search-index.json
 
 # Companion Tools
 
-> Desktop tools for controlling and viewing your GhostESP device over USB.
+> Desktop tools for controlling and viewing your GhostESP device over USB
 
 ---
 

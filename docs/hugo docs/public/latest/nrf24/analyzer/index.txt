@@ -12,9 +12,9 @@ Search index: /search-index.json
 ## On this page
 
 - [Prerequisites](#prerequisites)
-- [On-device UI](#on-device-ui)
+- [On-Device UI](#on-device-ui)
 - [CLI](#cli)
-- [Reading the graph](#reading-the-graph)
+- [Reading the Graph](#reading-the-graph)
 - [Jamming Detection](#jamming-detection)
 - [How It Works](#how-it-works)
 - [Threat Classifications](#threat-classifications)
@@ -26,12 +26,22 @@ Search index: /search-index.json
 
 The NRF24 analyzer scans 2.4 GHz channels and shows relative RF activity from 2.400 GHz to 2.525 GHz.
 It also includes a built-in jamming detection engine that identifies known threat signatures in real time.
+How the analyzer sweeps
+1
+Step through 126 channels`2.400 GHz` to `2.525 GHz`
+2
+Sample each channel every 45 msOne RSSI level per channel
+3
+Compare consecutive sweepsSustained activity stands out from single blips
+4
+Classify the signatureKnown Wi-Fi/Zigbee/video patterns; 6 ticks of confidence before alerting
+The jam classifier needs 6 consecutive detections before it reports a threat.
 ## Prerequisites
 - Firmware built with NRF24 support (CONFIG_HAS_NRF24=y)
 - Supported NRF24L01/NRF24L01&#43; module connected to the configured SPI pins
 - 2.4 GHz antenna connected to the module
 If you see built without CONFIG_HAS_NRF24, the firmware was built without local NRF24 analyzer support.
-## On-device UI
+## On-Device UI
 - Open Menu → NRF24 → Frequency Analyzer.
 - Watch the graph while the scan cursor sweeps channels.
 - Use Pause/Resume to freeze or continue sampling.
@@ -44,20 +54,20 @@ nrf24 resume
 nrf24 status
 nrf24 stop
 nrf24 status prints running state, pause state, last error, and active pin config.
-## Reading the graph
+## Reading the Graph
 - X axis: frequency in GHz (2.400 to 2.525)
 - Y axis: activity percentage (0-100%)
 - Bars: current activity estimate per channel
 - White markers: recent peak levels
 - Gray cursor: current scan position
-- Red alert bar: appears across the top of the graph when jamming is detected, showing the threat classification and peak channel
+- Red alert bar: appears across the top of the graph when jamming is detected, showing only the threat classification; the channel is in a separate CH:%03d label
 - Red vertical marker: highlights the peak signal channel during a detection event
 ## Jamming Detection
 The analyzer continuously monitors RF activity patterns and can identify several known threat signatures from firmware observed in the wild. Detection runs passively alongside normal spectrum scanning with no additional hardware required.
 ### How It Works
 The detector analyses channel activity in each scan tick by checking:
 - Consecutive channel runs – long unbroken stretches of high signal indicate a sequential sweep
-- Gap channel activity – channels between WiFi bands (e.g. 24-25, 49-50, 74-83) are normally quiet; activity here suggests broadband jamming
+- Gap channel activity – channels between Wi-Fi bands (e.g. 24-25, 49-50, 74-83) are normally quiet; activity here suggests broadband jamming
 - Known channel pattern matching – specific channel arrays associated with known threat actors
 - Simultaneous carrier detection – multiple channels at near-100% signal at the same time indicates multi-radio hardware
 - Confidence counter – detection must persist for 6 consecutive ticks (~270ms) before triggering, preventing false alarms from transient noise
@@ -70,7 +80,7 @@ Full-band sequential sweep across channels 1-83, often with gap channel saturati
 SIG: FW-A BLE ADV |
 Targeted BLE advertising channel jamming on {2, 26, 80} with low total active channel count |
 SIG: FW-A WIFI |
-WiFi-band jamming using a 15-channel step-5 pattern (channels spaced 5 MHz apart) |
+Wi-Fi-band jamming using a 15-channel step-5 pattern (channels spaced 5 MHz apart) |
 SIG: FW-A HI-BAND |
 Targeted upper-band jamming on channels 76, 78, 79 |
 SIG: FW-B BLE ADV |
@@ -87,7 +97,7 @@ Broadband activity detected that does not match any known signature |
 The detector distinguishes two primary threat actor profiles based on their channel behavior:
 Firmware A patterns are characterized by:
 - Sequential channel sweeping with controlled dwell times
-- A distinctive 15-channel WiFi pattern with 5-channel step spacing
+- A distinctive 15-channel Wi-Fi pattern with 5-channel step spacing
 - Single-radio operation (one active carrier at a time)
 - Targeted protocol modes (BLE advertising, upper-band NRF)
 Firmware B patterns are characterized by:
