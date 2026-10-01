@@ -15,6 +15,7 @@ const state = {
   actionRegistry: {},
   activeAction: null,
   activeItem: null,
+  actionTarget: 'local',
   selectedIndices: new Set(),
   terminalTimer: null,
   commandHistory: [],
@@ -87,12 +88,31 @@ function setLoading(el, loading) {
 function isRisky(command) { return isRiskyCommand(command); }
 function canUseGhostLink() { return !!state.comm.connected; }
 
-async function runCommandSequence(commands) {
-  for (const command of commands) {
-    await new Promise(resolve => {
-      runCommand(command, { skipRisk: true, onComplete: resolve });
-    });
+function resultLogs() { return sourceOutput(state.logs, state.actionTarget); }
+function setActionTarget(target) {
+  if (state.actionTarget !== target) {
+    state.selectedIndices.clear();
+    state.activeItem = null;
   }
+  state.actionTarget = target;
+  renderActionDetail();
+}
+function runFeatureCommand(command) {
+  return state.actionTarget === 'peer' ? runRemote(command) : runCommand(command, { feature: true });
+}
+async function runCommandSequence(commands, target = 'local') {
+  if (commands.some(isRisky) && !confirm(`Run this command sequence on ${target === 'peer' ? 'the GhostLink peer' : 'this device'}?`)) return false;
+  // Stop before selecting: stop handlers can change radio/selection state.
+  if (!commands.includes('stop') && commands.some(command => commandMetadata(command).stopFirst)) {
+    commands = ['stop', ...commands];
+  }
+  for (const command of commands) {
+    const ok = target === 'peer'
+      ? await runRemote(command, { skipRisk: true, skipStop: true })
+      : await runCommand(command, { skipRisk: true, skipStop: true });
+    if (!ok) return false;
+  }
+  return true;
 }
 
 /* ======================== SHELL BUILDERS ======================== */
@@ -559,7 +579,7 @@ function renderDashboard() {
 }
 
 function renderDashboardDevice() {
-  const info = Parsers.chipInfo(state.logs);
+  const info = Parsers.chipInfo(sourceOutput(state.logs));
   if (info) {
     $('dash-conn-status').textContent = 'Connected';
     $('dash-conn-status').className = 'dash-card-sub good';
@@ -576,8 +596,8 @@ function renderDashboardDevice() {
 }
 
 function renderDashboardWifi() {
-  const ws = Parsers.wifiStatus(state.logs);
-  const conn = Parsers.wifiConnection(state.logs);
+  const ws = Parsers.wifiStatus(sourceOutput(state.logs));
+  const conn = Parsers.wifiConnection(sourceOutput(state.logs));
   if (ws && ws.connected) {
     $('dash-wifi-status').textContent = 'Connected';
     $('dash-wifi-status').className = 'dash-card-sub good';
@@ -619,7 +639,7 @@ function renderDashboardGhostLink() {
 }
 
 function renderDashboardSd() {
-  const sdRows = parseKeyValueBlock(state.logs, /SD\s*Status/i, null);
+  const sdRows = parseKeyValueBlock(sourceOutput(state.logs), /SD\s*Status/i, null);
   if (sdRows.length) {
     const map = {};
     sdRows.forEach(r => map[r.key.toLowerCase()] = r.value);
@@ -634,7 +654,7 @@ function renderDashboardSd() {
 }
 
 function renderDashboardFeatures() {
-  const info = Parsers.chipInfo(state.logs);
+  const info = Parsers.chipInfo(sourceOutput(state.logs));
   const features = info ? info.enabledFeatures : [];
   const featureLabels = {
     'DISPLAY': 'Display', 'TOUCHSCREEN': 'Touchscreen', 'STATUS_DISPLAY': 'OLED',
@@ -767,7 +787,7 @@ function buildActionDetail(action) {
       <button class="btn ghost" data-${state.activeItem ? 'back-results' : 'close-action'}>Back to ${esc(backLabel)}</button>
     </div>
     <div class="actions">
-      <button class="btn primary" data-command="${escapeAttr(action.command)}">Run</button>
+      <button class="btn primary" data-local-command="${escapeAttr(action.command)}">Run locally</button>
       ${refreshCommand && !state.activeItem ? `<button class="btn" data-command="${escapeAttr(refreshCommand)}">${esc(action.refreshLabel || 'Refresh')}</button>` : ''}
       <button class="btn ghost" data-remote-command="${escapeAttr(action.command)}">Run via GhostLink</button>
     </div>
@@ -779,7 +799,7 @@ function buildActionDetail(action) {
       <p><code>${esc(action.command)}</code></p>
     </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
-      ${categoryBadge} ${safetyBadge}
+      ${categoryBadge} ${safetyBadge} <span class="badge">Results: ${state.actionTarget === 'peer' ? 'GhostLink peer' : 'Local'}</span>
     </div>
   </div>
   ${result}`;
@@ -787,35 +807,39 @@ function buildActionDetail(action) {
 
 function renderActionResult(action) {
   const cmd = (action.command || '').trim().toLowerCase();
-  const cache = cachedParse(state.logs);
+  const logs = resultLogs();
+  const cache = cachedParse(logs);
   if (/^(scanap|list -a|scanall)\b/.test(cmd)) return renderApTable(cache.aps);
   if (/^(scansta|list -s)\b/.test(cmd)) return renderStationTable(cache.stations);
   if (/^wifistatus\b/.test(cmd)) {
-    const status = Parsers.wifiStatus(state.logs);
-    const rows = status ? objectToKeyValueRows(status) : parseKeyValueBlock(state.logs, /===\s*WIFI\s*STATUS\s*===/, /===\s*END\s*STATUS\s*===/);
+    const status = Parsers.wifiStatus(logs);
+    const rows = status ? objectToKeyValueRows(status) : parseKeyValueBlock(logs, /===\s*WIFI\s*STATUS\s*===/, /===\s*END\s*STATUS\s*===/);
     return renderKeyValueTable(rows, 'WiFi Status');
   }
   if (/^chipinfo\b/.test(cmd)) {
-    const info = Parsers.chipInfo(state.logs);
+    const info = Parsers.chipInfo(logs);
     if (info) return renderDeviceInfo(info);
-    return renderKeyValueTable(parseKeyValueBlock(state.logs, /\[CHIPINFO_START\]/, /\[CHIPINFO_END\]/), 'Chip Information');
+    return renderKeyValueTable(parseKeyValueBlock(logs, /\[CHIPINFO_START\]/, /\[CHIPINFO_END\]/), 'Chip Information');
   }
   if (/^gpsinfo\b/.test(cmd)) {
-    const gps = Parsers.gpsPosition(state.logs);
-    return gps ? renderGpsInfo(gps) : renderKeyValueTable(parseKeyValueBlock(state.logs, /GPS\s*Info/i, null), 'GPS Information');
+    const gps = Parsers.gpsPosition(logs);
+    return gps ? renderGpsInfo(gps) : renderKeyValueTable(parseKeyValueBlock(logs, /GPS\s*Info/i, null), 'GPS Information');
   }
-  if (/^blescan\b/.test(cmd)) {
-    const { ble, flippers, airtags, gatt } = cachedParse(state.logs);
-    const all = [...ble, ...flippers, ...airtags, ...gatt];
+  if (/^blescan -(?:ds|r)\b/.test(cmd)) return renderGenericRows(parseGenericRows(logs, action.command), cmd);
+  if (/^(?:blescan|bledetect|listflippers|listairtags|listgatt)\b/.test(cmd)) {
+    const { ble, flippers, airtags, gatt } = cachedParse(logs);
+    const all = cmd.startsWith('listflippers') || /^blescan -f\b/.test(cmd) ? flippers
+      : cmd.startsWith('listairtags') || /^blescan -a\b/.test(cmd) ? airtags
+      : cmd.startsWith('listgatt') || /^blescan -g\b/.test(cmd) ? gatt : ble;
     return renderBleTable(all);
   }
-  if (/^scanports\b/.test(cmd)) return renderPortTable(cachedParse(state.logs).ports);
-  if (/^scanarp\b/.test(cmd)) return renderGenericRows(parseArpScan(state.logs), cmd);
-  if (/^capture\b/.test(cmd)) return renderKeyValueTable(parseCaptureStatus(state.logs), 'Capture Status');
-  if (/^congestion\b/.test(cmd)) return renderGenericRows(parseCongestion(state.logs), cmd);
-  if (/^commstatus\b/.test(cmd)) return renderKeyValueTable(parseCommStatus(state.logs), 'GhostLink Status');
-  if (/^(sweep|pineap|startportal|stopportal|listportals|dialconnect|wardrive|blewardriving)\b/.test(cmd)) return renderGenericRows(parseGenericRows(state.logs, action.command), cmd);
-  return renderGenericRows(parseGenericRows(state.logs, action.command), cmd);
+  if (/^scanports\b/.test(cmd)) return renderPortTable(cachedParse(logs).ports);
+  if (/^scanarp\b/.test(cmd)) return renderGenericRows(parseArpScan(logs), cmd);
+  if (/^capture\b/.test(cmd)) return renderKeyValueTable(parseCaptureStatus(logs), 'Capture Status');
+  if (/^congestion\b/.test(cmd)) return renderGenericRows(parseCongestion(logs), cmd);
+  if (/^commstatus\b/.test(cmd)) return renderKeyValueTable(parseCommStatus(logs), 'GhostLink Status');
+  if (/^(sweep|pineap|startportal|stopportal|listportals|dialconnect|wardrive|blewardriving)\b/.test(cmd)) return renderGenericRows(parseGenericRows(logs, action.command), cmd);
+  return renderGenericRows(parseGenericRows(logs, action.command), cmd);
 }
 
 /* ======================== ITEM DETAIL ======================== */
@@ -900,6 +924,7 @@ function renderPortDetail(data) {
       <div class="stat"><label>Host</label><strong><code>${esc(data.host)}</code></strong></div>
       <div class="stat"><label>Port</label><strong>${esc(data.port)}</strong></div>
       <div class="stat"><label>Protocol</label><strong>${esc(data.proto)}</strong></div>
+      <div class="stat"><label>Status</label><strong>${esc(data.status)}</strong></div>
     </div>
     <div class="detail-actions">
       <button class="btn" data-item-action="copy" data-text="${escapeAttr(data.host + ':' + data.port)}">Copy Host:Port</button>
@@ -947,35 +972,34 @@ function renderGpsInfo(gps) {
 
 /* ======================== PARSER FALLBACKS ======================== */
 function parsePortScan(text) {
+  text = latestCommandOutput(text, /^scanports\b/i);
   const rows = [];
   let currentHost = '';
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.replace(/^RX:\s*/, '').trim();
-    const host = line.match(/^Scanning\s+(.+)\s+tcp/i);
+  for (const line of text.split(/\r?\n/).map(l => l.trim())) {
+    const host = /^(?:\[Host \d+\] Found active host:|UDP ports on)\s*([0-9.]+)/i.exec(line)
+      || /^Scanning\s+([0-9.]+)\s+(?:tcp|udp)/i.exec(line);
     if (host) currentHost = host[1];
-    const port = line.match(/^\s{0,4}(?:Port\s+)?(\d+)(?:\s*\(?(tcp|udp)\)?)?/i);
-    if (port) rows.push({ index: String(rows.length), host: currentHost, port: port[1], proto: (port[2] || 'tcp').toUpperCase() });
-    const udp = line.match(/^\s{0,4}UDP\s+(\d+)/i);
-    if (udp) rows.push({ index: String(rows.length), host: currentHost, port: udp[1], proto: 'UDP' });
+    const port = /^(Port|UDP)\s+(\d+):\s*(OPEN|CLOSED|FILTERED)\b/i.exec(line);
+    if (port) rows.push({ index: String(rows.length), host: currentHost, port: port[2],
+      proto: port[1].toUpperCase() === 'UDP' ? 'UDP' : 'TCP', status: port[3].toUpperCase() });
   }
-  return rows;
+  return uniqueRows(rows.map(row => ({ ...row, key: `${row.host}:${row.proto}:${row.port}` })), 'key');
 }
 
 function parseArpScan(text) {
+  text = latestCommandOutput(text, /^scanarp\b/i);
   const rows = [];
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.replace(/^RX:\s*/, '').trim();
-    const m = line.match(/^\[(\d+)\]\s+(?:IP:\s*)?([0-9.]+)\s*(?:MAC:\s*)?([0-9A-Fa-f:]{17})?/i);
-    if (m) rows.push({ index: m[1], title: m[2], detail: m[3] || '' });
-    else {
-      const m2 = line.match(/^([0-9.]+)\s+([0-9A-Fa-f:]{17})/i);
-      if (m2) rows.push({ index: String(rows.length), title: m2[1], detail: m2[2] });
-    }
+  for (const line of text.split(/\r?\n/).map(l => l.trim())) {
+    const m = /^(\d+)\.\s+([0-9.]+)\s+\[([0-9A-Fa-f:]{17})\](?:\s+(.*))?$/.exec(line);
+    const legacy = /^\[(\d+)\]\s+(?:IP:\s*)?([0-9.]+)\s+(?:MAC:\s*)?([0-9A-Fa-f:]{17})/.exec(line);
+    const row = m || legacy;
+    if (row) rows.push({ index: row[1], title: row[2], detail: [row[3], row[4]].filter(Boolean).join(' · ') });
   }
-  return rows;
+  return uniqueRows(rows);
 }
 
 function parseCaptureStatus(text) {
+  text = latestCommandOutput(text, /^capture\b/i);
   const out = [];
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.replace(/^RX:\s*/, '').trim();
@@ -988,16 +1012,17 @@ function parseCaptureStatus(text) {
 }
 
 function parseCongestion(text) {
+  text = latestCommandOutput(text, /^congestion\b/i);
   const rows = [];
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.replace(/^RX:\s*/, '').trim();
-    const m = line.match(/^\s*(?:Channel\s*)?(\d+)[\s:=-]+(\d+)/i);
-    if (m) rows.push({ index: String(rows.length), title: 'Channel ' + m[1], detail: m[2] + ' networks' });
+  for (const line of text.split(/\r?\n/).map(l => l.trim())) {
+    const m = /^\|\s*(\d+)\s*\|\s*(\d+)\s*\|[ #]*\|$/.exec(line);
+    if (m) rows.push({ index: m[1], title: 'Channel ' + m[1], detail: m[2] + ' networks' });
   }
-  return rows;
+  return uniqueRows(rows);
 }
 
 function parseCommStatus(text) {
+  text = latestCommandOutput(text, /^commstatus\b/i);
   const out = [];
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.replace(/^RX:\s*/, '').trim();
@@ -1008,13 +1033,9 @@ function parseCommStatus(text) {
 }
 
 function parseGenericRows(text, command) {
-  const lines = text.split(/\r?\n/).map(l => l.trimEnd()).filter(Boolean);
-  const commandIndex = command ? lines.map(l => l.replace(/^RX:\s*/, '')).lastIndexOf(`> ${command}`) : -1;
-  const output = (commandIndex >= 0 ? lines.slice(commandIndex + 1) : lines.slice(-30))
-    .filter(l => !l.replace(/^RX:\s*/, '').startsWith('>'))
-    .slice(-24);
-  return output.map((line, index) => {
-    const stripped = line.replace(/^RX:\s*/, '').trim();
+  const lines = getOutputBlock(text, command).filter(l => l.trim() && !/^Peer command: /.test(l)).slice(-100);
+  return lines.map((line, index) => {
+    const stripped = line.trim();
     const kv = stripped.match(/^([^=:\n]{2,40})\s*[=:]\s*(.+)$/);
     return kv
       ? { index: String(index), title: kv[1].trim(), detail: kv[2].trim() }
@@ -1105,7 +1126,7 @@ function renderBleTable(rows) {
   const filterBar = `<div class="tabs" style="margin-bottom:10px">${chips}</div>`;
   if (!filtered.length) return filterBar + '<div class="empty">No devices match the current filter.</div>';
   return filterBar + `<div class="table-wrap"><table><thead><tr><th>#</th><th>MAC</th><th>Name</th><th>Type</th><th>RSSI</th></tr></thead><tbody>
-    ${filtered.map((r, i) => `<tr class="clickable-row" data-select-item="ble" data-index="${escapeAttr(r.index || String(i))}">
+    ${filtered.map((r, i) => `<tr class="clickable-row" data-select-item="ble" data-kind="${escapeAttr(r.kind || '')}" data-index="${escapeAttr(r.index || String(i))}">
       <td>${esc(r.index || String(i))}</td>
       <td><code>${esc(r.mac || '-')}</code></td>
       <td>${esc(r.name || '-')}</td>
@@ -1117,9 +1138,9 @@ function renderBleTable(rows) {
 
 function renderPortTable(rows) {
   if (!rows.length) return '<div class="empty">No port scan results yet. Run a port scan to populate.</div>';
-  return `<div class="table-wrap"><table><thead><tr><th>#</th><th>Host</th><th>Port</th><th>Protocol</th></tr></thead><tbody>
+  return `<div class="table-wrap"><table><thead><tr><th>#</th><th>Host</th><th>Port</th><th>Protocol</th><th>Status</th></tr></thead><tbody>
     ${rows.map(r => `<tr class="clickable-row" data-select-item="port" data-index="${escapeAttr(r.index)}">
-      <td>${esc(r.index)}</td><td><code>${esc(r.host)}</code></td><td>${esc(r.port)}</td><td>${esc(r.proto)}</td>
+      <td>${esc(r.index)}</td><td><code>${esc(r.host)}</code></td><td>${esc(r.port)}</td><td>${esc(r.proto)}</td><td>${esc(r.status)}</td>
     </tr>`).join('')}
   </tbody></table></div>`;
 }
@@ -1310,7 +1331,7 @@ const DASHBOARD_AUTO_QUERIES = [
 
 function populateDashboardIfStale() {
   if (state.dashboardAutoPopulated) return;
-  const missing = DASHBOARD_AUTO_QUERIES.filter(q => !q.has(state.logs || ''));
+  const missing = DASHBOARD_AUTO_QUERIES.filter(q => !q.has(sourceOutput(state.logs)));
   if (!missing.length) {
     state.dashboardAutoPopulated = true;
     return;
@@ -1352,6 +1373,7 @@ function getVal(id) { const el = $(id); return el ? el.value : ''; }
 function getBool(id) { const el = $(id); return el ? !!el.checked : false; }
 
 function cachedParse(logs) {
+  logs = sourceOutput(logs);
   if (state.parseCache.logs === logs) {
     return {
       aps: state.parseCache.aps,
@@ -1421,9 +1443,19 @@ async function saveSettings() {
 }
 
 async function runCommand(command, options = {}) {
+  if (!command || new TextEncoder().encode(command).length > 255 || /[\r\n\0]/.test(command)) {
+    const err = new Error('Use one command of 1–255 UTF-8 bytes');
+    toast(err.message, 'bad');
+    if (typeof options.onComplete === 'function') options.onComplete(err);
+    return false;
+  }
   if (!options.skipRisk && isRisky(command)) {
     showRiskModal(command);
-    return;
+    return false;
+  }
+  if (options.feature) setActionTarget('local');
+  if (!options.skipStop && commandMetadata(command).stopFirst) {
+    if (!await runCommand('stop', { silent: true, skipRisk: true, skipStop: true })) return false;
   }
   if (!options.silent) {
     state.commandHistory.push(command);
@@ -1434,7 +1466,7 @@ async function runCommand(command, options = {}) {
   }
   try {
     const res = await api('/api/command', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ command }) });
-    if (!res.ok) throw new Error('command failed');
+    if (!res.ok) throw new Error(await res.text() || 'command failed');
     if (!options.silent) {
       toast('Command sent', 'good');
       setTimeout(() => refreshLogs(true), 900);
@@ -1445,10 +1477,12 @@ async function runCommand(command, options = {}) {
       localStorage.removeItem('ghost_v2_pending_command');
     }
     if (typeof options.onComplete === 'function') options.onComplete();
+    return true;
   } catch (err) {
     if (isRisky(command) && !options.silent) startReconnectWatch();
     else if (!options.silent) toast('Command failed: ' + err.message, 'bad');
     if (typeof options.onComplete === 'function') options.onComplete(err);
+    return false;
   }
 }
 
@@ -1464,29 +1498,36 @@ function closeRiskModal() {
   state.pendingRiskCommand = null;
 }
 
-async function runRemote(command) {
-  if (isRisky(command)) {
-    const ok = confirm(`"${command}" is a radio-disruptive or risky command. Send it to the GhostLink peer anyway?`);
-    if (!ok) return;
+async function runRemote(command, options = {}) {
+  if (!canUseGhostLink()) { toast('GhostLink is disconnected', 'bad'); return false; }
+  const bytes = new TextEncoder().encode(command).length;
+  if (!bytes || bytes > 250 || /[\r\n\0]/.test(command)) {
+    toast('Use one command of 1–250 UTF-8 bytes', 'bad'); return false;
   }
-  appendComm('> ' + command);
-  setCommPending(true);
+  if (!options.skipRisk && isRisky(command) && !confirm(`Run "${command}" on the GhostLink peer?`)) return false;
+  if (!options.skipStop && commandMetadata(command).stopFirst) {
+    if (!await runRemote('stop', { skipRisk: true, skipStop: true, silent: true })) return false;
+  }
+  setActionTarget('peer');
+  if (!options.silent) {
+    appendComm('> ' + command);
+    state.commLogSnapshot = state.logs || '';
+    setCommPending(true);
+  }
   try {
     const res = await api('/api/esp_comm/send', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ command }) });
     const data = await res.json();
-    if (!data.success) {
-      appendComm('Error: ' + (data.message || 'send failed'), { kind: 'error' });
-      toast('GhostLink command failed', 'bad');
-      setCommPending(false);
-    } else {
-      toast('GhostLink command sent', 'good');
-      state.commLogOffset = (state.logs || '').length;
+    if (!res.ok || !data.success) throw new Error(data.message || data.error || 'send failed');
+    if (!options.silent) {
+      toast('GhostLink command queued', 'good');
       setTimeout(() => refreshLogs(true).then(pollPeerResponses).catch(() => setCommPending(false)), 800);
     }
+    return true;
   } catch (err) {
     appendComm('Error: ' + err.message, { kind: 'error' });
-    toast('GhostLink failed', 'bad');
+    toast('GhostLink failed: ' + err.message, 'bad');
     setCommPending(false);
+    return false;
   }
 }
 
@@ -1498,46 +1539,39 @@ function setCommPending(on) {
     state.commPending = (state.commPending || 0) + 1;
     state.commPendingTimer = setTimeout(() => {
       if (state.commPending > 0) {
-        appendComm('(no peer response within 12s)', { kind: 'error' });
+        appendComm('(no peer output within 130s)', { kind: 'error' });
       }
       setCommPending(false);
-    }, 12000);
+    }, 130000);
   } else {
     state.commPending = 0;
   }
 }
 
+function newLogText(previous, current) {
+  if (current.startsWith(previous)) return current.slice(previous.length);
+  // Retained history rolls over. Match complete lines, not an absolute byte offset.
+  const oldLines = previous.split('\n');
+  const newLines = current.split('\n');
+  if (oldLines.at(-1) === '') oldLines.pop();
+  if (newLines.at(-1) === '') newLines.pop();
+  for (let n = Math.min(oldLines.length, newLines.length); n > 0; n--) {
+    if (oldLines.slice(-n).join('\n') === newLines.slice(0, n).join('\n')) return newLines.slice(n).join('\n');
+  }
+  return current;
+}
 function pollPeerResponses() {
-  if (!state.logs) return;
-  if (state.commLogOffset === 0 || state.commLogOffset > state.logs.length) {
-    state.commLogOffset = state.logs.length;
-    return;
-  }
-  const slice = state.logs.slice(state.commLogOffset);
-  if (!slice) return;
-  const lines = slice.split('\n');
+  const snapshot = state.logs || '';
+  const slice = newLogText(state.commLogSnapshot || '', snapshot);
+  state.commLogSnapshot = snapshot;
   let appended = false;
-  for (const raw of lines) {
-    let body = null;
-    let kind = 'response';
-    let m = raw.match(/^RX:\s?(.*)$/);
-    if (m) {
-      body = m[1];
-    } else {
-      m = raw.match(/^ESP Comm Response:\s?(.*)$/);
-      if (m) body = m[1];
-    }
-    if (body != null) {
-      appendComm(body || '(empty response)', { kind });
-      appended = true;
-      continue;
-    }
-    if (/^E:\s*ESP Comm Response/i.test(raw) || /Response failed/i.test(raw) || /E:\s*esp_comm/i.test(raw)) {
-      appendComm(raw.replace(/^E:\s*/, ''), { kind: 'error' });
-      appended = true;
+  for (const raw of slice.split('\n')) {
+    const m = /^(?:RX: ?|ESP Comm Response: ?)(.*)$/.exec(raw);
+    if (m) { appendComm(m[1] || '(empty response)', { kind: 'response' }); appended = true; }
+    else if (/^E:\s*ESP Comm Response/i.test(raw) || /Response failed|E:\s*esp_comm/i.test(raw)) {
+      appendComm(raw, { kind: 'error' }); appended = true;
     }
   }
-  state.commLogOffset = state.logs.length;
   if (appended) setCommPending(false);
 }
 
@@ -1587,6 +1621,7 @@ async function refreshLogs(parse = false) {
   if (newLogs !== state.logs) {
     state.logs = newLogs;
     invalidateParseCache();
+    renderActiveFeatureView();
   }
   renderLogs();
   if (parse) {
@@ -1707,7 +1742,12 @@ function bindEvents() {
     const downloadPath = event.target.closest('[data-download-path]');
     const deletePath = event.target.closest('[data-delete-path]');
 
-    if (cmd) runCommand(cmd.dataset.command);
+    const local = event.target.closest('[data-local-command]');
+    if (local) { setActionTarget('local'); runCommand(local.dataset.localCommand, { feature: true }); }
+    if (cmd) {
+      if (cmd.closest('#wifi-detail, #ble-detail')) runFeatureCommand(cmd.dataset.command);
+      else runCommand(cmd.dataset.command);
+    }
     if (remote) runRemote(remote.dataset.remoteCommand);
     if (openActionBtn) openAction(openActionBtn.dataset.openAction);
     if (closeActionBtn) closeAction();
@@ -1721,12 +1761,12 @@ function bindEvents() {
       const type = itemRow.dataset.selectItem;
       const index = itemRow.dataset.index;
       let data = null;
-      const { aps, stations, ble, flippers, airtags, gatt, ports } = cachedParse(state.logs);
+      const { aps, stations, ble, flippers, airtags, gatt, ports } = cachedParse(resultLogs());
       if (type === 'ap') data = aps.find(r => r.index === index);
       else if (type === 'station') data = stations.find(r => r.index === index);
-      else if (type === 'ble') data = ble.concat(flippers, airtags, gatt).find(r => (r.index || '0') === index);
+      else if (type === 'ble') data = ble.concat(flippers, airtags, gatt).find(r => (r.index || '0') === index && r.kind === itemRow.dataset.kind);
       else if (type === 'port') data = ports.find(r => r.index === index);
-      else if (type === 'generic') data = parseGenericRows(state.logs, state.activeAction ? state.activeAction.command : '').find(r => r.index === index);
+      else if (type === 'generic') data = parseGenericRows(resultLogs(), state.activeAction ? state.activeAction.command : '').find(r => r.index === index);
       if (data) openItem(type, data);
       return;
     }
@@ -1744,7 +1784,7 @@ function bindEvents() {
     if (selectAll) {
       const type = selectAll.dataset.selectAll;
       let rows = [];
-      const cache = cachedParse(state.logs);
+      const cache = cachedParse(resultLogs());
       if (type === 'ap') rows = cache.aps;
       else if (type === 'station') rows = cache.stations;
       if (selectAll.checked) rows.forEach(r => state.selectedIndices.add(r.index));
@@ -1761,7 +1801,7 @@ function bindEvents() {
         const indices = Array.from(state.selectedIndices);
         if (!indices.length) { toast('Nothing selected', 'warn'); return; }
         const selectCmd = CMD.selectAp(indices.join(',')).cmd;
-        runCommandSequence([selectCmd, CMD.stopDeauth().cmd, 'stop', CMD.deauth().cmd]);
+        runCommandSequence([CMD.stopDeauth().cmd, 'stop', selectCmd, CMD.deauth().cmd], state.actionTarget);
       }
       return;
     }
@@ -1878,22 +1918,36 @@ function bindEvents() {
 
 function handleItemAction(action, dataset) {
   switch (action) {
-    case 'select-ap': runCommand(CMD.selectAp(dataset.index).cmd); break;
-    case 'select-sta': runCommand(CMD.selectSta(dataset.index).cmd); break;
-    case 'deauth': runCommandSequence([CMD.selectAp(dataset.index).cmd, CMD.deauth().cmd]); break;
-    case 'deauth-sta': runCommandSequence([CMD.selectSta(dataset.index).cmd, CMD.deauth().cmd]); break;
-    case 'track-ap': runCommand(CMD.trackAp().cmd); break;
-    case 'track-sta': runCommand(CMD.trackSta().cmd); break;
+    case 'select-ap': runFeatureCommand(CMD.selectAp(dataset.index).cmd); break;
+    case 'select-sta': runFeatureCommand(CMD.selectSta(dataset.index).cmd); break;
+    case 'deauth': runCommandSequence([CMD.selectAp(dataset.index).cmd, CMD.deauth().cmd], state.actionTarget); break;
+    case 'deauth-sta': runCommandSequence([CMD.selectSta(dataset.index).cmd, CMD.deauth().cmd], state.actionTarget); break;
+    case 'track-ap': runCommandSequence([CMD.selectAp(state.activeItem?.data.index).cmd, CMD.trackAp().cmd], state.actionTarget); break;
+    case 'track-sta': runCommandSequence([CMD.selectSta(state.activeItem?.data.index).cmd, CMD.trackSta().cmd], state.actionTarget); break;
     case 'connect-ap': {
       const pass = getVal(`ap-connect-pass-${dataset.index}`) || '';
       const ssid = dataset.ssid;
-      if (ssid) runCommand(CMD.connect(ssid, pass).cmd);
+      if (ssid) runFeatureCommand(CMD.connect(ssid, pass).cmd);
       else toast('No SSID available', 'warn');
       break;
     }
-    case 'track-ble': runCommand(CMD.bleScan('spam').cmd); break;
-    case 'spoof-airtag': runCommand(CMD.spoofAirTag(true).cmd); break;
-    case 'enum-gatt': runCommand(CMD.enumGatt().cmd); break;
+    case 'track-ble': {
+      const row = state.activeItem?.data;
+      if (!row) break;
+      if (row.kind === 'gatt') runCommandSequence([CMD.selectGatt(row.index).cmd, CMD.trackGatt().cmd], state.actionTarget);
+      else if (row.kind === 'flipper') runFeatureCommand(CMD.trackFlipper(row.index).cmd);
+      else if (row.kind === 'detector') runFeatureCommand(`bledetect -t ${row.index}`);
+      else toast('Tracking is not available for this scan type', 'warn');
+      break;
+    }
+    case 'spoof-airtag': {
+      const row = state.activeItem?.data;
+      if (row?.kind === 'detector' && row.type === 'AIR_TAG') runFeatureCommand(`bledetect -sp ${row.index}`);
+      else if (row?.kind === 'airtag') runCommandSequence([`selectairtag ${row.index}`, CMD.spoofAirTag(true).cmd], state.actionTarget);
+      else toast('Select an AirTag from an AirTag or device scan', 'warn');
+      break;
+    }
+    case 'enum-gatt': runCommandSequence([CMD.selectGatt(state.activeItem?.data.index).cmd, CMD.enumGatt().cmd], state.actionTarget); break;
     case 'copy': navigator.clipboard.writeText(dataset.text || '').then(() => toast('Copied', 'good')).catch(() => toast('Copy failed', 'bad')); break;
     default: toast('Action not implemented', 'warn');
   }

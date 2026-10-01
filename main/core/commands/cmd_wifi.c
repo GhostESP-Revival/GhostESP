@@ -501,78 +501,14 @@ void handle_wifi_connection(int argc, char **argv) {
         }
         glog("Connecting using saved credentials: %s\n", ssid);
     } else {
-        char ssid_buffer[128] = {0};
-        char password_buffer[128] = {0};
-        int i = 1;
-        // SSID parsing
-        if (argv[1][0] == '"') {
-            char *dest = ssid_buffer;
-            bool found_end = false;
-            strncpy(dest, &argv[1][1], sizeof(ssid_buffer) - 1);
-            dest += strlen(&argv[1][1]);
-            if (argv[1][strlen(argv[1]) - 1] == '"') {
-                ssid_buffer[strlen(ssid_buffer) - 1] = '\0';
-                found_end = true;
-            }
-            i = 2;
-            while (!found_end && i < argc) {
-                *dest++ = ' ';
-                if (strchr(argv[i], '"')) {
-                    size_t len = strchr(argv[i], '"') - argv[i];
-                    strncpy(dest, argv[i], len);
-                    dest[len] = '\0';
-                    found_end = true;
-                } else {
-                    strncpy(dest, argv[i], sizeof(ssid_buffer) - (dest - ssid_buffer) - 1);
-                    dest += strlen(argv[i]);
-                }
-                i++;
-            }
-            if (!found_end) {
-                glog("Error: Missing closing quote for SSID\n");
-                return;
-            }
-            ssid = ssid_buffer;
-        } else {
-            ssid = argv[1];
-            i = 2;
+        if (argc > 3) {
+            glog("Usage: connect <SSID> [PASSWORD] (quote arguments containing spaces)\n");
+            return;
         }
-        // Password parsing
-        if (i < argc) {
-            if (argv[i][0] == '"') {
-                char *dest = password_buffer;
-                bool found_end = false;
-                strncpy(dest, &argv[i][1], sizeof(password_buffer) - 1);
-                dest += strlen(&argv[i][1]);
-                if (argv[i][strlen(argv[i]) - 1] == '"') {
-                    password_buffer[strlen(password_buffer) - 1] = '\0';
-                    found_end = true;
-                }
-                i++;
-                while (!found_end && i < argc) {
-                    *dest++ = ' ';
-                    if (strchr(argv[i], '"')) {
-                        size_t len = strchr(argv[i], '"') - argv[i];
-                        strncpy(dest, argv[i], len);
-                        dest[len] = '\0';
-                        found_end = true;
-                    } else {
-                        strncpy(dest, argv[i], sizeof(password_buffer) - (dest - password_buffer) - 1);
-                        dest += strlen(argv[i]);
-                    }
-                    i++;
-                }
-                if (!found_end) {
-                    glog("Error: Missing closing quote for password\n");
-                    return;
-                }
-                password = password_buffer;
-            } else {
-                password = argv[i];
-            }
-        } else {
-            password = "";
-        }
+        // handle_serial_command already removed quote delimiters. Parse once;
+        // literal quotes inside a credential are data, not another quoting layer.
+        ssid = argv[1];
+        password = argc > 2 ? argv[2] : "";
         // Save provided credentials to NVS
         settings_set_sta_ssid(&G_Settings, ssid);
         settings_set_sta_password(&G_Settings, password);

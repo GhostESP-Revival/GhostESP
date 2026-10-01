@@ -477,6 +477,13 @@
  * - description: human-readable help
  */
 
+// The firmware tokenizer concatenates quoted segments and preserves backslashes.
+// JSON escaping is not shell quoting. Represent a double quote in a single-quoted segment.
+function quoteCommandArg(value) {
+  const text = String(value ?? '');
+  if (/[\r\n\0]/.test(text)) throw new Error('Command arguments must be a single line');
+  return '"' + text.replace(/"/g, "\"'\"'\"") + '"';
+}
 const CMD = {
   // Core
   help:            () => ({ cmd: 'help',            risky: false, stopFirst: false, cat: 'System', desc: 'Show help' }),
@@ -499,7 +506,7 @@ const CMD = {
   selectSta:       (indices) => ({ cmd: `select -s ${indices}`, risky: false, stopFirst: false, cat: 'WiFi Select', desc: 'Select station by index' }),
   connect:         (ssid, pass) => {
     if (!ssid) return { cmd: 'connect', risky: false, stopFirst: false, cat: 'WiFi Select', desc: 'Connect to saved WiFi' };
-    return { cmd: pass ? `connect "${ssid}" "${pass}"` : `connect "${ssid}"`, risky: true, stopFirst: false, cat: 'WiFi Select', desc: 'Connect to WiFi' };
+    return { cmd: pass ? `connect ${quoteCommandArg(ssid)} ${quoteCommandArg(pass)}` : `connect ${quoteCommandArg(ssid)}`, risky: true, stopFirst: false, cat: 'WiFi Select', desc: 'Connect to WiFi' };
   },
   disconnect:      () => ({ cmd: 'disconnect',      risky: false, stopFirst: false, cat: 'WiFi Select', desc: 'Disconnect WiFi' }),
   wifiStatus:      () => ({ cmd: 'wifistatus',      risky: false, stopFirst: false, cat: 'WiFi Select', desc: 'WiFi connection status' }),
@@ -513,9 +520,9 @@ const CMD = {
     return { cmd: `beaconspam ${map[mode] || mode}`, risky: true, stopFirst: true, cat: 'WiFi Attack', desc: 'Beacon spam' };
   },
   stopSpam:        () => ({ cmd: 'stopspam',        risky: false, stopFirst: false, cat: 'WiFi Attack', desc: 'Stop beacon spam' }),
-  karmaStart:      (ssids) => ({ cmd: ssids?.length ? `karma start ${ssids.map(s => /\s/.test(s) ? `"${s}"` : s).join(' ')}` : 'karma start', risky: true, stopFirst: true, cat: 'WiFi Attack', desc: 'Start karma attack' }),
+  karmaStart:      (ssids) => ({ cmd: ssids?.length ? `karma start ${ssids.map(quoteCommandArg).join(' ')}` : 'karma start', risky: true, stopFirst: true, cat: 'WiFi Attack', desc: 'Start karma attack' }),
   karmaStop:       () => ({ cmd: 'karma stop',      risky: false, stopFirst: false, cat: 'WiFi Attack', desc: 'Stop karma attack' }),
-  saeFlood:        (pass) => ({ cmd: `saeflood ${pass}`, risky: true, stopFirst: true, cat: 'WiFi Attack', desc: 'SAE flood attack' }),
+  saeFlood:        (pass) => ({ cmd: `saeflood ${quoteCommandArg(pass)}`, risky: true, stopFirst: true, cat: 'WiFi Attack', desc: 'SAE flood attack' }),
   stopSaeFlood:    () => ({ cmd: 'stopsaeflood',    risky: false, stopFirst: false, cat: 'WiFi Attack', desc: 'Stop SAE flood' }),
 
   // WiFi Tracking
@@ -535,7 +542,7 @@ const CMD = {
   // Environment
   sweep:           (stop) => ({ cmd: stop ? 'stop' : 'sweep', risky: !stop, stopFirst: !stop, cat: 'Environment', desc: 'WiFi/BLE/GPS sweep' }),
   pineap:          () => ({ cmd: 'pineap',          risky: true, stopFirst: true, cat: 'Environment', desc: 'Detect WiFi Pineapples' }),
-  congestion:      () => ({ cmd: 'congestion',      risky: false, stopFirst: false, cat: 'Environment', desc: 'Channel congestion' }),
+  congestion:      () => ({ cmd: 'congestion',      risky: true, stopFirst: true, cat: 'Environment', desc: 'Channel congestion' }),
   listenProbes:    (stop) => ({ cmd: stop ? 'listenprobes -s' : 'listenprobes', risky: !stop, stopFirst: !stop, cat: 'Environment', desc: 'Listen for probe requests' }),
 
   // Network
@@ -552,14 +559,15 @@ const CMD = {
 
   // Evil Portal
   startPortal:     (path, ssid, password) => {
-    let c = `startportal ${path || 'default'} "${ssid || 'FreeWiFi'}"`;
-    if (password) c += ` "${password}"`;
+    let c = `startportal ${quoteCommandArg(path || 'default')} ${quoteCommandArg(ssid || 'FreeWiFi')}`;
+    if (password) c += ` ${quoteCommandArg(password)}`;
     return { cmd: c, risky: true, stopFirst: true, cat: 'Portal', desc: 'Start evil portal' };
   },
   stopPortal:      () => ({ cmd: 'stopportal',      risky: false, stopFirst: false, cat: 'Portal', desc: 'Stop evil portal' }),
   listPortals:     () => ({ cmd: 'listportals',     risky: false, stopFirst: false, cat: 'Portal', desc: 'List portal files' }),
 
   // BLE Scan
+  bleDetect:       () => ({ cmd: 'bledetect', risky: true, stopFirst: true, cat: 'BLE Scan', desc: 'Detect BLE trackers, skimmers and beacons' }),
   bleScan:         (mode, stop) => {
     const m = { flipper: '-f', spam: '-ds', airtag: '-a', raw: '-r', gatt: '-g' };
     return { cmd: stop ? 'blescan -s' : `blescan ${m[mode] || ''}`.trim(), risky: !stop, stopFirst: !stop, cat: 'BLE Scan', desc: `BLE scan ${mode}` };
@@ -583,20 +591,19 @@ const CMD = {
   // No single 'scan' verb exists; a full NFC view would need its own UI.
 
   // IR
-  irList:          (path) => ({ cmd: path ? `ir list ${path}` : 'ir list', risky: false, stopFirst: false, cat: 'IR', desc: 'List IR remotes' }),
-  irSend:          (remote, btn) => ({ cmd: btn != null ? `ir send ${remote} ${btn}` : `ir send ${remote}`, risky: false, stopFirst: false, cat: 'IR', desc: 'Send IR signal' }),
-  irLearn:         (path) => ({ cmd: path ? `ir learn ${path}` : 'ir learn', risky: true, stopFirst: true, cat: 'IR', desc: 'Learn IR signal' }),
+  irList:          (path) => ({ cmd: path ? `ir list ${quoteCommandArg(path)}` : 'ir list', risky: false, stopFirst: false, cat: 'IR', desc: 'List IR remotes' }),
+  irSend:          (remote, btn) => ({ cmd: btn != null ? `ir send ${quoteCommandArg(remote)} ${btn}` : `ir send ${quoteCommandArg(remote)}`, risky: false, stopFirst: false, cat: 'IR', desc: 'Send IR signal' }),
+  irLearn:         (path) => ({ cmd: path ? `ir learn ${quoteCommandArg(path)}` : 'ir learn', risky: true, stopFirst: true, cat: 'IR', desc: 'Learn IR signal' }),
   irDazzler:       (stop) => ({ cmd: stop ? 'ir dazzler stop' : 'ir dazzler', risky: !stop, stopFirst: !stop, cat: 'IR', desc: 'IR dazzler' }),
-  irShow:          (remote) => ({ cmd: `ir show ${remote}`, risky: false, stopFirst: false, cat: 'IR', desc: 'Show IR remote buttons' }),
-
+  irShow:          (remote) => ({ cmd: `ir show ${quoteCommandArg(remote)}`, risky: false, stopFirst: false, cat: 'IR', desc: 'Show IR remote buttons' }),
   // BadUSB
   badusbList:      () => ({ cmd: 'badusb list',     risky: false, stopFirst: false, cat: 'BadUSB', desc: 'List BadUSB scripts' }),
-  badusbRun:       (file) => ({ cmd: `badusb run ${file}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Run BadUSB script' }),
+  badusbRun:       (file) => ({ cmd: `badusb run ${quoteCommandArg(file)}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Run BadUSB script' }),
   badusbStop:      () => ({ cmd: 'badusb stop',     risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Stop BadUSB' }),
   badusbRunBuiltin:() => ({ cmd: 'badusb run "Ghost Art (Built-in)"', risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Run built-in Ghost Art script' }),
   badusbKeyboardStart: () => ({ cmd: 'badusb keyboard_start', risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Enable USB keyboard mode' }),
   badusbKeyboardStop:  () => ({ cmd: 'badusb keyboard_stop',  risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Disable USB keyboard mode' }),
-  badusbType:      (text) => ({ cmd: `badusb type ${JSON.stringify(text || '')}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Type via USB keyboard' }),
+  badusbType:      (text) => ({ cmd: `badusb type ${quoteCommandArg(text || '')}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Type via USB keyboard' }),
   badusbTypeChar:  (ch) => ({ cmd: `badusb type_char ${(ch || '').charCodeAt(0)}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Send a single ASCII char' }),
   badusbKeysend:   (modifier, keycode) => ({ cmd: `badusb keysend ${modifier} ${keycode}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Send single HID key (modifier, keycode)' }),
   badusbJiggleStart: () => ({ cmd: 'badusb jiggle_start', risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Start mouse jiggler' }),
@@ -608,8 +615,8 @@ const CMD = {
   badusbTrackpadButton:(mask) => ({ cmd: `badusb trackpad_button ${mask}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Mouse button mask: 1=L 2=R 4=M 0=release' }),
   badusbSetVid:    (hex) => ({ cmd: `badusb set_vid ${hex}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Set BadUSB VID (next run)' }),
   badusbSetPid:    (hex) => ({ cmd: `badusb set_pid ${hex}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Set BadUSB PID (next run)' }),
-  badusbSetMfr:    (text) => ({ cmd: `badusb set_mfr ${JSON.stringify(text || '')}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Set manufacturer string' }),
-  badusbSetProd:   (text) => ({ cmd: `badusb set_prod ${JSON.stringify(text || '')}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Set product string' }),
+  badusbSetMfr:    (text) => ({ cmd: `badusb set_mfr ${quoteCommandArg(text || '')}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Set manufacturer string' }),
+  badusbSetProd:   (text) => ({ cmd: `badusb set_prod ${quoteCommandArg(text || '')}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Set product string' }),
   badusbSetRand:   (on) => ({ cmd: `badusb set_rand ${on ? '1' : '0'}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Toggle VID/PID randomize' }),
   badusbSetLayout: (n) => ({ cmd: `badusb set_layout ${n}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Keyboard layout (0=US 1=DE 2=FR 3=UK 4=ES)' }),
 
@@ -619,8 +626,8 @@ const CMD = {
   badbleStart:     () => ({ cmd: 'badble keyboard_start', risky: false, stopFirst: false, cat: 'BadBLE', desc: 'Advertise BLE HID keyboard for live typing' }),
   badbleStop:      () => ({ cmd: 'badble stop',      risky: false, stopFirst: false, cat: 'BadBLE', desc: 'Stop BadBLE and restore BLE stack' }),
   badbleName:      () => ({ cmd: 'badble name',      risky: false, stopFirst: false, cat: 'BadBLE', desc: 'Show advertised BadBLE name' }),
-  badbleSetName:   (text) => ({ cmd: `badble set_name ${JSON.stringify(text || '')}`, risky: false, stopFirst: false, cat: 'BadBLE', desc: 'Set advertised BadBLE name (max 31 chars)' }),
-  badbleRun:       (file) => ({ cmd: `badble run ${file}`, risky: false, stopFirst: false, cat: 'BadBLE', desc: 'Wait for a BLE host, then run a DuckyScript' }),
+  badbleSetName:   (text) => ({ cmd: `badble set_name ${quoteCommandArg(text || '')}`, risky: false, stopFirst: false, cat: 'BadBLE', desc: 'Set advertised BadBLE name (max 31 chars)' }),
+  badbleRun:       (file) => ({ cmd: `badble run ${quoteCommandArg(file)}`, risky: false, stopFirst: false, cat: 'BadBLE', desc: 'Wait for a BLE host, then run a DuckyScript' }),
   badbleRunBuiltin:() => ({ cmd: 'badble run "Ghost Art (Built-in)"', risky: false, stopFirst: false, cat: 'BadBLE', desc: 'Run the built-in Ghost Art script over BLE' }),
 
   // GPS
@@ -629,19 +636,18 @@ const CMD = {
 
   // SD Card
   sdStatus:        () => ({ cmd: 'sd status',       risky: false, stopFirst: false, cat: 'Files', desc: 'SD card status' }),
-  sdList:          (path) => ({ cmd: path ? `sd list ${path}` : 'sd list', risky: false, stopFirst: false, cat: 'Files', desc: 'List SD files' }),
-  sdRead:          (path, offset, length) => ({ cmd: `sd read ${path}${offset != null ? ' ' + offset : ''}${length != null ? ' ' + length : ''}`, risky: false, stopFirst: false, cat: 'Files', desc: 'Read SD file' }),
-  sdSize:          (path) => ({ cmd: `sd size ${path}`, risky: false, stopFirst: false, cat: 'Files', desc: 'Get file size' }),
-  sdWrite:         (path, b64) => ({ cmd: `sd write ${path} ${b64}`, risky: false, stopFirst: false, cat: 'Files', desc: 'Write file' }),
-  sdAppend:        (path, b64) => ({ cmd: `sd append ${path} ${b64}`, risky: false, stopFirst: false, cat: 'Files', desc: 'Append to file' }),
-  sdMkdir:         (path) => ({ cmd: `sd mkdir ${path}`, risky: false, stopFirst: false, cat: 'Files', desc: 'Create directory' }),
-  sdRm:            (path) => ({ cmd: `sd rm ${path}`, risky: false, stopFirst: false, cat: 'Files', desc: 'Delete file/dir' }),
-
+  sdList:          (path) => ({ cmd: path ? `sd list ${quoteCommandArg(path)}` : 'sd list', risky: false, stopFirst: false, cat: 'Files', desc: 'List SD files' }),
+  sdRead:          (path, offset, length) => ({ cmd: `sd read ${quoteCommandArg(path)}${offset != null ? ' ' + offset : ''}${length != null ? ' ' + length : ''}`, risky: false, stopFirst: false, cat: 'Files', desc: 'Read SD file' }),
+  sdSize:          (path) => ({ cmd: `sd size ${quoteCommandArg(path)}`, risky: false, stopFirst: false, cat: 'Files', desc: 'Get file size' }),
+  sdWrite:         (path, b64) => ({ cmd: `sd write ${quoteCommandArg(path)} ${b64}`, risky: false, stopFirst: false, cat: 'Files', desc: 'Write file' }),
+  sdAppend:        (path, b64) => ({ cmd: `sd append ${quoteCommandArg(path)} ${b64}`, risky: false, stopFirst: false, cat: 'Files', desc: 'Append to file' }),
+  sdMkdir:         (path) => ({ cmd: `sd mkdir ${quoteCommandArg(path)}`, risky: false, stopFirst: false, cat: 'Files', desc: 'Create directory' }),
+  sdRm:            (path) => ({ cmd: `sd rm ${quoteCommandArg(path)}`, risky: false, stopFirst: false, cat: 'Files', desc: 'Delete file/dir' }),
   // Aerial
   aerialScan:      (duration, stop) => ({ cmd: stop ? 'aerialstop' : `aerialscan ${duration || 30}`, risky: !stop, stopFirst: !stop, cat: 'Aerial', desc: 'Aerial scan' }),
   aerialList:      () => ({ cmd: 'aeriallist',      risky: false, stopFirst: false, cat: 'Aerial', desc: 'List aerial devices' }),
   aerialTrack:     (id) => ({ cmd: `aerialtrack ${id}`, risky: true, stopFirst: true, cat: 'Aerial', desc: 'Track aerial device' }),
-  aerialSpoof:     (id, lat, lon, alt) => ({ cmd: `aerialspoof "${id || 'GHOST-TEST'}" ${lat || 37.7749} ${lon || -122.4194} ${alt || 100}`, risky: true, stopFirst: true, cat: 'Aerial', desc: 'Spoof aerial device' }),
+  aerialSpoof:     (id, lat, lon, alt) => ({ cmd: `aerialspoof ${quoteCommandArg(id || 'GHOST-TEST')} ${lat ?? 37.7749} ${lon ?? -122.4194} ${alt ?? 100}`, risky: true, stopFirst: true, cat: 'Aerial', desc: 'Spoof aerial device' }),
   aerialSpoofStop: () => ({ cmd: 'aerialspoofstop', risky: false, stopFirst: false, cat: 'Aerial', desc: 'Stop aerial spoof' }),
 
   // Ethernet
@@ -674,7 +680,7 @@ const CMD = {
   timezone:        (tz) => ({ cmd: `timezone ${tz}`, risky: false, stopFirst: false, cat: 'Misc', desc: 'Set timezone' }),
   apcred:          (ssid, pass, reset) => {
     if (reset) return { cmd: 'apcred -r', risky: false, stopFirst: false, cat: 'Misc', desc: 'Reset AP creds' };
-    if (ssid && pass) return { cmd: `apcred "${ssid}" "${pass}"`, risky: false, stopFirst: false, cat: 'Misc', desc: 'Set AP credentials' };
+    if (ssid && pass) return { cmd: `apcred ${quoteCommandArg(ssid)} ${quoteCommandArg(pass)}`, risky: false, stopFirst: false, cat: 'Misc', desc: 'Set AP credentials' };
     return { cmd: 'apcred', risky: false, stopFirst: false, cat: 'Misc', desc: 'Show AP credentials' };
   },
   apenable:        (on) => ({ cmd: `apenable ${on ? 'on' : 'off'}`, risky: true, stopFirst: false, cat: 'Misc', desc: 'Enable/disable AP' }),
@@ -764,7 +770,7 @@ const WIFI_GROUPS = {
 /** BLE action definitions (grouped, mirroring WiFi layout) */
 const BLE_GROUPS = {
   'Scan & Select': [
-    { label: 'Detect Devices',     factory: () => CMD.bleScan('spam'),    refresh: () => CMD.bleScan('spam'),    refreshLabel: 'Re-scan' },
+    { label: 'Detect Devices',     factory: () => CMD.bleDetect(),         refresh: () => ({ cmd: 'bledetect -l' }), refreshLabel: 'List Devices' },
     { label: 'Find Flippers',      factory: () => CMD.bleScan('flipper') },
     { label: 'AirTag Scanner',     factory: () => CMD.bleScan('airtag') },
     { label: 'Raw BLE Scanner',    factory: () => CMD.bleScan('raw') },
@@ -978,23 +984,23 @@ function buildCommand(factoryResult) {
   return null;
 }
 
-/** Determine if a raw command string is risky */
-function isRiskyCommand(commandString) {
-  const riskyPatterns = [
-    /^scanap\b/i, /^scansta\b/i, /^scanall\b/i,
-    /^attack\b/i, /^beaconspam\b/i,
-    /^capture\b/i, /^listenprobes\b/i, /^pineap\b/i, /^karma\b/i,
-    /^blescan\b/i, /^blespam\b/i, /^blewardriving\b/i,
-    /^startwd\b/i, /^startportal\b/i, /^sweep\b/i, /^dhcpstarve\b/i,
-    /^trackap\b/i, /^tracksta\b/i, /^trackgatt\b/i, /^selectflipper\b/i,
-    /^spoofairtag\b/i, /^aerialscan\b/i, /^aerialspoof\b/i,
-    /^ir dazzler\b/i, /^ir learn\b/i, /^badusb run\b/i,
-    /^reboot\b/i, /^apenable\b/i, /^lora start\b/i,
-    /^mesh (switch|on|off)\b/i,
-  ];
-  return riskyPatterns.some(p => p.test(commandString.trim()));
+/** Shared metadata for raw commands and registry actions. Stops never need another stop. */
+function commandMetadata(commandString) {
+  const command = commandString.trim();
+  if (/^bledetect\s+-(?:s|u|l|i)\b/i.test(command)) return { risky: false, stopFirst: false };
+  if (/^bledetect\s+-(?:t|sp)\b/i.test(command)) return { risky: true, stopFirst: false };
+  if (/^(?:stop\w*\b|(?:capture|blescan|blespam|blewardriving|gpsinfo|startwd|listenprobes)\s+(?:-stop|-s)\b|(?:karma|dhcpstarve|ir dazzler|lora|meshcore)\s+stop\b)/i.test(command)) {
+    return { risky: false, stopFirst: false };
+  }
+  for (const factory of Object.values(CMD)) {
+    const meta = factory();
+    if (meta.cmd === command) return meta;
+  }
+  const radio = /^(?:scanap|scansta|scanall|attack|beaconspam|capture|listenprobes|pineap|congestion|karma|saeflood|blescan|blespam|blewardriving|startwd|startportal|sweep|dhcpstarve|trackap|tracksta|trackgatt|selectflipper|spoofairtag|aerialscan|aerialtrack|aerialspoof)\b|^ir (?:dazzler|learn)\b|^(?:lora|meshcore) start\b|^mesh switch\b/i.test(command);
+  return { risky: radio || /^(?:reboot|apenable)\b|^badusb run\b|^connect\s/i.test(command), stopFirst: radio };
 }
 
+function isRiskyCommand(commandString) { return commandMetadata(commandString).risky; }
 /** Map a command string to its category for UI organisation */
 function commandCategory(commandString) {
   const c = commandString.trim().toLowerCase();
@@ -1020,15 +1026,55 @@ function commandCategory(commandString) {
  * firmware output formats. Returns structured data or null.
  */
 
+// Keep transport decoration out of every firmware-format parser.
+function normalizeOutput(text) {
+  return String(text || '').replace(/^(?:RX: ?|ESP Comm Response: ?)/gm, '');
+}
+
+function sourceOutput(text, target = 'local') {
+  return String(text || '').split(/\r?\n/).flatMap(line => {
+    const peer = /^(?:RX: ?|ESP Comm Response: ?)/.test(line);
+    if (line.startsWith('> [peer] ')) return target === 'peer' ? ['> ' + line.slice(9)] : [];
+    return peer === (target === 'peer') ? [normalizeOutput(line)] : [];
+  }).join('\n');
+}
+
+function latestCommandOutput(text, pattern) {
+  const lines = normalizeOutput(text).split(/\r?\n/);
+  let start = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const command = /^> (.+)$/.exec(lines[i]);
+    if (command && pattern.test(command[1])) start = i + 1;
+  }
+  return lines.slice(start).join('\n');
+}
+
+function latestBlock(text, header, footer) {
+  const lines = normalizeOutput(text).split(/\r?\n/);
+  let start = -1, end = lines.length;
+  for (let i = 0; i < lines.length; i++) if (header.test(lines[i])) start = i;
+  if (start < 0) return normalizeOutput(text);
+  if (footer) for (let i = start + 1; i < lines.length; i++) {
+    if (footer.test(lines[i])) { end = i; break; }
+  }
+  return lines.slice(start, end).join('\n');
+}
+
+function uniqueRows(rows, key = 'index') {
+  const latest = new Map();
+  for (const row of rows) latest.set(row[key] ?? row.mac ?? row.index, row);
+  return [...latest.values()];
+}
+
 const Patterns = {
   // AP scan (multiline)
   AP_INDEX:     /^\[(\d+)\]\s*SSID:/m,
-  AP_SSID:      /SSID:\s*([^,\n]+)/,
+  AP_SSID:      /SSID:[ \t]*(.*?)(?:,\s*BSSID:|,?[ \t]*$)/m,
   AP_BSSID:     /BSSID:\s*([0-9A-Fa-f:]{17})/,
   AP_RSSI:      /RSSI:\s*(-?\d+)/,
   AP_CHANNEL:   /Channel:\s*(\d+)/,
-  AP_SECURITY:  /Security:\s*(\S+)/,
-  AP_PMF:       /PMF:\s*(\S+)/,
+  AP_SECURITY:  /Security:[ \t]*([^\n,]+)/,
+  AP_PMF:       /PMF:[ \t]*([^\n,]+)/,
   AP_VENDOR:    /Vendor:\s*(.+?)(?:\n|$)/,
   AP_BAND:      /Band:\s*(\S+)/,
 
@@ -1036,7 +1082,7 @@ const Patterns = {
   STATION_INDEX: /^\[(\d+)\]\s*Station\s*MAC:/m,
   STATION_MAC:   /Station(?:\s*MAC)?:\s*([0-9A-Fa-f:]{17})/,
   STATION_VENDOR:/(?:Station|STA)\s*Vendor:\s*([^,\n]+)/,
-  STATION_AP_SSID:/Associated\s*AP:\s*([^,\n]+)/,
+  STATION_AP_SSID:/(?:Associated\s*AP|AP\s*SSID):[ \t]*([^\n]+)/,
   STATION_AP_BSSID:/AP\s*BSSID:\s*([0-9A-Fa-f:]{17})/,
   STATION_AP_VENDOR:/AP\s*Vendor:\s*([^,\n]+)/,
   STATION_RSSI:  /RSSI:\s*(-?\d+)/,
@@ -1047,7 +1093,7 @@ const Patterns = {
   BLE_MAC:       /([0-9A-Fa-f:]{17})/,
 
   // Flipper
-  FLIPPER_INDEX: /^\[(\d+)\]\s*(White|Black|Transparent)?\s*Flipper\s*Found/i,
+  FLIPPER_INDEX: /^\[(\d+)\]\s*(White|Black|Transparent)?\s*Flipper\s*Found/im,
   FLIPPER_MAC:   /MAC:\s*([0-9A-Fa-f:]{17})/,
   FLIPPER_NAME:  /Name:\s*([^,\n]+)/,
   FLIPPER_RSSI:  /RSSI:\s*(-?\d+)\s*dBm/,
@@ -1075,18 +1121,18 @@ const Patterns = {
   SD_SIZE:       /SD:SIZE:(\d+)/,
 
   // GPS
-  GPS_FIX:       /Fix:\s*(\S+)/,
+  GPS_FIX:       /Fix:[ \t]*([^\n]+)/,
   GPS_SATS:      /Sats:\s*(\d+)(?:\/(\d+))?/,
   GPS_LAT:       /Lat:\s*(\d+)deg\s+([\d.]+)'([NS])/,
   GPS_LON:       /Long:\s*(\d+)deg\s+([\d.]+)'([EW])/,
-  GPS_ALT:       /Alt:\s*([\d.]+)m/,
+  GPS_ALT:       /Alt:\s*(-?[\d.]+)m/,
   GPS_SPEED:     /Speed:\s*([\d.]+)\s*km\/h/,
   GPS_DIRECTION: /Direction:\s*(\d+)°\s*(\S+)/,
   GPS_HDOP:      /HDOP:\s*([\d.]+)/,
 
   // Tracking
-  TRACK_RSSI:    /#####\s+(-?\d+)\s*dBm\s*\(min:(-?\d+)\s+max:(-?\d+)\)/,
-  TRACK_RSSI_GATT:/\[[#]+\]\s*RSSI:\s*(-?\d+)\s*dBm,\s*Min:\s*(-?\d+),\s*Max:\s*(-?\d+)(?:,\s*(CLOSER|FARTHER))?/,
+  TRACK_RSSI:    /[#]+\s+(-?\d+)\s*dBm\s*\(min:(-?\d+)\s+max:(-?\d+)(?:\s+close:\d+%)?\)/,
+  TRACK_RSSI_GATT:/\[[#]+\]\s*RSSI:\s*(-?\d+)\s*dBm,\s*Min:\s*(-?\d+),\s*Max:\s*(-?\d+)(?:,\s*Close:\s*\d+%)?(?:,\s*(CLOSER|FARTHER))?/,
   TRACK_HEADER:  /===\s*tracking\s+(ap|sta):\s*(.+)\s*===/i,
   TRACK_BSSID:   /bssid:\s*([0-9A-Fa-f:]{17})/i,
   TRACK_CHANNEL: /channel:\s*(\d+)/i,
@@ -1110,7 +1156,7 @@ const Patterns = {
   CHIP_MODEL:      /Model:\s*([^,\s\n]+(?:\s+[^,\s\n]+)*?)(?=\s*(?:[,\n]|$))/,
   CHIP_REVISION:   /Revision:\s*v?(\d+(?:\.\d+)+)/,
   CHIP_CORES:      /CPU Cores:\s*(\d+)/,
-  CHIP_FEATURES:   /(?<!Enabled )Features:\s*([^,\n]+)/,
+  CHIP_FEATURES:   /(?<!Enabled )Features:[ \t]*([^\n]+)/,
   CHIP_FREE_HEAP:  /Free Heap:\s*(\d+)/,
   CHIP_MIN_HEAP:   /Min Free Heap:\s*(\d+)/,
   CHIP_IDF:        /IDF Version:\s*([^,\s\n]+)/,
@@ -1119,20 +1165,20 @@ const Patterns = {
   // IR
   IR_LEARNED:      /Captured:\s*(\S+)\s+A:0x([0-9A-Fa-f]+)\s+C:0x([0-9A-Fa-f]+)/,
   IR_LEARNED_RAW:  /Captured RAW signal\s*\((\d+)\s+samples\)/,
-  IR_REMOTE:       /\[(\d+)\]\s*(\S+\.(?:ir|json))/,
-  IR_BUTTON:       /\[(\d+)\]\s*(\S+)(?:\s*\(([^)]+)\))?/,
+  IR_REMOTE:       /\[(\d+)\]\s*(.+?\.(?:ir|json))\s*$/,
+  IR_BUTTON:       /\[(\d+)\]\s*(.+?)(?:\s*\(([^)]+)\)(?:\s+Addr:\s*0x[0-9a-f]+\s+Cmd:\s*0x[0-9a-f]+)?)?\s*$/i,
 
   // Portal
   PORTAL_CREDS:    /Captured credentials:\s*(.+)\s*\/\s*(.+)/,
 
   // Generic
-  ERROR:           /ERROR:\s*(.+)/,
+  ERROR:           /ERROR:\s*(.+)/i,
   SUCCESS:         /^OK:\s*(.+)$/m,
   GHOSTESP_OK:     /GHOSTESP_OK/,
   SETTING_KV:      /([\w_]+)\s*=\s*(.+)/,
 
   // Wardrive
-  WARDRIVE_HEART:  /Wardrive:\s*ap=(\d+)\s+logged=(\d+)\/(\d+)\s+gpsrej=(\d+)\s+ch=(\d+)\s+up=(\d+)m(\d+)s\s+gps=([^/]+)\/(\d+)(?:\s+sats=(\d+))?\s+pending=(\d+)B/,
+  WARDRIVE_HEART:  /Wardrive:\s*ap=(\d+)\s+logged=(\d+)\/(\d+)\s+gpsrej=(\d+).*?\s+ch=(\d+)\s+up=(\d+)m(\d+)s\s+gps=([^/]+)\/(\d+)(?:\s+sats=(\d+))?.*?\s+pending=(\d+)B/,
 
   // Port scan
   PORT_SCAN:       /Port\s+(\d+):\s*(\w+)/,
@@ -1153,7 +1199,7 @@ const Parsers = {
       channel: parseInt(Patterns.AP_CHANNEL.exec(text)?.[1] || '-1', 10),
       security: (Patterns.AP_SECURITY.exec(text)?.[1] || 'Unknown').trim(),
       vendor: (Patterns.AP_VENDOR.exec(text)?.[1] || '').trim() || null,
-      band: (Patterns.AP_BAND.exec(text)?.[1] || '').trim() || null,
+      band: (Patterns.AP_BAND.exec(text)?.[1] || '').trim().replace(/,$/, '') || null,
       pmf: (Patterns.AP_PMF.exec(text)?.[1] || '').trim() || null,
       isHidden: !ssid || ssid === '(Hidden)',
     };
@@ -1168,7 +1214,7 @@ const Parsers = {
       index: idx,
       mac,
       vendor: (Patterns.STATION_VENDOR.exec(text)?.[1] || '').trim() || null,
-      associatedApSsid: (Patterns.STATION_AP_SSID.exec(text)?.[1] || '').trim() || null,
+      associatedApSsid: (Patterns.STATION_AP_SSID.exec(text)?.[1] || '').trim().replace(/,$/, '') || null,
       apBssid: Patterns.STATION_AP_BSSID.exec(text)?.[1] || null,
       apVendor: (Patterns.STATION_AP_VENDOR.exec(text)?.[1] || '').trim() || null,
       rssi: parseInt(Patterns.STATION_RSSI.exec(text)?.[1] || '-100', 10),
@@ -1203,9 +1249,8 @@ const Parsers = {
     return { name, mac, rssi, type };
   },
 
-  flipper(text) {
-    if (!text.includes('Flipper') || !text.includes('Found')) return null;
-    const idx = Patterns.FLIPPER_INDEX.exec(text)?.[1];
+  flipper(text, listed = false) {
+    const idx = Patterns.FLIPPER_INDEX.exec(text)?.[1] ?? (listed ? /^\[(\d+)\] MAC:/m.exec(text)?.[1] : null);
     if (idx == null) return null;
     return {
       index: idx,
@@ -1216,9 +1261,8 @@ const Parsers = {
     };
   },
 
-  airTag(text) {
-    if (!text.includes('AirTag')) return null;
-    const idx = Patterns.AIRTAG_INDEX.exec(text)?.[1];
+  airTag(text, listed = false) {
+    const idx = Patterns.AIRTAG_INDEX.exec(text)?.[1] ?? (listed ? /^\[(\d+)\] MAC:/m.exec(text)?.[1] : null);
     if (idx == null) return null;
     return {
       index: idx,
@@ -1252,6 +1296,7 @@ const Parsers = {
   },
 
   wifiStatus(text) {
+    text = latestBlock(text, Patterns.WIFI_STATUS_HDR, Patterns.WIFI_STATUS_FTR);
     if (!Patterns.WIFI_STATUS_HDR.test(text) && !text.includes('connected=')) return null;
     const values = {};
     for (const line of text.split(/\r?\n/)) {
@@ -1271,16 +1316,18 @@ const Parsers = {
   },
 
   wifiConnection(text) {
-    if (!text.includes('Got IP:') && !/WiFi\s+Connected/i.test(text) && !/WiFi\s+disconnected/i.test(text)) return null;
-    const ip = Patterns.GOT_IP.exec(text)?.[1];
-    if (ip) return { isConnected: true, ip };
-    if (Patterns.WIFI_CONNECTED.test(text)) return { isConnected: true };
-    const reason = Patterns.WIFI_DISCONN.exec(text)?.[1];
-    if (reason !== undefined) return { isConnected: false, reason: reason || null };
+    for (const line of text.split(/\r?\n/).reverse()) {
+      const ip = Patterns.GOT_IP.exec(line)?.[1];
+      if (ip) return { isConnected: true, ip };
+      const disconnected = Patterns.WIFI_DISCONN.exec(line);
+      if (disconnected) return { isConnected: false, reason: disconnected[1] || null };
+      if (Patterns.WIFI_CONNECTED.test(line)) return { isConnected: true };
+    }
     return null;
   },
 
   chipInfo(text) {
+    text = latestBlock(text, /\[CHIPINFO_START\]/, /\[CHIPINFO_END\]/);
     const hasInfo = text.includes('Chip Information') || (text.includes('Model:') && text.includes('IDF Version:') && text.includes('CPU Cores:'));
     if (!hasInfo) return null;
     const model = Patterns.CHIP_MODEL.exec(text)?.[1]?.trim();
@@ -1296,6 +1343,7 @@ const Parsers = {
       'T-Deck': 'TDECK', 'Rotary Encoder': 'ROTARY_ENCODER', 'USB Keyboard (Host)': 'USB_KEYBOARD',
       'Ghost Board': 'GHOST_BOARD', 'S3TWatch': 'S3TWATCH', 'SD Card (SPI)': 'SD_CARD_SPI',
       'SD Card (MMC)': 'SD_CARD_MMC',
+      'NRF24': 'NRF24', 'SubGHz': 'SUBGHZ', 'AtomS3R': 'ATOMS3R', 'Core Dump': 'CORE_DUMP',
     };
     const enabledSection = text.indexOf('Enabled Features:');
     if (enabledSection !== -1) {
@@ -1319,8 +1367,9 @@ const Parsers = {
   },
 
   gpsPosition(text) {
+    text = latestBlock(text, /^GPS Info\s*$/);
     if (!text.includes('GPS Info') && !text.includes('Lat:') && !text.includes('Long:')) return null;
-    const fixStr = Patterns.GPS_FIX.exec(text)?.[1] || 'No Fix';
+    const fixStr = Patterns.GPS_FIX.exec(text)?.[1]?.trim() || 'No Fix';
     const hasFix = /^(3D|2D|Fix)$/i.test(fixStr);
     const sats = Patterns.GPS_SATS.exec(text);
     const satsUsed = parseInt(sats?.[1] || '0', 10);
@@ -1355,7 +1404,7 @@ const Parsers = {
     if (w) {
       const rssi = parseInt(w[1], 10);
       return {
-        rssi, minRssi: parseInt(w[2], 10) || rssi, maxRssi: parseInt(w[3], 10) || rssi,
+        rssi, minRssi: parseInt(w[2], 10), maxRssi: parseInt(w[3], 10),
         direction: line.includes('CLOSER') ? 'CLOSER' : line.includes('FARTHER') ? 'FARTHER' : 'STABLE',
       };
     }
@@ -1363,7 +1412,7 @@ const Parsers = {
     if (g) {
       const rssi = parseInt(g[1], 10);
       return {
-        rssi, minRssi: parseInt(g[2], 10) || rssi, maxRssi: parseInt(g[3], 10) || rssi,
+        rssi, minRssi: parseInt(g[2], 10), maxRssi: parseInt(g[3], 10),
         direction: g[4] || 'STABLE',
       };
     }
@@ -1372,6 +1421,9 @@ const Parsers = {
 
   trackHeader(text) {
     const h = Patterns.TRACK_HEADER.exec(text);
+    if (/===\s*tracking sta\s*===/i.test(text)) {
+      return { isAp: false, targetName: null, targetBssid: Patterns.TRACK_BSSID.exec(text)?.[1] || null, channel: null };
+    }
     if (!h) {
       if (/Tracking\s+Device/i.test(text)) {
         const name = /Name:\s*([^,\n]+)/.exec(text)?.[1]?.trim();
@@ -1438,7 +1490,7 @@ const Parsers = {
   },
 
   error(line) {
-    if (!line.startsWith('ERROR:')) return null;
+    if (!/^ERROR:/i.test(line)) return null;
     return { message: Patterns.ERROR.exec(line)?.[1]?.trim() || 'Unknown error' };
   },
 
@@ -1477,106 +1529,116 @@ const Parsers = {
   },
 };
 
-/** Batch parse all access points from full log text */
-function parseAllAccessPoints(text) {
-  const rows = [];
-  const blocks = text.split(/\n(?=(?:RX:\s*)?\[\d+\]\s+SSID:)/g);
-  for (const block of blocks) {
-    const ap = Parsers.accessPoint(block);
-    if (ap) rows.push(ap);
-  }
-  return rows;
+// Public parsers accept either raw local output or RX-decorated peer output.
+for (const [name, parse] of Object.entries(Parsers)) {
+  if (typeof parse !== 'function') continue;
+  Parsers[name] = function (...args) {
+    if (typeof args[0] === 'string') args[0] = normalizeOutput(args[0]);
+    return parse.apply(this, args);
+  };
 }
 
-/** Batch parse all stations from full log text */
+function parseIndexedRows(text, header, parser, commands) {
+  text = latestCommandOutput(text, commands);
+  const rows = [];
+  const blocks = text.split(new RegExp('\\n(?=' + header + ')', 'gi'));
+  for (const block of blocks) {
+    const row = parser(block);
+    if (row) rows.push(row);
+  }
+  return uniqueRows(rows);
+}
+
+function parseAllAccessPoints(text) {
+  return parseIndexedRows(text, '\\[\\d+\\]\\s+SSID:',
+    block => Parsers.accessPoint(block), /^(?:scanap|scanall|list -a)\b/i);
+}
+
 function parseAllStations(text) {
   Parsers.resetStationCounter();
-  const rows = [];
-  const blocks = text.split(/\n(?=(?:RX:\s*)?\[\d+\]\s+(?:Station MAC:|STA:))/g);
-  for (const block of blocks) {
-    const sta = Parsers.stationWithFallbackIndex(block);
-    if (sta) rows.push(sta);
-  }
-  return rows;
+  // Unindexed discovery messages are useful in logs, but are not selectable IDs.
+  return parseIndexedRows(text, '\\[\\d+\\]\\s+(?:Station MAC:|STA:)',
+    block => { const row = Parsers.station(block); return row?.index != null ? row : null; },
+    /^(?:scansta|scanall|list -s)\b/i);
 }
 
-/** Batch parse BLE devices from log lines */
 function parseAllBleDevices(text) {
+  text = latestCommandOutput(text, /^(?:blescan(?:\s+(?!-s\b).+)?|bledetect(?:\s+-l)?)\s*$/i);
   const rows = [];
   for (const line of text.split(/\r?\n/)) {
-    const d = Parsers.bleDevice(line.replace(/^RX:\s*/, ''));
-    if (d) rows.push({ ...d, index: String(rows.length) });
+    const d = Parsers.bleDevice(line);
+    if (d?.mac) rows.push({ ...d, index: String(rows.length), kind: 'advertisement' });
   }
-  return rows;
+  // Current -ds firmware emits indexed multi-line detector records.
+  const blocks = text.split(/\n(?=\[\d+\]\s+[^\n]+ found)/gi);
+  for (const block of blocks) {
+    const head = /^\[(\d+)\] (.+) found\s*$/im.exec(block);
+    if (!head) continue;
+    const mac = /MAC:\s*([0-9A-Fa-f:]{17})/.exec(block)?.[1];
+    if (!mac) continue;
+    rows.push({ index: head[1], mac, name: /Name:[ \t]*([^\n]+)/.exec(block)?.[1]?.trim() || head[2],
+      rssi: Number(/RSSI:\s*(-?\d+)/.exec(block)?.[1] || -100),
+      type: /flipper/i.test(head[2]) ? 'FLIPPER_ZERO' : /airtag/i.test(head[2]) ? 'AIR_TAG' : 'GENERIC',
+      kind: 'detector' });
+  }
+  for (const line of text.split(/\r?\n/)) {
+    const m = /^\s*\[(\d+)\](?: \*)? (.+?) \| (.+?) \| (-?\d+) dBm\s*$/.exec(line);
+    if (!m) continue;
+    const isMac = /^[0-9A-Fa-f:]{17}$/.test(m[3]);
+    rows.push({ index: m[1], mac: isMac ? m[3] : null, name: isMac ? m[2] : m[3],
+      type: /flipper/i.test(m[2]) ? 'FLIPPER_ZERO' : /airtag/i.test(m[2]) ? 'AIR_TAG' : 'GENERIC',
+      rssi: Number(m[4]), kind: 'detector' });
+  }
+  return uniqueRows(rows, 'mac');
 }
 
-/** Parse all Flipper devices from log text */
 function parseAllFlippers(text) {
-  const rows = [];
-  const blocks = text.split(/\n(?=(?:RX:\s*)?\[\d+\]\s+(?:White|Black|Transparent)?\s*Flipper)/gi);
-  for (const block of blocks) {
-    const f = Parsers.flipper(block);
-    if (f) rows.push(f);
-  }
-  return rows;
+  const marker = normalizeOutput(text).match(/^> (?:blescan -f|listflippers)\b.*$/gm)?.at(-1);
+  const listed = marker?.startsWith('> listflippers') || (!marker && /Discovered Flippers/i.test(text));
+  if (listed && marker) text = getOutputBlock(text, 'listflippers').join('\n');
+  return parseIndexedRows(text, listed ? '\\[\\d+\\]\\s*MAC:' : '\\[\\d+\\]\\s*(?:White|Black|Transparent)?\\s*Flipper',
+    block => { const row = Parsers.flipper(block, listed); return row && { ...row, type: 'FLIPPER_ZERO', kind: 'flipper' }; },
+    /^(?:blescan -f|listflippers)\b/i);
 }
 
-/** Parse all AirTags from log text */
 function parseAllAirTags(text) {
-  const rows = [];
-  const blocks = text.split(/\n(?=(?:RX:\s*)?\[\d+\]\s*AirTag)/g);
-  for (const block of blocks) {
-    const a = Parsers.airTag(block);
-    if (a) rows.push(a);
-  }
-  return rows;
+  const marker = normalizeOutput(text).match(/^> (?:blescan -a|listairtags)\b.*$/gm)?.at(-1);
+  const listed = marker?.startsWith('> listairtags') || (!marker && /Discovered AirTags/i.test(text));
+  if (listed && marker) text = getOutputBlock(text, 'listairtags').join('\n');
+  return parseIndexedRows(text, listed ? '\\[\\d+\\]\\s*MAC:' : '\\[\\d+\\]\\s*AirTag',
+    block => { const row = Parsers.airTag(block, listed); return row && { ...row, type: 'AIR_TAG', kind: 'airtag' }; },
+    /^(?:blescan -a|listairtags)\b/i);
 }
 
-/** Parse all GATT devices from log text */
 function parseAllGattDevices(text) {
-  const rows = [];
-  const blocks = text.split(/\n(?=(?:RX:\s*)?\[\d+\]\s*Name:)/g);
-  for (const block of blocks) {
-    const g = Parsers.gattDevice(block);
-    if (g) rows.push(g);
-  }
-  return rows;
+  return parseIndexedRows(text, '\\[\\d+\\]\\s*Name:',
+    block => { const row = Parsers.gattDevice(block); return row && { ...row, kind: 'gatt' }; },
+    /^(?:blescan -g|listgatt)\b/i);
 }
 
-/** Parse all SD entries from log lines */
 function parseAllSdEntries(text) {
-  const rows = [];
-  for (const line of text.split(/\r?\n/)) {
-    const e = Parsers.sdEntry(line.replace(/^RX:\s*/, ''));
-    if (e) rows.push(e);
-  }
-  return rows;
+  const rows = latestCommandOutput(text, /^sd list\b/i).split(/\r?\n/).map(line => Parsers.sdEntry(line)).filter(Boolean);
+  return uniqueRows(rows);
 }
 
-/** Extract output block for a specific command from logs */
 function getOutputBlock(logs, command) {
-  const lines = logs.split(/\r?\n/).map(l => l.trimEnd());
-  const needle = `> ${command}`;
-  let start = -1;
-  for (let i = lines.length - 1; i >= 0; i--) {
-    if (lines[i].replace(/^RX:\s*/, '') === needle) { start = i; break; }
-  }
+  const lines = normalizeOutput(logs).split(/\r?\n/).map(l => l.trimEnd());
+  const start = lines.lastIndexOf(`> ${command}`);
   if (start < 0) return [];
   const out = [];
   for (let i = start + 1; i < lines.length; i++) {
-    const line = lines[i];
-    if (line.startsWith('>') && !line.startsWith('> ')) break;
-    out.push(line);
+    if (/^> /.test(lines[i])) break;
+    out.push(lines[i]);
   }
   return out;
 }
 
-/** Generic key=value block parser */
 function parseKeyValueBlock(text, headerRe, footerRe) {
+  text = headerRe ? latestBlock(text, headerRe, footerRe) : normalizeOutput(text);
   const out = [];
-  let inBlock = false;
+  let inBlock = !headerRe;
   for (const raw of text.split(/\r?\n/)) {
-    const line = raw.replace(/^RX:\s*/, '').trim();
+    const line = raw.trim();
     if (headerRe && headerRe.test(line)) { inBlock = true; continue; }
     if (footerRe && footerRe.test(line)) break;
     if (!inBlock) continue;
@@ -1602,6 +1664,7 @@ const state = {
   actionRegistry: {},
   activeAction: null,
   activeItem: null,
+  actionTarget: 'local',
   selectedIndices: new Set(),
   terminalTimer: null,
   commandHistory: [],
@@ -1674,12 +1737,31 @@ function setLoading(el, loading) {
 function isRisky(command) { return isRiskyCommand(command); }
 function canUseGhostLink() { return !!state.comm.connected; }
 
-async function runCommandSequence(commands) {
-  for (const command of commands) {
-    await new Promise(resolve => {
-      runCommand(command, { skipRisk: true, onComplete: resolve });
-    });
+function resultLogs() { return sourceOutput(state.logs, state.actionTarget); }
+function setActionTarget(target) {
+  if (state.actionTarget !== target) {
+    state.selectedIndices.clear();
+    state.activeItem = null;
   }
+  state.actionTarget = target;
+  renderActionDetail();
+}
+function runFeatureCommand(command) {
+  return state.actionTarget === 'peer' ? runRemote(command) : runCommand(command, { feature: true });
+}
+async function runCommandSequence(commands, target = 'local') {
+  if (commands.some(isRisky) && !confirm(`Run this command sequence on ${target === 'peer' ? 'the GhostLink peer' : 'this device'}?`)) return false;
+  // Stop before selecting: stop handlers can change radio/selection state.
+  if (!commands.includes('stop') && commands.some(command => commandMetadata(command).stopFirst)) {
+    commands = ['stop', ...commands];
+  }
+  for (const command of commands) {
+    const ok = target === 'peer'
+      ? await runRemote(command, { skipRisk: true, skipStop: true })
+      : await runCommand(command, { skipRisk: true, skipStop: true });
+    if (!ok) return false;
+  }
+  return true;
 }
 
 /* ======================== SHELL BUILDERS ======================== */
@@ -2146,7 +2228,7 @@ function renderDashboard() {
 }
 
 function renderDashboardDevice() {
-  const info = Parsers.chipInfo(state.logs);
+  const info = Parsers.chipInfo(sourceOutput(state.logs));
   if (info) {
     $('dash-conn-status').textContent = 'Connected';
     $('dash-conn-status').className = 'dash-card-sub good';
@@ -2163,8 +2245,8 @@ function renderDashboardDevice() {
 }
 
 function renderDashboardWifi() {
-  const ws = Parsers.wifiStatus(state.logs);
-  const conn = Parsers.wifiConnection(state.logs);
+  const ws = Parsers.wifiStatus(sourceOutput(state.logs));
+  const conn = Parsers.wifiConnection(sourceOutput(state.logs));
   if (ws && ws.connected) {
     $('dash-wifi-status').textContent = 'Connected';
     $('dash-wifi-status').className = 'dash-card-sub good';
@@ -2206,7 +2288,7 @@ function renderDashboardGhostLink() {
 }
 
 function renderDashboardSd() {
-  const sdRows = parseKeyValueBlock(state.logs, /SD\s*Status/i, null);
+  const sdRows = parseKeyValueBlock(sourceOutput(state.logs), /SD\s*Status/i, null);
   if (sdRows.length) {
     const map = {};
     sdRows.forEach(r => map[r.key.toLowerCase()] = r.value);
@@ -2221,7 +2303,7 @@ function renderDashboardSd() {
 }
 
 function renderDashboardFeatures() {
-  const info = Parsers.chipInfo(state.logs);
+  const info = Parsers.chipInfo(sourceOutput(state.logs));
   const features = info ? info.enabledFeatures : [];
   const featureLabels = {
     'DISPLAY': 'Display', 'TOUCHSCREEN': 'Touchscreen', 'STATUS_DISPLAY': 'OLED',
@@ -2354,7 +2436,7 @@ function buildActionDetail(action) {
       <button class="btn ghost" data-${state.activeItem ? 'back-results' : 'close-action'}>Back to ${esc(backLabel)}</button>
     </div>
     <div class="actions">
-      <button class="btn primary" data-command="${escapeAttr(action.command)}">Run</button>
+      <button class="btn primary" data-local-command="${escapeAttr(action.command)}">Run locally</button>
       ${refreshCommand && !state.activeItem ? `<button class="btn" data-command="${escapeAttr(refreshCommand)}">${esc(action.refreshLabel || 'Refresh')}</button>` : ''}
       <button class="btn ghost" data-remote-command="${escapeAttr(action.command)}">Run via GhostLink</button>
     </div>
@@ -2366,7 +2448,7 @@ function buildActionDetail(action) {
       <p><code>${esc(action.command)}</code></p>
     </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
-      ${categoryBadge} ${safetyBadge}
+      ${categoryBadge} ${safetyBadge} <span class="badge">Results: ${state.actionTarget === 'peer' ? 'GhostLink peer' : 'Local'}</span>
     </div>
   </div>
   ${result}`;
@@ -2374,35 +2456,39 @@ function buildActionDetail(action) {
 
 function renderActionResult(action) {
   const cmd = (action.command || '').trim().toLowerCase();
-  const cache = cachedParse(state.logs);
+  const logs = resultLogs();
+  const cache = cachedParse(logs);
   if (/^(scanap|list -a|scanall)\b/.test(cmd)) return renderApTable(cache.aps);
   if (/^(scansta|list -s)\b/.test(cmd)) return renderStationTable(cache.stations);
   if (/^wifistatus\b/.test(cmd)) {
-    const status = Parsers.wifiStatus(state.logs);
-    const rows = status ? objectToKeyValueRows(status) : parseKeyValueBlock(state.logs, /===\s*WIFI\s*STATUS\s*===/, /===\s*END\s*STATUS\s*===/);
+    const status = Parsers.wifiStatus(logs);
+    const rows = status ? objectToKeyValueRows(status) : parseKeyValueBlock(logs, /===\s*WIFI\s*STATUS\s*===/, /===\s*END\s*STATUS\s*===/);
     return renderKeyValueTable(rows, 'WiFi Status');
   }
   if (/^chipinfo\b/.test(cmd)) {
-    const info = Parsers.chipInfo(state.logs);
+    const info = Parsers.chipInfo(logs);
     if (info) return renderDeviceInfo(info);
-    return renderKeyValueTable(parseKeyValueBlock(state.logs, /\[CHIPINFO_START\]/, /\[CHIPINFO_END\]/), 'Chip Information');
+    return renderKeyValueTable(parseKeyValueBlock(logs, /\[CHIPINFO_START\]/, /\[CHIPINFO_END\]/), 'Chip Information');
   }
   if (/^gpsinfo\b/.test(cmd)) {
-    const gps = Parsers.gpsPosition(state.logs);
-    return gps ? renderGpsInfo(gps) : renderKeyValueTable(parseKeyValueBlock(state.logs, /GPS\s*Info/i, null), 'GPS Information');
+    const gps = Parsers.gpsPosition(logs);
+    return gps ? renderGpsInfo(gps) : renderKeyValueTable(parseKeyValueBlock(logs, /GPS\s*Info/i, null), 'GPS Information');
   }
-  if (/^blescan\b/.test(cmd)) {
-    const { ble, flippers, airtags, gatt } = cachedParse(state.logs);
-    const all = [...ble, ...flippers, ...airtags, ...gatt];
+  if (/^blescan -(?:ds|r)\b/.test(cmd)) return renderGenericRows(parseGenericRows(logs, action.command), cmd);
+  if (/^(?:blescan|bledetect|listflippers|listairtags|listgatt)\b/.test(cmd)) {
+    const { ble, flippers, airtags, gatt } = cachedParse(logs);
+    const all = cmd.startsWith('listflippers') || /^blescan -f\b/.test(cmd) ? flippers
+      : cmd.startsWith('listairtags') || /^blescan -a\b/.test(cmd) ? airtags
+      : cmd.startsWith('listgatt') || /^blescan -g\b/.test(cmd) ? gatt : ble;
     return renderBleTable(all);
   }
-  if (/^scanports\b/.test(cmd)) return renderPortTable(cachedParse(state.logs).ports);
-  if (/^scanarp\b/.test(cmd)) return renderGenericRows(parseArpScan(state.logs), cmd);
-  if (/^capture\b/.test(cmd)) return renderKeyValueTable(parseCaptureStatus(state.logs), 'Capture Status');
-  if (/^congestion\b/.test(cmd)) return renderGenericRows(parseCongestion(state.logs), cmd);
-  if (/^commstatus\b/.test(cmd)) return renderKeyValueTable(parseCommStatus(state.logs), 'GhostLink Status');
-  if (/^(sweep|pineap|startportal|stopportal|listportals|dialconnect|wardrive|blewardriving)\b/.test(cmd)) return renderGenericRows(parseGenericRows(state.logs, action.command), cmd);
-  return renderGenericRows(parseGenericRows(state.logs, action.command), cmd);
+  if (/^scanports\b/.test(cmd)) return renderPortTable(cachedParse(logs).ports);
+  if (/^scanarp\b/.test(cmd)) return renderGenericRows(parseArpScan(logs), cmd);
+  if (/^capture\b/.test(cmd)) return renderKeyValueTable(parseCaptureStatus(logs), 'Capture Status');
+  if (/^congestion\b/.test(cmd)) return renderGenericRows(parseCongestion(logs), cmd);
+  if (/^commstatus\b/.test(cmd)) return renderKeyValueTable(parseCommStatus(logs), 'GhostLink Status');
+  if (/^(sweep|pineap|startportal|stopportal|listportals|dialconnect|wardrive|blewardriving)\b/.test(cmd)) return renderGenericRows(parseGenericRows(logs, action.command), cmd);
+  return renderGenericRows(parseGenericRows(logs, action.command), cmd);
 }
 
 /* ======================== ITEM DETAIL ======================== */
@@ -2487,6 +2573,7 @@ function renderPortDetail(data) {
       <div class="stat"><label>Host</label><strong><code>${esc(data.host)}</code></strong></div>
       <div class="stat"><label>Port</label><strong>${esc(data.port)}</strong></div>
       <div class="stat"><label>Protocol</label><strong>${esc(data.proto)}</strong></div>
+      <div class="stat"><label>Status</label><strong>${esc(data.status)}</strong></div>
     </div>
     <div class="detail-actions">
       <button class="btn" data-item-action="copy" data-text="${escapeAttr(data.host + ':' + data.port)}">Copy Host:Port</button>
@@ -2534,35 +2621,34 @@ function renderGpsInfo(gps) {
 
 /* ======================== PARSER FALLBACKS ======================== */
 function parsePortScan(text) {
+  text = latestCommandOutput(text, /^scanports\b/i);
   const rows = [];
   let currentHost = '';
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.replace(/^RX:\s*/, '').trim();
-    const host = line.match(/^Scanning\s+(.+)\s+tcp/i);
+  for (const line of text.split(/\r?\n/).map(l => l.trim())) {
+    const host = /^(?:\[Host \d+\] Found active host:|UDP ports on)\s*([0-9.]+)/i.exec(line)
+      || /^Scanning\s+([0-9.]+)\s+(?:tcp|udp)/i.exec(line);
     if (host) currentHost = host[1];
-    const port = line.match(/^\s{0,4}(?:Port\s+)?(\d+)(?:\s*\(?(tcp|udp)\)?)?/i);
-    if (port) rows.push({ index: String(rows.length), host: currentHost, port: port[1], proto: (port[2] || 'tcp').toUpperCase() });
-    const udp = line.match(/^\s{0,4}UDP\s+(\d+)/i);
-    if (udp) rows.push({ index: String(rows.length), host: currentHost, port: udp[1], proto: 'UDP' });
+    const port = /^(Port|UDP)\s+(\d+):\s*(OPEN|CLOSED|FILTERED)\b/i.exec(line);
+    if (port) rows.push({ index: String(rows.length), host: currentHost, port: port[2],
+      proto: port[1].toUpperCase() === 'UDP' ? 'UDP' : 'TCP', status: port[3].toUpperCase() });
   }
-  return rows;
+  return uniqueRows(rows.map(row => ({ ...row, key: `${row.host}:${row.proto}:${row.port}` })), 'key');
 }
 
 function parseArpScan(text) {
+  text = latestCommandOutput(text, /^scanarp\b/i);
   const rows = [];
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.replace(/^RX:\s*/, '').trim();
-    const m = line.match(/^\[(\d+)\]\s+(?:IP:\s*)?([0-9.]+)\s*(?:MAC:\s*)?([0-9A-Fa-f:]{17})?/i);
-    if (m) rows.push({ index: m[1], title: m[2], detail: m[3] || '' });
-    else {
-      const m2 = line.match(/^([0-9.]+)\s+([0-9A-Fa-f:]{17})/i);
-      if (m2) rows.push({ index: String(rows.length), title: m2[1], detail: m2[2] });
-    }
+  for (const line of text.split(/\r?\n/).map(l => l.trim())) {
+    const m = /^(\d+)\.\s+([0-9.]+)\s+\[([0-9A-Fa-f:]{17})\](?:\s+(.*))?$/.exec(line);
+    const legacy = /^\[(\d+)\]\s+(?:IP:\s*)?([0-9.]+)\s+(?:MAC:\s*)?([0-9A-Fa-f:]{17})/.exec(line);
+    const row = m || legacy;
+    if (row) rows.push({ index: row[1], title: row[2], detail: [row[3], row[4]].filter(Boolean).join(' · ') });
   }
-  return rows;
+  return uniqueRows(rows);
 }
 
 function parseCaptureStatus(text) {
+  text = latestCommandOutput(text, /^capture\b/i);
   const out = [];
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.replace(/^RX:\s*/, '').trim();
@@ -2575,16 +2661,17 @@ function parseCaptureStatus(text) {
 }
 
 function parseCongestion(text) {
+  text = latestCommandOutput(text, /^congestion\b/i);
   const rows = [];
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.replace(/^RX:\s*/, '').trim();
-    const m = line.match(/^\s*(?:Channel\s*)?(\d+)[\s:=-]+(\d+)/i);
-    if (m) rows.push({ index: String(rows.length), title: 'Channel ' + m[1], detail: m[2] + ' networks' });
+  for (const line of text.split(/\r?\n/).map(l => l.trim())) {
+    const m = /^\|\s*(\d+)\s*\|\s*(\d+)\s*\|[ #]*\|$/.exec(line);
+    if (m) rows.push({ index: m[1], title: 'Channel ' + m[1], detail: m[2] + ' networks' });
   }
-  return rows;
+  return uniqueRows(rows);
 }
 
 function parseCommStatus(text) {
+  text = latestCommandOutput(text, /^commstatus\b/i);
   const out = [];
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.replace(/^RX:\s*/, '').trim();
@@ -2595,13 +2682,9 @@ function parseCommStatus(text) {
 }
 
 function parseGenericRows(text, command) {
-  const lines = text.split(/\r?\n/).map(l => l.trimEnd()).filter(Boolean);
-  const commandIndex = command ? lines.map(l => l.replace(/^RX:\s*/, '')).lastIndexOf(`> ${command}`) : -1;
-  const output = (commandIndex >= 0 ? lines.slice(commandIndex + 1) : lines.slice(-30))
-    .filter(l => !l.replace(/^RX:\s*/, '').startsWith('>'))
-    .slice(-24);
-  return output.map((line, index) => {
-    const stripped = line.replace(/^RX:\s*/, '').trim();
+  const lines = getOutputBlock(text, command).filter(l => l.trim() && !/^Peer command: /.test(l)).slice(-100);
+  return lines.map((line, index) => {
+    const stripped = line.trim();
     const kv = stripped.match(/^([^=:\n]{2,40})\s*[=:]\s*(.+)$/);
     return kv
       ? { index: String(index), title: kv[1].trim(), detail: kv[2].trim() }
@@ -2692,7 +2775,7 @@ function renderBleTable(rows) {
   const filterBar = `<div class="tabs" style="margin-bottom:10px">${chips}</div>`;
   if (!filtered.length) return filterBar + '<div class="empty">No devices match the current filter.</div>';
   return filterBar + `<div class="table-wrap"><table><thead><tr><th>#</th><th>MAC</th><th>Name</th><th>Type</th><th>RSSI</th></tr></thead><tbody>
-    ${filtered.map((r, i) => `<tr class="clickable-row" data-select-item="ble" data-index="${escapeAttr(r.index || String(i))}">
+    ${filtered.map((r, i) => `<tr class="clickable-row" data-select-item="ble" data-kind="${escapeAttr(r.kind || '')}" data-index="${escapeAttr(r.index || String(i))}">
       <td>${esc(r.index || String(i))}</td>
       <td><code>${esc(r.mac || '-')}</code></td>
       <td>${esc(r.name || '-')}</td>
@@ -2704,9 +2787,9 @@ function renderBleTable(rows) {
 
 function renderPortTable(rows) {
   if (!rows.length) return '<div class="empty">No port scan results yet. Run a port scan to populate.</div>';
-  return `<div class="table-wrap"><table><thead><tr><th>#</th><th>Host</th><th>Port</th><th>Protocol</th></tr></thead><tbody>
+  return `<div class="table-wrap"><table><thead><tr><th>#</th><th>Host</th><th>Port</th><th>Protocol</th><th>Status</th></tr></thead><tbody>
     ${rows.map(r => `<tr class="clickable-row" data-select-item="port" data-index="${escapeAttr(r.index)}">
-      <td>${esc(r.index)}</td><td><code>${esc(r.host)}</code></td><td>${esc(r.port)}</td><td>${esc(r.proto)}</td>
+      <td>${esc(r.index)}</td><td><code>${esc(r.host)}</code></td><td>${esc(r.port)}</td><td>${esc(r.proto)}</td><td>${esc(r.status)}</td>
     </tr>`).join('')}
   </tbody></table></div>`;
 }
@@ -2897,7 +2980,7 @@ const DASHBOARD_AUTO_QUERIES = [
 
 function populateDashboardIfStale() {
   if (state.dashboardAutoPopulated) return;
-  const missing = DASHBOARD_AUTO_QUERIES.filter(q => !q.has(state.logs || ''));
+  const missing = DASHBOARD_AUTO_QUERIES.filter(q => !q.has(sourceOutput(state.logs)));
   if (!missing.length) {
     state.dashboardAutoPopulated = true;
     return;
@@ -2939,6 +3022,7 @@ function getVal(id) { const el = $(id); return el ? el.value : ''; }
 function getBool(id) { const el = $(id); return el ? !!el.checked : false; }
 
 function cachedParse(logs) {
+  logs = sourceOutput(logs);
   if (state.parseCache.logs === logs) {
     return {
       aps: state.parseCache.aps,
@@ -3008,9 +3092,19 @@ async function saveSettings() {
 }
 
 async function runCommand(command, options = {}) {
+  if (!command || new TextEncoder().encode(command).length > 255 || /[\r\n\0]/.test(command)) {
+    const err = new Error('Use one command of 1–255 UTF-8 bytes');
+    toast(err.message, 'bad');
+    if (typeof options.onComplete === 'function') options.onComplete(err);
+    return false;
+  }
   if (!options.skipRisk && isRisky(command)) {
     showRiskModal(command);
-    return;
+    return false;
+  }
+  if (options.feature) setActionTarget('local');
+  if (!options.skipStop && commandMetadata(command).stopFirst) {
+    if (!await runCommand('stop', { silent: true, skipRisk: true, skipStop: true })) return false;
   }
   if (!options.silent) {
     state.commandHistory.push(command);
@@ -3021,7 +3115,7 @@ async function runCommand(command, options = {}) {
   }
   try {
     const res = await api('/api/command', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ command }) });
-    if (!res.ok) throw new Error('command failed');
+    if (!res.ok) throw new Error(await res.text() || 'command failed');
     if (!options.silent) {
       toast('Command sent', 'good');
       setTimeout(() => refreshLogs(true), 900);
@@ -3032,10 +3126,12 @@ async function runCommand(command, options = {}) {
       localStorage.removeItem('ghost_v2_pending_command');
     }
     if (typeof options.onComplete === 'function') options.onComplete();
+    return true;
   } catch (err) {
     if (isRisky(command) && !options.silent) startReconnectWatch();
     else if (!options.silent) toast('Command failed: ' + err.message, 'bad');
     if (typeof options.onComplete === 'function') options.onComplete(err);
+    return false;
   }
 }
 
@@ -3051,29 +3147,36 @@ function closeRiskModal() {
   state.pendingRiskCommand = null;
 }
 
-async function runRemote(command) {
-  if (isRisky(command)) {
-    const ok = confirm(`"${command}" is a radio-disruptive or risky command. Send it to the GhostLink peer anyway?`);
-    if (!ok) return;
+async function runRemote(command, options = {}) {
+  if (!canUseGhostLink()) { toast('GhostLink is disconnected', 'bad'); return false; }
+  const bytes = new TextEncoder().encode(command).length;
+  if (!bytes || bytes > 250 || /[\r\n\0]/.test(command)) {
+    toast('Use one command of 1–250 UTF-8 bytes', 'bad'); return false;
   }
-  appendComm('> ' + command);
-  setCommPending(true);
+  if (!options.skipRisk && isRisky(command) && !confirm(`Run "${command}" on the GhostLink peer?`)) return false;
+  if (!options.skipStop && commandMetadata(command).stopFirst) {
+    if (!await runRemote('stop', { skipRisk: true, skipStop: true, silent: true })) return false;
+  }
+  setActionTarget('peer');
+  if (!options.silent) {
+    appendComm('> ' + command);
+    state.commLogSnapshot = state.logs || '';
+    setCommPending(true);
+  }
   try {
     const res = await api('/api/esp_comm/send', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ command }) });
     const data = await res.json();
-    if (!data.success) {
-      appendComm('Error: ' + (data.message || 'send failed'), { kind: 'error' });
-      toast('GhostLink command failed', 'bad');
-      setCommPending(false);
-    } else {
-      toast('GhostLink command sent', 'good');
-      state.commLogOffset = (state.logs || '').length;
+    if (!res.ok || !data.success) throw new Error(data.message || data.error || 'send failed');
+    if (!options.silent) {
+      toast('GhostLink command queued', 'good');
       setTimeout(() => refreshLogs(true).then(pollPeerResponses).catch(() => setCommPending(false)), 800);
     }
+    return true;
   } catch (err) {
     appendComm('Error: ' + err.message, { kind: 'error' });
-    toast('GhostLink failed', 'bad');
+    toast('GhostLink failed: ' + err.message, 'bad');
     setCommPending(false);
+    return false;
   }
 }
 
@@ -3085,46 +3188,39 @@ function setCommPending(on) {
     state.commPending = (state.commPending || 0) + 1;
     state.commPendingTimer = setTimeout(() => {
       if (state.commPending > 0) {
-        appendComm('(no peer response within 12s)', { kind: 'error' });
+        appendComm('(no peer output within 130s)', { kind: 'error' });
       }
       setCommPending(false);
-    }, 12000);
+    }, 130000);
   } else {
     state.commPending = 0;
   }
 }
 
+function newLogText(previous, current) {
+  if (current.startsWith(previous)) return current.slice(previous.length);
+  // Retained history rolls over. Match complete lines, not an absolute byte offset.
+  const oldLines = previous.split('\n');
+  const newLines = current.split('\n');
+  if (oldLines.at(-1) === '') oldLines.pop();
+  if (newLines.at(-1) === '') newLines.pop();
+  for (let n = Math.min(oldLines.length, newLines.length); n > 0; n--) {
+    if (oldLines.slice(-n).join('\n') === newLines.slice(0, n).join('\n')) return newLines.slice(n).join('\n');
+  }
+  return current;
+}
 function pollPeerResponses() {
-  if (!state.logs) return;
-  if (state.commLogOffset === 0 || state.commLogOffset > state.logs.length) {
-    state.commLogOffset = state.logs.length;
-    return;
-  }
-  const slice = state.logs.slice(state.commLogOffset);
-  if (!slice) return;
-  const lines = slice.split('\n');
+  const snapshot = state.logs || '';
+  const slice = newLogText(state.commLogSnapshot || '', snapshot);
+  state.commLogSnapshot = snapshot;
   let appended = false;
-  for (const raw of lines) {
-    let body = null;
-    let kind = 'response';
-    let m = raw.match(/^RX:\s?(.*)$/);
-    if (m) {
-      body = m[1];
-    } else {
-      m = raw.match(/^ESP Comm Response:\s?(.*)$/);
-      if (m) body = m[1];
-    }
-    if (body != null) {
-      appendComm(body || '(empty response)', { kind });
-      appended = true;
-      continue;
-    }
-    if (/^E:\s*ESP Comm Response/i.test(raw) || /Response failed/i.test(raw) || /E:\s*esp_comm/i.test(raw)) {
-      appendComm(raw.replace(/^E:\s*/, ''), { kind: 'error' });
-      appended = true;
+  for (const raw of slice.split('\n')) {
+    const m = /^(?:RX: ?|ESP Comm Response: ?)(.*)$/.exec(raw);
+    if (m) { appendComm(m[1] || '(empty response)', { kind: 'response' }); appended = true; }
+    else if (/^E:\s*ESP Comm Response/i.test(raw) || /Response failed|E:\s*esp_comm/i.test(raw)) {
+      appendComm(raw, { kind: 'error' }); appended = true;
     }
   }
-  state.commLogOffset = state.logs.length;
   if (appended) setCommPending(false);
 }
 
@@ -3174,6 +3270,7 @@ async function refreshLogs(parse = false) {
   if (newLogs !== state.logs) {
     state.logs = newLogs;
     invalidateParseCache();
+    renderActiveFeatureView();
   }
   renderLogs();
   if (parse) {
@@ -3294,7 +3391,12 @@ function bindEvents() {
     const downloadPath = event.target.closest('[data-download-path]');
     const deletePath = event.target.closest('[data-delete-path]');
 
-    if (cmd) runCommand(cmd.dataset.command);
+    const local = event.target.closest('[data-local-command]');
+    if (local) { setActionTarget('local'); runCommand(local.dataset.localCommand, { feature: true }); }
+    if (cmd) {
+      if (cmd.closest('#wifi-detail, #ble-detail')) runFeatureCommand(cmd.dataset.command);
+      else runCommand(cmd.dataset.command);
+    }
     if (remote) runRemote(remote.dataset.remoteCommand);
     if (openActionBtn) openAction(openActionBtn.dataset.openAction);
     if (closeActionBtn) closeAction();
@@ -3308,12 +3410,12 @@ function bindEvents() {
       const type = itemRow.dataset.selectItem;
       const index = itemRow.dataset.index;
       let data = null;
-      const { aps, stations, ble, flippers, airtags, gatt, ports } = cachedParse(state.logs);
+      const { aps, stations, ble, flippers, airtags, gatt, ports } = cachedParse(resultLogs());
       if (type === 'ap') data = aps.find(r => r.index === index);
       else if (type === 'station') data = stations.find(r => r.index === index);
-      else if (type === 'ble') data = ble.concat(flippers, airtags, gatt).find(r => (r.index || '0') === index);
+      else if (type === 'ble') data = ble.concat(flippers, airtags, gatt).find(r => (r.index || '0') === index && r.kind === itemRow.dataset.kind);
       else if (type === 'port') data = ports.find(r => r.index === index);
-      else if (type === 'generic') data = parseGenericRows(state.logs, state.activeAction ? state.activeAction.command : '').find(r => r.index === index);
+      else if (type === 'generic') data = parseGenericRows(resultLogs(), state.activeAction ? state.activeAction.command : '').find(r => r.index === index);
       if (data) openItem(type, data);
       return;
     }
@@ -3331,7 +3433,7 @@ function bindEvents() {
     if (selectAll) {
       const type = selectAll.dataset.selectAll;
       let rows = [];
-      const cache = cachedParse(state.logs);
+      const cache = cachedParse(resultLogs());
       if (type === 'ap') rows = cache.aps;
       else if (type === 'station') rows = cache.stations;
       if (selectAll.checked) rows.forEach(r => state.selectedIndices.add(r.index));
@@ -3348,7 +3450,7 @@ function bindEvents() {
         const indices = Array.from(state.selectedIndices);
         if (!indices.length) { toast('Nothing selected', 'warn'); return; }
         const selectCmd = CMD.selectAp(indices.join(',')).cmd;
-        runCommandSequence([selectCmd, CMD.stopDeauth().cmd, 'stop', CMD.deauth().cmd]);
+        runCommandSequence([CMD.stopDeauth().cmd, 'stop', selectCmd, CMD.deauth().cmd], state.actionTarget);
       }
       return;
     }
@@ -3465,22 +3567,36 @@ function bindEvents() {
 
 function handleItemAction(action, dataset) {
   switch (action) {
-    case 'select-ap': runCommand(CMD.selectAp(dataset.index).cmd); break;
-    case 'select-sta': runCommand(CMD.selectSta(dataset.index).cmd); break;
-    case 'deauth': runCommandSequence([CMD.selectAp(dataset.index).cmd, CMD.deauth().cmd]); break;
-    case 'deauth-sta': runCommandSequence([CMD.selectSta(dataset.index).cmd, CMD.deauth().cmd]); break;
-    case 'track-ap': runCommand(CMD.trackAp().cmd); break;
-    case 'track-sta': runCommand(CMD.trackSta().cmd); break;
+    case 'select-ap': runFeatureCommand(CMD.selectAp(dataset.index).cmd); break;
+    case 'select-sta': runFeatureCommand(CMD.selectSta(dataset.index).cmd); break;
+    case 'deauth': runCommandSequence([CMD.selectAp(dataset.index).cmd, CMD.deauth().cmd], state.actionTarget); break;
+    case 'deauth-sta': runCommandSequence([CMD.selectSta(dataset.index).cmd, CMD.deauth().cmd], state.actionTarget); break;
+    case 'track-ap': runCommandSequence([CMD.selectAp(state.activeItem?.data.index).cmd, CMD.trackAp().cmd], state.actionTarget); break;
+    case 'track-sta': runCommandSequence([CMD.selectSta(state.activeItem?.data.index).cmd, CMD.trackSta().cmd], state.actionTarget); break;
     case 'connect-ap': {
       const pass = getVal(`ap-connect-pass-${dataset.index}`) || '';
       const ssid = dataset.ssid;
-      if (ssid) runCommand(CMD.connect(ssid, pass).cmd);
+      if (ssid) runFeatureCommand(CMD.connect(ssid, pass).cmd);
       else toast('No SSID available', 'warn');
       break;
     }
-    case 'track-ble': runCommand(CMD.bleScan('spam').cmd); break;
-    case 'spoof-airtag': runCommand(CMD.spoofAirTag(true).cmd); break;
-    case 'enum-gatt': runCommand(CMD.enumGatt().cmd); break;
+    case 'track-ble': {
+      const row = state.activeItem?.data;
+      if (!row) break;
+      if (row.kind === 'gatt') runCommandSequence([CMD.selectGatt(row.index).cmd, CMD.trackGatt().cmd], state.actionTarget);
+      else if (row.kind === 'flipper') runFeatureCommand(CMD.trackFlipper(row.index).cmd);
+      else if (row.kind === 'detector') runFeatureCommand(`bledetect -t ${row.index}`);
+      else toast('Tracking is not available for this scan type', 'warn');
+      break;
+    }
+    case 'spoof-airtag': {
+      const row = state.activeItem?.data;
+      if (row?.kind === 'detector' && row.type === 'AIR_TAG') runFeatureCommand(`bledetect -sp ${row.index}`);
+      else if (row?.kind === 'airtag') runCommandSequence([`selectairtag ${row.index}`, CMD.spoofAirTag(true).cmd], state.actionTarget);
+      else toast('Select an AirTag from an AirTag or device scan', 'warn');
+      break;
+    }
+    case 'enum-gatt': runCommandSequence([CMD.selectGatt(state.activeItem?.data.index).cmd, CMD.enumGatt().cmd], state.actionTarget); break;
     case 'copy': navigator.clipboard.writeText(dataset.text || '').then(() => toast('Copied', 'good')).catch(() => toast('Copy failed', 'bad')); break;
     default: toast('Action not implemented', 'warn');
   }

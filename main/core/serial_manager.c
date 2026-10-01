@@ -1215,7 +1215,7 @@ int handle_serial_command(const char *input) {
       *write++ = *p++;
     }
     if (quote != '\0') {
-      printf("Error: Missing closing quote\n");
+      glog("Error: Missing closing quote\n");
       return ESP_ERR_INVALID_ARG;
     }
     /* Advance past the delimiter before terminating the compacted token. If
@@ -1223,6 +1223,11 @@ int handle_serial_command(const char *input) {
     if (*p != '\0') p++;
     *write = '\0';
     while (isspace((unsigned char)*p)) p++;
+  }
+
+  if (*p != '\0') {
+    glog("Error: Too many command arguments (maximum 10)\n");
+    return ESP_ERR_INVALID_ARG;
   }
 
   if (argc == 0) {

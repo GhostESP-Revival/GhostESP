@@ -906,7 +906,7 @@ static void send_handshake_ack(void) {
 
 static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t* packet) {
     if (!comm || !packet) return;
-    static char log_buffer[128];
+    static char log_buffer[sizeof(comm->response_assembly) + 8];
 
     switch(packet->type) {
         case PACKET_TYPE_DISCOVERY:
@@ -1243,8 +1243,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                         // force flush oldest buffered data if no newline present
                         size_t line_len = comm->response_assembly_len;
                         if (line_len > 0) {
-                            if (line_len > 255) line_len = 255;
-                            char line[256];
+                            char line[sizeof(comm->response_assembly) + 1];
                             memcpy(line, comm->response_assembly, line_len);
                             line[line_len] = '\0';
                             printf("ESP Comm Response: %s\n", line);
@@ -1273,8 +1272,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                             if (c == '\n' && line_len > 0 && comm->response_assembly[i - 1] == '\r') {
                                 line_len -= 1;
                             }
-                            if (line_len > 255) line_len = 255;
-                            char line[256];
+                            char line[sizeof(comm->response_assembly) + 1];
                             memcpy(line, comm->response_assembly + start, line_len);
                             line[line_len] = '\0';
                             printf("ESP Comm Response: %s\n", line);
@@ -1870,7 +1868,8 @@ bool esp_comm_manager_send_command(const char* command, const char* data) {
 
     size_t cmd_len = strlen(command);
     if (cmd_len > MAX_CMD_LEN) {
-        cmd_len = MAX_CMD_LEN;
+        printf("Command name too long; use command line transport\n");
+        return false;
     }
 
     strncpy((char*)packet.data, command, cmd_len);
