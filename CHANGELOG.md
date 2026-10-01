@@ -64,6 +64,8 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Freed ~15KB of RAM at boot on classic ESP32 boards by releasing unused Classic Bluetooth memory at startup instead of on first BLE use
 
 ### Fixed
+- Fixed the web UI sending Wi-Fi commands with SSIDs or passwords containing quotes or spaces, and made command arguments, long commands and oversized web UI payloads get validated instead of silently truncated
+- Fixed the DNS server task overflowing its stack during Evil Portal sessions on non-PSRAM boards
 - Fixed the HT Control field being ignored on non-QoS data frames, which hid some ARP, EAP and IP traffic
 - Capture summaries now report frames lost to an oversized buffer or a full queue instead of discarding them silently
 - Fixed empty options menus (Wi-Fi, Settings, BadUSB, NFC, SubGHz, and more)
