@@ -67,6 +67,9 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Freed ~15KB of RAM at boot on classic ESP32 boards by releasing unused Classic Bluetooth memory at startup instead of on first BLE use
 
 ### Fixed
+- Fixed S3TWatch USB serial becoming unresponsive when the screen turns off
+- Fixed repeated AXP2101 battery errors and invalid battery readings on S3TWatch
+- Fixed S3TWatch backlight flickering instead of dimming in low power mode
 - Fixed the web UI dashboard SD Card card never populating; it now shows mount status, path and used/total space
 - Fixed the web UI dashboard "Remote CMD" field reading "No" while remote commands worked; it now shows Running/Idle as "Remote CMD Activity"
 - Fixed the web UI sending Wi-Fi commands with SSIDs or passwords containing quotes or spaces, and made command arguments, long commands and oversized web UI payloads get validated instead of silently truncated

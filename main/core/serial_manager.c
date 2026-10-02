@@ -5,6 +5,7 @@
 #include "driver/usb_serial_jtag.h"
 #include "esp_task_wdt.h"
 #include "esp_log.h"
+#include "esp_pm.h"
 #include "esp_attr.h"
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
@@ -71,6 +72,10 @@ static TaskHandle_t s_serial_task_handle = NULL;
 static bool s_serial_initialized = false;
 static bool s_uart_disabled = false; // disable main serial UART for certain templates
 static bool s_uart_paused = false;   // temporarily hand the UART driver to another owner (e.g. GPS)
+#if defined(CONFIG_IS_S3TWATCH) && defined(CONFIG_PM_ENABLE)
+static esp_pm_lock_handle_t s_usb_sleep_lock = NULL;
+static bool s_usb_sleep_locked = false;
+#endif
 
 static bool serial_should_disable_uart(void) {
   return false;
@@ -690,6 +695,11 @@ void serial_task(void *pvParameter) {
     return;
   }
   int index = 0;
+#if defined(CONFIG_IS_S3TWATCH) && defined(CONFIG_PM_ENABLE)
+  // USB Serial/JTAG cannot receive commands while the CPU is in light sleep.
+  ESP_ERROR_CHECK(esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP, 0, "serial_usb",
+                                    &s_usb_sleep_lock));
+#endif
   static uint32_t hwm_log_counter = 0;
 
   // Display initial prompt after startup messages have time to print
@@ -701,6 +711,16 @@ void serial_task(void *pvParameter) {
 
   bool first_iteration = true;
   while (1) {
+#if defined(CONFIG_IS_S3TWATCH) && defined(CONFIG_PM_ENABLE)
+    bool usb_connected = usb_serial_jtag_is_connected();
+    if (usb_connected && !s_usb_sleep_locked) {
+      esp_pm_lock_acquire(s_usb_sleep_lock);
+      s_usb_sleep_locked = true;
+    } else if (!usb_connected && s_usb_sleep_locked) {
+      esp_pm_lock_release(s_usb_sleep_lock);
+      s_usb_sleep_locked = false;
+    }
+#endif
     // Ensure prompt is displayed on first iteration if it wasn't shown during init
     if (first_iteration && !s_uart_disabled && !prompt_displayed) {
       fflush(stdout);
@@ -1059,6 +1079,16 @@ void serial_manager_deinit() {
     vTaskDelete(s_serial_task_handle);
     s_serial_task_handle = NULL;
   }
+#if defined(CONFIG_IS_S3TWATCH) && defined(CONFIG_PM_ENABLE)
+  if (s_usb_sleep_lock) {
+    if (s_usb_sleep_locked) {
+      esp_pm_lock_release(s_usb_sleep_lock);
+      s_usb_sleep_locked = false;
+    }
+    esp_pm_lock_delete(s_usb_sleep_lock);
+    s_usb_sleep_lock = NULL;
+  }
+#endif
 #if JTAG_SUPPORTED
   usb_serial_jtag_driver_uninstall();
 #endif
