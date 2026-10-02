@@ -44,6 +44,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Added `Tools`, `System`, `Games`, `Communication`, `Media` and `Sensors` folders to the Apps gallery, shared with SD apps by their manifest `category`
 
 ### Changed
+- Renamed the SD browser's bottom Back row to Exit
 - Restyled the on-screen keyboard with a standard iOS-style layout
 - Defaulted the terminal to white small text with padding, spacing and colour-coded output
 - Reorganized Settings menu categories for easier navigation
@@ -55,6 +56,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Mapped IR buttons to the theme palette
 - Matched the Ethernet dashboard status card to the rounded action rows
 - Reduced GhostScript RAM use across all boards
+- Reduced wardriving queue RAM use by 58% without reducing capture capacity
 - Raised the Banshee GhostLink UART to 921600 baud with a larger receive buffer so the higher rate does not increase receive loss
 - Cleaned up boot and GhostLink console output
 - Added periodic capture progress and shut up the PCAP writer HWM log
@@ -64,6 +66,8 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Freed ~15KB of RAM at boot on classic ESP32 boards by releasing unused Classic Bluetooth memory at startup instead of on first BLE use
 
 ### Fixed
+- Fixed the web UI dashboard SD Card card never populating; it now shows mount status, path and used/total space
+- Fixed the web UI dashboard "Remote CMD" field reading "No" while remote commands worked; it now shows Running/Idle as "Remote CMD Activity"
 - Fixed the web UI sending Wi-Fi commands with SSIDs or passwords containing quotes or spaces, and made command arguments, long commands and oversized web UI payloads get validated instead of silently truncated
 - Fixed the DNS server task overflowing its stack during Evil Portal sessions on non-PSRAM boards
 - Fixed the HT Control field being ignored on non-QoS data frames, which hid some ARP, EAP and IP traffic

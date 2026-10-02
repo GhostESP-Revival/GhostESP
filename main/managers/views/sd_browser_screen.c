@@ -776,7 +776,7 @@ static void sd_browser_show_list(void) {
     if (loaded < 0) {
         sd_browser_add_row(LV_SYMBOL_SD_CARD " SD unavailable", SD_ROW_REFRESH, -1);
         sd_browser_add_row(LV_SYMBOL_REFRESH " Refresh", SD_ROW_REFRESH, -1);
-        sd_browser_add_row(LV_SYMBOL_LEFT " Back", SD_ROW_BACK, -1);
+        sd_browser_add_row(LV_SYMBOL_LEFT " Exit", SD_ROW_BACK, -1);
         options_view_set_selected(browser_options, 1);
 #ifdef CONFIG_USE_TOUCHSCREEN
         sd_update_scroll_buttons_visibility();
@@ -803,7 +803,7 @@ static void sd_browser_show_list(void) {
 
     if (page_entry_count == 0) sd_browser_add_row("No items found", SD_ROW_REFRESH, -1);
     if (page_has_next) sd_browser_add_row("Next " LV_SYMBOL_RIGHT, SD_ROW_NEXT, -1);
-    sd_browser_add_row(LV_SYMBOL_LEFT " Back", SD_ROW_BACK, -1);
+    sd_browser_add_row(LV_SYMBOL_LEFT " Exit", SD_ROW_BACK, -1);
     options_view_set_selected(browser_options, 0);
 
 #ifdef CONFIG_USE_TOUCHSCREEN

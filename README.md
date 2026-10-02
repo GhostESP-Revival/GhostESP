@@ -9,6 +9,8 @@
 [![Discord](https://img.shields.io/discord/5cyNmUMgwh?style=flat-square&label=Discord&color=5865F2)](https://discord.gg/5cyNmUMgwh)
 [![Boards](https://img.shields.io/badge/board%20targets-62-2ea043?style=flat-square)](#supported-boards)
 
+> **⚠️ Only flash GhostESP with the [official flasher](https://ghostesp.net/flasher) or bins from our [GitHub releases](https://github.com/GhostESP-Revival/GhostESP/releases).** Third-party flashers and mirrors are unsupported and can't be verified. [Why →](SECURITY.md)
+
 **⭐️ Enjoying GhostESP? Please give the repo a star. It helps a lot.**
 
 ---
