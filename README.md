@@ -150,7 +150,7 @@ GhostESP is a platform, not a bag of tools. Five things set it apart:
 - MIFARE Classic dictionary attack (default + user dictionary + session key reuse / sector sweep)
 - Full embedded MIFARE Classic dictionary
 - MIFARE Classic hardnested recovery
-- Flipper NFC parser set (transit, parking, access, amusement, loyalty): BIP, Clipper, CharlieCard, Troika, Plantain, Zolotaya Korona, Ventra, WashCity, Social Moscow, Sonicare, Saflok, Gallagher, Disney Infinity, Skylanders, Aime, Hi, HWorld, Two Cities, Umarsh, Microel, MIZIP, MetroMoney, Kazan, SmartRider, TRT, and more
+- Flipper NFC parser set (transit, parking, access, amusement, loyalty): BIP, Clipper, CharlieCard, Troika, Plantain, Zolotaya Korona, WashCity, Social Moscow, Saflok, Gallagher, Disney Infinity, Skylanders, Aime, Hi, HWorld, Two Cities, Umarsh, Microel, MIZIP, MetroMoney, Kazan, SmartRider, and more
 - MIFARE Desfire detection
 - Chameleon Ultra support (CLI + UI + BLE control)
 - Chameleon Ultra HF/LF RFID scan + reader controls
@@ -388,7 +388,7 @@ The table below compares GhostESP against other broad-scope firmware. It is base
 | Current source available for audit | [x] | [x] | Limited / older public source | Limited / older public source |
 | ESP-IDF-native architecture | [x] |  |  |  |
 | Arduino / PlatformIO architecture |  | [x] | [x] | [x] |
-| Supported board targets | 62 CI targets | 42+ | 4 | 1 |
+| Supported board targets | 62 CI targets | 48+ | 4 | 1 |
 | Full LVGL graphical UI | [x] |  |  |  |
 | Web dashboard / REST control | [x] | [x] |  |  |
 | Captive portal web server | [x] | [x] | [x] | [x] |
@@ -397,7 +397,7 @@ The table below compares GhostESP against other broad-scope firmware. It is base
 | Beacon spam | [x] | [x] | [x] | [x] |
 | Karma / probe response attack | [x] | [x] | [x] |  |
 | Handshake / EAPOL capture | [x] | [x] | [x] |  |
-| On-device PCAP browser / hc22000 export | [x] |  |  |  |
+| On-device PCAP browser / hc22000 export | [x] |  | [x] |  |
 | PMKID capture / export | [x] |  | [x] |  |
 | Live Wireshark USB streaming | [x] |  |  |  |
 | SAE flood / WPA3-specific testing | [x] |  |  |  |
@@ -406,17 +406,17 @@ The table below compares GhostESP against other broad-scope firmware. It is base
 | Channel switch attack | [x] |  |  |  |
 | GTK abuse / client isolation testing | [x] |  |  |  |
 | DHCP starvation | [x] | [x] |  |  |
-| ARP / port / SSH scanners | [x] | [x] |  |  |
+| ARP / port / SSH scanners | [x] | [x] | [x] |  |
 | mDNS discovery | [x] |  |  |  |
 | NetBIOS scanner | [x] |  |  |  |
-| HTTP banner scanner | [x] |  |  |  |
+| HTTP banner scanner | [x] |  | [x] |  |
 | SNMP probe | [x] |  |  |  |
 | WiFi OUI vendor lookup | [x] | [x] | [x] |  |
 | PineAP / Evil Twin detection | [x] |  |  | [x] |
 | WPS detection / reporting | [x] | [x] |  |  |
 | Pwnagotchi-style automated capture mode | [x] | [x] |  |  |
 | Pwnagotchi detector / spam |  | [x] |  | [x] |
-| Channel congestion analysis | [x] |  |  | [x] |
+| Channel congestion analysis | [x] | [x] |  | [x] |
 | Live WiFi packet monitor / visualizer | [x] |  | [x] | [x] |
 | WiFi Airspace Monitor | [x] |  |  |  |
 | DNS sinkhole / blocklist NXDOMAIN | [x] |  |  |  |
@@ -431,12 +431,12 @@ The table below compares GhostESP against other broad-scope firmware. It is base
 | Drone / OpenDroneID detect | [x] |  |  | [x] |
 | Drone / OpenDroneID spoof | [x] |  |  | [x] |
 | BLE scanning | [x] | [x] | [x] | [x] |
-| Raw BLE scanner | [x] |  |  |  |
+| Raw BLE scanner | [x] | [x] |  | [x] |
 | BLE spam modes | [x] | [x] | [x] | [x] |
 | AirTag scan / spoof | [x] | [x] | [x] | [x] |
 | BLE tracker detection tools | [x] |  | [x] | [x] |
 | Flipper Zero finder | [x] |  |  | [x] |
-| GATT / service enumeration | [x] |  | [x] |  |
+| GATT / service enumeration | [x] | [x] | [x] |  |
 | BLE device tracking by RSSI | [x] |  |  |  |
 | BLE stream to Wireshark | [x] |  |  |  |
 | BLE skimmer detection | [x] |  |  | [x] |
@@ -450,10 +450,10 @@ The table below compares GhostESP against other broad-scope firmware. It is base
 | ST25R3916 NFC support | [x] | [x] |  |  |
 | Chameleon Ultra support | [x] | [x] |  |  |
 | Chameleon Ultra BLE control | [x] | [x] |  |  |
-| Flipper `.nfc` import/export | [x] |  |  |  |
+| Flipper `.nfc` import/export | [x] | [x] |  |  |
 | Flipper NFC parser collection | [x] |  |  |  |
 | MIFARE Classic default-key attack | [x] | [x] | [x] |  |
-| MIFARE Classic embedded dictionary | [x] |  |  |  |
+| MIFARE Classic embedded dictionary | [x] | [x] | [x] |  |
 | MIFARE Classic user dictionary file | [x] | [x] |  |  |
 | MIFARE Classic session key reuse / sector sweep | [x] |  |  |  |
 | MIFARE Classic hardnested recovery | [x] |  |  |  |
@@ -464,23 +464,23 @@ The table below compares GhostESP against other broad-scope firmware. It is base
 | USB keyboard host mode | [x] |  |  |  |
 | USB HID keyboard output mode | [x] | [x] |  |  |
 | Remote keyboard over dual-device link | [x] |  |  |  |
-| BadUSB VID/PID identity options | [x] | [x] |  |  |
+| BadUSB VID/PID identity options | [x] |  |  |  |
 | BadUSB mouse jiggler / trackpad | [x] |  |  |  |
 | IR learn / capture / replay | [x] | [x] |  |  |
 | Flipper `.ir` file support | [x] | [x] |  |  |
 | Universal IR library transmit | [x] | [x] |  |  |
 | CC1101 SubGHz scan / replay | [x] | [x] | [x] |  |
 | CC1101 waterfall spectrum analyzer | [x] | [x] | [x] |  |
-| Flipper `.sub` read/write support | [x] | [x] | [x] | [x] |
+| Flipper `.sub` read/write support | [x] | [x] | [x] |  |
 | SubGHz protocol decoders | [x] | [x] | [x] |  |
 | NRF24 spectrum analyzer | [x] | [x] | [x] | [x] |
 | NRF24 MouseJack |  | [x] | [x] |  |
-| Passive jamming detection | [x] |  | [x] |  |
+| Passive jamming detection | [x] | [x] | [x] |  |
 | Active RF jamming shipped | Not shipped | [x] | [x] | [x] |
 | Zigbee / 802.15.4 packet capture | [x] |  |  |  |
 | Ethernet W5500 support | [x] | [x] |  |  |
 | Ethernet ARP poisoning / MITM tools | [x] | [x] |  |  |
-| Ethernet fingerprint / port / ping tools | [x] |  |  |  |
+| Ethernet fingerprint / port / ping tools | [x] | [x] |  |  |
 | Ethernet DNS / NTP / HTTP / trace tools | [x] |  |  |  |
 | TLS SNI / HTTP / FTP credential capture over Ethernet | [x] |  |  |  |
 | Camera streaming / motion detection | [x] |  |  |  |
@@ -499,8 +499,8 @@ The table below compares GhostESP against other broad-scope firmware. It is base
 | Native SD app/plugin system | [x] |  |  |  |
 | Native app SDK / build tooling | [x] |  |  |  |
 | Sandboxed on-device scripting runtime | Lua 5.4 | JavaScript |  |  |
-| Cloud app / script / asset store | [x] |  |  |  |
-| Apps gallery / launcher | [x] |  |  |  |
+| Cloud app / script / asset store | [x] | [x] |  |  |
+| Apps gallery / launcher | [x] | [x] |  |  |
 | Ghostchi / virtual pet | [x] | [x] |  |  |
 | Audio player | [x] | [x] |  |  |
 | Microphone spectrum / visualizer | [x] | [x] |  |  |
@@ -509,13 +509,13 @@ The table below compares GhostESP against other broad-scope firmware. It is base
 | Compass screen | [x] |  |  |  |
 | Accelerometer screen | [x] |  |  |  |
 | ENV-III temperature / humidity / pressure | [x] |  |  |  |
-| Battery monitoring / fuel gauge support | [x] | [x] | [x] |  |
+| Battery monitoring / fuel gauge support | [x] | [x] |  |  |
 | Sensor / RTC hardware support | [x] | [x] |  |  |
 | M5 Cardputer keyboard support | [x] | [x] |  |  |
 | Android companion app | [x] |  |  |  |
 | Accessibility modes / reduced motion | [x] |  | [x] |  |
 | Custom theme / UI palette system | [x] | [x] | [x] |  |
-| Custom SD asset packs | [x] |  |  |  |
+| Custom SD asset packs | [x] | [x] |  |  |
 | LoRa support | [x] | [x] |  |  |
 | FM radio support |  | [x] |  |  |
 
