@@ -44,6 +44,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Added `Tools`, `System`, `Games`, `Communication`, `Media` and `Sensors` folders to the Apps gallery, shared with SD apps by their manifest `category`
 
 ### Changed
+- Added subfolder navigation to IR Remotes and Universals, NFC Saved/Write/Emulate, SubGHz Saved, Evil Portal, Favorites and BadUSB, with full paths for nested files and pagination in Favorites and BadUSB
 - Enabled the lockscreen by default with no PIN on fresh installs
 - Renamed the SD browser's bottom Back row to Exit
 - Restyled the on-screen keyboard with a standard iOS-style layout

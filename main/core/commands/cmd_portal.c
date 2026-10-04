@@ -26,7 +26,7 @@
 
 extern dns_server_handle_t dns_handle;
 
-#define MAX_PORTAL_PATH_LEN 128
+#define MAX_PORTAL_PATH_LEN 256
 
 void handle_start_portal(int argc, char **argv) {
     if (argc < 3 || argc > 4) { // Accept 3 or 4 arguments

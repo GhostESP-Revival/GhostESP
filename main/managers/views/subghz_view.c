@@ -1,3 +1,4 @@
+#include "managers/views/file_browser.h"
 #include "managers/views/subghz_view.h"
 #include "sdkconfig.h"
 #include "esp_attr.h"
@@ -275,6 +276,7 @@ static subghz_decoded_signal_t s_remote_decoded = {0};
 #define SUBGHZ_CAPTURE_SIGNAL_THRESHOLD 65
 #define SUBGHZ_CAPTURE_SIGNAL_HITS      2
 #define SUBGHZ_SNAPSHOT_DIR             "/mnt/ghostesp/subghz"
+static char s_saved_browse_dir[FILE_BROWSER_PATH_MAX] = SUBGHZ_SNAPSHOT_DIR;
 #define SUBGHZ_SNAPSHOT_EXT             ".sub"
 
 static bool s_remote_mode = false;
@@ -845,23 +847,45 @@ static void subghz_saved_list_clear(void) {
     s_saved_index = 0;
 }
 
+static bool subghz_accept_saved_file(const char *name) {
+    const char *ext = strrchr(name, '.');
+    return ext && strcasecmp(ext, SUBGHZ_SNAPSHOT_EXT) == 0;
+}
+
+static void subghz_saved_open_path(const char *path) {
+    if (file_browser_is_dir(path)) {
+        if (file_browser_enter(s_saved_browse_dir, sizeof(s_saved_browse_dir), path)) {
+            subghz_saved_list_clear();
+            subghz_saved_list_reload();
+        }
+        return;
+    }
+    for (int i = 0; i < s_saved_file_count; i++) {
+        if (strcmp(s_saved_file_paths[i], path) == 0) {
+            s_saved_index = i;
+            subghz_open_saved_popup();
+            return;
+        }
+    }
+}
+
 static void subghz_saved_list_item_cb(lv_event_t *e) {
     const char *path = (const char *)lv_event_get_user_data(e);
     if (!path) {
         return;
     }
 
-    for (int i = 0; i < s_saved_file_count; i++) {
-        if (s_saved_file_paths[i] && strcmp(s_saved_file_paths[i], path) == 0) {
-            s_saved_index = i;
-            break;
-        }
-    }
-    subghz_open_saved_popup();
+    subghz_saved_open_path(path);
 }
 
 static void subghz_back_to_root_menu(void) {
+    if (s_in_saved_list && file_browser_parent(s_saved_browse_dir, SUBGHZ_SNAPSHOT_DIR)) {
+        subghz_saved_list_clear();
+        subghz_saved_list_reload();
+        return;
+    }
     s_in_saved_list = false;
+    strcpy(s_saved_browse_dir, SUBGHZ_SNAPSHOT_DIR);
     subghz_saved_list_clear();
     if (!s_ov) {
         return;
@@ -912,41 +936,10 @@ static void subghz_saved_list_reload(void) {
     if (!s_saved_file_paths) {
         bool susp = false;
         bool did = subghz_sd_begin(&susp);
-        DIR *d = opendir(SUBGHZ_SNAPSHOT_DIR);
-        if (d) {
-            struct dirent *de;
-            int count = 0;
-            while ((de = readdir(d)) != NULL) {
-                if (de->d_name[0] == '.') continue;
-                size_t len = strlen(de->d_name);
-                size_t ext_len = strlen(SUBGHZ_SNAPSHOT_EXT);
-                if (len > ext_len && strcmp(de->d_name + len - ext_len, SUBGHZ_SNAPSHOT_EXT) == 0) {
-                    count++;
-                }
-            }
-            rewinddir(d);
-            if (count > 0) {
-                s_saved_file_paths = (char **)calloc((size_t)count, sizeof(char *));
-            }
-            int idx = 0;
-            while ((de = readdir(d)) != NULL) {
-                if (de->d_name[0] == '.') continue;
-                size_t len = strlen(de->d_name);
-                size_t ext_len = strlen(SUBGHZ_SNAPSHOT_EXT);
-                if (!(len > ext_len && strcmp(de->d_name + len - ext_len, SUBGHZ_SNAPSHOT_EXT) == 0)) continue;
-                size_t need = strlen(SUBGHZ_SNAPSHOT_DIR) + 1 + len + 1;
-                char *copy = (char *)malloc(need);
-                if (!copy) continue;
-                snprintf(copy, need, "%s/%s", SUBGHZ_SNAPSHOT_DIR, de->d_name);
-                if (s_saved_file_paths && idx < count) {
-                    s_saved_file_paths[idx++] = copy;
-                } else {
-                    free(copy);
-                }
-            }
-            s_saved_file_count = idx;
-            closedir(d);
-        }
+        size_t count = 0;
+        if (did) file_browser_read(s_saved_browse_dir, subghz_accept_saved_file, 0, (size_t)-1,
+                                  &s_saved_file_paths, &count, NULL);
+        s_saved_file_count = (int)count;
         if (did) {
             subghz_sd_end(susp);
         }
@@ -967,8 +960,7 @@ static void subghz_saved_list_reload(void) {
         options_view_add_item(s_ov, "No .sub files", NULL, NULL);
     } else {
         for (int i = start; i < end; i++) {
-            const char *name = strrchr(s_saved_file_paths[i], '/');
-            name = name ? (name + 1) : s_saved_file_paths[i];
+            const char *name = file_browser_name(s_saved_file_paths[i]);
             options_view_add_item(s_ov, name, subghz_saved_list_item_cb, s_saved_file_paths[i]);
         }
     }
@@ -3030,9 +3022,14 @@ static void subghz_saved_replay_btn_cb(lv_event_t *e) {
 static void subghz_saved_delete_confirm_cb(void *user_data) {
     (void)user_data;
     if (s_saved_file_count <= 0 || !s_saved_file_paths || !s_saved_file_paths[s_saved_index]) return;
-    if (remove(s_saved_file_paths[s_saved_index]) == 0) {
+    bool susp = false;
+    bool did = subghz_sd_begin(&susp);
+    int result = did ? remove(s_saved_file_paths[s_saved_index]) : -1;
+    if (did) subghz_sd_end(susp);
+    if (result == 0) {
         subghz_show_feedback_popup("SubGHz", "Capture deleted");
         subghz_close_saved_popup();
+        subghz_saved_list_clear();
         subghz_saved_list_reload();
     } else {
         subghz_show_feedback_popup("SubGHz error", "Failed to delete capture");
@@ -3243,8 +3240,7 @@ static void subghz_select_row(void) {
         int has_prev = (s_saved_page > 0) ? 1 : 0;
         int has_next = ((s_saved_page + 1) * 7 < s_saved_file_count) ? 1 : 0;
         if (sel < visible_files) {
-            s_saved_index = s_saved_page * 7 + sel;
-            subghz_open_saved_popup();
+            subghz_saved_open_path(s_saved_file_paths[s_saved_page * 7 + sel]);
         } else if (has_prev && sel == visible_files) {
             subghz_saved_list_prev_page_cb(NULL);
         } else if (has_next && sel == visible_files + has_prev) {
@@ -4570,15 +4566,21 @@ static void subghz_view_apply_pending_open(void) {
     path[sizeof(path) - 1] = '\0';
     free(s_pending_capture_open);
     s_pending_capture_open = NULL;
-    s_saved_page = 0;
+    subghz_saved_list_clear();
+    char *slash = strrchr(path, '/');
+    if (slash && strncmp(path, SUBGHZ_SNAPSHOT_DIR, strlen(SUBGHZ_SNAPSHOT_DIR)) == 0 && path[strlen(SUBGHZ_SNAPSHOT_DIR)] == '/') {
+        size_t len = (size_t)(slash - path);
+        memcpy(s_saved_browse_dir, path, len);
+        s_saved_browse_dir[len] = '\0';
+    }
     subghz_saved_list_reload();
     for (int i = 0; i < s_saved_file_count; i++) {
         if (s_saved_file_paths[i] && strcmp(s_saved_file_paths[i], path) == 0) {
             s_saved_index = i;
-            break;
+            subghz_open_saved_popup();
+            return;
         }
     }
-    subghz_open_saved_popup();
 }
 
 void subghz_view_create(void) {
