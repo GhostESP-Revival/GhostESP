@@ -99,6 +99,13 @@ static void *mon_tbl_calloc(size_t n, size_t size) {
 #define WARDRIVE_HELPER_REFRESH_MS 2000
 #define WARDRIVE_OBS_QUEUE_PSRAM_LEN 64
 #define WARDRIVE_OBS_QUEUE_INTERNAL_LEN 32
+/* Reservations track queued observations, so the table only needs the capacity of the
+ * queue that can exist: the PSRAM-sized queue is only attempted when PSRAM is configured. */
+#ifdef CONFIG_SPIRAM
+#define WARDRIVE_PENDING_LEN WARDRIVE_OBS_QUEUE_PSRAM_LEN
+#else
+#define WARDRIVE_PENDING_LEN WARDRIVE_OBS_QUEUE_INTERNAL_LEN
+#endif
 #define WARDRIVE_OBS_TASK_STACK_BYTES 8192
 #define PEER_GPS_STREAM_INTERVAL_MS 1000
 #define PEER_GPS_INIT_RETRY_MS 5000
@@ -240,7 +247,7 @@ typedef struct {
 } wardrive_pending_t;
 // Reservations only cover queued observations, never successfully logged APs.
 // A failed queue insertion or completed dequeue releases the reservation.
-static wardrive_pending_t wardrive_pending[WARDRIVE_OBS_QUEUE_PSRAM_LEN];
+static wardrive_pending_t wardrive_pending[WARDRIVE_PENDING_LEN];
 static uint32_t wardrive_pending_token;
 static uint32_t wardrive_pending_suppressed;
 static StaticSemaphore_t wardrive_ack_storage;
@@ -347,7 +354,7 @@ static void wardrive_obs_task(void *arg) {
             continue;
         }
         portENTER_CRITICAL(&wardrive_obs_mux);
-        for (size_t i = 0; i < WARDRIVE_OBS_QUEUE_PSRAM_LEN; ++i) {
+        for (size_t i = 0; i < WARDRIVE_PENDING_LEN; ++i) {
             if (wardrive_pending[i].used && wardrive_pending[i].token == item.pending_token) {
                 wardrive_pending[i].used = false;
                 break;
@@ -537,7 +544,7 @@ static bool wardrive_obs_submit(const wardriving_data_t *data, wardrive_obs_sour
     if (item.has_gps_snapshot) wardrive_gps_record_store(&item.gps_snapshot, &gps_snapshot);
     int slot = -1;
     portENTER_CRITICAL(&wardrive_obs_mux);
-    for (size_t i = 0; i < WARDRIVE_OBS_QUEUE_PSRAM_LEN; ++i) {
+    for (size_t i = 0; i < WARDRIVE_PENDING_LEN; ++i) {
         wardrive_pending_t *p = &wardrive_pending[i];
         if (!p->used) { if (slot < 0) slot = (int)i; continue; }
         if (strcmp(p->bssid, data->bssid) != 0) continue;
