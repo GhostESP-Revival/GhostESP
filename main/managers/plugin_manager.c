@@ -689,6 +689,7 @@ int plugin_manager_reload(void) {
     plugin_manager_materialize_packages();
     ESP_LOGI(TAG, "Package materialize check took %lld ms", (long long)((esp_timer_get_time() - materialize_start_us) / 1000));
 
+    /* Installed apps take precedence over package caches with the same id. */
     const char *scan_dirs[] = { PLUGIN_APPS_DIR, PLUGIN_APP_CACHE_DIR };
     for (size_t scan_i = 0; scan_i < sizeof(scan_dirs) / sizeof(scan_dirs[0]) && s_app_count < PLUGIN_APP_REGISTRY_CAPACITY; ++scan_i) {
         DIR *dir = opendir(scan_dirs[scan_i]);
@@ -714,6 +715,16 @@ int plugin_manager_reload(void) {
             memset(app, 0, sizeof(*app));
             if (!parse_manifest(base_path, app)) {
                 ESP_LOGW(TAG, "Skipping app at %s: %s", base_path, app->error);
+                memset(app, 0, sizeof(*app));
+                continue;
+            }
+            /* Installing a .gapp leaves its source package on SD, so its
+             * materialized cache can describe an already installed app.
+             * Keep one registry entry per id, just as find()/launch expect. */
+            const plugin_app_manifest_t *existing = plugin_manager_find(app->id);
+            if (existing) {
+                ESP_LOGW(TAG, "Skipping duplicate app %s at %s (using %s)",
+                         app->id, base_path, existing->base_path);
                 memset(app, 0, sizeof(*app));
                 continue;
             }

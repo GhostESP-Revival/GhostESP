@@ -4,6 +4,12 @@
 Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A trailing `@handle` credits a guest contributor for that specific line. "Ported from / adapted from" credits the upstream source a feature was based on, not GhostESP authorship.
 
 
+## v2.2.1
+
+### Fixed
+
+- Fixed SD apps appearing twice in the Apps gallery when an installed app also has a cached package with the same app ID
+
 ## v2.2
 
 ### TL;DR
