@@ -8,6 +8,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 
 ### Fixed
 
+- Fixed multi-target app manifests allowing incompatible ELF binaries to hide working SD packages or fail during launch
 - Fixed duplicate SD app tiles and inflated folder counts in the Apps gallery, including default-icon copies and installed apps with cached packages
 
 ## v2.2

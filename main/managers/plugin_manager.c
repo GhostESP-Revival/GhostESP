@@ -410,6 +410,26 @@ static bool read_file_to_buffer(const char *path, char **out_buf) {
     return true;
 }
 
+static bool app_binary_matches_arch(const char *path) {
+    /* A multi-target manifest describes supported builds, not a portable ELF.
+     * Verify the actual binary before it can shadow a compatible package. */
+    unsigned char header[20];
+    FILE *file = fopen(path, "rb");
+    if (!file) return false;
+    size_t bytes = fread(header, 1, sizeof(header), file);
+    fclose(file);
+    if (bytes != sizeof(header) || memcmp(header, "\177ELF", 4) != 0 ||
+        header[4] != 1 || header[5] != 1) return false; /* ELF32, little endian */
+    unsigned machine = (unsigned)header[18] | ((unsigned)header[19] << 8);
+#if CONFIG_IDF_TARGET_ARCH_RISCV
+    return machine == 243; /* EM_RISCV */
+#elif CONFIG_IDF_TARGET_ARCH_XTENSA
+    return machine == 94; /* EM_XTENSA */
+#else
+    return false;
+#endif
+}
+
 static bool parse_manifest(const char *base_path, plugin_app_manifest_t *out) {
     char manifest_path[PLUGIN_APP_PATH_MAX];
     if (!join_path(manifest_path, sizeof(manifest_path), base_path, "manifest.json")) {
@@ -572,6 +592,10 @@ static bool parse_manifest(const char *base_path, plugin_app_manifest_t *out) {
     }
     if (!sd_card_exists(out->entry_path)) {
         snprintf(out->error, sizeof(out->error), "entry missing");
+        return false;
+    }
+    if (!app_binary_matches_arch(out->entry_path)) {
+        snprintf(out->error, sizeof(out->error), "app ELF architecture does not match firmware");
         return false;
     }
 
