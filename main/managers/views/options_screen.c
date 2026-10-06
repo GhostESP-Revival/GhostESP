@@ -8,6 +8,7 @@
 #include "core/chip_info.h"
 #include "core/ghostesp_version.h"
 #include "managers/display_manager.h"
+#include "managers/power_manager.h"
 #include "gui/options_view.h"
 #include "gui/touch_bar.h"
 #include "core/screen_mirror.h"
@@ -1775,6 +1776,7 @@ static const char * const rgb_mode_options[] = {"Normal", "Rainbow", "Stealth", 
 static const char * const timeout_options[] = {"5s", "10s", "15s", "30s", "60s", "2m", "5m", "Never"};
 static const char *theme_options[THEME_PALETTE_THEME_COUNT];
 static const char * const bool_options[] = {"Off", "On"};
+static const char * const power_profile_options[] = {"Performance", "Balanced", "Saver"};
 #ifdef CONFIG_USE_ENCODER
 static const char * const encoder_latch_options[] = {"2 transitions", "4 transitions (legacy)"};
 #endif
@@ -1931,7 +1933,7 @@ static SettingsItem settings_items[] = {
     {"Clock Style", SETTING_CLOCK_STYLE, clock_style_options, 3, 0, SETTINGS_CAT_DATE_TIME, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"Status Bar Clock", SETTING_STATUS_BAR_CLOCK, bool_options, 2, 1, SETTINGS_CAT_DATE_TIME, false, NULL, SETTING_WIDGET_TOGGLE},
 
-    {"Power Saving Mode", SETTING_POWER_SAVE, bool_options, 2, 0, SETTINGS_CAT_POWER, false, NULL, SETTING_WIDGET_TOGGLE},
+    {"Power Profile", SETTING_POWER_PROFILE, power_profile_options, 3, 0, SETTINGS_CAT_POWER, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
 #if CONFIG_IDF_TARGET_ESP32S3
     {"USB Host Mode", SETTING_USB_HOST_MODE, bool_options, 2, 0, SETTINGS_CAT_POWER, true, "CONFIG_IDF_TARGET_ESP32S3", SETTING_WIDGET_TOGGLE},
 #ifdef CONFIG_HAS_USB_MSC_SD
@@ -4472,8 +4474,8 @@ static void load_current_settings_values(void) {
             case SETTING_AP_ENABLED:
                 settings_items[i].current_value = settings_get_ap_enabled(&G_Settings) ? 1 : 0;
                 break;
-            case SETTING_POWER_SAVE:
-                settings_items[i].current_value = settings_get_power_save_enabled(&G_Settings) ? 1 : 0;
+            case SETTING_POWER_PROFILE:
+                settings_items[i].current_value = settings_get_power_profile(&G_Settings);
                 break;
             case SETTING_ZEBRA_MENUS:
                 settings_items[i].current_value = settings_get_zebra_menus_enabled(&G_Settings) ? 1 : 0;
@@ -4859,9 +4861,9 @@ static void apply_setting_change(int setting_index, int new_value) {
                 ap_manager_stop_services();
             }
             break;
-        case SETTING_POWER_SAVE:
-            settings_set_power_save_enabled(&G_Settings, new_value == 1);
-            apply_power_management_config(new_value == 1);
+        case SETTING_POWER_PROFILE:
+            // Persisted by the generic granular save at the end of this function.
+            (void)power_manager_set_profile((power_profile_t)new_value, false);
             break;
         case SETTING_ZEBRA_MENUS:
             settings_set_zebra_menus_enabled(&G_Settings, new_value == 1);

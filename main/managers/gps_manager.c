@@ -24,7 +24,7 @@
 #include "driver/gpio.h"
 #include "i2c_shared.h"
 #include <esp_heap_caps.h>
-#include "esp_pm.h"
+#include "managers/power_manager.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
 #include "freertos/portmacro.h"
@@ -110,9 +110,7 @@ static bool ghostscript_peer_fix_known = false;
 static bool ghostscript_peer_has_fix = false;
 static gpio_num_t gps_soft_rx_pin = GPIO_NUM_NC;
 static uint32_t gps_soft_baud_rate = 0;
-#ifdef CONFIG_PM_ENABLE
-static esp_pm_lock_handle_t gps_soft_pm_lock = NULL;
-#endif
+static power_lock_t gps_soft_pm_lock = NULL;
 static void check_gps_connection_task(void *pvParameters);
 static void gps_soft_watchdog_task(void *pvParameters);
 static void gps_soft_try_release_rgb_rmt(void);
@@ -298,30 +296,14 @@ static bool gps_detect_baud(uart_port_t uart_port, gpio_num_t rx_pin, uint32_t *
 }
 
 static void gps_soft_acquire_pm_lock(void) {
-#ifdef CONFIG_PM_ENABLE
     if (gps_soft_pm_lock == NULL) {
-        esp_err_t err = esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP, 0, "gps_soft", &gps_soft_pm_lock);
-        if (err != ESP_OK) {
-            ESP_LOGW(GPS_TAG, "Failed to create GPS PM lock: %s", esp_err_to_name(err));
-            return;
-        }
+        gps_soft_pm_lock = power_lock_create(POWER_LOCK_NO_LIGHT_SLEEP, "gps_soft");
     }
-    esp_err_t err = esp_pm_lock_acquire(gps_soft_pm_lock);
-    if (err != ESP_OK) {
-        ESP_LOGW(GPS_TAG, "Failed to acquire GPS PM lock: %s", esp_err_to_name(err));
-    }
-#endif
+    power_lock_acquire(gps_soft_pm_lock);
 }
 
 static void gps_soft_release_pm_lock(void) {
-#ifdef CONFIG_PM_ENABLE
-    if (gps_soft_pm_lock != NULL) {
-        esp_err_t err = esp_pm_lock_release(gps_soft_pm_lock);
-        if (err != ESP_OK) {
-            ESP_LOGW(GPS_TAG, "Failed to release GPS PM lock: %s", esp_err_to_name(err));
-        }
-    }
-#endif
+    power_lock_release(gps_soft_pm_lock);
 }
 
 static void gps_soft_prepare_rx_pin(void) {

@@ -87,7 +87,7 @@ typedef enum {
     SETTING_AP_ENABLED,
     SETTING_COUNTRY,
     SETTING_HOP_CHANNELS,
-    SETTING_POWER_SAVE,
+    SETTING_POWER_PROFILE,
     SETTING_MAX_BRIGHTNESS,
     SETTING_NEOPIXEL_BRIGHTNESS,
     SETTING_ZEBRA_MENUS,
@@ -306,7 +306,7 @@ typedef struct {
   int32_t esp_comm_tx_pin; // ESP communication TX pin
   int32_t esp_comm_rx_pin; // ESP communication RX pin
   bool ap_enabled; // Enable/disable AP across reboots
-  bool power_save_enabled;
+  uint8_t power_profile; // power_profile_t: 0 performance, 1 balanced, 2 saver
   bool zebra_menus_enabled;
   uint8_t max_screen_brightness; // Max screen brightness (0-100)
 
@@ -558,6 +558,9 @@ void settings_set_ap_enabled(FSettings *settings, bool enabled);
 bool settings_get_ap_enabled(const FSettings *settings);
 
 // Getter and Setter for power save enabled state
+uint8_t settings_get_power_profile(const FSettings *settings);
+void settings_set_power_profile(FSettings *settings, uint8_t profile);
+// Legacy alias: true == saver profile.
 bool settings_get_power_save_enabled(const FSettings *settings);
 void settings_set_power_save_enabled(FSettings *settings, bool enabled);
 

@@ -3,6 +3,7 @@
 #include "gui/theme_palette_api.h"
 #include "managers/sd_card_manager.h"
 #include "managers/display_manager.h"
+#include "managers/power_manager.h"
 #include "managers/wifi_manager.h"
 #include "cJSON.h"
 #include "esp_log.h"
@@ -148,7 +149,8 @@ static cJSON *settings_to_json_object(const FSettings *s) {
   cJSON_AddNumberToObject(o, "esp_comm_tx_pin", (double)s->esp_comm_tx_pin);
   cJSON_AddNumberToObject(o, "esp_comm_rx_pin", (double)s->esp_comm_rx_pin);
   cJSON_AddBoolToObject(o, "ap_enabled", s->ap_enabled);
-  cJSON_AddBoolToObject(o, "power_save_enabled", s->power_save_enabled);
+  cJSON_AddNumberToObject(o, "power_profile", (double)s->power_profile);
+  cJSON_AddBoolToObject(o, "power_save_enabled", s->power_profile == 2); // legacy readers
   cJSON_AddBoolToObject(o, "zebra_menus_enabled", s->zebra_menus_enabled);
   cJSON_AddNumberToObject(o, "max_screen_brightness", (double)s->max_screen_brightness);
   cJSON_AddBoolToObject(o, "infrared_easy_mode", s->infrared_easy_mode);
@@ -299,8 +301,12 @@ static void json_apply_to_settings(FSettings *s, const cJSON *root) {
   if (cJSON_GetObjectItemCaseSensitive(root, "ap_enabled")) {
     s->ap_enabled = jget_bool(root, "ap_enabled", s->ap_enabled);
   }
-  if (cJSON_GetObjectItemCaseSensitive(root, "power_save_enabled")) {
-    s->power_save_enabled = jget_bool(root, "power_save_enabled", s->power_save_enabled);
+  if (cJSON_GetObjectItemCaseSensitive(root, "power_profile")) {
+    int pp = jget_int_clamp(root, "power_profile", (int)s->power_profile, 0, 2);
+    s->power_profile = (uint8_t)pp;
+  } else if (cJSON_GetObjectItemCaseSensitive(root, "power_save_enabled")) {
+    // Backup from older firmware: bool -> saver / performance.
+    s->power_profile = jget_bool(root, "power_save_enabled", false) ? 2 : 0;
   }
   if (cJSON_GetObjectItemCaseSensitive(root, "zebra_menus_enabled")) {
     s->zebra_menus_enabled = jget_bool(root, "zebra_menus_enabled", s->zebra_menus_enabled);
@@ -562,4 +568,5 @@ void settings_backup_apply_runtime_after_import(void) {
   wifi_manager_configure_sta_from_settings();
   settings_restart_rgb_effect();
   display_manager_update_status_bar_color();
+  power_manager_apply_settings();
 }

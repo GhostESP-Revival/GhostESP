@@ -4,6 +4,7 @@
 #define GHOST_SITE_PAYLOAD_SIZE ghost_site_html_gz_size
 #define GHOST_SITE_IS_GZ 1
 #include "managers/settings_manager.h"
+#include "managers/power_manager.h"
 #include "core/esp_comm_manager.h"
 #include "core/ouis.h"
 #include "core/utils.h"
@@ -1101,8 +1102,8 @@ esp_err_t ap_manager_start_services() {
     esp_err_t ret;
 
     // if ap is disabled or power saving is on, do not start ap services.
-    if (!settings_get_ap_enabled(&G_Settings) || settings_get_power_save_enabled(&G_Settings)) {
-        glog("ap services skipped: ap disabled or power saving mode is on\n");
+    if (!settings_get_ap_enabled(&G_Settings) || !power_manager_ap_allowed()) {
+        glog("ap services skipped: ap disabled or power profile is saver\n");
         status_display_show_status("AP Disabled");
         // make sure services are stopped if they somehow started and conditions changed
         ap_manager_stop_services();

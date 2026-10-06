@@ -585,6 +585,35 @@ menu "Ghost ESP Options"
                 Enable power saving features if you have a battery.
 
 
+        config POWER_LIGHT_SLEEP_VALIDATED
+            bool "Board has been validated for automatic light sleep"
+            default n
+            help
+                Automatic light sleep (CONFIG_PM_ENABLE + tickless idle) is only used
+                when this is set. Light sleep interacts with backlight PWM, GPIO
+                interrupts, USB and peripherals in board-specific ways, so a new board
+                config gets CPU frequency scaling only until someone has verified it with
+                the 'power sleeptest' command and set this.
+
+        config POWER_WAKE_GPIO
+            int "Deep sleep wake GPIO (-1 = none)"
+            default -1
+            help
+                RTC-capable GPIO that wakes the board from deep sleep (the power button).
+                -1 means this board declares no wake pin, so 'power off' is refused.
+
+        config POWER_WAKE_LEVEL
+            int "Deep sleep wake level (0 = low, 1 = high)"
+            default 0
+            range 0 1
+
+        config POWER_RAIL_GPIO
+            int "Peripheral power rail GPIO driven low in deep sleep (-1 = none)"
+            default -1
+            help
+                GPIO that gates peripheral power (e.g. T-Embed IO15). It is driven low and
+                latched with a deep-sleep hold so the rail really stays off.
+
         config HAS_BATTERY_ADC
             bool "Enable battery ADC reading"
             default n
