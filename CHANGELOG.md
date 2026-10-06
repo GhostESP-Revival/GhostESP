@@ -9,30 +9,47 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 ### TL;DR
 
 **LoRa and Meshtastic:**
-- GhostESP can now talk to Meshtastic and Meshcore networks over SX1262 LoRa radios, and you can use the official Meshtastic and Meshcore apps with it over BLE.
-- LoRa is supported on the Heltec V3, LilyGo T-Deck, the CrowPanel Advance 2.4/2.8/4.3-inch, and the CrowPanel Advanced P4 7/9/10.1-inch.
+- GhostESP can now talk to Meshtastic and Meshcore networks over SX1262 LoRa radios.
+- The official Meshtastic and Meshcore apps work with it over BLE.
+- LoRa is supported on the Heltec V3 and LilyGo T-Deck.
+- LoRa is also supported on the CrowPanel Advance 2.4/2.8/4.3-inch and the CrowPanel Advanced P4 7/9/10.1-inch.
 
 **Bluetooth:**
-- The BLE device detect scan has its own CLI command and menu row, and it now recognises many more devices: Tile, Samsung SmartTag, Chipolo, AirPods, Apple Watch, FindMy clones, Fast Pair / Find Hub accessories, hearing aids, exposure beacons, and Chameleon Ultra.
+- The BLE device detect scan now has its own CLI command and menu row.
+- It recognises many more devices: Tile, Samsung SmartTag, Chipolo, AirPods, Apple Watch, FindMy clones, Fast Pair / Find Hub accessories, hearing aids, exposure beacons, and Chameleon Ultra.
 - Dual BLE + Wi-Fi wardriving (`dualwd`) is available on PSRAM boards.
 
 **Wi-Fi and captures:**
-- You can set your own channel hopping list for attacks, scans, the airspace monitor, and packet hopping, and pick your country in Settings > Wi-Fi.
-- Captures now include signal, channel, and rate info, VLAN-tagged traffic, and control frames, so Wireshark shows much more. Several capture bugs that dropped or mangled frames are fixed.
+- You can set your own channel hopping list for attacks, scans, the airspace monitor, and packet hopping.
+- You can pick your country in Settings > Wi-Fi.
+- Captures now include signal, channel, and rate info, so Wireshark shows per-frame radio details.
+- Captures now include VLAN-tagged traffic and control frames.
+- Several capture bugs that dropped or mangled frames are fixed.
 - A new `mdnssniff` command passively learns local device names (mDNS, LLMNR, SSDP, NetBIOS).
 
 **Apps and hardware:**
 - New Game Boy / Game Boy Color emulator with save states.
-- The Apps gallery now has folders (Tools, System, Games, Communication, Media, Sensors), and the plugin API gained faster menus, a native options list, and more.
-- The T-Deck can play audio, ESP32-S3 boards can expose their SD card over USB, and the Elecrow CrowPanel 1.28-inch rotary display is supported.
+- The Apps gallery now has folders: Tools, System, Games, Communication, Media, and Sensors.
+- The plugin API gained faster menus and a native options list.
+- The T-Deck can now play audio.
+- ESP32-S3 boards with an SD card can expose it over USB.
+- The Elecrow CrowPanel 1.28-inch rotary display is supported.
 - IR TX/RX pins can now be changed at runtime.
 
 **UI:**
-- A clock in the status bar, plus analog and seven-segment clock faces.
-- A restyled on-screen keyboard, reorganised Settings, a Row Height setting, subfolder navigation across IR, NFC, SubGHz, Evil Portal, Favorites and BadUSB, and a lockscreen that is on by default.
+- A clock in the status bar.
+- Analog and seven-segment clock faces.
+- A restyled on-screen keyboard.
+- Reorganised Settings and a new Row Height setting.
+- Subfolder navigation in IR, NFC, SubGHz, Evil Portal, Favorites and BadUSB.
+- The lockscreen is on by default.
 
 **Reliability:**
-- Lower RAM use (GhostScript, wardriving, and ~15KB freed at boot on classic ESP32), plus fixes for S3TWatch (USB, battery, backlight, RTC), the web UI, C5 Wi-Fi scanning, and several memory leaks.
+- Lower RAM use in GhostScript and wardriving.
+- About 15KB of RAM freed at boot on classic ESP32 boards.
+- Fixes for S3TWatch USB, battery, backlight and RTC.
+- Fixes for the web UI and C5 Wi-Fi scanning.
+- Several memory leaks fixed.
 
 
 ### Added
