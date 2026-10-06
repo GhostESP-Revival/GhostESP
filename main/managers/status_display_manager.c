@@ -62,6 +62,9 @@ static uint8_t s_drawn_pages; // pages drawn in the last render pass
 #define STATUS_ANIM_TASK_STACK_BYTES 4096
 static char s_line1[24];
 static char s_line2[24];
+// Set by status_display_set_lines_hold(): the held content (e.g. the BLE
+// pairing PIN) owns the panel until status_display_clear() releases it.
+static bool s_hold_display;
 static const int SCALE_Y = CONFIG_STATUS_DISPLAY_SCALE_Y; // 1=1:1 pixels, 2=double-height
 #if defined(CONFIG_USE_IO_EXPANDER)
 static TickType_t s_next_flush_allowed_tick;
@@ -711,6 +714,9 @@ static void status_display_anim_task(void *arg) {
     for (;;) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         TickType_t now = xTaskGetTickCount();
+        // A held screen owns the panel: don't let the HUD/animations repaint
+        // over it (this is what made the BLE pairing PIN flicker away).
+        if (s_hold_display) continue;
 #ifdef CONFIG_HAS_LORA
         lora_status_t lora_status;
         memset(&lora_status, 0, sizeof(lora_status));
@@ -1044,7 +1050,7 @@ bool status_display_is_ready(void) {
     return s_ready;
 }
 
-void status_display_set_lines(const char *line_one, const char *line_two) {
+static void status_display_render_lines(const char *line_one, const char *line_two) {
     if (!s_ready) {
         ESP_LOGW(TAG, "set_lines called while display not ready");
         return;
@@ -1062,6 +1068,21 @@ void status_display_set_lines(const char *line_one, const char *line_two) {
     status_display_animations_reset();
     // late-create anim worker if idle animation was enabled after boot
     (void)status_display_ensure_anim_task();
+}
+
+void status_display_set_lines(const char *line_one, const char *line_two) {
+    // A held screen takes priority over transient status messages.
+    if (s_hold_display) return;
+    status_display_render_lines(line_one, line_two);
+}
+
+void status_display_set_lines_hold(const char *line_one, const char *line_two) {
+    if (!s_ready) {
+        ESP_LOGW(TAG, "set_lines_hold called while display not ready");
+        return;
+    }
+    s_hold_display = true;
+    status_display_render_lines(line_one, line_two);
 }
 
 void status_display_show_attack(const char *attack_name, const char *target) {
@@ -1089,8 +1110,10 @@ void status_display_show_status(const char *status_line) {
 }
 
 void status_display_clear(void) {
+    // Always release a held screen, even if the panel is not ready.
+    s_hold_display = false;
     if (!s_ready) return;
-    status_display_set_lines("", "");
+    status_display_render_lines("", "");
 }
 
 void status_display_deinit(void) {
@@ -1100,6 +1123,7 @@ void status_display_deinit(void) {
     s_dirty_pages = 0xFF;
     status_display_flush();
     s_ready = false;
+    s_hold_display = false;
     if (s_idle_timer) {
         xTimerStop(s_idle_timer, 0);
         xTimerDelete(s_idle_timer, 0);
@@ -1152,6 +1176,11 @@ bool status_display_is_ready(void)
 }
 
 void status_display_set_lines(const char *a, const char *b)
+{
+    if (status_display_use_tdongle_lcd()) tdongle_status_set_lines(a, b);
+}
+
+void status_display_set_lines_hold(const char *a, const char *b)
 {
     if (status_display_use_tdongle_lcd()) tdongle_status_set_lines(a, b);
 }
