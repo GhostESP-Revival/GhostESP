@@ -1,5 +1,5 @@
 Title: Capturing handshakes
-Description: Record Wi-Fi authentication data for analysis.
+Description: Record Wi-Fi authentication data for analysis
 URL: /latest/wifi/handshakes/
 Version: latest
 Section: Wi-Fi
@@ -7,35 +7,40 @@ Search index: /search-index.json
 
 # Capturing handshakes
 
-> Record Wi-Fi authentication data for analysis.
+> Record Wi-Fi authentication data for analysis
 
 ## On this page
 
-- [Prerequisites](#prerequisites)
 - [Capturing a handshake](#capturing-a-handshake)
 - [On-device UI](#on-device-ui)
-- [Command line](#command-line)
-- [Next steps](#next-steps)
+- [CLI](#cli)
+- [Copying the capture](#copying-the-capture)
 - [Troubleshooting](#troubleshooting)
 
 ---
 
-Capture Wi-Fi authentication handshakes from nearby networks.
-Legal note: Only capture traffic from networks you own or have explicit permission to test. Unauthorized network testing is illegal in most jurisdictions.
-## Prerequisites
-- GhostESP with SD card mounted (for saving captures).
-- A device to connect to the target network (so it can authenticate and create a handshake).
+Capture Wi-Fi authentication handshakes from nearby networks for analysis. You need GhostESP with an SD card mounted to save captures, and a device that will connect to the target network so it can authenticate and create a handshake.
+Legal note: Only capture traffic from networks you own or have permission to test. See [Legal and ethical rules](/latest/wifi/basics/#legal-and-ethical-rules).
+The four EAPOL frames
+ClientAP
+association after a forced reconnectA short deauth makes the client rejoin
+EAPOL 1 - ANonceKey Info: pairwise, ACK requested
+EAPOL 2 - SNonce &#43; MICClient nonce and MIC
+EAPOL 3 - GTK &#43; MICInstall flag set; encrypted GTK delivered
+EAPOL 4 - ACKHandshake complete
+GhostESP forces a reconnect, then records all four frames so the passphrase can be tested offline (or the PMKID from message 1).
 ## Capturing a handshake
 ### On-device UI
-- Open Menu → WiFi → Scanning and find your target network.
+- Open Menu → Wi-Fi → Scanning and find your target network.
 - Select it with Select AP to lock onto that channel.
-- Open Menu → WiFi → Capture → Capture Eapol.
+- Open Menu → Wi-Fi → Capture → Capture Eapol.
 The device will start listening for authentication activity.
 - Wait for a device to connect or reconnect to the network.
 You should see Handshake found! when the capture succeeds.
 - Back out to stop capturing.
 - The capture is saved to the SD card under /mnt/ghostesp/pcaps/.
-### Command line
+- To convert it for offline cracking, choose Menu → Wi-Fi → Capture → Export Handshakes (hc22000).
+### CLI
 - Run list -a to see nearby networks.
 - Run select -a &lt;number&gt; to lock onto your target network.
 - Run capture -eapol to start listening.
@@ -43,7 +48,8 @@ You should see Handshake found! when the capture succeeds.
 You should see Handshake found! when successful.
 - Run capture -stop to finish capturing.
 The file location will be shown in the log.
-## Next steps
+- Run capture -export &lt;pcap-file&gt; to write an hc22000 file for offline cracking.
+## Copying the capture
 - Copy the .pcap file from the device to your computer for further analysis.
 - For Flipper Zero saved files, copy the file from /ext/apps_data/ghost_esp/pcaps/ on the Flipper’s SD card.
 ## Troubleshooting

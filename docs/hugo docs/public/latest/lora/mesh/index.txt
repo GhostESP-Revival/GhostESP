@@ -12,22 +12,34 @@ Search index: /search-index.json
 
 ## On this page
 
-- [Wire format](#wire-format)
-- [Region and channel](#region-and-channel)
+- [Wire Format](#wire-format)
+- [Region and Channel](#region-and-channel)
 - [Routing](#routing)
 - [NodeInfo](#nodeinfo)
 
 ---
 
 GhostESP speaks the stock Meshtastic wire format so it interoperates with unmodified firmware.
-## Wire format
+## Wire Format
 Each LoRa frame is:
 [16 B header] [AES-CTR ciphertext: protobuf Data]
 - Header (16 B): from, to, packet ID, flags, channel hash, next hop, and relay node.
 - Ciphertext: AES-CTR with the channel PSK (LongFast default PSK AQ== → chash 0x08) covering the serialized Data protobuf (portnum, payload, routing fields).
 - De-dup: from &#43; packet ID identifies a message. Repeats may still be acknowledged, but they are not shown twice in chat.
 Direct messages use X25519 and authenticated AES-CCM instead of the channel key. Both nodes must first learn each other’s public key from NodeInfo.
-## Region and channel
+How a mesh message is sent
+1
+Build a Data protobufPortnum, payload, and routing fields
+2
+Encrypt with the channel PSKAES-CTR; LongFast default PSK `AQ==` gives chash `0x08`
+3
+Prepend the 16-byte headerfrom, to, packet ID, flags, chash, next hop, relay
+4
+Transmit and retryUp to three attempts, spaced by the modem airtime
+5
+Deduplicate on receipt`from` &#43; packet ID; repeats are acked but not shown twice
+Interoperates with unmodified Meshtastic firmware.
+## Region and Channel
 - Region slots: each of the 24 region presets selects a Meshtastic frequency slot, bandwidth, spreading factor, coding rate, and power ceiling (e.g., US LongFast at 906.875 MHz / SF11 / BW250). GhostESP and stock nodes must agree; mismatch = no RX.
 - Sync word: 0x442B, the Meshtastic private LoRa sync word (not 0x12/0x34 public). GhostESP sets this on SX1262 at lora start; stock nodes ignore frames with other sync words.
 - Default-key channel: LongFast on chash 0x08. Custom PSKs derive a different chash; both ends must match.
@@ -40,6 +52,6 @@ Direct messages use X25519 and authenticated AES-CCM instead of the channel key.
 ## NodeInfo
 - Interval: every 3 hours per node (plus on boot and on explicit request). GhostESP sends its long/short name, HW model, and role after lora start.
 - Discovery: first 30-60 seconds after lora start populates lora nodes as NodeInfos arrive. Nodes expire from the list only on long silence.
-- Diagnostics: lora nodes and lora diag expose last NodeInfo timestamps, SNR/RSSI, and hop counts.
-- Capacity: Heltec V3 keeps up to 200 nodes in RAM. Up to 32 important peer records are retained across reboot, prioritizing public keys and user flags.
+- Diagnostics: lora nodes lists !node short rssi snr [pki][&#43;]; lora diag reports last NodeInfo timestamps and SNR/RSSI.
+- Capacity: up to 200 nodes in RAM. Up to 96 peer records are retained across reboot on PSRAM builds (32 without PSRAM), prioritizing public keys and user flags.
 See [Commands](/latest/lora/commands/) for tuning SF/BW and [Getting Started](/latest/lora/getting-started/) for first contact.

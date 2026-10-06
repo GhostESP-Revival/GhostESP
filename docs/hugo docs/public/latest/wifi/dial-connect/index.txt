@@ -1,5 +1,5 @@
 Title: DIAL Connect
-Description: Cast YouTube videos to smart TVs on your network.
+Description: Cast YouTube videos to smart TVs on your network
 URL: /latest/wifi/dial-connect/
 Version: latest
 Section: Wi-Fi
@@ -7,33 +7,27 @@ Search index: /search-index.json
 
 # DIAL Connect
 
-> Cast YouTube videos to smart TVs on your network.
+> Cast YouTube videos to smart TVs on your network
 
 ## On this page
 
-- [Prerequisites](#prerequisites)
 - [How to use](#how-to-use)
 - [On-device UI](#on-device-ui)
-- [Command line](#command-line)
-- [What happens](#what-happens)
+- [CLI](#cli)
+- [How it works](#how-it-works)
 - [Supported devices](#supported-devices)
 - [Troubleshooting](#troubleshooting)
-- [How it works](#how-it-works)
 
 ---
 
-Cast random YouTube videos to all DIAL-enabled devices (Chromecasts, smart TVs, Roku, etc.) on your network.
-Note: Only test this on networks and devices you own or have explicit permission to test.
-## Prerequisites
-- GhostESP flashed device, powered on.
-- Connected to the same Wi-Fi network as the target devices (run connect SSID PASSWORD first).
-- DIAL-enabled devices on the network (Chromecast, smart TV with YouTube app, Roku, etc.).
+Cast random YouTube videos to all DIAL-enabled devices (Chromecasts, smart TVs, Roku, etc.) on your network. Connect GhostESP to the same Wi-Fi network as the target devices first.
+Note: Only test on networks and devices you own or have permission to test. See [Legal and ethical rules](/latest/wifi/basics/#legal-and-ethical-rules).
 ## How to use
 ### On-device UI
-- First connect to a Wi-Fi network: Menu → WiFi → Connection → Connect to WiFi.
-- Go to Menu → WiFi → DIAL Connect.
+- First connect to a Wi-Fi network: Menu → Wi-Fi → Connection → Connect to Wi-Fi.
+- Go to Menu → Wi-Fi → Gadgets → TV Cast (Dial Connect).
 - The device will discover smart TVs and cast a random YouTube video.
-### Command line
+### CLI
 Cast to first available device:
 dialconnect
 Cast to ALL devices on the network:
@@ -44,11 +38,12 @@ Set a custom device name (shown on TV):
 dialconnect MyDevice
 Cast to all with custom name:
 dialconnect all GhostESP
-## What happens
-- GhostESP discovers DIAL-enabled devices using SSDP (multicast discovery).
-- For each device found, it fetches the device description to get the app launch URL.
-- It sends a POST request to launch YouTube with a random video ID.
-- The TV should start playing the video within seconds.
+## How it works
+DIAL (Discovery and Launch) is a protocol developed by Netflix and YouTube that allows second-screen devices to discover and launch apps on first-screen devices (TVs). GhostESP:
+- Sends an SSDP M-SEARCH request to discover DIAL devices.
+- Fetches the device description to get the Application-URL (the app launch URL).
+- POSTs to the YouTube app endpoint with a random video ID.
+The TV receives the launch request and starts playing the specified video within seconds.
 ## Supported devices
 DIAL Connect works with any device that supports the DIAL protocol:
 - Google Chromecast (all versions)
@@ -62,9 +57,3 @@ DIAL Connect works with any device that supports the DIAL protocol:
 - 404 errors: The YouTube app may not be installed or available on that device.
 - 403 errors: The device may have DIAL restrictions enabled. Some Roku devices require enabling “Screen Mirroring” in settings.
 - Connection timeouts: The device may be on a different subnet or have firewall rules blocking DIAL.
-## How it works
-DIAL (Discovery and Launch) is a protocol developed by Netflix and YouTube that allows second-screen devices to discover and launch apps on first-screen devices (TVs). GhostESP uses this protocol to:
-- Send an SSDP M-SEARCH request to discover DIAL devices.
-- Fetch device descriptions to get the Application-URL.
-- POST to the YouTube app endpoint with a video ID parameter.
-The TV receives the launch request and starts playing the specified video.

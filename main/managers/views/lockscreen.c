@@ -1207,9 +1207,8 @@ static void lockscreen_fav_launch(const char *name) {
         target = &ghostscript_runner_view;
     } else if (strncasecmp(name, "badusb:", 7) == 0) {
 #if defined(CONFIG_HAS_BADUSB) || defined(CONFIG_HAS_BADUSB_REMOTE)
-        // Payload script: the view addresses payloads by bare name.
-        const char *slash = strrchr(name + 7, '/');
-        badusb_view_open_script(slash ? slash + 1 : name + 7);
+        // Preserve relative or absolute subfolder paths; legacy bare names also work.
+        badusb_view_open_script(name + 7);
         target = &badusb_view;
 #else
         // Board without BadUSB support: fall back like the other file types.

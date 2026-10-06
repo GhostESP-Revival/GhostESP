@@ -3,19 +3,29 @@
 > **The ESP-IDF-native wireless security platform for ESP32.**
 > Deep Wi-Fi and BLE assessment, research-grade capture and export, and a real app ecosystem. Built directly on Espressif's ESP-IDF rather than through the Arduino core, so new silicon and radio features land first and there is no abstraction layer between GhostESP and the hardware.
 
-[![Version](https://img.shields.io/badge/version-2.1.2-7c5cff?style=flat-square)](https://github.com/GhostESP-Revival/GhostESP)
+[![Version](https://img.shields.io/badge/version-2.2-7c5cff?style=flat-square)](https://github.com/GhostESP-Revival/GhostESP)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square)](LICENSE)
 [![ESP-IDF](https://img.shields.io/badge/ESP--IDF-v6.1-orange?style=flat-square)](https://docs.espressif.com/projects/esp-idf/)
 [![Discord](https://img.shields.io/discord/5cyNmUMgwh?style=flat-square&label=Discord&color=5865F2)](https://discord.gg/5cyNmUMgwh)
-[![Boards](https://img.shields.io/badge/board%20targets-61-2ea043?style=flat-square)](#supported-boards)
+[![Boards](https://img.shields.io/badge/board%20targets-62-2ea043?style=flat-square)](#supported-boards)
 
+> **⚠️ Only flash GhostESP with the [official flasher](https://ghostesp.net/flasher) or bins from our [GitHub releases](https://github.com/GhostESP-Revival/GhostESP/releases).** We can't verify integrity or provide support for third-party flashers and mirrors.
+> 
 **⭐️ Enjoying GhostESP? Please give the repo a star. It helps a lot.**
 
 ---
 
 ## What's New
 
-v2.0 rebuilt the UI, added a native app ecosystem, and expanded the radio workflows. v2.1 (Revival) adds on-device OTA with rollback protection, a second NFC backend (ST25R3916), a Cloud Store for apps and scripts and asset packs, and GhostScript, a sandboxed Lua runtime.
+**v2.2:** LoRa goes dual-stack, captures get richer, and detection widens.
+
+- **LoRa:** Meshtastic and MeshCore on SX1262, switchable at runtime, with the official apps over BLE. Ships on Heltec V3, T-Deck, CrowPanel Advance 2.4/2.8/4.3", and CrowPanel Advanced P4 7/9/10.1".
+- **Captures:** per-frame signal, channel and rate in Wireshark; 802.1Q/QinQ VLAN tags; control frames (RTS/CTS/ACK) in EAPOL and Wireshark captures.
+- **Detection:** a wider BLE device-detect list (Tile, SmartTag, Chipolo, AirPods, Apple Watch, FindMy, Fast Pair, hearing aids and more), plus `bledetect`, `mdnssniff`, and `dualwd` BLE + Wi-Fi wardriving.
+- **Apps:** Game Boy / Game Boy Color emulator, gallery folders (Tools, System, Games, Communication, Media, Sensors), and a richer plugin UI API.
+- **Quality of life:** status-bar clock with analog and seven-segment faces, Country selector, Row Height setting, runtime IR TX/RX pin config, custom channel hopping, USB SD passthrough (S3), and T-Deck audio.
+
+Earlier: v2.1 (Revival) added on-device OTA with rollback protection, the ST25R3916 NFC backend, the Cloud Store, and GhostScript (sandboxed Lua). v2.0 rebuilt the UI and introduced the native app ecosystem.
 
 <img width="320" height="170" alt="app-gallery2" src="https://github.com/user-attachments/assets/f7bb96ed-db0c-4777-a721-ded2d397b167" /> <img width="320" height="170" alt="airspace-monitor" src="https://github.com/user-attachments/assets/e049dfc8-3888-42ec-9fd1-6be62fcec114" />
 
@@ -61,13 +71,16 @@ GhostESP is a platform, not a bag of tools. Five things set it apart:
 - Handshake + PMKID capture
 - WiFi capture to SD (PCAP) with on-device PCAP browser + hc22000 export
 - USB dongle mode for Wireshark (extcap stream)
+- Per-frame signal, channel and rate in captures, plus 802.1Q/QinQ VLAN tag and control-frame (RTS/CTS/ACK) support
 - DHCP starvation
 - ARP / port / SSH / local IP scanners
 - mDNS discovery / NetBIOS scan / HTTP banner scan / SNMP probe (with per-host and per-subnet variants)
+- Passive local-name sniffer (`mdnssniff`: mDNS/LLMNR/SSDP/NetBIOS) per ARP-discovered host
 - WiFi OUI vendor lookup
 - WPA3/SAE attacks (flood + compliance checker)
 - Wardriving exports (WiFi/BLE/GPS) + sweep CSV (WiFi/BLE/GPS/802.15.4)
 - Split-channel wardriving helper via GhostLink
+- Dual-band `dualwd` BLE + Wi-Fi coexistence wardriving (PSRAM boards)
 - RSSI tracking (AP/station) with live RSSI meter view
 - Drone detection / spoofing
 - PineAP detection
@@ -75,6 +88,7 @@ GhostESP is a platform, not a bag of tools. Five things set it apart:
 - WPS detection
 - Pwnagotchi-style automated capture mode (Capture PWN)
 - Channel congestion analysis
+- Custom channel-hopping plans for attacks, AP/station scans, Airspace Monitor and packet hopping
 - WiFi Airspace Monitor (real-time packet/threat insights, fast channel hopping, suspect device cards, packets/sec sparkline)
 - DNS Sinkhole (blocklist-based NXDOMAIN blocking with built-in blocklist downloads)
 - Web UI + filesystem + remote command relay
@@ -85,7 +99,7 @@ GhostESP is a platform, not a bag of tools. Five things set it apart:
 
 - BLE scan modes (general, AirTag, Flipper, raw)
 - BLE advertisement scan with OUI prefix/vendor filtering + RGB match pulses
-- BLE spam modes (Apple, Microsoft, Samsung, Google, Random)
+- BLE spam modes (Apple, Microsoft, Samsung, Google, Random) with optional custom advertiser name (`blespam -name`)
 - AirTag scan / spoof / select
 - BLE packet capture
 - BLE stream to Wireshark
@@ -93,6 +107,7 @@ GhostESP is a platform, not a bag of tools. Five things set it apart:
 - GATT/service scan + per-device enumeration + device tracking (live RSSI meter)
 - BLE wardriving
 - BLE skimmer detection
+- BLE device detect scan (`bledetect`) with list, track and AirTag-spoof actions: Tile, Samsung SmartTag, Chipolo, AirPods (per-model), Apple Watch, generic FindMy clones, Fast Pair / Find Hub, hearing aids, exposure beacons and Chameleon Ultra
 - Drone / OpenDroneID scan / list / track / spoof
 - Aerial (drone) detector with threat classification
 - GhostLink BLE bridge to the Android companion app
@@ -102,6 +117,7 @@ GhostESP is a platform, not a bag of tools. Five things set it apart:
 <summary><strong>USB Features</strong></summary>
 
 - USB keyboard host mode (ESP32-S3 builds)
+- USB SD card passthrough (ESP32-S3 boards with an SD slot)
 - Remote keyboard control over GhostLink
 - BadUSB script runner
 - BadUSB identity options (VID/PID/manufacturer/product/layout/randomize)
@@ -117,6 +133,7 @@ GhostESP is a platform, not a bag of tools. Five things set it apart:
 
 - IR TX/RX on supported boards
 - IR learn mode
+- Runtime IR TX/RX pin configuration (CLI or Settings)
 - IR easy learn mode
 - Flipper `.ir` file support
 - Universal library transmit
@@ -133,7 +150,7 @@ GhostESP is a platform, not a bag of tools. Five things set it apart:
 - MIFARE Classic dictionary attack (default + user dictionary + session key reuse / sector sweep)
 - Full embedded MIFARE Classic dictionary
 - MIFARE Classic hardnested recovery
-- Flipper NFC parser set (transit, parking, access, amusement, loyalty): BIP, Clipper, CharlieCard, Troika, Plantain, Zolotaya Korona, Ventra, WashCity, Social Moscow, Sonicare, Saflok, Gallagher, Disney Infinity, Skylanders, Aime, Hi, HWorld, Two Cities, Umarsh, Microel, MIZIP, MetroMoney, Kazan, SmartRider, TRT, and more
+- Flipper NFC parser set (transit, parking, access, amusement, loyalty): BIP, Clipper, CharlieCard, Troika, Plantain, Zolotaya Korona, WashCity, Social Moscow, Saflok, Gallagher, Disney Infinity, Skylanders, Aime, Hi, HWorld, Two Cities, Umarsh, Microel, MIZIP, MetroMoney, Kazan, SmartRider, and more
 - MIFARE Desfire detection
 - Chameleon Ultra support (CLI + UI + BLE control)
 - Chameleon Ultra HF/LF RFID scan + reader controls
@@ -160,6 +177,7 @@ GhostESP is a platform, not a bag of tools. Five things set it apart:
 
 - I2S DAC audio player (MP3 playback with headphone detection and volume control)
 - Audio receiver (TLV320DAC I2S)
+- T-Deck onboard MAX98357A speaker amp support
 - Music visualizer (RGB LED audio visualization)
 - Microphone spectrum / MIC visualizer (microphone-driven RGB LED effects with multiple modes, color modes, sensitivity, smoothing, and contrast)
 </details>
@@ -175,8 +193,10 @@ GhostESP is a platform, not a bag of tools. Five things set it apart:
 - Persistent status bar with level badge
 - Touch drag scroll + tap-to-wake
 - Configurable screen timeout, brightness, and orientation
+- Country selector (Settings > Wi-Fi), Row Height setting for menus, and T-Embed rotary detent mode
 - Idle animations (Game of Life, Ghost, Starfield, HUD, Matrix, Flying Ghosts, Spiral, Falling Leaves, Bouncing Text)
 - On-screen Clock
+- Status-bar clock (toggleable) with analog and seven-segment clock faces
 - Compass screen (magnetometer)
 - Accelerometer screen (G-force, tilt, orientation, shake, speed)
 - ENV-III sensor screen (temperature, humidity, pressure, dew point, altitude)
@@ -192,14 +212,16 @@ GhostESP is a platform, not a bag of tools. Five things set it apart:
 <details>
 <summary><strong>Apps & Extensibility</strong></summary>
 
-- Apps Gallery (central launcher for native SD apps, with categorical submenus)
+- Apps Gallery (central launcher for native SD apps, with folders for Tools, System, Games, Communication, Media, and Sensors)
 - Native SD app system (load, list, inspect, launch, stop, reset apps with permissions and scoped storage)
 - Ghost Build Tool (`gbt`) for scaffolding, building, and packaging apps and firmware
 - Plugin/app SDK and example apps (Device Inspector, ESP32Finder)
+- Plugin UI API additions: embeddable options list, widget rects, design metrics, page stack, raw touch state, batched UI calls, `forward_back` manifest option and `GHOSTESP_API_HAS()` feature gating
 - Cloud Store (browse and install apps, scripts, and asset packs on-device)
 - GhostScript (sandboxed Lua 5.4 scripting runtime for scripts from the SD card)
 - Ghostchi virtual pet companion (50-level XP system, 27 XP sources, passive/aggressive modes, companion lockscreen, global mood, level-up toasts, status-bar badge)
 - SD Browser (file/folder browsing, rename, delete, copy/move, text file preview)
+- Game Boy / Game Boy Color emulator app with save states and battery saves
 - On-device PCAP browser with hc22000 export
 - On-device Info screen (device, runtime, build, credits)
 - Reusable confirmation popups for dangerous UI actions
@@ -209,6 +231,7 @@ GhostESP is a platform, not a bag of tools. Five things set it apart:
 <summary><strong>Additional Features</strong></summary>
 
 - GhostLink (dual-device command and display interface) with remote radio support and keyboard relay
+- `glbench` GhostLink throughput benchmark and link statistics
 - Setup wizard (display builds)
 - Wired + web screen mirroring
 - Ethernet mode (W5500) + full toolset: fingerprint scan, port scan, ping sweep, ARP scan, ARP poisoning, MITM, HTTP, DNS, NTP, trace route, MAC tools, statistics
@@ -228,6 +251,7 @@ GhostESP is a platform, not a bag of tools. Five things set it apart:
 - M5 Cardputer / Cardputer ADV keyboard support
 - Android companion app
 - On-device CH422G / ST7262 / AXS15231B / APX2102 display driver support
+- CrowPanel 1.28-inch rotary display with USB audio volume/mute control
 - Light-sleep idle + frequency scaling + Wi-Fi power saving
 - Reduced-motion animations
 - SD config backup / restore
@@ -262,21 +286,21 @@ GhostESP is a platform, not a bag of tools. Five things set it apart:
 
 ## Supported Boards
 
-61 board targets build in CI ([`.github/workflows/compile_all.yml`](.github/workflows/compile_all.yml)) from 60 configs in [`configs/`](configs/). Awok V5 shares the generic ESP32-S2 config.
+62 board targets build in CI ([`.github/workflows/compile_all.yml`](.github/workflows/compile_all.yml)) from 61 configs in [`configs/`](configs/). Awok V5 shares the generic ESP32-S2 config.
 
 <details>
 <summary><strong>Board feature matrix (click to expand)</strong></summary>
 
 | Board | Bluetooth | NFC (PN532) | NFC (Chameleon) | IR TX | IR RX | GPS Default | Keyboard | Display | SD | OTA | Native SD Apps | LoRa |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| ESP32-Wroom DevKitC | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ | ✗ |
-| ESP32-S2 DevKitC | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ | ✗ |
-| ESP32-S3 DevKitC | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ | ✗ |
-| ESP32-C3 DevKitC | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ | ✗ |
-| ESP32-C5 DevKitC | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ | ✗ |
-| ESP32-C6 DevKitC | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ | ✗ |
-| Awok V5 | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ | ✗ |
-| GhostBoard | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | — | ✓ | ✗ | ✗ | ✗ |
+| ESP32-Wroom DevKitC | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | - | ✓ | ✗ | ✗ | ✗ |
+| ESP32-S2 DevKitC | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | - | ✓ | ✗ | ✗ | ✗ |
+| ESP32-S3 DevKitC | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | - | ✓ | ✗ | ✗ | ✗ |
+| ESP32-C3 DevKitC | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | - | ✓ | ✗ | ✗ | ✗ |
+| ESP32-C5 DevKitC | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | - | ✓ | ✗ | ✗ | ✗ |
+| ESP32-C6 DevKitC | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | - | ✓ | ✗ | ✗ | ✗ |
+| Awok V5 | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | - | ✓ | ✗ | ✗ | ✗ |
+| GhostBoard | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | - | ✓ | ✗ | ✗ | ✗ |
 | Marauder v4 | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | Full | ✓ | ✓ | ✗ | ✗ |
 | Marauder v6 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✗ | ✗ | ✗ | ✗ |
 | AWOK Mini | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | Full | ✗ | ✗ | ✓ | ✗ |
@@ -298,52 +322,53 @@ GhostESP is a platform, not a bag of tools. Five things set it apart:
 | CrowPanel Advance 3.5" (S3, 480×320) | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ | ✗ |
 | CrowPanel Advance 4.3" (S3, 800×480) | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ | ✓ |
 | CrowPanel Advance 5" (S3, 800×480) | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ | ✗ |
+| CrowPanel 1.28" Rotary (S3, 240×240) | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ | ✗ |
 | CrowPanel Advanced P4 7/9/10.1" (v1.2+) | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ | ✓ |
 | CrowPanel Advanced P4 7/9/10.1" (v1.1) | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ | ✓ |
 | CrowPanel Advanced P4 5" RGB | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ | ✗ |
 | Sunton 7" | ✓ | ✗ | ✓* | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ | ✗ |
 | JC3248W535EN | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ | ✗ |
-| Flipper JCMK GPS | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | — | ✓ | ✗ | ✗ | ✗ |
+| Flipper JCMK GPS | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | - | ✓ | ✗ | ✗ | ✗ |
 | T-Deck | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✓ | Full | ✓ | ✗ | ✓ | ✓ |
 | T-Embed CC1101 | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | Full | ✓ | ✓ | ✓ | ✗ |
 | GhostLink P1 Core | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ | ✗ |
-| GhostLink P1 Peer | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ | ✗ |
+| GhostLink P1 Peer | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | - | ✓ | ✗ | ✗ | ✗ |
 | T-Dongle-S3 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✗ | ✗ |
 | T-Dongle-C5 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ | ✗ |
 | S3TWatch | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ | ✗ | Full | has 4MB vfs partition | ✓ | ✗ | ✗ |
 | T-Display S3 Touch | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | Full | ✓ | ✗ | ✗ | ✗ |
-| JCMK Devboard Pro | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | — | ✓ | ✗ | ✗ | ✗ |
-| Minion | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ | ✗ |
-| Lolin S3 Pro | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✓ | ✗ |
+| JCMK Devboard Pro | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | - | ✓ | ✗ | ✗ | ✗ |
+| Minion | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | - | ✓ | ✗ | ✗ | ✗ |
+| Lolin S3 Pro | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | - | ✓ | ✗ | ✓ | ✗ |
 | Cardputer ADV | ✓ | ✗ | ✓ | ✓ | ✗ | ✓ | ✓ | Full | ✓ | ✓ | ✗ | ✗ |
 | Poltergeist | ✓ | ✗ | ✓ | ✓ | ✓ | ✗ | ✗ | Status | ✓ | ✗ | ✗ | ✗ |
-| Banshee (C5 display MCU) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | Full + Status | ✓ | ✓ | ✓ | ✗ |
-| Banshee (S3 main) | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | — | ✗ | ✓ | ✗ | ✗ |
-| Febris Pro | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | — | ✗ | ✗ | ✗ | ✗ |
-| ACE C5 | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | — | ✓ | ✗ | ✗ | ✗ |
+| Banshee (C5 display MCU) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | Full + Status | ✓ | ✗ | ✓ | ✗ |
+| Banshee (S3 main) | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | - | ✗ | ✓ | ✗ | ✗ |
+| Febris Pro | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | - | ✗ | ✗ | ✗ | ✗ |
+| ACE C5 | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | - | ✓ | ✗ | ✗ | ✗ |
 | NM-CYD-C5 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ | ✗ |
-| ACE S3 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ | ✗ |
-| Seeed XIAO ESP32-S3 Sense | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✓ | ✗ | ✗ |
-| Seeed XIAO ESP32-S3 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✓ | ✗ | ✗ |
-| Seeed XIAO ESP32-C5 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ | ✗ |
+| ACE S3 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | - | ✓ | ✗ | ✗ | ✗ |
+| Seeed XIAO ESP32-S3 Sense | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | - | ✓ | ✓ | ✗ | ✗ |
+| Seeed XIAO ESP32-S3 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | - | ✓ | ✓ | ✗ | ✗ |
+| Seeed XIAO ESP32-C5 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | - | ✓ | ✗ | ✗ | ✗ |
 | Marauder v8 | ✓ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | Full | ✓ | ✗ | ✓ | ✗ |
 | Pancake C5 | ✓ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | Full | ✓ | ✗ | ✓ | ✗ |
 | M5Stack CoreS3-SE | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | Full | ✓ | ✓ | ✓ | ✗ |
 | M5Stack AtomS3R | ✓ | ✗ | ✓ | ✓ | ✗ | ✓ | ✗ | Full | has 1MB vfs partition | ✗ | ✗ | ✗ |
 
-`*` — the checked-in config for this board predates a Kconfig option (`NFC_CHAMELEON`) that defaults on for BLE-capable boards; no board-specific override is present, so this reflects the Kconfig default rather than an explicit setting in the file. Most unstarred BLE-capable boards set the symbol explicitly, but some generic configs may also rely on the Kconfig default.
+`*`: the checked-in config for this board predates a Kconfig option (`NFC_CHAMELEON`) that defaults on for BLE-capable boards; no board-specific override is present, so this reflects the Kconfig default rather than an explicit setting in the file. Most unstarred BLE-capable boards set the symbol explicitly, but some generic configs may also rely on the Kconfig default.
 
-**M5Stack Grove ports:** the M5Stack CoreS3-SE and AtomS3R configs expose their HY2.0-4P Grove connectors on I2C port 1 (`PORT.A`: SDA=G2, SCL=G1; the CoreS3-SE also has `PORT.B` G8/G9 and `PORT.C` G17/G18). Plug an ST25R3916 NFC module (I2C, 0x50) and/or an M5Stack ENV III unit (SHT30 0x44 + QMP6988 0x70) into Grove `PORT.A` and open the NFC or ENV III app — both devices share the same bus.
+**M5Stack Grove ports:** the M5Stack CoreS3-SE and AtomS3R configs expose their HY2.0-4P Grove connectors on I2C port 1 (`PORT.A`: SDA=G2, SCL=G1; the CoreS3-SE also has `PORT.B` G8/G9 and `PORT.C` G17/G18). Plug an ST25R3916 NFC module (I2C, 0x50) and/or an M5Stack ENV III unit (SHT30 0x44 + QMP6988 0x70) into Grove `PORT.A` and open the NFC or ENV III app; both devices share the same bus.
 
-**Display:** `Full` = LVGL graphical UI. `Status` = secondary small status display only (shares the IO-expander I2C bus), no full UI. `—` = headless, no display.
+**Display:** `Full` = LVGL graphical UI. `Status` = secondary small status display only (shares the IO-expander I2C bus), no full UI. `-` = headless, no display.
 
 **SD:** most boards use SPI-mode SD. JC3248W535EN and T-Dongle-S3 use SDMMC 1-bit mode instead; the SDMMC bus option exists in Kconfig for other boards.
 
 **NFC (Chameleon):** Chameleon Ultra support rides over BLE, so it's on by default for any BLE-capable board and off where BLE is unavailable (ESP32-S2 boards) or explicitly disabled (Marauder v8, Pancake C5).
 
-**Native SD Apps:** at compile time the feature depends only on `CONFIG_SPIRAM` (`main/Kconfig.projbuild:1410`). At runtime the app gallery checks `MALLOC_CAP_SPIRAM` and renders into the full LVGL screen, so a display is required for the UI to be usable. That leaves it enabled on: AWOK Mini, Waveshare/Crowtech/Sunton 7″, CrowPanel Advance 2.4/2.8/3.5/4.3/5″, CrowPanel Advanced P4 5″/7/9/10.1″ (v1.1/v1.2+), JC3248W535EN, T-Deck, T-Embed CC1101, GhostLink P1 Core, T-Dongle-C5, NM-CYD-C5, M5Stack CoreS3-SE, Banshee (C5), and Marauder v8/Pancake C5. Boards with a screen but no PSRAM (Cardputer, Cardputer ADV, the CYD2 family, S3TWatch, T-Dongle-S3, M5Stack AtomS3R, etc.) don't get it.
+**Native SD Apps:** at compile time the feature depends only on `CONFIG_SPIRAM` (`main/Kconfig.projbuild:1410`). At runtime the app gallery checks `MALLOC_CAP_SPIRAM` and renders into the full LVGL screen, so a display is required for the UI to be usable. That leaves it enabled on: AWOK Mini, Waveshare/Crowtech/Sunton 7″, CrowPanel Advance 2.4/2.8/3.5/4.3/5″, CrowPanel Advanced P4 5″/7/9/10.1″ (v1.1/v1.2+), JC3248W535EN, CrowPanel 1.28″ Rotary, T-Deck, T-Embed CC1101, GhostLink P1 Core, T-Dongle-C5, NM-CYD-C5, M5Stack CoreS3-SE, Banshee (C5), and Marauder v8/Pancake C5. Boards with a screen but no PSRAM (Cardputer, Cardputer ADV, the CYD2 family, S3TWatch, T-Dongle-S3, M5Stack AtomS3R, etc.) don't get it.
 
-**Banshee** ships as two configs: the S3 main board (headless) and the C5 module that drives its display and status LED, paired over GhostLink.
+**Banshee** ships as two configs: the S3 main board (headless) and the C5 module that drives its display and status LED, paired over GhostLink. Self-OTA is disabled on the C5 in v2.2; update it over GhostLink from the S3 or by USB.
 
 </details>
 
@@ -363,7 +388,7 @@ The table below compares GhostESP against other broad-scope firmware. It is base
 | Current source available for audit | [x] | [x] | Limited / older public source | Limited / older public source |
 | ESP-IDF-native architecture | [x] |  |  |  |
 | Arduino / PlatformIO architecture |  | [x] | [x] | [x] |
-| Supported board targets | 61 CI targets | 42+ | 4 | 1 |
+| Supported board targets | 62 CI targets | 48+ | 4 | 1 |
 | Full LVGL graphical UI | [x] |  |  |  |
 | Web dashboard / REST control | [x] | [x] |  |  |
 | Captive portal web server | [x] | [x] | [x] | [x] |
@@ -372,7 +397,7 @@ The table below compares GhostESP against other broad-scope firmware. It is base
 | Beacon spam | [x] | [x] | [x] | [x] |
 | Karma / probe response attack | [x] | [x] | [x] |  |
 | Handshake / EAPOL capture | [x] | [x] | [x] |  |
-| On-device PCAP browser / hc22000 export | [x] |  |  |  |
+| On-device PCAP browser / hc22000 export | [x] |  | [x] |  |
 | PMKID capture / export | [x] |  | [x] |  |
 | Live Wireshark USB streaming | [x] |  |  |  |
 | SAE flood / WPA3-specific testing | [x] |  |  |  |
@@ -381,17 +406,17 @@ The table below compares GhostESP against other broad-scope firmware. It is base
 | Channel switch attack | [x] |  |  |  |
 | GTK abuse / client isolation testing | [x] |  |  |  |
 | DHCP starvation | [x] | [x] |  |  |
-| ARP / port / SSH scanners | [x] | [x] |  |  |
+| ARP / port / SSH scanners | [x] | [x] | [x] |  |
 | mDNS discovery | [x] |  |  |  |
 | NetBIOS scanner | [x] |  |  |  |
-| HTTP banner scanner | [x] |  |  |  |
+| HTTP banner scanner | [x] |  | [x] |  |
 | SNMP probe | [x] |  |  |  |
 | WiFi OUI vendor lookup | [x] | [x] | [x] |  |
 | PineAP / Evil Twin detection | [x] |  |  | [x] |
 | WPS detection / reporting | [x] | [x] |  |  |
 | Pwnagotchi-style automated capture mode | [x] | [x] |  |  |
 | Pwnagotchi detector / spam |  | [x] |  | [x] |
-| Channel congestion analysis | [x] |  |  | [x] |
+| Channel congestion analysis | [x] | [x] |  | [x] |
 | Live WiFi packet monitor / visualizer | [x] |  | [x] | [x] |
 | WiFi Airspace Monitor | [x] |  |  |  |
 | DNS sinkhole / blocklist NXDOMAIN | [x] |  |  |  |
@@ -406,12 +431,12 @@ The table below compares GhostESP against other broad-scope firmware. It is base
 | Drone / OpenDroneID detect | [x] |  |  | [x] |
 | Drone / OpenDroneID spoof | [x] |  |  | [x] |
 | BLE scanning | [x] | [x] | [x] | [x] |
-| Raw BLE scanner | [x] |  |  |  |
+| Raw BLE scanner | [x] | [x] |  | [x] |
 | BLE spam modes | [x] | [x] | [x] | [x] |
 | AirTag scan / spoof | [x] | [x] | [x] | [x] |
 | BLE tracker detection tools | [x] |  | [x] | [x] |
 | Flipper Zero finder | [x] |  |  | [x] |
-| GATT / service enumeration | [x] |  | [x] |  |
+| GATT / service enumeration | [x] | [x] | [x] |  |
 | BLE device tracking by RSSI | [x] |  |  |  |
 | BLE stream to Wireshark | [x] |  |  |  |
 | BLE skimmer detection | [x] |  |  | [x] |
@@ -425,10 +450,10 @@ The table below compares GhostESP against other broad-scope firmware. It is base
 | ST25R3916 NFC support | [x] | [x] |  |  |
 | Chameleon Ultra support | [x] | [x] |  |  |
 | Chameleon Ultra BLE control | [x] | [x] |  |  |
-| Flipper `.nfc` import/export | [x] |  |  |  |
+| Flipper `.nfc` import/export | [x] | [x] |  |  |
 | Flipper NFC parser collection | [x] |  |  |  |
 | MIFARE Classic default-key attack | [x] | [x] | [x] |  |
-| MIFARE Classic embedded dictionary | [x] |  |  |  |
+| MIFARE Classic embedded dictionary | [x] | [x] | [x] |  |
 | MIFARE Classic user dictionary file | [x] | [x] |  |  |
 | MIFARE Classic session key reuse / sector sweep | [x] |  |  |  |
 | MIFARE Classic hardnested recovery | [x] |  |  |  |
@@ -439,23 +464,23 @@ The table below compares GhostESP against other broad-scope firmware. It is base
 | USB keyboard host mode | [x] |  |  |  |
 | USB HID keyboard output mode | [x] | [x] |  |  |
 | Remote keyboard over dual-device link | [x] |  |  |  |
-| BadUSB VID/PID identity options | [x] | [x] |  |  |
+| BadUSB VID/PID identity options | [x] |  |  |  |
 | BadUSB mouse jiggler / trackpad | [x] |  |  |  |
 | IR learn / capture / replay | [x] | [x] |  |  |
 | Flipper `.ir` file support | [x] | [x] |  |  |
 | Universal IR library transmit | [x] | [x] |  |  |
 | CC1101 SubGHz scan / replay | [x] | [x] | [x] |  |
 | CC1101 waterfall spectrum analyzer | [x] | [x] | [x] |  |
-| Flipper `.sub` read/write support | [x] | [x] | [x] | [x] |
+| Flipper `.sub` read/write support | [x] | [x] | [x] |  |
 | SubGHz protocol decoders | [x] | [x] | [x] |  |
 | NRF24 spectrum analyzer | [x] | [x] | [x] | [x] |
 | NRF24 MouseJack |  | [x] | [x] |  |
-| Passive jamming detection | [x] |  | [x] |  |
+| Passive jamming detection | [x] | [x] | [x] |  |
 | Active RF jamming shipped | Not shipped | [x] | [x] | [x] |
 | Zigbee / 802.15.4 packet capture | [x] |  |  |  |
 | Ethernet W5500 support | [x] | [x] |  |  |
 | Ethernet ARP poisoning / MITM tools | [x] | [x] |  |  |
-| Ethernet fingerprint / port / ping tools | [x] |  |  |  |
+| Ethernet fingerprint / port / ping tools | [x] | [x] |  |  |
 | Ethernet DNS / NTP / HTTP / trace tools | [x] |  |  |  |
 | TLS SNI / HTTP / FTP credential capture over Ethernet | [x] |  |  |  |
 | Camera streaming / motion detection | [x] |  |  |  |
@@ -474,8 +499,8 @@ The table below compares GhostESP against other broad-scope firmware. It is base
 | Native SD app/plugin system | [x] |  |  |  |
 | Native app SDK / build tooling | [x] |  |  |  |
 | Sandboxed on-device scripting runtime | Lua 5.4 | JavaScript |  |  |
-| Cloud app / script / asset store | [x] |  |  |  |
-| Apps gallery / launcher | [x] |  |  |  |
+| Cloud app / script / asset store | [x] | [x] |  |  |
+| Apps gallery / launcher | [x] | [x] |  |  |
 | Ghostchi / virtual pet | [x] | [x] |  |  |
 | Audio player | [x] | [x] |  |  |
 | Microphone spectrum / visualizer | [x] | [x] |  |  |
@@ -484,14 +509,14 @@ The table below compares GhostESP against other broad-scope firmware. It is base
 | Compass screen | [x] |  |  |  |
 | Accelerometer screen | [x] |  |  |  |
 | ENV-III temperature / humidity / pressure | [x] |  |  |  |
-| Battery monitoring / fuel gauge support | [x] | [x] | [x] |  |
+| Battery monitoring / fuel gauge support | [x] | [x] |  |  |
 | Sensor / RTC hardware support | [x] | [x] |  |  |
 | M5 Cardputer keyboard support | [x] | [x] |  |  |
 | Android companion app | [x] |  |  |  |
 | Accessibility modes / reduced motion | [x] |  | [x] |  |
 | Custom theme / UI palette system | [x] | [x] | [x] |  |
-| Custom SD asset packs | [x] |  |  |  |
-| LoRa support |  | [x] |  |  |
+| Custom SD asset packs | [x] | [x] |  |  |
+| LoRa support | [x] | [x] |  |  |
 | FM radio support |  | [x] |  |  |
 
 > GhostESP does not ship active jamming features. Distribution, promotion, sale, and use of jamming devices or firmware is illegal in many jurisdictions.
@@ -734,11 +759,11 @@ GhostESP is not affiliated with or endorsed by Meshtastic.
 
 ## Contributing
 
-GhostESP welcomes contributions — from a one-line board config to a new feature.
+GhostESP welcomes contributions, from a one-line board config to a new feature.
 
-- **Adding a board**: https://docs.ghostesp.net/v2.1/development/custom-board-configs/
+- **Adding a board**: https://docs.ghostesp.net/latest/development/custom-board-configs/
 - **Fixing a bug or adding a feature**: check [open issues](https://github.com/GhostESP-Revival/GhostESP/issues) - anything tagged `good first issue` is a solid place to start.
-- **Building a native app**: see the `gbt` (Ghost Build Tool) [docs](https://docs.ghostesp.net/v2.1/development/gbt/) and example apps (Device Inspector, ESP32Finder) for the SDK pattern.
+- **Building a native app**: see the `gbt` (Ghost Build Tool) [docs](https://docs.ghostesp.net/latest/development/gbt/) and example apps (Device Inspector, ESP32Finder) for the SDK pattern.
 - Questions before you start? Ask in [Discord](https://discord.gg/5cyNmUMgwh) - the team is responsive.
 
 ---

@@ -1,4 +1,5 @@
 #include "core/callbacks.h"
+#include "scans/wifi/wardrive_observation.h"
 #include "core/system_manager.h"
 #include "esp_wifi.h"
 #include "managers/gps_manager.h"
@@ -98,6 +99,13 @@ static void *mon_tbl_calloc(size_t n, size_t size) {
 #define WARDRIVE_HELPER_REFRESH_MS 2000
 #define WARDRIVE_OBS_QUEUE_PSRAM_LEN 64
 #define WARDRIVE_OBS_QUEUE_INTERNAL_LEN 32
+/* Reservations track queued observations, so the table only needs the capacity of the
+ * queue that can exist: the PSRAM-sized queue is only attempted when PSRAM is configured. */
+#ifdef CONFIG_SPIRAM
+#define WARDRIVE_PENDING_LEN WARDRIVE_OBS_QUEUE_PSRAM_LEN
+#else
+#define WARDRIVE_PENDING_LEN WARDRIVE_OBS_QUEUE_INTERNAL_LEN
+#endif
 #define WARDRIVE_OBS_TASK_STACK_BYTES 8192
 #define PEER_GPS_STREAM_INTERVAL_MS 1000
 #define PEER_GPS_INIT_RETRY_MS 5000
@@ -227,8 +235,8 @@ typedef struct {
     uint32_t pending_token;
     bool has_gps_snapshot;
     bool using_peer_gps;
-    gps_t gps_snapshot;
-    wardriving_data_t data;
+    wardrive_gps_record_t gps_snapshot;
+    wardrive_wifi_record_t data;
 } wardrive_obs_item_t;
 
 typedef struct {
@@ -239,7 +247,7 @@ typedef struct {
 } wardrive_pending_t;
 // Reservations only cover queued observations, never successfully logged APs.
 // A failed queue insertion or completed dequeue releases the reservation.
-static wardrive_pending_t wardrive_pending[WARDRIVE_OBS_QUEUE_PSRAM_LEN];
+static wardrive_pending_t wardrive_pending[WARDRIVE_PENDING_LEN];
 static uint32_t wardrive_pending_token;
 static uint32_t wardrive_pending_suppressed;
 static StaticSemaphore_t wardrive_ack_storage;
@@ -346,7 +354,7 @@ static void wardrive_obs_task(void *arg) {
             continue;
         }
         portENTER_CRITICAL(&wardrive_obs_mux);
-        for (size_t i = 0; i < WARDRIVE_OBS_QUEUE_PSRAM_LEN; ++i) {
+        for (size_t i = 0; i < WARDRIVE_PENDING_LEN; ++i) {
             if (wardrive_pending[i].used && wardrive_pending[i].token == item.pending_token) {
                 wardrive_pending[i].used = false;
                 break;
@@ -354,8 +362,10 @@ static void wardrive_obs_task(void *arg) {
         }
         portEXIT_CRITICAL(&wardrive_obs_mux);
 
+        wardriving_data_t data;
+        wardrive_wifi_record_restore(&data, &item.data);
         if (item.source == WARDRIVE_OBS_HELPER_TX) {
-            wardrive_process_helper_tx(&item.data);
+            wardrive_process_helper_tx(&data);
             continue;
         }
         // This may take the CSV mutex, so it belongs in the worker, never in
@@ -368,8 +378,10 @@ static void wardrive_obs_task(void *arg) {
         wardrive_log_attempts++;
         esp_err_t err = ESP_ERR_INVALID_STATE;
         if (item.has_gps_snapshot) {
+            gps_t gps_snapshot;
+            wardrive_gps_record_restore(&gps_snapshot, &item.gps_snapshot);
             for (uint8_t attempt = 0; attempt < 5; attempt++) {
-                err = gps_manager_log_wardriving_data_with_snapshot(&item.data, &item.gps_snapshot,
+                err = gps_manager_log_wardriving_data_with_snapshot(&data, &gps_snapshot,
                                                                     item.using_peer_gps);
                 if (err != ESP_ERR_TIMEOUT && err != ESP_ERR_NO_MEM) break;
                 vTaskDelay(pdMS_TO_TICKS(10));
@@ -409,6 +421,28 @@ static bool wardrive_obs_queue_ensure(void) {
         vTaskDelay(1);
     }
 
+    // Reserve the largest mandatory block first. Allocating queue storage
+    // first can split the last block large enough for the worker stack.
+    StackType_t *stack = NULL;
+#if defined(CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY)
+    stack = heap_caps_malloc(WARDRIVE_OBS_TASK_STACK_BYTES,
+                             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+#endif
+    if (!stack) {
+        stack = heap_caps_malloc(WARDRIVE_OBS_TASK_STACK_BYTES,
+                                 MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    }
+    StaticTask_t *tcb = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (!stack || !tcb) {
+        heap_caps_free(stack);
+        heap_caps_free(tcb);
+        ESP_LOGE(TAG, "Wardrive worker allocation failed: stack=%u, largest internal block=%u",
+                 (unsigned)WARDRIVE_OBS_TASK_STACK_BYTES,
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+        wardrive_obs_init_done();
+        return false;
+    }
+
     UBaseType_t capacity = WARDRIVE_OBS_QUEUE_PSRAM_LEN;
     size_t storage_size = capacity * sizeof(wardrive_obs_item_t);
     uint8_t *storage = heap_caps_malloc(storage_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -420,8 +454,13 @@ static bool wardrive_obs_queue_ensure(void) {
     }
     StaticQueue_t *control = heap_caps_calloc(1, sizeof(StaticQueue_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (!storage || !control) {
+        ESP_LOGE(TAG, "Wardrive queue allocation failed: storage=%u, largest internal block=%u",
+                 (unsigned)storage_size,
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
         if (storage) heap_caps_free(storage);
         if (control) heap_caps_free(control);
+        heap_caps_free(stack);
+        heap_caps_free(tcb);
         wardrive_obs_init_done();
         return false;
     }
@@ -430,6 +469,8 @@ static bool wardrive_obs_queue_ensure(void) {
     if (!queue) {
         heap_caps_free(storage);
         heap_caps_free(control);
+        heap_caps_free(stack);
+        heap_caps_free(tcb);
         wardrive_obs_init_done();
         return false;
     }
@@ -442,28 +483,8 @@ static bool wardrive_obs_queue_ensure(void) {
         vQueueDelete(queue);
         heap_caps_free(storage);
         heap_caps_free(control);
-        wardrive_obs_init_done();
-        return false;
-    }
-
-    StackType_t *stack = NULL;
-#if defined(CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY)
-    stack = heap_caps_malloc(WARDRIVE_OBS_TASK_STACK_BYTES,
-                             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-#endif
-    if (!stack) {
-        stack = heap_caps_malloc(WARDRIVE_OBS_TASK_STACK_BYTES,
-                                 MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    }
-    StaticTask_t *tcb = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    if (!stack || !tcb) {
-        if (stack) heap_caps_free(stack);
-        if (tcb) heap_caps_free(tcb);
-        vSemaphoreDelete(drain_sem);
-        vSemaphoreDelete(lifecycle_mutex);
-        vQueueDelete(queue);
-        heap_caps_free(storage);
-        heap_caps_free(control);
+        heap_caps_free(stack);
+        heap_caps_free(tcb);
         wardrive_obs_init_done();
         return false;
     }
@@ -515,12 +536,15 @@ static bool wardrive_obs_submit(const wardriving_data_t *data, wardrive_obs_sour
     portEXIT_CRITICAL(&wardrive_obs_mux);
     if (!accepted) return false;
 
-    wardrive_obs_item_t item = {.source = source, .data = *data};
-    item.has_gps_snapshot = gps_manager_get_wardrive_snapshot(&item.gps_snapshot,
-                                                                       &item.using_peer_gps);
+    wardrive_obs_item_t item = {.source = source};
+    wardrive_wifi_record_store(&item.data, data);
+    gps_t gps_snapshot;
+    item.has_gps_snapshot = gps_manager_get_wardrive_snapshot(&gps_snapshot,
+                                                             &item.using_peer_gps);
+    if (item.has_gps_snapshot) wardrive_gps_record_store(&item.gps_snapshot, &gps_snapshot);
     int slot = -1;
     portENTER_CRITICAL(&wardrive_obs_mux);
-    for (size_t i = 0; i < WARDRIVE_OBS_QUEUE_PSRAM_LEN; ++i) {
+    for (size_t i = 0; i < WARDRIVE_PENDING_LEN; ++i) {
         wardrive_pending_t *p = &wardrive_pending[i];
         if (!p->used) { if (slot < 0) slot = (int)i; continue; }
         if (strcmp(p->bssid, data->bssid) != 0) continue;

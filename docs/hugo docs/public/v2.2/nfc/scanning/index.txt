@@ -1,0 +1,92 @@
+Title: Scanning
+Description: Read GhostESP-compatible NFC tags and understand the on-screen feedback
+URL: /v2.2/nfc/scanning/
+Version: v2.2
+Section: NFC
+Search index: /search-index.json
+
+# Scanning
+
+> Read GhostESP-compatible NFC tags and understand the on-screen feedback
+
+## On this page
+
+- [Backend Selection](#backend-selection)
+- [Steps](#steps)
+- [MIFARE Classic Flow](#mifare-classic-flow)
+- [NTAG / Ultralight Flow](#ntag--ultralight-flow)
+- [Chameleon Ultra Scanning](#chameleon-ultra-scanning)
+- [Troubleshooting](#troubleshooting)
+
+---
+
+Scan and read a tag. GhostESP works with a PN532, an ST25R3916, or a Chameleon Ultra over BLE, so you need firmware built with NFC support and one of those devices; an SD card is only required if you plan to save dumps.
+## Backend Selection
+If both a PN532 and an ST25R3916 are fitted, pick which one drives scans:
+- UI: the NFC menu has a Backend toggle - off selects the PN532, on selects the ST25R3916.
+- CLI: nfc backend auto, nfc backend pn532, or nfc backend st25r.
+auto (CLI only) tries the PN532 first, then the ST25R3916. For MIFARE Classic dictionary brute-force the PN532 is noticeably faster because it has hardware Crypto1; the ST25R3916 does the same auth in software. Keep that in mind if brute-force feels slow - switch the backend to pn532 (or auto in the CLI) when you just need a dump.
+## Steps
+-
+Open Scan. Pick Scan in the NFC menu; the popup shows “Scanning NFC…” while the PN532 spins up.
+-
+Bring in a tag. Place it flat on the antenna. The UID, ATQA, and SAK appear immediately; Classic cards flip the title to “Unlocking card… 0%”.
+-
+Hold steady. Keep the tag still while reads finish. The scanner polls continuously, so if the tag slips away the UI pauses, disables brute-force attempts, and resumes automatically once the same UID is back in range.
+-
+Check output. Review the summary, toggle More for more info, and use Save to write the dump once “NFC Tag” is displayed.
+What happens when you scan
+1
+Poll for a tagUID, ATQA, and SAK are read first
+2
+Identify the tag typeNTAG / Ultralight, or MIFARE Classic
+3
+Authenticate sectorsSession keys, then the user dictionary, then built-in keys
+4
+Read blocksUnlocked sectors and their keys are cached as they are read
+5
+Show or save the dumpSave writes a `.nfc` file once the tag is read
+Classic cards with unknown keys fall through to dictionary recovery.
+## MIFARE Classic Flow
+-
+Dictionary attack order: GhostESP tries session keys (recovered earlier in the same scan) first, then the user dictionary (/mnt/ghostesp/nfc/mfc_user_dict.nfc, with Key A and Key B candidates interleaved), then the built-in default-key list, and finally the embedded dictionary blob (which combines common keys and Flipper dictionary keys). The embedded blob is always compiled in, so the old /mnt/ghostesp/nfc/mf_classic_dict.nfc SD fallback is no longer used.
+-
+Caching behavior. Once a sector unlocks, its blocks and both Key A/Key B values are cached. The title shifts to “Reading sectors…” during the copy. Successful keys are appended back to the user dictionary on the SD card.
+-
+Magic backdoor tags. If the card supports the classic backdoor sequence, GhostESP logs the detection and can skip sector authentication, pulling data directly.
+-
+Nested key recovery (ST25R3916 only). When at least one key is known and another is missing, the ST25R3916 software Crypto1 path captures encrypted nested nonces and their parity bits, then tests the dictionaries locally against those constraints instead of doing one RF auth per candidate. This is much faster than a plain brute-force when a key exists somewhere on the card. The PRNG is classified weak vs hard automatically:
+Weak PRNG cards need only a couple of samples; decrypted nonces must satisfy the weak 16-bit PRNG relation.
+- Hard PRNG cards require more samples and the recovered candidate is RF-verified before being trusted.
+-
+Nested log export. If local recovery cannot fully solve the card, GhostESP writes Momentum-compatible hardnested samples to /mnt/ghostesp/nfc/.nested.log so you can finish the crack on a PC with your normal hardnested solver. Each new capture starts with a fresh log: if .nested.log already exists, GhostESP deletes any existing .nested.log.old, renames .nested.log to .nested.log.old, then creates a new .nested.log. The on-screen summary notes whether the nested log was written.
+-
+Using cracked keys. .nested.log is output-only; GhostESP does not parse cracked solver output back into keys. Add recovered keys to /mnt/ghostesp/nfc/mfc_user_dict.nfc as raw 6-byte hex keys, one per line, such as A0A1A2A3A4A5. Do not paste labelled solver/log lines like Sec 1 key A ...; only the actual 12 hex digits should be in the user dictionary.
+-
+Skip option: Tap Skip to bypass dictionaries when you only need public sectors.
+-
+After the scan. The summary lists recovered sectors (each protected by Key A and Key B; a listed sector means at least one key unlocked it) and keys, as well as any detected NDEF data.
+## NTAG / Ultralight Flow
+-
+Immediate reads. NTAG21x and Ultralight tags are readable without keys, so the title stays “Scanning NFC…” until the UID appears, then flips to “NFC Tag”.
+-
+Page sweep. The reader streams all user pages, signature bytes, and counters if present. Progress is shown via the page counter in the popup body.
+-
+NDEF parsing. Detected TLVs are decoded into text, URI, or custom payload summaries. Tap More to see the raw TLV breakdown.
+-
+Caching and saves. All pages remain in RAM for the current session; saving writes the entire image to /mnt/ghostesp/nfc/&lt;Model&gt;_&lt;UID&gt;.nfc for later writes.
+-
+Verification. Re-scan immediately after to confirm the data matches or to check the signature for authenticity.
+## Chameleon Ultra Scanning
+- Connect first. Complete the [Chameleon Ultra setup](/v2.2/nfc/chameleon-ultra/) so GhostESP is paired over BLE.
+- Switch to reader. Run chameleon reader in the CLI; the terminal confirms the device is ready to scan.
+- Start HF scans. Use chameleon scanhf while holding the tag near the Chameleon Ultra antenna. The CLI mirrors the familiar popup summaries, including brute-force percentages for MIFARE Classic cards.
+- Start LF scans. Use chameleon scanlf (or scanlfall to sweep profiles) for low-frequency tags; results appear in the CLI and the on-device terminal view.
+- Reuse cached data. Once a scan finishes, you can proceed directly to the save flow without rescanning on the PN532.
+## Troubleshooting
+-
+No change from “Scanning NFC…”. Re-seat the tag and verify PN532 wiring; try another tag to rule out hardware issues.
+-
+Stuck on “Unlocking card… 0%”. GhostESP is testing dictionaries. Switch the backend to pn532 or auto for faster dictionary attacks, or use the Skip button if you only need publicly readable blocks.
+-
+UID reads but data is empty. The card may be write-protected or needs a key not present in your dictionaries. You can add it to your user dictionary in /mnt/ghostesp/nfc/mfc_user_dict.nfc and then try rescanning.

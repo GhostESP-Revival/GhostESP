@@ -190,7 +190,7 @@ No |
 Short description. |
 category |
 No |
-Category for future gallery grouping. |
+Apps gallery folder. One of Tools, System, Games, Communication, Media, Sensors (matched case-insensitively). The app joins that folder alongside the built-ins; an absent or unrecognised value leaves it at the gallery root. Folders with no members are not shown. |
 manifest_version |
 No |
 Must be 1 if set. |

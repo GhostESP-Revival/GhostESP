@@ -12,6 +12,6 @@ Search index: /search-index.json
 ---
 
 Camera features are available on builds that enable CONFIG_HAS_CAMERA. The camera module supports:
-- Live camera streaming — MJPEG stream viewable in a browser with real-time quality, resolution, and FPS controls.
-- Motion detection — On-device motion detection with optional SD snapshots and Discord webhook alerts.
-The Seeed Studio XIAO ESP32-S3 Sense is the primary supported camera build.
+- Live camera streaming - MJPEG stream viewable in a browser with real-time quality, resolution, and FPS controls.
+- Motion detection - On-device motion detection with optional SD snapshots and Discord webhook alerts.
+The Seeed Studio XIAO ESP32-S3 Sense is the build that enables CONFIG_HAS_CAMERA and provides these stream and motion features. The CrowPanel Advanced P4 builds ship a separate native camera app (CONFIG_CROWPANEL_P4_CAMERA) instead.

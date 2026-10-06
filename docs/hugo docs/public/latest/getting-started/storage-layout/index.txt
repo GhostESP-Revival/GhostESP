@@ -1,5 +1,5 @@
 Title: Storage Layout
-Description: Where GhostESP saves captures, reports, applications, and settings on the SD card.
+Description: Where GhostESP saves captures, reports, applications, and settings on the SD card
 URL: /latest/getting-started/storage-layout/
 Version: latest
 Section: Getting Started
@@ -7,12 +7,13 @@ Search index: /search-index.json
 
 # Storage Layout
 
-> Where GhostESP saves captures, reports, applications, and settings on the SD card.
+> Where GhostESP saves captures, reports, applications, and settings on the SD card
 
 ## On this page
 
 - [Find Your Results](#find-your-results)
 - [Files You Can Add](#files-you-can-add)
+- [Mounting](#mounting)
 - [Internal Folders](#internal-folders)
 - [Privacy](#privacy)
 
@@ -45,7 +46,7 @@ Ghostchi capture/history |
 ghostesp/ghostchi/pcaps/, ghostesp/ghostchi/sessions/ |
 .pcap, .log |
 NFC, IR, or SubGHz save |
-ghostesp/nfc/, ghostesp/infrared/, ghostesp/subghz/ |
+ghostesp/nfc/, ghostesp/infrared/ (remotes/, universals/), ghostesp/subghz/ |
 .nfc, .ir, .sub |
 Settings backup |
 ghostesp/settings_backup.json |
@@ -65,11 +66,22 @@ Theme packages |
 ghostesp/themes/ |
 SNMP community strings (one per line, # comments) |
 ghostesp/snmp_communities.txt |
+## Mounting
+Most boards keep the SD card mounted for the whole session. On boards where the
+SD card shares an SPI bus with the display (like Wired Hatters Banshee),
+GhostESP uses Just-In-Time (JIT) mounting: it suspends display SPI, mounts
+the card, performs the read or write, unmounts the card, then resumes display
+SPI. This prevents display freezes during SD access. Boards with dedicated SPI
+buses leave the card mounted during the operation.
 ## Internal Folders
 Do not rely on app_cache/ or downloads/ for backups; firmware can replace
 their contents. appdata/&lt;app_id&gt;/ and scriptdata/ contain persistent data
-owned by an app or script. Ghostchi’s learn.bin and state.bin are also
-firmware-private state rather than portable exports.
+owned by an app or script. Firmware also manages debug/ (debug dumps),
+dns_sinkhole/ (sinkhole blocklist data), and logs/ (diagnostics and
+coredumps), and keeps the selected theme under themes/active/. The games/
+and comics/ folders hold content managed by the Games and Reader apps.
+Ghostchi’s learn.bin and state.bin are also firmware-private state rather
+than portable exports.
 ## Privacy
 evil_portal/portal_creds_N.txt, evil_portal/portal_keystrokes_N.txt, DNS
 logs, packet captures, and radio/NFC saves can contain sensitive information.

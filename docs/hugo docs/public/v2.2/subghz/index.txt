@@ -1,0 +1,49 @@
+Title: SubGHz
+Description: Overview of GhostESP&#39;s SubGHz radio capabilities
+URL: /v2.2/subghz/
+Version: v2.2
+Section: GhostESP: Revival
+Keywords: subghz, radio, 433MHz, garage door, remote control, CC1101
+Search index: /search-index.json
+
+# SubGHz
+
+> Overview of GhostESP&#39;s SubGHz radio capabilities
+
+## On this page
+
+- [Supported Frequency Bands](#supported-frequency-bands)
+- [Features](#features)
+- [Technical Implementation](#technical-implementation)
+- [Getting Started](#getting-started)
+
+---
+
+GhostESP includes SubGHz radio tools for scanning, capturing, and transmitting signals on common frequency bands. Use these features to work with garage door remotes, gate openers, wireless sensors, and other sub-1 GHz devices. SubGHz requires a CC1101-based radio module; not all GhostESP boards include this hardware (see [Hardware Support](/v2.2/subghz/hardware/)).
+## Supported Frequency Bands
+- 315 MHz
+- 390 MHz
+- 433.92 MHz
+- 868.35 MHz
+- 915 MHz
+## Features
+- Signal scanning - Monitor activity across 64 channels in real-time
+- Frequency analyzer - Visualize signal strength across bands to find active frequencies
+- Waterfall spectrum analyzer - View a stable 5-band RSSI waterfall with 320 real RF bins per sweep
+- Signal capture - Record and decode signals from remotes and transmitters
+- Protocol decoding - Automatic detection of 30&#43; common protocols
+- Signal transmission - Replay captured signals to control devices
+- Saved signals - Store and manage captured signals as .sub files
+- Flipper compatibility - Uses Flipper SubGhz Key File format
+## Technical Implementation
+GhostESP uses dedicated protocol decoders based on Flipper Zero Unleashed/xMasterX firmware, with precise per-protocol timing constants and real-time edge-queue processing. This covers 30&#43; protocols including Manchester and other multi-bit encodings, and supports a wider range of static-code protocols than generic libraries such as RCSwitch (10-15 protocols).
+Recently added support includes Ansonic, Bett, Clemsa, Dickert MAHS, Dooya, Elplast, Marantec24, Hollarm, Hay21, Feron, Roger, Treadmill37, KeyFinder, and Nord ICE.
+## Getting Started
+- [Scanning](/v2.2/subghz/scanning/) - Monitor radio activity
+- [Capturing Signals](/v2.2/subghz/capturing/) - Record and decode signals
+- [Waterfall Spectrum Analyzer](/v2.2/subghz/waterfall/) - Visualize RSSI activity across common bands
+- [Transmitting](/v2.2/subghz/transmitting/) - Replay captured signals
+- [Frequency Analyzer](/v2.2/subghz/freq-analyzer/) - Find active frequencies
+- [Supported Protocols](/v2.2/subghz/protocols/) - Protocol reference
+- [Files and Management](/v2.2/subghz/files/) - .sub file format and saved signals
+- [Hardware Support](/v2.2/subghz/hardware/) - Required boards and peripherals

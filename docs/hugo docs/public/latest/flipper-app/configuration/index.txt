@@ -1,5 +1,5 @@
 Title: Configuration &amp; System
-Description: LED control, SD card configuration, and system settings in the Flipper Zero companion app.
+Description: LED control, SD card configuration, and system settings in the Flipper Zero companion app
 URL: /latest/flipper-app/configuration/
 Version: latest
 Section: Flipper Zero App
@@ -8,7 +8,7 @@ Search index: /search-index.json
 
 # Configuration &amp; System
 
-> LED control, SD card configuration, and system settings in the Flipper Zero companion app.
+> LED control, SD card configuration, and system settings in the Flipper Zero companion app
 
 ## On this page
 

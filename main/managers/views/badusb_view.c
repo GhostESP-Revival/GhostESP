@@ -1,3 +1,4 @@
+#include "managers/views/file_browser.h"
 #include "sdkconfig.h"
 
 #if defined(CONFIG_HAS_BADUSB) || defined(CONFIG_HAS_BADUSB_REMOTE)
@@ -92,8 +93,13 @@ static void populate_settings_labels(void) {
 
 #define MAX_SCRIPTS 32
 #define MAX_SCRIPT_NAME 64
-EXT_RAM_BSS_ATTR static char script_names[MAX_SCRIPTS][MAX_SCRIPT_NAME];
-static const char *script_options[MAX_SCRIPTS + 2];
+#define BADUSB_BROWSER_ROOT "/mnt/ghostesp/badusb"
+static char script_browse_dir[FILE_BROWSER_PATH_MAX] = BADUSB_BROWSER_ROOT;
+static char **script_paths = NULL;
+static size_t script_path_count = 0;
+static size_t script_page_offset = 0;
+static bool script_has_next = false;
+static const char *script_options[MAX_SCRIPTS + 5];
 static int script_count = 0;
 
 static lv_obj_t *root = NULL;
@@ -149,37 +155,36 @@ static void on_option_click(lv_event_t *e) {
     if (opt) handle_option(opt);
 }
 
+static bool badusb_accept_script(const char *name) {
+    const char *ext = strrchr(name, '.');
+    return ext && strcasecmp(ext, ".txt") == 0;
+}
+
+static void clear_script_paths(void) {
+    file_browser_free(script_paths, script_path_count);
+    script_paths = NULL;
+    script_path_count = 0;
+}
+
 static void populate_script_list(void) {
-    script_count = 0;
-
-    strncpy(script_names[script_count], BADUSB_BUILTIN_SCRIPT_NAME, MAX_SCRIPT_NAME - 1);
-    script_names[script_count][MAX_SCRIPT_NAME - 1] = '\0';
-    script_count++;
-
-    bool display_was_suspended = false;
-    if (badusb_sd_begin(&display_was_suspended)) {
-        const char *dir_path = "/mnt/ghostesp/badusb";
-        DIR *dir = opendir(dir_path);
-        if (dir) {
-            struct dirent *entry;
-            while ((entry = readdir(dir)) != NULL && script_count < MAX_SCRIPTS) {
-                size_t len = strlen(entry->d_name);
-                if (len > 4 && strcmp(entry->d_name + len - 4, ".txt") == 0) {
-                    strncpy(script_names[script_count], entry->d_name, MAX_SCRIPT_NAME - 1);
-                    script_names[script_count][MAX_SCRIPT_NAME - 1] = '\0';
-                    script_count++;
-                }
-            }
-            closedir(dir);
-        }
-        badusb_sd_end(display_was_suspended);
+    clear_script_paths();
+    script_has_next = false;
+    bool susp = false;
+    if (badusb_sd_begin(&susp)) {
+        file_browser_read(script_browse_dir, badusb_accept_script, script_page_offset, MAX_SCRIPTS,
+                          &script_paths, &script_path_count, &script_has_next);
+        badusb_sd_end(susp);
     }
-
-    for (int i = 0; i < script_count; i++) {
-        script_options[i] = script_names[i];
-    }
-    script_options[script_count] = "< Back";
-    script_options[script_count + 1] = NULL;
+    size_t idx = 0;
+    bool show_builtin = script_page_offset == 0 && strcmp(script_browse_dir, BADUSB_BROWSER_ROOT) == 0;
+    if (show_builtin) script_options[idx++] = BADUSB_BUILTIN_SCRIPT_NAME;
+    for (size_t i = 0; i < script_path_count; i++) script_options[idx++] = file_browser_name(script_paths[i]);
+    script_count = (int)idx;
+    if (script_count == 0) script_options[idx++] = "No scripts found";
+    if (script_page_offset) script_options[idx++] = "< Prev Page";
+    if (script_has_next) script_options[idx++] = "Next Page >";
+    script_options[idx++] = "< Back";
+    script_options[idx] = NULL;
 }
 
 static void add_options_items(options_view_t *ov, const char **labels) {
@@ -546,10 +551,7 @@ static bool badusb_send_script_to_peer(const char *name) {
         return false;
     }
 
-    char path[128];
-    snprintf(path, sizeof(path), "/mnt/ghostesp/badusb/%s", name);
-
-    FILE *f = fopen(path, "r");
+    FILE *f = fopen(name, "r");
     if (!f) {
         badusb_sd_end(display_was_suspended);
         error_popup_create("Failed to open script");
@@ -658,6 +660,8 @@ static void handle_option(const char *option) {
                 error_popup_create("Not connected to peer");
                 return;
             }
+            strcpy(script_browse_dir, BADUSB_BROWSER_ROOT);
+            script_page_offset = 0;
             populate_script_list();
             if (script_count == 0) {
                 error_popup_create("No scripts found");
@@ -788,14 +792,44 @@ static void handle_option(const char *option) {
             go_back();
             return;
         }
+        if (strcmp(option, "No scripts found") == 0) return;
+        if (strcmp(option, "< Prev Page") == 0 || strcmp(option, "Next Page >") == 0) {
+            if (strcmp(option, "< Prev Page") == 0) {
+                if (script_page_offset >= MAX_SCRIPTS) script_page_offset -= MAX_SCRIPTS;
+            } else if (script_has_next) script_page_offset += MAX_SCRIPTS;
+            populate_script_list();
+            rebuild_menu();
+            return;
+        }
         bool is_builtin = (strcmp(option, BADUSB_BUILTIN_SCRIPT_NAME) == 0);
+        const char *path = NULL;
+        if (!is_builtin) {
+            for (size_t i = 0; i < script_path_count; i++) {
+                if (strcmp(option, file_browser_name(script_paths[i])) == 0 || strcmp(option, script_paths[i]) == 0) {
+                    path = script_paths[i];
+                    break;
+                }
+            }
+            /* Favorite launches can point to a script on another page. */
+            if (!path && strncmp(option, BADUSB_BROWSER_ROOT "/", strlen(BADUSB_BROWSER_ROOT) + 1) == 0) path = option;
+            if (!path) { error_popup_create("Script not found"); return; }
+            if (file_browser_is_dir(path)) {
+                if (file_browser_enter(script_browse_dir, sizeof(script_browse_dir), path)) {
+                    script_page_offset = 0;
+                    populate_script_list();
+                    rebuild_menu();
+                }
+                return;
+            }
+        }
+        const char *display_name = is_builtin ? BADUSB_BUILTIN_SCRIPT_NAME : file_browser_name(path);
         if (remote) {
 #ifdef CONFIG_HAS_BADUSB_REMOTE
             badusb_send_settings_to_peer();
             bool ok = is_builtin ? badusb_send_builtin_to_peer()
-                                 : badusb_send_script_to_peer(option);
+                                 : badusb_send_script_to_peer(path);
             if (ok) {
-                show_running_popup(option);
+                show_running_popup(display_name);
             }
 #endif
         } else {
@@ -809,19 +843,20 @@ static void handle_option(const char *option) {
                     badusb_manager_execute_buffer(buf, BADUSB_BUILTIN_SCRIPT_LEN);
                 }
             } else {
-                char cmd[128];
-                snprintf(cmd, sizeof(cmd), "badusb run %s", option);
-                simulateCommand(cmd);
+                if (badusb_manager_execute_file(path) != ESP_OK) {
+                    error_popup_create("Failed to execute script");
+                    return;
+                }
             }
 
             if (has_vsense && !already_connected) {
-                show_running_popup_ex(option, true);
+                show_running_popup_ex(display_name, true);
                 if (vsense_poll_timer) {
                     lv_timer_del(vsense_poll_timer);
                 }
                 vsense_poll_timer = lv_timer_create(vsense_poll_timer_cb, 100, NULL);
             } else {
-                show_running_popup(option);
+                show_running_popup(display_name);
             }
 #endif
         }
@@ -829,6 +864,12 @@ static void handle_option(const char *option) {
 }
 
 static void go_back(void) {
+    if (current_menu_state == BADUSB_MENU_SCRIPT_SELECT && file_browser_parent(script_browse_dir, BADUSB_BROWSER_ROOT)) {
+        script_page_offset = 0;
+        populate_script_list();
+        rebuild_menu();
+        return;
+    }
     if (current_menu_state != BADUSB_MENU_MAIN) {
         current_menu_state = BADUSB_MENU_MAIN;
         rebuild_menu();
@@ -837,9 +878,8 @@ static void go_back(void) {
     }
 }
 
-// Deep-link support for favorites: run a specific script by name (as shown
-// in the Select Script list). Safe to call before the view exists - the
-// request is consumed by badusb_view_create().
+// Deep-link support for favorites: run a script by name or nested path.
+// Safe to call before the view exists; consumed by badusb_view_create().
 static char *s_pending_script = NULL;
 static void badusb_view_apply_pending_open(void);
 
@@ -855,20 +895,32 @@ void badusb_view_open_script(const char *name) {
 
 static void badusb_view_apply_pending_open(void) {
     if (!s_pending_script) return;
-    char name[MAX_SCRIPT_NAME];
-    strncpy(name, s_pending_script, sizeof(name) - 1);
-    name[sizeof(name) - 1] = '\0';
+    char name[FILE_BROWSER_PATH_MAX];
+    int len;
+    if (s_pending_script[0] == '/' || strcmp(s_pending_script, BADUSB_BUILTIN_SCRIPT_NAME) == 0) {
+        len = snprintf(name, sizeof(name), "%s", s_pending_script);
+    } else {
+        len = snprintf(name, sizeof(name), "%s/%s", BADUSB_BROWSER_ROOT, s_pending_script);
+    }
     free(s_pending_script);
     s_pending_script = NULL;
-
+    if (len < 0 || (size_t)len >= sizeof(name)) { error_popup_create("Script path too long"); return; }
     if (badusb_is_remote() && !esp_comm_manager_is_connected()) {
         error_popup_create("Not connected to peer");
         return;
     }
+    strcpy(script_browse_dir, BADUSB_BROWSER_ROOT);
+    if (strncmp(name, BADUSB_BROWSER_ROOT "/", strlen(BADUSB_BROWSER_ROOT) + 1) == 0) {
+        const char *slash = strrchr(name, '/');
+        size_t parent_len = (size_t)(slash - name);
+        memcpy(script_browse_dir, name, parent_len);
+        script_browse_dir[parent_len] = '\0';
+    }
+    script_page_offset = 0;
     populate_script_list();
     current_menu_state = BADUSB_MENU_SCRIPT_SELECT;
     rebuild_menu();
-    handle_option(name); // executes the payload exactly as the picker would
+    handle_option(name);
 }
 
 static void rebuild_menu(void) {
@@ -939,6 +991,7 @@ void badusb_view_create(void) {
         selected_item_index = 0;
     }
     num_items = 0;
+    if (current_menu_state == BADUSB_MENU_SCRIPT_SELECT) populate_script_list();
 
     const char *title = "BadUSB";
     const char **options = NULL;
@@ -981,6 +1034,7 @@ void badusb_view_create(void) {
 }
 
 void badusb_view_destroy(void) {
+    clear_script_paths();
     if (vsense_poll_timer) {
         lv_timer_del(vsense_poll_timer);
         vsense_poll_timer = NULL;

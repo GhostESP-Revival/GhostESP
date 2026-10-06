@@ -1,5 +1,8 @@
 #include "managers/display_manager.h"
 #include "driver/gpio.h"
+#ifdef CONFIG_IS_S3TWATCH
+#include "driver/usb_serial_jtag.h"
+#endif
 #include <time.h>
 #include "esp_sleep.h"
 #include "esp_timer.h"
@@ -1167,10 +1170,22 @@ static bool get_battery_info(uint8_t *percentage, bool *is_charging) {
         result = true;
     }
 #elif defined(CONFIG_HAS_BATTERY)
-    // Fallback to AXP2101
-    axp2101_get_power_level(percentage);
-    *is_charging = axp202_is_charging();
-    result = true;
+    // Poll on a fixed interval even after failure; UI redraws must not flood
+    // the console or publish an uninitialized percentage when the PMU is absent.
+    static int64_t last_axp_poll_ms = -5000;
+    int64_t now_ms = esp_timer_get_time() / 1000;
+    if (now_ms - last_axp_poll_ms >= 5000) {
+        last_axp_poll_ms = now_ms;
+        if (axp2101_get_power_level(percentage) == ESP_OK) {
+            *is_charging = axp202_is_charging();
+            result = true;
+        }
+    }
+    if (!result && last_valid_cache) {
+        *percentage = last_pct_cache;
+        *is_charging = last_chg_cache;
+        result = true;
+    }
 #elif defined(CONFIG_HAS_BATTERY_ADC)
     // Fallback to ADC
     int battery_percent = getBattery();
@@ -4023,20 +4038,21 @@ void set_backlight_brightness(uint8_t percentage) {
         esp_sleep_disable_wifi_beacon_wakeup();
 
 #ifdef CONFIG_IS_S3TWATCH
-        // 2a) On S3T-Watch: only GPIO button can wake us
-        gpio_wakeup_enable(WAKE_UP_PIN, GPIO_INTR_LOW_LEVEL);
-        esp_sleep_enable_gpio_wakeup();
+        // Explicit light sleep ignores PM locks. Keep the USB console and UI
+        // tasks running while a host is attached, even with the panel dark.
+        if (!usb_serial_jtag_is_connected()) {
+            gpio_wakeup_enable(WAKE_UP_PIN, GPIO_INTR_LOW_LEVEL);
+            esp_sleep_enable_gpio_wakeup();
 
-        // 3a) Pause all UI and drop into light-sleep until that button is pressed
-        if (status_update_timer)   lv_timer_pause(status_update_timer);
-        if (status_update_timer)   lv_timer_set_period(status_update_timer, 5000);
+            // Pause UI and sleep until the button is pressed.
+            if (status_update_timer)   lv_timer_pause(status_update_timer);
+            if (status_update_timer)   lv_timer_set_period(status_update_timer, 5000);
 #ifndef CONFIG_USE_CARDPUTER
-        if (lvgl_task_handle)      vTaskSuspend(lvgl_task_handle);
+            if (lvgl_task_handle)      vTaskSuspend(lvgl_task_handle);
 #endif
-        if (rainbow_timer)         lv_timer_pause(rainbow_timer);
-        if (terminal_update_timer) lv_timer_pause(terminal_update_timer);
-        if (clock_timer)           lv_timer_pause(clock_timer);
-        {
+            if (rainbow_timer)         lv_timer_pause(rainbow_timer);
+            if (terminal_update_timer) lv_timer_pause(terminal_update_timer);
+            if (clock_timer)           lv_timer_pause(clock_timer);
             if (!wifi_manager_is_evil_portal_active()) {
                 wifi_config_t cfg;
                 if (esp_wifi_get_config(WIFI_IF_AP, &cfg) == ESP_OK) {
@@ -4046,8 +4062,8 @@ void set_backlight_brightness(uint8_t percentage) {
                 }
                 esp_wifi_set_ps(WIFI_PS_MAX_MODEM);
             }
+            esp_light_sleep_start();
         }
-        esp_light_sleep_start();
 
 #else
         // 2b) On Cardputer (or other devices without real GPIO wake):

@@ -1,3 +1,4 @@
+#include "managers/views/file_browser.h"
 #include "managers/views/options_screen.h"
 #include "managers/views/lockscreen.h"
 #include "managers/views/favorites_manager_screen.h"
@@ -78,10 +79,13 @@ static detail_view_t *sinkhole_detail_view = NULL;
 static void sinkhole_detail_back_cb(lv_event_t *e);
 static popup_confirm_t *settings_confirm_popup = NULL;
 
-static char selected_portal[MAX_PORTAL_NAME] = {0};
-static char selected_karma_portal[MAX_PORTAL_NAME] = {0};
+static char selected_portal[FILE_BROWSER_PATH_MAX] = {0};
+static char selected_karma_portal[FILE_BROWSER_PATH_MAX] = {0};
 
-static char *evil_portal_names = NULL;   /* flat name storage for current page */
+#define PORTAL_BROWSER_ROOT "/mnt/ghostesp/evil_portal/portals"
+static char portal_browse_dir[FILE_BROWSER_PATH_MAX] = PORTAL_BROWSER_ROOT;
+static char **portal_file_paths = NULL;
+static size_t portal_file_count = 0;
 static const char **evil_portal_options = NULL; /* NULL-terminated pointer array  */
 static int   portal_page_offset   = 0;   /* first file index of current page    */
 static bool  portal_has_next_page = false;
@@ -2549,6 +2553,7 @@ static int base_button_height(void) {
 }
 
 static void rebuild_current_menu(void); // Forward declaration
+static bool portal_browse_select(const char *option, char *selected, size_t capacity);
 static void portal_free_cache(void);    // Forward declaration
 
 static void update_scroll_buttons_visibility(void);
@@ -3700,15 +3705,11 @@ static void evil_portal_ssid_cb(const char *input) {
         memcpy(ssid, input, ssid_len);
         ssid[ssid_len] = '\0';
     }
-    char cmd[256];
-    if (pass[0]) {
-        snprintf(cmd, sizeof(cmd), "startportal %s %s %s", selected_portal, ssid, pass);
-    } else {
-        snprintf(cmd, sizeof(cmd), "startportal %s %s", selected_portal, ssid);
-    }
-terminal_set_return_view(&options_menu_view);
-display_manager_switch_view(&terminal_view);
-    simulateCommand(cmd);
+    /* Pass the selected path as one argument, including spaces in folder names. */
+    char *args[] = { "startportal", selected_portal, ssid, pass };
+    terminal_set_return_view(&options_menu_view);
+    display_manager_switch_view(&terminal_view);
+    handle_start_portal(pass[0] ? 4 : 3, args);
     keyboard_view_set_submit_callback(NULL);
     selected_portal[0] = '\0';
 }
@@ -7387,8 +7388,7 @@ static void karma_portal_ssids_cb(const char *input) {
     if (strcmp(selected_karma_portal, "default") == 0) {
         strncpy(portal_path, "default", 320);
     } else {
-        snprintf(portal_path, 320,
-                  "/mnt/ghostesp/evil_portal/portals/%s", selected_karma_portal);
+        snprintf(portal_path, 320, "%s", selected_karma_portal);
     }
     wifi_manager_set_karma_portal_file(portal_path);
 
@@ -9340,6 +9340,7 @@ void option_event_cb(lv_event_t *e) {
     }
     else if (strcmp(Selected_Option, "Karma Attack (Custom Portal)") == 0) {
         portal_page_offset = 0;
+        strcpy(portal_browse_dir, PORTAL_BROWSER_ROOT);
         current_wifi_menu_state = WIFI_MENU_KARMA_PORTAL_SELECT;
         rebuild_current_menu();
         option_invoked = false;
@@ -9364,8 +9365,10 @@ void option_event_cb(lv_event_t *e) {
             option_invoked = false;
             return;
         }
-        strncpy(selected_karma_portal, Selected_Option, MAX_PORTAL_NAME - 1);
-        selected_karma_portal[MAX_PORTAL_NAME - 1] = '\0';
+        if (!portal_browse_select(Selected_Option, selected_karma_portal, sizeof(selected_karma_portal))) {
+            option_invoked = false;
+            return;
+        }
         keyboard_view_set_submit_callback(karma_portal_ssids_cb);
         display_manager_switch_view(&keyboard_view);
         keyboard_view_set_placeholder("SSIDs (comma-sep, blank=auto)");
@@ -9445,6 +9448,7 @@ void option_event_cb(lv_event_t *e) {
 
     else if (strcmp(Selected_Option, "Custom Evil Portal") == 0) {
         portal_page_offset = 0;
+        strcpy(portal_browse_dir, PORTAL_BROWSER_ROOT);
         current_wifi_menu_state = WIFI_MENU_EVIL_PORTAL_SELECT;
         rebuild_current_menu();
         option_invoked = false;
@@ -9471,8 +9475,10 @@ void option_event_cb(lv_event_t *e) {
             return;
         }
         /* Prompt for SSID after selecting a portal file */
-        strncpy(selected_portal, Selected_Option, MAX_PORTAL_NAME - 1);
-        selected_portal[MAX_PORTAL_NAME - 1] = '\0';
+        if (!portal_browse_select(Selected_Option, selected_portal, sizeof(selected_portal))) {
+            option_invoked = false;
+            return;
+        }
         keyboard_view_set_submit_callback(evil_portal_ssid_cb);
         display_manager_switch_view(&keyboard_view);
         keyboard_view_set_placeholder("SSID");
@@ -10445,6 +10451,11 @@ static void back_event_cb(lv_event_t *e) {
 
     // If in Evil Portal select submenu, go back to Evil Portal menu
     if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_EVIL_PORTAL_SELECT) {
+        if (file_browser_parent(portal_browse_dir, PORTAL_BROWSER_ROOT)) {
+            portal_page_offset = 0;
+            rebuild_current_menu();
+            return;
+        }
         portal_page_offset = 0;
         portal_free_cache();
         if (options_menu_restore_previous_state()) {
@@ -10456,6 +10467,11 @@ static void back_event_cb(lv_event_t *e) {
     }
     // If in Karma portal select submenu, go back to Attacks menu
     if (SelectedMenuType == OT_Wifi && current_wifi_menu_state == WIFI_MENU_KARMA_PORTAL_SELECT) {
+        if (file_browser_parent(portal_browse_dir, PORTAL_BROWSER_ROOT)) {
+            portal_page_offset = 0;
+            rebuild_current_menu();
+            return;
+        }
         portal_page_offset = 0;
         portal_free_cache();
         selected_karma_portal[0] = '\0';
@@ -13616,107 +13632,77 @@ static void wigle_show_csv_details_popup(const char *filename) {
 
 /** Free the heap storage for the currently loaded portal page. */
 static void portal_free_cache(void) {
-    if (evil_portal_names)   { free(evil_portal_names);   evil_portal_names   = NULL; }
+    file_browser_free(portal_file_paths, portal_file_count);
+    portal_file_paths = NULL;
+    portal_file_count = 0;
     if (evil_portal_options) { free(evil_portal_options); evil_portal_options = NULL; }
 }
 
-/**
- * Load one page of .html files from the portals directory into
- * evil_portal_names / evil_portal_options.
- *
- * Layout of the returned NULL-terminated options array:
- *   page 0 : [default]  [file0 … fileN]  [Next > if more]
- *   page 1+: [< Prev]   [file0 … fileN]  [Next > if more]
- *
- * Always frees any previously cached page first.
- * Returns evil_portal_options on success, a static fallback {"default",NULL}
- * on allocation or directory-open failure.
- *
- * The caller is responsible for JIT-mounting/unmounting the SD card around
- * this call on shared-SPI boards.
- */
+static bool portal_accept_file(const char *name) {
+    const char *ext = strrchr(name, '.');
+    return ext && strcasecmp(ext, ".html") == 0;
+}
+
+/* Return true only for a file/default selection. Navigation rebuilds the
+ * current picker without opening the SSID keyboard. */
+static bool portal_browse_select(const char *option, char *selected, size_t capacity) {
+    if (strcmp(option, "../") == 0) {
+        file_browser_parent(portal_browse_dir, PORTAL_BROWSER_ROOT);
+        portal_page_offset = 0;
+        rebuild_current_menu();
+        return false;
+    }
+    if (strcmp(option, "default") == 0) {
+        snprintf(selected, capacity, "default");
+        return true;
+    }
+    for (size_t i = 0; i < portal_file_count; i++) {
+        const char *path = portal_file_paths[i];
+        if (strcmp(option, file_browser_name(path)) != 0) continue;
+        if (file_browser_is_dir(path)) {
+            if (file_browser_enter(portal_browse_dir, sizeof(portal_browse_dir), path)) {
+                portal_page_offset = 0;
+                rebuild_current_menu();
+            }
+            return false;
+        }
+        if (strlen(path) >= capacity) return false;
+        strcpy(selected, path);
+        return true;
+    }
+    return false;
+}
+
+/* Caller owns the shared-SPI SD mount. Keep only the current page in RAM. */
 static const char **portal_load_page(void) {
-    static const char *fallback[] = {"default", NULL};
-
+    static const char *fallback_root[] = { "default", NULL };
+    static const char *fallback_folder[] = { "../", "No portal files found", NULL };
     portal_free_cache();
-
-    /* ---- read one page from the SD card ---- */
-    char (*file_names)[MAX_PORTAL_NAME] =
-        malloc(PORTAL_PAGE_SIZE * MAX_PORTAL_NAME);
-    if (!file_names) {
-        ESP_LOGE(TAG, "portal_load_page: OOM for file name buffer");
-        return fallback;
-    }
-
-    int count = sd_card_list_dir_paged(
-        "/mnt/ghostesp/evil_portal/portals", ".html",
-        portal_page_offset, PORTAL_PAGE_SIZE,
-        file_names, &portal_has_next_page);
-
-    if (count < 0) {
-        ESP_LOGW(TAG, "portal_load_page: directory scan failed (offset=%d)", portal_page_offset);
-        free(file_names);
-        return fallback;
-    }
-
-    /* ---- determine optional prefix / suffix navigation items ---- */
-    bool show_prev    = (portal_page_offset > 0);
-    bool show_default = (portal_page_offset == 0);
-    bool show_next    = portal_has_next_page;
-
-    int total = (show_prev ? 1 : 0) + (show_default ? 1 : 0)
-              + count + (show_next ? 1 : 0);
-
-    if (total == 0) {
-        /* Empty directory — show a non-selectable placeholder */
-        free(file_names);
-        static const char *empty[] = {"No portal files found", NULL};
-        return empty;
-    }
-
-    /* ---- allocate final storage ---- */
-    evil_portal_names   = malloc(MAX_PORTAL_NAME * (size_t)total);
-    evil_portal_options = malloc(sizeof(char *) * ((size_t)total + 1));
-
-    if (!evil_portal_names || !evil_portal_options) {
-        ESP_LOGE(TAG, "portal_load_page: OOM for portal list (total=%d)", total);
-        free(file_names);
+    portal_has_next_page = false;
+    bool nested = strcmp(portal_browse_dir, PORTAL_BROWSER_ROOT) != 0;
+    const char **fallback = nested ? fallback_folder : fallback_root;
+    if (!file_browser_read(portal_browse_dir, portal_accept_file,
+                           (size_t)portal_page_offset, PORTAL_PAGE_SIZE,
+                           &portal_file_paths, &portal_file_count, &portal_has_next_page)) return fallback;
+    bool show_prev = portal_page_offset > 0;
+    bool show_default = !nested && !show_prev;
+    size_t total = portal_file_count + nested + show_prev + show_default + portal_has_next_page;
+    if (nested && portal_file_count == 0) total++;
+    evil_portal_options = malloc(sizeof(char *) * (total + 1));
+    if (!evil_portal_options) {
         portal_free_cache();
         return fallback;
     }
-
-    /* ---- fill options array ---- */
-    int idx = 0;
-
-    if (show_prev) {
-        strcpy(evil_portal_names + idx * MAX_PORTAL_NAME, "< Prev");
-        evil_portal_options[idx] = evil_portal_names + idx * MAX_PORTAL_NAME;
-        idx++;
+    size_t idx = 0;
+    if (nested) evil_portal_options[idx++] = "../";
+    if (show_prev) evil_portal_options[idx++] = "< Prev";
+    if (show_default) evil_portal_options[idx++] = "default";
+    for (size_t i = 0; i < portal_file_count; i++) {
+        evil_portal_options[idx++] = file_browser_name(portal_file_paths[i]);
     }
-    if (show_default) {
-        strcpy(evil_portal_names + idx * MAX_PORTAL_NAME, "default");
-        evil_portal_options[idx] = evil_portal_names + idx * MAX_PORTAL_NAME;
-        idx++;
-    }
-    for (int i = 0; i < count; i++) {
-        strcpy(evil_portal_names + idx * MAX_PORTAL_NAME, file_names[i]);
-        evil_portal_options[idx] = evil_portal_names + idx * MAX_PORTAL_NAME;
-        idx++;
-    }
-    if (show_next) {
-        strcpy(evil_portal_names + idx * MAX_PORTAL_NAME, "Next >");
-        evil_portal_options[idx] = evil_portal_names + idx * MAX_PORTAL_NAME;
-        idx++;
-    }
+    if (nested && portal_file_count == 0) evil_portal_options[idx++] = "No portal files found";
+    if (portal_has_next_page) evil_portal_options[idx++] = "Next >";
     evil_portal_options[idx] = NULL;
-
-    free(file_names);
-
-    ESP_LOGI(TAG, "portal page loaded: offset=%d files=%d prev=%d next=%d "
-             "heap_used=%zu bytes",
-             portal_page_offset, count, show_prev, show_next,
-             (size_t)total * MAX_PORTAL_NAME + sizeof(char *) * ((size_t)total + 1));
-
     return evil_portal_options;
 }
 

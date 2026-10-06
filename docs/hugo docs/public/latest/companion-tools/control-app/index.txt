@@ -1,5 +1,5 @@
 Title: Control App
-Description: Use the Control App desktop application to control your device via serial connection.
+Description: Use the Control App desktop application to control your device via serial connection
 URL: /latest/companion-tools/control-app/
 Version: latest
 Section: Companion Tools
@@ -7,19 +7,16 @@ Search index: /search-index.json
 
 # Control App
 
-> Use the Control App desktop application to control your device via serial connection.
+> Use the Control App desktop application to control your device via serial connection
 
 ## On this page
 
-- [Overview](#overview)
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
-- [First-Time Setup](#first-time-setup)
 - [Connecting to Your Device](#connecting-to-your-device)
-- [Initial Connection](#initial-connection)
-- [Connection Status](#connection-status)
 - [Main Features](#main-features)
 - [Wi-Fi Operations](#wi-fi-operations)
+- [Network Operations](#network-operations)
 - [BLE Operations](#ble-operations)
 - [Packet Capture](#packet-capture)
 - [Portal Management](#portal-management)
@@ -33,9 +30,6 @@ Search index: /search-index.json
 - [Log Area](#log-area)
 - [Display Area](#display-area)
 - [UI Features](#ui-features)
-- [Resizable Panes](#resizable-panes)
-- [Visual Feedback](#visual-feedback)
-- [Keyboard Shortcuts](#keyboard-shortcuts)
 - [Troubleshooting](#troubleshooting)
 - [Cannot Connect to ESP32](#cannot-connect-to-esp32)
 - [Unexpected Disconnections](#unexpected-disconnections)
@@ -45,14 +39,12 @@ Search index: /search-index.json
 - [ESP-IDF Not Found (Custom Build)](#esp-idf-not-found-custom-build)
 - [Missing SDKConfig or Build Files](#missing-sdkconfig-or-build-files)
 - [Application Won&amp;rsquo;t Start](#application-wont-start)
-- [Next Steps](#next-steps)
+- [Related Tasks](#related-tasks)
 - [Notes](#notes)
 
 ---
 
-The Control App is a desktop GUI application that provides comprehensive control over your GhostESP device through a serial connection. It offers Wi-Fi/BLE scanning, packet capture, custom commands, firmware flashing, and more—all from an intuitive graphical interface.
-## Overview
-The Control App is a Python-based application built with PyQt6 that connects to your GhostESP device via USB serial. It provides a user-friendly alternative to the command-line interface, with organized tabs for different operations and real-time feedback.
+The Control App is a Python desktop GUI built with PyQt6 that controls your GhostESP device over a USB serial connection. It offers Wi-Fi/BLE scanning, packet capture, custom commands, firmware flashing, and more through organized tabs with real-time feedback - a friendlier alternative to the command line.
 ## Prerequisites
 - Python 3.8 or newer: Required to run the application
 - USB cable: To connect your GhostESP device to your computer
@@ -62,8 +54,7 @@ sudo apt update
 sudo apt install libxcb-cursor0
 - ESP-IDF (optional, for custom builds): Required only if you plan to build custom firmware. See [ESP-IDF installation instructions](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/index.html#manual-installation)
 ## Installation
-The Control App is located in the scripts/control app/ directory of the GhostESP repository.
-### First-Time Setup
+The Control App is located in the scripts/control app/ directory of the GhostESP repository. To run it:
 -
 Navigate to the control app directory:
 cd scripts/control\ app/
@@ -76,22 +67,15 @@ The application will automatically:
 - Launch the GUI
 Note: On first run, the setup process may take a few minutes as dependencies are downloaded and installed.
 ## Connecting to Your Device
-### Initial Connection
 - Connect your GhostESP device via USB to your computer
 - Select the serial port from the dropdown in the Serial Connection section
 - Click Refresh Ports if your device doesn’t appear in the list
 - Click Connect to establish the serial connection
-Once connected:
-- The UI overlay will disappear, enabling all controls
-- Connection status will appear in the log area
-- You can now use all features of the application
-### Connection Status
-- Connected: All controls are enabled and the overlay is hidden
-- Disconnected: A visual overlay appears with “No serial connection. Connect to enable controls.”
-- Auto-reconnect: Enable this option in settings to automatically reconnect if the connection drops
+When connected, the UI overlay disappears and controls are enabled, and the log area shows connection status. When disconnected, an overlay reads “No serial connection. Connect to enable controls.” Enable Auto-reconnect in settings to reconnect automatically if the connection drops.
 ## Main Features
+The command panel is organized into five top-level tabs: WiFi Operations, Network Operations, BLE Operations, Evil Portal, and Settings.
 ### Wi-Fi Operations
-The Wi-Fi tab provides access to wireless network operations:
+The Wi-Fi Operations tab groups its controls into Scanning, Attacks, Beacons, and Capture sub-tabs:
 - Scan Access Points: Discover nearby Wi-Fi networks
 - List APs/Stations: View currently stored access points and stations
 - Deauth Attacks: Start or stop deauthentication attacks on selected networks
@@ -99,6 +83,11 @@ The Wi-Fi tab provides access to wireless network operations:
 Random SSIDs
 - Rickroll SSIDs
 - AP list (uses stored access points)
+### Network Operations
+The Network Operations tab provides:
+- WiFi Connection: Join a network by SSID and password
+- Network Tools: Cast a random YouTube video or print to a network printer
+- Port Scanner: Scan a target IP (or local) with common-port, all-port, or range arguments
 ### BLE Operations
 The BLE tab handles Bluetooth Low Energy scanning:
 - Find Flippers: Scan specifically for Flipper Zero devices
@@ -106,12 +95,15 @@ The BLE tab handles Bluetooth Low Energy scanning:
 - Raw BLE Scan: Perform a general BLE device scan
 - Stop Scan: Cancel any active BLE scan
 ### Packet Capture
-The Capture tab enables Wi-Fi packet monitoring:
-- Capture Probes: Monitor Wi-Fi probe requests
-- Capture Deauth: Track deauthentication packets
-- Capture WPS: Log WPS (Wi-Fi Protected Setup) packets
+The Capture sub-tab under Wi-Fi Operations enables Wi-Fi packet monitoring. The Capture Type combo offers:
+- Probes: Monitor Wi-Fi probe requests
+- Beacons: Log beacon frames
+- Deauth: Track deauthentication packets
+- Raw: Capture raw Wi-Fi frames
+- WPS: Log WPS (Wi-Fi Protected Setup) packets
+- Pwnagotchi: Capture for Pwnagotchi-style handshake collection
 ### Portal Management
-The Portal Files tab handles evil portal operations:
+The Evil Portal tab handles evil portal operations:
 - Upload Custom HTML: Send a local HTML file to use as a custom portal
 - Progress Indicator: Visual feedback during file upload
 - Portal Selection: Choose from built-in portals or your uploaded HTML
@@ -190,15 +182,11 @@ Displays structured output for:
 - Formatted command responses
 Both areas support ANSI color codes for better readability of terminal output.
 ## UI Features
-### Resizable Panes
-The command and display areas can be resized by dragging the splitter between them, allowing you to customize the layout to your preference.
-### Visual Feedback
+Drag the splitter between the command and display areas to resize them.
 - Connection overlay: When disconnected, a semi-transparent overlay covers the main UI with a message
 - Status indicators: Color-coded indicators show connection status and flashing panel status
 - Progress indicators: Visual feedback for file uploads and long-running operations
-### Keyboard Shortcuts
-- Enter: Send custom command
-- Standard text editing shortcuts work in all text fields
+- Keyboard: Press Enter to send a custom command; standard text editing shortcuts work in all text fields
 ## Troubleshooting
 ### Cannot Connect to ESP32
 - Check the serial port: Ensure the correct port is selected
@@ -215,7 +203,7 @@ Then log out and back in.
 - Check for interference: Move away from sources of electrical interference
 ### Command Errors
 - Verify firmware version: Ensure your device firmware supports the commands you’re trying to use
-- Check command syntax: Refer to the [Command Line Reference](/latest/getting-started/command-line-reference/) for correct syntax
+- Check command syntax: Refer to the [CLI Reference](/latest/getting-started/command-line-reference/) for correct syntax
 - View error messages: Check the log area for detailed error information
 ### UI Overlay Covers Controls
 - This is normal: The overlay only appears when disconnected
@@ -240,11 +228,11 @@ Then log out and back in.
 - Install system dependencies (Linux): Install libxcb-cursor0 if missing
 - Check virtual environment: The app should create it automatically, but you can delete ghost-control-venv and restart to recreate it
 - View error messages: Check the terminal output for specific error messages
-## Next Steps
-- Explore the [Command Line Reference](/latest/getting-started/command-line-reference/) to learn about all available commands
+## Related Tasks
+- Explore the [CLI Reference](/latest/getting-started/command-line-reference/) to learn about all available commands
 - Set up [GhostLink](/latest/getting-started/dual-communication/) for dual-device operations
 - Review [Wi-Fi Basics](/latest/wifi/basics/) to understand wireless attacks
 - Check out [BLE Scanning](/latest/ble/scanning/) for Bluetooth operations
 ## Notes
-- Responsible use: This is a development and diagnostics tool — always comply with local regulations when using network diagnostic tools.
-- Cross-platform: Works on Windows, macOS, and Linux. On first run it auto-creates its own Python virtual environment and installs dependencies.
+- Responsible use: This is a development and diagnostics tool - always comply with local regulations when using network diagnostic tools.
+- Cross-platform: Works on Windows, macOS, and Linux.

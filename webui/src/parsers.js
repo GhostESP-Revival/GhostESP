@@ -6,15 +6,55 @@
  * firmware output formats. Returns structured data or null.
  */
 
+// Keep transport decoration out of every firmware-format parser.
+function normalizeOutput(text) {
+  return String(text || '').replace(/^(?:RX: ?|ESP Comm Response: ?)/gm, '');
+}
+
+function sourceOutput(text, target = 'local') {
+  return String(text || '').split(/\r?\n/).flatMap(line => {
+    const peer = /^(?:RX: ?|ESP Comm Response: ?)/.test(line);
+    if (line.startsWith('> [peer] ')) return target === 'peer' ? ['> ' + line.slice(9)] : [];
+    return peer === (target === 'peer') ? [normalizeOutput(line)] : [];
+  }).join('\n');
+}
+
+function latestCommandOutput(text, pattern) {
+  const lines = normalizeOutput(text).split(/\r?\n/);
+  let start = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const command = /^> (.+)$/.exec(lines[i]);
+    if (command && pattern.test(command[1])) start = i + 1;
+  }
+  return lines.slice(start).join('\n');
+}
+
+function latestBlock(text, header, footer) {
+  const lines = normalizeOutput(text).split(/\r?\n/);
+  let start = -1, end = lines.length;
+  for (let i = 0; i < lines.length; i++) if (header.test(lines[i])) start = i;
+  if (start < 0) return normalizeOutput(text);
+  if (footer) for (let i = start + 1; i < lines.length; i++) {
+    if (footer.test(lines[i])) { end = i; break; }
+  }
+  return lines.slice(start, end).join('\n');
+}
+
+function uniqueRows(rows, key = 'index') {
+  const latest = new Map();
+  for (const row of rows) latest.set(row[key] ?? row.mac ?? row.index, row);
+  return [...latest.values()];
+}
+
 const Patterns = {
   // AP scan (multiline)
   AP_INDEX:     /^\[(\d+)\]\s*SSID:/m,
-  AP_SSID:      /SSID:\s*([^,\n]+)/,
+  AP_SSID:      /SSID:[ \t]*(.*?)(?:,\s*BSSID:|,?[ \t]*$)/m,
   AP_BSSID:     /BSSID:\s*([0-9A-Fa-f:]{17})/,
   AP_RSSI:      /RSSI:\s*(-?\d+)/,
   AP_CHANNEL:   /Channel:\s*(\d+)/,
-  AP_SECURITY:  /Security:\s*(\S+)/,
-  AP_PMF:       /PMF:\s*(\S+)/,
+  AP_SECURITY:  /Security:[ \t]*([^\n,]+)/,
+  AP_PMF:       /PMF:[ \t]*([^\n,]+)/,
   AP_VENDOR:    /Vendor:\s*(.+?)(?:\n|$)/,
   AP_BAND:      /Band:\s*(\S+)/,
 
@@ -22,7 +62,7 @@ const Patterns = {
   STATION_INDEX: /^\[(\d+)\]\s*Station\s*MAC:/m,
   STATION_MAC:   /Station(?:\s*MAC)?:\s*([0-9A-Fa-f:]{17})/,
   STATION_VENDOR:/(?:Station|STA)\s*Vendor:\s*([^,\n]+)/,
-  STATION_AP_SSID:/Associated\s*AP:\s*([^,\n]+)/,
+  STATION_AP_SSID:/(?:Associated\s*AP|AP\s*SSID):[ \t]*([^\n]+)/,
   STATION_AP_BSSID:/AP\s*BSSID:\s*([0-9A-Fa-f:]{17})/,
   STATION_AP_VENDOR:/AP\s*Vendor:\s*([^,\n]+)/,
   STATION_RSSI:  /RSSI:\s*(-?\d+)/,
@@ -33,7 +73,7 @@ const Patterns = {
   BLE_MAC:       /([0-9A-Fa-f:]{17})/,
 
   // Flipper
-  FLIPPER_INDEX: /^\[(\d+)\]\s*(White|Black|Transparent)?\s*Flipper\s*Found/i,
+  FLIPPER_INDEX: /^\[(\d+)\]\s*(White|Black|Transparent)?\s*Flipper\s*Found/im,
   FLIPPER_MAC:   /MAC:\s*([0-9A-Fa-f:]{17})/,
   FLIPPER_NAME:  /Name:\s*([^,\n]+)/,
   FLIPPER_RSSI:  /RSSI:\s*(-?\d+)\s*dBm/,
@@ -61,18 +101,18 @@ const Patterns = {
   SD_SIZE:       /SD:SIZE:(\d+)/,
 
   // GPS
-  GPS_FIX:       /Fix:\s*(\S+)/,
+  GPS_FIX:       /Fix:[ \t]*([^\n]+)/,
   GPS_SATS:      /Sats:\s*(\d+)(?:\/(\d+))?/,
   GPS_LAT:       /Lat:\s*(\d+)deg\s+([\d.]+)'([NS])/,
   GPS_LON:       /Long:\s*(\d+)deg\s+([\d.]+)'([EW])/,
-  GPS_ALT:       /Alt:\s*([\d.]+)m/,
+  GPS_ALT:       /Alt:\s*(-?[\d.]+)m/,
   GPS_SPEED:     /Speed:\s*([\d.]+)\s*km\/h/,
   GPS_DIRECTION: /Direction:\s*(\d+)°\s*(\S+)/,
   GPS_HDOP:      /HDOP:\s*([\d.]+)/,
 
   // Tracking
-  TRACK_RSSI:    /#####\s+(-?\d+)\s*dBm\s*\(min:(-?\d+)\s+max:(-?\d+)\)/,
-  TRACK_RSSI_GATT:/\[[#]+\]\s*RSSI:\s*(-?\d+)\s*dBm,\s*Min:\s*(-?\d+),\s*Max:\s*(-?\d+)(?:,\s*(CLOSER|FARTHER))?/,
+  TRACK_RSSI:    /[#]+\s+(-?\d+)\s*dBm\s*\(min:(-?\d+)\s+max:(-?\d+)(?:\s+close:\d+%)?\)/,
+  TRACK_RSSI_GATT:/\[[#]+\]\s*RSSI:\s*(-?\d+)\s*dBm,\s*Min:\s*(-?\d+),\s*Max:\s*(-?\d+)(?:,\s*Close:\s*\d+%)?(?:,\s*(CLOSER|FARTHER))?/,
   TRACK_HEADER:  /===\s*tracking\s+(ap|sta):\s*(.+)\s*===/i,
   TRACK_BSSID:   /bssid:\s*([0-9A-Fa-f:]{17})/i,
   TRACK_CHANNEL: /channel:\s*(\d+)/i,
@@ -96,7 +136,7 @@ const Patterns = {
   CHIP_MODEL:      /Model:\s*([^,\s\n]+(?:\s+[^,\s\n]+)*?)(?=\s*(?:[,\n]|$))/,
   CHIP_REVISION:   /Revision:\s*v?(\d+(?:\.\d+)+)/,
   CHIP_CORES:      /CPU Cores:\s*(\d+)/,
-  CHIP_FEATURES:   /(?<!Enabled )Features:\s*([^,\n]+)/,
+  CHIP_FEATURES:   /(?<!Enabled )Features:[ \t]*([^\n]+)/,
   CHIP_FREE_HEAP:  /Free Heap:\s*(\d+)/,
   CHIP_MIN_HEAP:   /Min Free Heap:\s*(\d+)/,
   CHIP_IDF:        /IDF Version:\s*([^,\s\n]+)/,
@@ -105,20 +145,20 @@ const Patterns = {
   // IR
   IR_LEARNED:      /Captured:\s*(\S+)\s+A:0x([0-9A-Fa-f]+)\s+C:0x([0-9A-Fa-f]+)/,
   IR_LEARNED_RAW:  /Captured RAW signal\s*\((\d+)\s+samples\)/,
-  IR_REMOTE:       /\[(\d+)\]\s*(\S+\.(?:ir|json))/,
-  IR_BUTTON:       /\[(\d+)\]\s*(\S+)(?:\s*\(([^)]+)\))?/,
+  IR_REMOTE:       /\[(\d+)\]\s*(.+?\.(?:ir|json))\s*$/,
+  IR_BUTTON:       /\[(\d+)\]\s*(.+?)(?:\s*\(([^)]+)\)(?:\s+Addr:\s*0x[0-9a-f]+\s+Cmd:\s*0x[0-9a-f]+)?)?\s*$/i,
 
   // Portal
   PORTAL_CREDS:    /Captured credentials:\s*(.+)\s*\/\s*(.+)/,
 
   // Generic
-  ERROR:           /ERROR:\s*(.+)/,
+  ERROR:           /ERROR:\s*(.+)/i,
   SUCCESS:         /^OK:\s*(.+)$/m,
   GHOSTESP_OK:     /GHOSTESP_OK/,
   SETTING_KV:      /([\w_]+)\s*=\s*(.+)/,
 
   // Wardrive
-  WARDRIVE_HEART:  /Wardrive:\s*ap=(\d+)\s+logged=(\d+)\/(\d+)\s+gpsrej=(\d+)\s+ch=(\d+)\s+up=(\d+)m(\d+)s\s+gps=([^/]+)\/(\d+)(?:\s+sats=(\d+))?\s+pending=(\d+)B/,
+  WARDRIVE_HEART:  /Wardrive:\s*ap=(\d+)\s+logged=(\d+)\/(\d+)\s+gpsrej=(\d+).*?\s+ch=(\d+)\s+up=(\d+)m(\d+)s\s+gps=([^/]+)\/(\d+)(?:\s+sats=(\d+))?.*?\s+pending=(\d+)B/,
 
   // Port scan
   PORT_SCAN:       /Port\s+(\d+):\s*(\w+)/,
@@ -139,7 +179,7 @@ const Parsers = {
       channel: parseInt(Patterns.AP_CHANNEL.exec(text)?.[1] || '-1', 10),
       security: (Patterns.AP_SECURITY.exec(text)?.[1] || 'Unknown').trim(),
       vendor: (Patterns.AP_VENDOR.exec(text)?.[1] || '').trim() || null,
-      band: (Patterns.AP_BAND.exec(text)?.[1] || '').trim() || null,
+      band: (Patterns.AP_BAND.exec(text)?.[1] || '').trim().replace(/,$/, '') || null,
       pmf: (Patterns.AP_PMF.exec(text)?.[1] || '').trim() || null,
       isHidden: !ssid || ssid === '(Hidden)',
     };
@@ -154,7 +194,7 @@ const Parsers = {
       index: idx,
       mac,
       vendor: (Patterns.STATION_VENDOR.exec(text)?.[1] || '').trim() || null,
-      associatedApSsid: (Patterns.STATION_AP_SSID.exec(text)?.[1] || '').trim() || null,
+      associatedApSsid: (Patterns.STATION_AP_SSID.exec(text)?.[1] || '').trim().replace(/,$/, '') || null,
       apBssid: Patterns.STATION_AP_BSSID.exec(text)?.[1] || null,
       apVendor: (Patterns.STATION_AP_VENDOR.exec(text)?.[1] || '').trim() || null,
       rssi: parseInt(Patterns.STATION_RSSI.exec(text)?.[1] || '-100', 10),
@@ -189,9 +229,8 @@ const Parsers = {
     return { name, mac, rssi, type };
   },
 
-  flipper(text) {
-    if (!text.includes('Flipper') || !text.includes('Found')) return null;
-    const idx = Patterns.FLIPPER_INDEX.exec(text)?.[1];
+  flipper(text, listed = false) {
+    const idx = Patterns.FLIPPER_INDEX.exec(text)?.[1] ?? (listed ? /^\[(\d+)\] MAC:/m.exec(text)?.[1] : null);
     if (idx == null) return null;
     return {
       index: idx,
@@ -202,9 +241,8 @@ const Parsers = {
     };
   },
 
-  airTag(text) {
-    if (!text.includes('AirTag')) return null;
-    const idx = Patterns.AIRTAG_INDEX.exec(text)?.[1];
+  airTag(text, listed = false) {
+    const idx = Patterns.AIRTAG_INDEX.exec(text)?.[1] ?? (listed ? /^\[(\d+)\] MAC:/m.exec(text)?.[1] : null);
     if (idx == null) return null;
     return {
       index: idx,
@@ -238,6 +276,7 @@ const Parsers = {
   },
 
   wifiStatus(text) {
+    text = latestBlock(text, Patterns.WIFI_STATUS_HDR, Patterns.WIFI_STATUS_FTR);
     if (!Patterns.WIFI_STATUS_HDR.test(text) && !text.includes('connected=')) return null;
     const values = {};
     for (const line of text.split(/\r?\n/)) {
@@ -257,16 +296,18 @@ const Parsers = {
   },
 
   wifiConnection(text) {
-    if (!text.includes('Got IP:') && !/WiFi\s+Connected/i.test(text) && !/WiFi\s+disconnected/i.test(text)) return null;
-    const ip = Patterns.GOT_IP.exec(text)?.[1];
-    if (ip) return { isConnected: true, ip };
-    if (Patterns.WIFI_CONNECTED.test(text)) return { isConnected: true };
-    const reason = Patterns.WIFI_DISCONN.exec(text)?.[1];
-    if (reason !== undefined) return { isConnected: false, reason: reason || null };
+    for (const line of text.split(/\r?\n/).reverse()) {
+      const ip = Patterns.GOT_IP.exec(line)?.[1];
+      if (ip) return { isConnected: true, ip };
+      const disconnected = Patterns.WIFI_DISCONN.exec(line);
+      if (disconnected) return { isConnected: false, reason: disconnected[1] || null };
+      if (Patterns.WIFI_CONNECTED.test(line)) return { isConnected: true };
+    }
     return null;
   },
 
   chipInfo(text) {
+    text = latestBlock(text, /\[CHIPINFO_START\]/, /\[CHIPINFO_END\]/);
     const hasInfo = text.includes('Chip Information') || (text.includes('Model:') && text.includes('IDF Version:') && text.includes('CPU Cores:'));
     if (!hasInfo) return null;
     const model = Patterns.CHIP_MODEL.exec(text)?.[1]?.trim();
@@ -282,6 +323,7 @@ const Parsers = {
       'T-Deck': 'TDECK', 'Rotary Encoder': 'ROTARY_ENCODER', 'USB Keyboard (Host)': 'USB_KEYBOARD',
       'Ghost Board': 'GHOST_BOARD', 'S3TWatch': 'S3TWATCH', 'SD Card (SPI)': 'SD_CARD_SPI',
       'SD Card (MMC)': 'SD_CARD_MMC',
+      'NRF24': 'NRF24', 'SubGHz': 'SUBGHZ', 'AtomS3R': 'ATOMS3R', 'Core Dump': 'CORE_DUMP',
     };
     const enabledSection = text.indexOf('Enabled Features:');
     if (enabledSection !== -1) {
@@ -305,8 +347,9 @@ const Parsers = {
   },
 
   gpsPosition(text) {
+    text = latestBlock(text, /^GPS Info\s*$/);
     if (!text.includes('GPS Info') && !text.includes('Lat:') && !text.includes('Long:')) return null;
-    const fixStr = Patterns.GPS_FIX.exec(text)?.[1] || 'No Fix';
+    const fixStr = Patterns.GPS_FIX.exec(text)?.[1]?.trim() || 'No Fix';
     const hasFix = /^(3D|2D|Fix)$/i.test(fixStr);
     const sats = Patterns.GPS_SATS.exec(text);
     const satsUsed = parseInt(sats?.[1] || '0', 10);
@@ -341,7 +384,7 @@ const Parsers = {
     if (w) {
       const rssi = parseInt(w[1], 10);
       return {
-        rssi, minRssi: parseInt(w[2], 10) || rssi, maxRssi: parseInt(w[3], 10) || rssi,
+        rssi, minRssi: parseInt(w[2], 10), maxRssi: parseInt(w[3], 10),
         direction: line.includes('CLOSER') ? 'CLOSER' : line.includes('FARTHER') ? 'FARTHER' : 'STABLE',
       };
     }
@@ -349,7 +392,7 @@ const Parsers = {
     if (g) {
       const rssi = parseInt(g[1], 10);
       return {
-        rssi, minRssi: parseInt(g[2], 10) || rssi, maxRssi: parseInt(g[3], 10) || rssi,
+        rssi, minRssi: parseInt(g[2], 10), maxRssi: parseInt(g[3], 10),
         direction: g[4] || 'STABLE',
       };
     }
@@ -358,6 +401,9 @@ const Parsers = {
 
   trackHeader(text) {
     const h = Patterns.TRACK_HEADER.exec(text);
+    if (/===\s*tracking sta\s*===/i.test(text)) {
+      return { isAp: false, targetName: null, targetBssid: Patterns.TRACK_BSSID.exec(text)?.[1] || null, channel: null };
+    }
     if (!h) {
       if (/Tracking\s+Device/i.test(text)) {
         const name = /Name:\s*([^,\n]+)/.exec(text)?.[1]?.trim();
@@ -424,7 +470,7 @@ const Parsers = {
   },
 
   error(line) {
-    if (!line.startsWith('ERROR:')) return null;
+    if (!/^ERROR:/i.test(line)) return null;
     return { message: Patterns.ERROR.exec(line)?.[1]?.trim() || 'Unknown error' };
   },
 
@@ -463,106 +509,116 @@ const Parsers = {
   },
 };
 
-/** Batch parse all access points from full log text */
-function parseAllAccessPoints(text) {
-  const rows = [];
-  const blocks = text.split(/\n(?=(?:RX:\s*)?\[\d+\]\s+SSID:)/g);
-  for (const block of blocks) {
-    const ap = Parsers.accessPoint(block);
-    if (ap) rows.push(ap);
-  }
-  return rows;
+// Public parsers accept either raw local output or RX-decorated peer output.
+for (const [name, parse] of Object.entries(Parsers)) {
+  if (typeof parse !== 'function') continue;
+  Parsers[name] = function (...args) {
+    if (typeof args[0] === 'string') args[0] = normalizeOutput(args[0]);
+    return parse.apply(this, args);
+  };
 }
 
-/** Batch parse all stations from full log text */
+function parseIndexedRows(text, header, parser, commands) {
+  text = latestCommandOutput(text, commands);
+  const rows = [];
+  const blocks = text.split(new RegExp('\\n(?=' + header + ')', 'gi'));
+  for (const block of blocks) {
+    const row = parser(block);
+    if (row) rows.push(row);
+  }
+  return uniqueRows(rows);
+}
+
+function parseAllAccessPoints(text) {
+  return parseIndexedRows(text, '\\[\\d+\\]\\s+SSID:',
+    block => Parsers.accessPoint(block), /^(?:scanap|scanall|list -a)\b/i);
+}
+
 function parseAllStations(text) {
   Parsers.resetStationCounter();
-  const rows = [];
-  const blocks = text.split(/\n(?=(?:RX:\s*)?\[\d+\]\s+(?:Station MAC:|STA:))/g);
-  for (const block of blocks) {
-    const sta = Parsers.stationWithFallbackIndex(block);
-    if (sta) rows.push(sta);
-  }
-  return rows;
+  // Unindexed discovery messages are useful in logs, but are not selectable IDs.
+  return parseIndexedRows(text, '\\[\\d+\\]\\s+(?:Station MAC:|STA:)',
+    block => { const row = Parsers.station(block); return row?.index != null ? row : null; },
+    /^(?:scansta|scanall|list -s)\b/i);
 }
 
-/** Batch parse BLE devices from log lines */
 function parseAllBleDevices(text) {
+  text = latestCommandOutput(text, /^(?:blescan(?:\s+(?!-s\b).+)?|bledetect(?:\s+-l)?)\s*$/i);
   const rows = [];
   for (const line of text.split(/\r?\n/)) {
-    const d = Parsers.bleDevice(line.replace(/^RX:\s*/, ''));
-    if (d) rows.push({ ...d, index: String(rows.length) });
+    const d = Parsers.bleDevice(line);
+    if (d?.mac) rows.push({ ...d, index: String(rows.length), kind: 'advertisement' });
   }
-  return rows;
+  // Current -ds firmware emits indexed multi-line detector records.
+  const blocks = text.split(/\n(?=\[\d+\]\s+[^\n]+ found)/gi);
+  for (const block of blocks) {
+    const head = /^\[(\d+)\] (.+) found\s*$/im.exec(block);
+    if (!head) continue;
+    const mac = /MAC:\s*([0-9A-Fa-f:]{17})/.exec(block)?.[1];
+    if (!mac) continue;
+    rows.push({ index: head[1], mac, name: /Name:[ \t]*([^\n]+)/.exec(block)?.[1]?.trim() || head[2],
+      rssi: Number(/RSSI:\s*(-?\d+)/.exec(block)?.[1] || -100),
+      type: /flipper/i.test(head[2]) ? 'FLIPPER_ZERO' : /airtag/i.test(head[2]) ? 'AIR_TAG' : 'GENERIC',
+      kind: 'detector' });
+  }
+  for (const line of text.split(/\r?\n/)) {
+    const m = /^\s*\[(\d+)\](?: \*)? (.+?) \| (.+?) \| (-?\d+) dBm\s*$/.exec(line);
+    if (!m) continue;
+    const isMac = /^[0-9A-Fa-f:]{17}$/.test(m[3]);
+    rows.push({ index: m[1], mac: isMac ? m[3] : null, name: isMac ? m[2] : m[3],
+      type: /flipper/i.test(m[2]) ? 'FLIPPER_ZERO' : /airtag/i.test(m[2]) ? 'AIR_TAG' : 'GENERIC',
+      rssi: Number(m[4]), kind: 'detector' });
+  }
+  return uniqueRows(rows, 'mac');
 }
 
-/** Parse all Flipper devices from log text */
 function parseAllFlippers(text) {
-  const rows = [];
-  const blocks = text.split(/\n(?=(?:RX:\s*)?\[\d+\]\s+(?:White|Black|Transparent)?\s*Flipper)/gi);
-  for (const block of blocks) {
-    const f = Parsers.flipper(block);
-    if (f) rows.push(f);
-  }
-  return rows;
+  const marker = normalizeOutput(text).match(/^> (?:blescan -f|listflippers)\b.*$/gm)?.at(-1);
+  const listed = marker?.startsWith('> listflippers') || (!marker && /Discovered Flippers/i.test(text));
+  if (listed && marker) text = getOutputBlock(text, 'listflippers').join('\n');
+  return parseIndexedRows(text, listed ? '\\[\\d+\\]\\s*MAC:' : '\\[\\d+\\]\\s*(?:White|Black|Transparent)?\\s*Flipper',
+    block => { const row = Parsers.flipper(block, listed); return row && { ...row, type: 'FLIPPER_ZERO', kind: 'flipper' }; },
+    /^(?:blescan -f|listflippers)\b/i);
 }
 
-/** Parse all AirTags from log text */
 function parseAllAirTags(text) {
-  const rows = [];
-  const blocks = text.split(/\n(?=(?:RX:\s*)?\[\d+\]\s*AirTag)/g);
-  for (const block of blocks) {
-    const a = Parsers.airTag(block);
-    if (a) rows.push(a);
-  }
-  return rows;
+  const marker = normalizeOutput(text).match(/^> (?:blescan -a|listairtags)\b.*$/gm)?.at(-1);
+  const listed = marker?.startsWith('> listairtags') || (!marker && /Discovered AirTags/i.test(text));
+  if (listed && marker) text = getOutputBlock(text, 'listairtags').join('\n');
+  return parseIndexedRows(text, listed ? '\\[\\d+\\]\\s*MAC:' : '\\[\\d+\\]\\s*AirTag',
+    block => { const row = Parsers.airTag(block, listed); return row && { ...row, type: 'AIR_TAG', kind: 'airtag' }; },
+    /^(?:blescan -a|listairtags)\b/i);
 }
 
-/** Parse all GATT devices from log text */
 function parseAllGattDevices(text) {
-  const rows = [];
-  const blocks = text.split(/\n(?=(?:RX:\s*)?\[\d+\]\s*Name:)/g);
-  for (const block of blocks) {
-    const g = Parsers.gattDevice(block);
-    if (g) rows.push(g);
-  }
-  return rows;
+  return parseIndexedRows(text, '\\[\\d+\\]\\s*Name:',
+    block => { const row = Parsers.gattDevice(block); return row && { ...row, kind: 'gatt' }; },
+    /^(?:blescan -g|listgatt)\b/i);
 }
 
-/** Parse all SD entries from log lines */
 function parseAllSdEntries(text) {
-  const rows = [];
-  for (const line of text.split(/\r?\n/)) {
-    const e = Parsers.sdEntry(line.replace(/^RX:\s*/, ''));
-    if (e) rows.push(e);
-  }
-  return rows;
+  const rows = latestCommandOutput(text, /^sd list\b/i).split(/\r?\n/).map(line => Parsers.sdEntry(line)).filter(Boolean);
+  return uniqueRows(rows);
 }
 
-/** Extract output block for a specific command from logs */
 function getOutputBlock(logs, command) {
-  const lines = logs.split(/\r?\n/).map(l => l.trimEnd());
-  const needle = `> ${command}`;
-  let start = -1;
-  for (let i = lines.length - 1; i >= 0; i--) {
-    if (lines[i].replace(/^RX:\s*/, '') === needle) { start = i; break; }
-  }
+  const lines = normalizeOutput(logs).split(/\r?\n/).map(l => l.trimEnd());
+  const start = lines.lastIndexOf(`> ${command}`);
   if (start < 0) return [];
   const out = [];
   for (let i = start + 1; i < lines.length; i++) {
-    const line = lines[i];
-    if (line.startsWith('>') && !line.startsWith('> ')) break;
-    out.push(line);
+    if (/^> /.test(lines[i])) break;
+    out.push(lines[i]);
   }
   return out;
 }
 
-/** Generic key=value block parser */
 function parseKeyValueBlock(text, headerRe, footerRe) {
+  text = headerRe ? latestBlock(text, headerRe, footerRe) : normalizeOutput(text);
   const out = [];
-  let inBlock = false;
+  let inBlock = !headerRe;
   for (const raw of text.split(/\r?\n/)) {
-    const line = raw.replace(/^RX:\s*/, '').trim();
+    const line = raw.trim();
     if (headerRe && headerRe.test(line)) { inBlock = true; continue; }
     if (footerRe && footerRe.test(line)) break;
     if (!inBlock) continue;

@@ -1,0 +1,25 @@
+Title: Ethernet
+Description: Overview of GhostESP&#39;s Ethernet capabilities
+URL: /v2.2/ethernet/
+Version: v2.2
+Section: GhostESP: Revival
+Search index: /search-index.json
+
+# Ethernet
+
+> Overview of GhostESP&#39;s Ethernet capabilities
+
+## On this page
+
+- [Quick Links](#quick-links)
+
+---
+
+GhostESP provides Ethernet connectivity with network scanning, device fingerprinting, and service discovery tools.
+Note: Ethernet is available only on the Banshee S3 build (CONFIG_WITH_ETHERNET). It is not present on other boards. If ethup reports an initialization failure, your build does not include Ethernet.
+## Quick Links
+- [Connection Management](/v2.2/ethernet/connection/) - bring the interface up, configure IP and MAC
+- [Scanning](/v2.2/ethernet/scanning/) - ping sweeps, port scans, and traceroute
+- [Fingerprinting](/v2.2/ethernet/fingerprinting/) - identify devices on the network
+- [HTTP](/v2.2/ethernet/http/) - web requests and service checks
+- [ARP Poisoning](/v2.2/ethernet/arp-poisoning/) - man-in-the-middle testing

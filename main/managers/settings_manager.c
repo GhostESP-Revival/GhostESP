@@ -330,9 +330,9 @@ void settings_set_defaults(FSettings *settings) {
   settings->wd_hop_helper_ms = 125;
   settings->wd_weighted_5g = true;
 
-  // Lockscreen defaults (disabled by default)
-  settings->lockscreen_enabled = false;
-  settings->lockscreen_type = 1;         // PIN-only for now
+  // Lockscreen defaults: enabled, with no PIN configured.
+  settings->lockscreen_enabled = true;
+  settings->lockscreen_type = 1;         // Persisted PIN type; an empty blob allows press-to-unlock
   memset(settings->lockscreen_obfuscated, 0, sizeof(settings->lockscreen_obfuscated));
   settings->lockscreen_timeout_sec = 0;    // Off
   settings->lockscreen_wake_lock = true;  // Default to locking on wake
