@@ -524,14 +524,14 @@ static void add_plugin_apps_in_folder(const char *key, bool include_loaded_plugi
     }
 }
 
-/* Native apps with no category, or one the firmware does not define, stay at
- * the root next to the unfiled built-ins. Pinned apps are already there. */
+/* Categorised native apps live in firmware or dynamic folders. Only unfiled
+ * apps and apps explicitly pinned by the user belong at the root. */
 static void add_uncategorised_plugin_apps(bool include_loaded_plugins) {
     if (!include_loaded_plugins) return;
     for (int i = 0; i < plugin_manager_count(); ++i) {
         const plugin_app_manifest_t *app = plugin_manager_get(i);
         if (!plugin_app_displayable(app)) continue;
-        if (!plugin_app_pinned_to_root(app) && menu_catalog_folder_index(app->category) >= 0) continue;
+        if (!plugin_app_pinned_to_root(app) && app->category[0] != '\0') continue;
         add_plugin_app_item(app);
     }
 }
@@ -543,6 +543,16 @@ static void rebuild_app_items(bool include_loaded_plugins) {
 
     int count = 0;
     menu_catalog_item_t *items = menu_catalog_collect(MENU_PLACE_APPS, true, &count);
+
+    /* The shared catalog also contains SD apps. They are added below through
+     * the plugin path, which sets plugin_id for icons and launch handling.
+     * Keep only built-ins here so native apps and folder counts aren't doubled. */
+    int builtin_count = 0;
+    for (int i = 0; items && i < count; ++i) {
+        if (strncmp(items[i].id, "plugin:", 7) == 0) continue;
+        items[builtin_count++] = items[i];
+    }
+    count = builtin_count;
 
     if (in_submenu) {
         add_back_app_item();

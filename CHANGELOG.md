@@ -8,7 +8,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 
 ### Fixed
 
-- Fixed SD apps appearing twice in the Apps gallery when an installed app also has a cached package with the same app ID
+- Fixed duplicate SD app tiles and inflated folder counts in the Apps gallery, including default-icon copies and installed apps with cached packages
 
 ## v2.2
 
