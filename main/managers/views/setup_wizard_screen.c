@@ -139,17 +139,44 @@ static void wizard_theme_swatch_draw_cb(lv_event_t *e) {
     }
 }
 
-static const char *timezone_options[] = {
-    "UTC", "EST5EDT", "CST6CDT", "MST7MDT", "PST8PDT",
-    "GMT0", "CET-1CEST", "EET-2EEST", "IST-5:30", "JST-9",
-    "AEST-10AEDT", "AWST-8", "NZST-12NZDT"
+// const-qualified and kept in flash; labels/order MUST match options_screen.c.
+static const char * const timezone_options[] = {
+    "UTC", "EST", "CST", "MST", "PST",
+    "GMT/BST (UK)", "CET", "EET", "IST (India)", "JST",
+    "AEST", "AWST", "NZST",
+    // North America
+    "HST (Hawaii)", "AKST (Alaska)", "AST (Atlantic)", "MEX (Mexico)",
+    // South America
+    "BRT (Brasilia)", "ART (Argentina)", "CLT (Chile)", "COT (Colombia)", "PET (Peru)", "VET (Venezuela)",
+    // Europe & Africa
+    "WET (Portugal)", "MSK (Moscow)", "TRT (Turkey)",
+    "WAT (W.Africa)", "CAT (C.Africa)", "EAT (E.Africa)", "SAST (S.Africa)",
+    // Middle East & Asia
+    "GST (Gulf)", "IRST (Iran)", "PKT (Pakistan)", "AFT (Afghanistan)", "NPT (Nepal)", "BST (Bangladesh)",
+    "ICT (Indochina)", "WIB (Indonesia)", "SGT (Singapore)", "HKT (HongKong)", "CST (China)",
+    "PHT (Philippines)", "MYT (Malaysia)", "KST (Korea)", "MMT (Myanmar)",
+    // Oceania
+    "ACST (Adelaide)", "ChST (Chamorro)"
 };
-static const char *timezone_values[] = {
+static const char * const timezone_values[] = {
     "UTC0", "EST5EDT,M3.2.0,M11.1.0", "CST6CDT,M3.2.0,M11.1.0", "MST7MDT,M3.2.0,M11.1.0", "PST8PDT,M3.2.0,M11.1.0",
-    "GMT0", "CET-1CEST,M3.5.0,M10.5.0", "EET-2EEST,M3.5.0,M10.5.0", "IST-5:30", "JST-9",
-    "AEST-10AEDT,M10.1.0,M4.1.0", "AWST-8", "NZST-12NZDT,M9.5.0,M4.1.0"
+    "GMT0BST,M3.5.0/1,M10.5.0", "CET-1CEST,M3.5.0,M10.5.0", "EET-2EEST,M3.5.0,M10.5.0", "IST-5:30", "JST-9",
+    "AEST-10AEDT,M10.1.0,M4.1.0", "AWST-8", "NZST-12NZDT,M9.5.0,M4.1.0",
+    // North America
+    "HST10", "AKST9AKDT,M3.2.0,M11.1.0", "AST4ADT,M3.2.0,M11.1.0", "CST6",
+    // South America
+    "BRT3", "ART3", "CLT4CLST,M9.1.0,M4.1.0", "COT5", "PET5", "VET4",
+    // Europe & Africa
+    "WET0WEST,M3.5.0,M10.5.0", "MSK-3", "TRT-3",
+    "WAT-1", "CAT-2", "EAT-3", "SAST-2",
+    // Middle East & Asia
+    "GST-4", "IRST-3:30", "PKT-5", "AFT-4:30", "NPT-5:45", "BST-6",
+    "ICT-7", "WIB-7", "SGT-8", "HKT-8", "CST-8",
+    "PHT-8", "MYT-8", "KST-9", "MMT-6:30",
+    // Oceania
+    "ACST-9:30", "ChST-10"
 };
-#define TIMEZONE_COUNT 13
+#define TIMEZONE_COUNT ((int)(sizeof(timezone_values) / sizeof(timezone_values[0])))
 
 static const char *display_timeout_options[] = {"5s", "10s", "30s", "60s", "Never"};
 static const uint32_t display_timeout_values[] = {5000, 10000, 30000, 60000, UINT32_MAX};
@@ -501,7 +528,7 @@ static void update_option_selection(int count) {
     }
 }
 
-static void show_option_screen(const char *title_text, const char **options, int count, int current_value) {
+static void show_option_screen(const char *title_text, const char * const *options, int count, int current_value) {
     const lv_font_t *title_font = get_title_font();
     const lv_font_t *body_font = get_body_font();
 

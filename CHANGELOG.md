@@ -6,11 +6,15 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 
 ## v2.2.1
 
+### Added
+
+- Added 34 new timezones to the Date & Time picker covering the Americas, Europe, Africa, the Middle East, Asia and Oceania, and added UK British Summer Time (BST) support
+- Support for changing the Meshtastic pairing pin type with defaults set to NO_PIN
+
 ### Fixed
 
 - Fixed multi-target app manifests allowing incompatible ELF binaries to hide working SD packages or fail during launch
 - Fixed duplicate SD app tiles and inflated folder counts in the Apps gallery, including default-icon copies and installed apps with cached packages
-- Fixed the Meshtastic BLE pairing PIN being cleared almost immediately; it now stays on screen until pairing succeeds
 
 ## v2.2
 
