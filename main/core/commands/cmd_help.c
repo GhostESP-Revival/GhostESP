@@ -20,6 +20,9 @@ void handle_help(int argc, char **argv) {
     // List of all categories to print in order
     const char *all_categories[] = {
         "wifi", "ble", "chameleon", "comm", "sd", "led", "gps", "shell", "misc", "portal", "printer", "cast", "gadgets", "capture", "beacon", "attack"
+#ifdef CONFIG_HAS_LORA
+        , "lora"
+#endif
 #ifdef CONFIG_HAS_INFRARED
         , "ir"
 #endif
@@ -475,6 +478,46 @@ void handle_help(int argc, char **argv) {
         glog("    Usage: statusidle [list|set <life|ghost|starfield|hud|matrix|ghosts|spiral|leaves|bouncing|0|1|2|3|4|5|6|7|8>]\n\n");
         return;
     }
+#ifdef CONFIG_HAS_LORA
+    if (strcmp(category, "lora") == 0 || strcmp(category, "mesh") == 0) {
+        glog("\nLoRa / Mesh Commands:\n\n");
+        glog("-- Choosing a protocol (one radio, one protocol at a time) --\n");
+        glog("mesh\n    Show the active mesh and how to switch.\n    Usage: mesh | mesh status\n\n");
+        glog("mesh switch\n    Stop the current protocol and start another.\n    Usage: mesh switch <meshtastic|meshcore>\n\n");
+        glog("mesh on / off\n    Start the remembered protocol / stop the active one.\n    Usage: mesh on [meshtastic|meshcore] | mesh off\n\n");
+        glog("mesh autostart\n    Choose what starts on boot.\n    Usage: mesh autostart <meshtastic|meshcore|off>\n\n");
+        glog("-- Basics --\n");
+        glog("lora\n    Show LoRa status.\n    Usage: lora [status]\n\n");
+        glog("lora on / off\n    Start or stop the Meshtastic radio.\n    Usage: lora on | lora off\n\n");
+        glog("lora region\n    Set the region while the radio is stopped.\n    Usage: lora region <name>   (e.g. anz)\n\n");
+        glog("lora setup\n    Show first-time setup guidance.\n    Usage: lora setup\n\n");
+        glog("lora autostart\n    Choose what starts on boot.\n    Usage: lora autostart <meshtastic|meshcore|on|off>\n\n");
+        glog("lora set\n    Change a radio or node setting.\n    Usage: lora set <preset|sf|bw|cr|tx|hop|offset|ovrfreq|chnum|txen|role|owner|companion|autostart> <value>\n\n");
+        glog("-- Messaging --\n");
+        glog("lora send / messages\n    Send on channel 0 / read received messages.\n    Usage: lora send <text> | lora messages\n\n");
+        glog("lora dm\n    PKI-encrypted direct message.\n    Usage: lora dm <node> <text>\n\n");
+        glog("lora nodes\n    List nearby nodes.\n    Usage: lora nodes\n\n");
+        glog("lora channels\n    Show the 8 channel slots.\n    Usage: lora channels\n\n");
+        glog("lora nodeinfo\n    Exchange NodeInfo now (broadcast by default).\n    Usage: lora nodeinfo [node]\n\n");
+        glog("-- Phone app (Meshtastic app over BLE) --\n");
+        glog("lora ble\n    Start/stop the app BLE link or show its state.\n    Usage: lora ble [on|off|status]   (alias: mesh app)\n\n");
+        glog("lora ble pin\n    Set the app pairing PIN. Default is none (no prompt).\n"
+             "    The PIN is shown on the node screen and in this terminal when the phone connects.\n"
+             "    Usage: lora ble pin <none|random|fixed [6-digit pin]>   (alias: mesh pin)\n"
+             "    Modes:\n"
+             "        none   : no PIN, no pairing prompt\n"
+             "        random : new 6-digit PIN each pairing\n"
+             "        fixed  : fixed PIN (default 123456)\n"
+             "    Changing mode drops the link; forget the node on the phone, then reconnect.\n\n");
+        glog("lora app\n    Show app link counters.\n    Usage: lora app\n\n");
+        glog("-- Keys (PKI) --\n");
+        glog("lora pubkey | pkinfo <node> | pki-regen\n    Show our public key / peer + our keys / regenerate the keypair.\n\n");
+        glog("-- Diagnostics --\n");
+        glog("lora diag | cad | reg <addr> [count]\n    Radio diagnostics, channel-activity detect, register read.\n");
+        glog("lora pkitest <node> | pkselftest | pktry <hex>\n    PKI loopback and known-answer tests.\n\n");
+        return;
+    }
+#endif
     if (strcmp(category, "gps") == 0) {
         glog("\nGPS Commands:\n\n");
         glog("gpsinfo\n    Show GPS info.\n    Usage: gpsinfo [-s]\n\n");
@@ -872,6 +915,9 @@ void handle_help(int argc, char **argv) {
     glog("  help capture   - Wi-Fi packet capture commands\n");
     glog("  help beacon    - Beacon spam commands\n");
     glog("  help attack    - Attack/flood commands\n");
+#ifdef CONFIG_HAS_LORA
+    glog("  help lora      - LoRa / Meshtastic / mesh commands\n");
+#endif
 #ifdef CONFIG_HAS_INFRARED
     glog("  help ir        - Infrared commands\n");
 #endif
