@@ -410,6 +410,26 @@ static bool read_file_to_buffer(const char *path, char **out_buf) {
     return true;
 }
 
+static bool app_binary_matches_arch(const char *path) {
+    /* A multi-target manifest describes supported builds, not a portable ELF.
+     * Verify the actual binary before it can shadow a compatible package. */
+    unsigned char header[20];
+    FILE *file = fopen(path, "rb");
+    if (!file) return false;
+    size_t bytes = fread(header, 1, sizeof(header), file);
+    fclose(file);
+    if (bytes != sizeof(header) || memcmp(header, "\177ELF", 4) != 0 ||
+        header[4] != 1 || header[5] != 1) return false; /* ELF32, little endian */
+    unsigned machine = (unsigned)header[18] | ((unsigned)header[19] << 8);
+#if CONFIG_IDF_TARGET_ARCH_RISCV
+    return machine == 243; /* EM_RISCV */
+#elif CONFIG_IDF_TARGET_ARCH_XTENSA
+    return machine == 94; /* EM_XTENSA */
+#else
+    return false;
+#endif
+}
+
 static bool parse_manifest(const char *base_path, plugin_app_manifest_t *out) {
     char manifest_path[PLUGIN_APP_PATH_MAX];
     if (!join_path(manifest_path, sizeof(manifest_path), base_path, "manifest.json")) {
@@ -574,6 +594,10 @@ static bool parse_manifest(const char *base_path, plugin_app_manifest_t *out) {
         snprintf(out->error, sizeof(out->error), "entry missing");
         return false;
     }
+    if (!app_binary_matches_arch(out->entry_path)) {
+        snprintf(out->error, sizeof(out->error), "app ELF architecture does not match firmware");
+        return false;
+    }
 
     out->valid = true;
     return true;
@@ -689,6 +713,7 @@ int plugin_manager_reload(void) {
     plugin_manager_materialize_packages();
     ESP_LOGI(TAG, "Package materialize check took %lld ms", (long long)((esp_timer_get_time() - materialize_start_us) / 1000));
 
+    /* Installed apps take precedence over package caches with the same id. */
     const char *scan_dirs[] = { PLUGIN_APPS_DIR, PLUGIN_APP_CACHE_DIR };
     for (size_t scan_i = 0; scan_i < sizeof(scan_dirs) / sizeof(scan_dirs[0]) && s_app_count < PLUGIN_APP_REGISTRY_CAPACITY; ++scan_i) {
         DIR *dir = opendir(scan_dirs[scan_i]);
@@ -714,6 +739,16 @@ int plugin_manager_reload(void) {
             memset(app, 0, sizeof(*app));
             if (!parse_manifest(base_path, app)) {
                 ESP_LOGW(TAG, "Skipping app at %s: %s", base_path, app->error);
+                memset(app, 0, sizeof(*app));
+                continue;
+            }
+            /* Installing a .gapp leaves its source package on SD, so its
+             * materialized cache can describe an already installed app.
+             * Keep one registry entry per id, just as find()/launch expect. */
+            const plugin_app_manifest_t *existing = plugin_manager_find(app->id);
+            if (existing) {
+                ESP_LOGW(TAG, "Skipping duplicate app %s at %s (using %s)",
+                         app->id, base_path, existing->base_path);
                 memset(app, 0, sizeof(*app));
                 continue;
             }

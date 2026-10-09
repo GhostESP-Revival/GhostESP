@@ -21,6 +21,14 @@
 #define LORA_BLE_H
 
 #include <stdbool.h>
+#include <stdint.h>
+
+// Values match meshtastic BluetoothConfig.PairingMode.
+typedef enum {
+    LORA_BLE_PIN_RANDOM = 0, // new 6-digit PIN per pairing, shown on the node
+    LORA_BLE_PIN_FIXED = 1,  // fixed PIN (default 123456), shown on the node
+    LORA_BLE_PIN_NONE = 2,   // Just Works, no PIN (our default)
+} lora_ble_pin_mode_t;
 
 #ifdef __cplusplus
 extern "C" {
@@ -34,6 +42,12 @@ void lora_ble_stop(void); // stop adv, keep host up for other users
 bool lora_ble_is_advertising(void);
 bool lora_ble_is_connected(void); // raw link (app may not be subscribed yet)
 bool lora_ble_is_linked(void);    // subscribed: the UI/session truth
+
+// Pairing policy; persisted as the app-visible BluetoothConfig. Setting a
+// mode drops the current link so the phone reconnects under the new policy
+// (the phone must also forget its old bond). fixed_pin: 100000-999999.
+lora_ble_pin_mode_t lora_ble_get_pin_mode(uint32_t *fixed_pin);
+bool lora_ble_set_pin_mode(lora_ble_pin_mode_t mode, uint32_t fixed_pin);
 
 // Called by phoneapi paths to ring the FromNum doorbell after fifo_push.
 void lora_ble_notify_from_num(void);

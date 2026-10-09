@@ -25,6 +25,10 @@
 #include "managers/lora_mesh.h"
 #include "managers/lora_pb.h"
 #include "managers/lora_phoneapi.h"
+#include "managers/lora_store.h"
+#include "managers/status_display_manager.h"
+#include "core/glog.h"
+#include "esp_random.h"
 #include "sdkconfig.h"
 
 #if defined(CONFIG_HAS_LORA) && !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
@@ -180,8 +184,17 @@ static void req_conn_params(uint16_t conn, bool fast) {
 
 // MTU (517) + 2M PHY + 251B data-length attempts. Each step is rc-checked and
 // compiled only where its feature macro/API exists in this IDF (non-fatal).
+static bool link_gate_open(uint16_t conn); // false while a PIN pairing is pending
+
 static void tune_link(uint16_t conn, bool fast) {
     if (conn == BLE_HS_CONN_HANDLE_NONE) return;
+    // The ESP controller can't take LE Set PHY while the phone is pairing:
+    // the HCI ack never arrives and the host resets (reason 19), killing the
+    // pairing. Tune once the link is encrypted instead.
+    if (!link_gate_open(conn)) {
+        ESP_LOGI(TAG, "link tuning deferred until paired");
+        return;
+    }
 #ifdef CONFIG_BT_NIMBLE_ENABLED
     int rc = ble_att_set_preferred_mtu(BLE_PREFERRED_MTU);
     if (rc != 0) ESP_LOGW(TAG, "preferred MTU %u rc=%d", BLE_PREFERRED_MTU, rc);
@@ -214,9 +227,135 @@ static void flush_link_queues(void) {
 }
 
 // ---------- GATT access (NimBLE host task context: copy fast, never block) --
+// ---------- Pairing policy (BluetoothConfig, section 7) ----------
+// Mirrors upstream: NO_PIN = Just Works/open GATT (our default), FIXED_PIN =
+// display-only with a configured PIN (default 123456), RANDOM_PIN = new
+// 6-digit PIN per pairing shown on the node. The mode lives in the same
+// stored BluetoothConfig the app reads/writes (enabled=1, mode=2, fixed_pin=3),
+// so the Meshtastic app and `lora ble pin` stay in sync. Access is gated per
+// request instead of via static GATT flags, so a mode change needs no host
+// restart.
+#define BLE_PIN_SECTION 7
+#define BLE_PIN_DEFAULT 123456u
+
+static lora_ble_pin_mode_t s_pin_mode = LORA_BLE_PIN_NONE;
+static uint32_t s_fixed_pin = BLE_PIN_DEFAULT;
+static uint32_t s_cur_pin; // PIN for the current connection (fixed or random)
+
+static void pin_cfg_load(void) {
+    uint8_t raw[16];
+    uint16_t n = lora_store_cfg_get(BLE_PIN_SECTION, raw, sizeof(raw));
+    lora_ble_pin_mode_t mode = LORA_BLE_PIN_NONE; // nothing stored: open
+    uint32_t pin = 0;
+    if (n > 0) {
+        mode = LORA_BLE_PIN_RANDOM; // proto3: omitted mode == 0 == RANDOM_PIN
+        uint16_t i = 0;
+        while (i < n) {
+            uint8_t tag = raw[i++];
+            uint8_t wt = tag & 7;
+            uint8_t field = tag >> 3;
+            if (wt == 0) {
+                uint32_t v = 0;
+                uint8_t shift = 0;
+                while (i < n) {
+                    uint8_t b = raw[i++];
+                    v |= (uint32_t)(b & 0x7F) << shift;
+                    if (!(b & 0x80) || (shift += 7) > 28) break;
+                }
+                if (field == 2) mode = (lora_ble_pin_mode_t)(v > 2 ? 2 : v);
+                else if (field == 3) pin = v;
+            } else if (wt == 2 && i < n) {
+                i = (uint16_t)(i + 1 + raw[i]);
+            } else {
+                break;
+            }
+        }
+    }
+    s_pin_mode = mode;
+    s_fixed_pin = (pin >= 100000 && pin <= 999999) ? pin : BLE_PIN_DEFAULT;
+}
+
+// Called from pre_host and each connect (before any pairing starts).
+static void apply_security(void) {
+    pin_cfg_load();
+    ble_hs_cfg.sm_bonding = 1;
+    if (s_pin_mode == LORA_BLE_PIN_NONE) {
+        // No way to type a PIN and no encryption required: Just Works, so a
+        // phone-initiated bond never asks for a code nobody can enter.
+        ble_hs_cfg.sm_io_cap = BLE_HS_IO_NO_INPUT_OUTPUT;
+        ble_hs_cfg.sm_mitm = 0;
+    } else {
+        ble_hs_cfg.sm_io_cap = BLE_HS_IO_DISPLAY_ONLY;
+        ble_hs_cfg.sm_mitm = 1;
+        ble_hs_cfg.sm_sc = 1;
+    }
+}
+
+static bool conn_secure(uint16_t conn) {
+    struct ble_gap_conn_desc d;
+    return ble_gap_conn_find(conn, &d) == 0 && d.sec_state.encrypted &&
+           d.sec_state.authenticated;
+}
+
+static bool link_gate_open(uint16_t conn) {
+    return s_pin_mode == LORA_BLE_PIN_NONE || conn_secure(conn);
+}
+
+static void show_pin(uint32_t pin) {
+    char l2[16];
+    snprintf(l2, sizeof(l2), "%06u", (unsigned)pin);
+    ESP_LOGW(TAG, "pairing PIN: %s", l2);
+    glog("Meshtastic BLE pairing PIN: %s\n", l2);
+    // Hold the panel so the idle animation / LoRa HUD cannot paint over the
+    // PIN; it stays until pairing succeeds (status_display_clear()).
+    status_display_set_lines_hold("BLE PIN", l2);
+}
+
+lora_ble_pin_mode_t lora_ble_get_pin_mode(uint32_t *fixed_pin) {
+    pin_cfg_load();
+    if (fixed_pin) *fixed_pin = s_fixed_pin;
+    return s_pin_mode;
+}
+
+bool lora_ble_set_pin_mode(lora_ble_pin_mode_t mode, uint32_t fixed_pin) {
+    if (mode > LORA_BLE_PIN_NONE) return false;
+    if (mode == LORA_BLE_PIN_FIXED &&
+        (fixed_pin < 100000 || fixed_pin > 999999)) return false;
+    uint8_t raw[10];
+    uint16_t n = 0;
+    raw[n++] = 0x08; raw[n++] = 0x01;                 // enabled = true
+    if (mode != LORA_BLE_PIN_RANDOM) {                // 0 is omitted in proto3
+        raw[n++] = 0x10; raw[n++] = (uint8_t)mode;
+    }
+    if (mode == LORA_BLE_PIN_FIXED) {
+        raw[n++] = 0x18;
+        uint32_t v = fixed_pin;
+        while (v >= 0x80) { raw[n++] = (uint8_t)(v | 0x80); v >>= 7; }
+        raw[n++] = (uint8_t)v;
+    }
+    if (!lora_store_cfg_set(BLE_PIN_SECTION, raw, n)) return false;
+    pin_cfg_load();
+    // Forget every saved bond: a key from an earlier mode (e.g. a random-PIN
+    // pairing) would otherwise re-encrypt instantly and skip the new PIN.
+    ble_store_clear();
+    // Drop the live link so the phone reconnects under the new policy.
+    if (s_conn != BLE_HS_CONN_HANDLE_NONE)
+        ble_gap_terminate(s_conn, BLE_ERR_REM_USER_CONN_TERM);
+    // The policy changed: any PIN currently held is stale.
+    status_display_clear();
+    return true;
+}
+
 static int gatt_access(uint16_t conn, uint16_t attr, struct ble_gatt_access_ctxt *ctxt, void *arg) {
-    (void)conn;
     (void)arg;
+    // A PIN mode is on: unauthenticated links get INSUFFICIENT_AUTHEN, which
+    // makes the phone start pairing (and show its PIN prompt).
+    // Local accesses (e.g. notify reading the value) carry no connection.
+    if (s_pin_mode != LORA_BLE_PIN_NONE && conn != BLE_HS_CONN_HANDLE_NONE &&
+        !conn_secure(conn)) {
+        ESP_LOGI(TAG, "app access refused: link not paired yet");
+        return BLE_ATT_ERR_INSUFFICIENT_AUTHEN;
+    }
     if (ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR) {
         if (attr == s_fromradio_h) {
             // Upstream SEND_PACKETS behavior: drain one FIFO entry per read,
@@ -315,6 +454,17 @@ static int gap_cb(struct ble_gap_event *ev, void *arg) {
         if (ev->connect.status == 0) {
             s_conn = ev->connect.conn_handle;
             ESP_LOGI(TAG, "app connected (handle %u)", (unsigned)s_conn);
+            apply_security(); // pick up mode changes before any pairing
+            if (s_pin_mode != LORA_BLE_PIN_NONE) {
+                // Show the PIN the moment the phone connects (not on its
+                // first refused read) and push the phone straight into
+                // pairing with a Security Request.
+                s_cur_pin = (s_pin_mode == LORA_BLE_PIN_FIXED)
+                                ? s_fixed_pin
+                                : 100000 + (esp_random() % 900000);
+                show_pin(s_cur_pin);
+                ble_gap_security_initiate(s_conn);
+            }
             // High-throughput params + MTU/PHY/DLE attempts (best-effort).
             tune_link(s_conn, true);
         } else {
@@ -328,6 +478,8 @@ static int gap_cb(struct ble_gap_event *ev, void *arg) {
         }
     } else if (ev->type == BLE_GAP_EVENT_DISCONNECT) {
         ESP_LOGI(TAG, "app disconnected");
+        // Keep the PIN on screen: the phone may have dropped mid-pairing and
+        // will reconnect. It is only released once the link is encrypted.
         s_conn = BLE_HS_CONN_HANDLE_NONE;
         s_linked = false;
         lora_phoneapi_set_linked(false);
@@ -376,6 +528,36 @@ static int gap_cb(struct ble_gap_event *ev, void *arg) {
 #endif
     } else if (ev->type == BLE_GAP_EVENT_ADV_COMPLETE) {
         s_advertising = false;
+    } else if (ev->type == BLE_GAP_EVENT_PASSKEY_ACTION) {
+        if (ev->passkey.params.action == BLE_SM_IOACT_DISP) {
+            struct ble_sm_io pk = {.action = BLE_SM_IOACT_DISP};
+            // Same PIN already on screen from the connect event.
+            pk.passkey = s_cur_pin ? s_cur_pin : s_fixed_pin;
+            show_pin(pk.passkey);
+            ble_sm_inject_io(ev->passkey.conn_handle, &pk);
+        }
+    } else if (ev->type == BLE_GAP_EVENT_ENC_CHANGE) {
+        struct ble_gap_conn_desc d;
+        if (ble_gap_conn_find(ev->enc_change.conn_handle, &d) == 0) {
+            ESP_LOGI(TAG, "link security: status=%d enc=%d auth=%d bonded=%d",
+                     ev->enc_change.status, d.sec_state.encrypted,
+                     d.sec_state.authenticated, d.sec_state.bonded);
+        }
+        // Only a successful encryption means the PIN has been used. A failed
+        // attempt (wrong PIN, timeout, host reset) must leave the code up so
+        // the user can retry it.
+        if (s_pin_mode != LORA_BLE_PIN_NONE &&
+            ev->enc_change.status == 0) {
+            status_display_clear();
+            // Deferred link tuning can run now that the link is encrypted.
+            tune_link(ev->enc_change.conn_handle, true);
+        }
+    } else if (ev->type == BLE_GAP_EVENT_REPEAT_PAIRING) {
+        // Phone lost/forgot its bond: drop ours and let it re-pair.
+        struct ble_gap_conn_desc d;
+        if (ble_gap_conn_find(ev->repeat_pairing.conn_handle, &d) == 0)
+            ble_store_util_delete_peer(&d.peer_id_addr);
+        return BLE_GAP_REPEAT_PAIRING_RETRY;
     }
     return 0;
 }
@@ -552,6 +734,9 @@ static esp_err_t pre_host_init(void *arg) {
     // sync with ENOMEM (rc=6 -> host assert). Safe to repeat after a deinit
     // cycle (stop() zeroes the counters); paired with one init per host life.
     ble_gatts_count_cfg(defs);
+    // Override the shared host default (KEYBOARD_DISP): this node can't type
+    // a PIN, so it's either Just Works (NO_PIN) or display-only (PIN modes).
+    apply_security();
     // NOTE: add_svcs only STAGES the defs; attribute handles are assigned at
     // ble_gatts_start() (host sync), so val_handles are still 0 here by
     // design. adv_tick() resolves them post-sync before advertising.
@@ -655,6 +840,8 @@ void lora_ble_stop(void) {
     s_advertising = false;
     s_linked = false;
     lora_phoneapi_set_linked(false);
+    // Release any held pairing PIN so the display can resume.
+    if (s_pin_mode != LORA_BLE_PIN_NONE) status_display_clear();
     flush_link_queues(); // set_linked(false) path: drop stale frames
     // Full teardown like every other BLE flow: releases the host and lets
     // ble_resume_networking() bring WiFi/AP back (on no-PSRAM the AP was

@@ -232,6 +232,7 @@ static void print_help(void) {
          "  mesh peers               nodes (Meshtastic) / contacts (MeshCore)\n"
          "  mesh channels            list channels\n"
          "  mesh app [on|off]        BLE app link\n"
+         "  mesh pin <none|random|fixed [pin]>  Meshtastic app pairing PIN\n"
          "  mesh selftest            backend self test\n"
          "\n"
          "Protocol-specific commands stay under `lora` and `meshcore`.\n"
@@ -294,6 +295,21 @@ void handle_mesh_cmd(int argc, char **argv) {
         handle_meshcore_cmd(argc - 1, argv);
 #else
         glog("MeshCore not enabled on this board\n");
+#endif
+        return;
+    }
+
+    // Meshtastic app pairing PIN: `mesh pin <none|random|fixed [pin]>`
+    // (also accepts `mesh ble pin ...`) -> `lora ble pin ...`.
+    if (!strcmp(verb, "pin") || (!strcmp(verb, "ble") && argc >= 3 && !strcmp(argv[2], "pin"))) {
+#ifdef CONFIG_HAS_LORA
+        int skip = !strcmp(verb, "ble") ? 3 : 2; // args after "pin"
+        char *a[6] = {(char *)"lora", (char *)"ble", (char *)"pin"};
+        int n = 3;
+        for (int i = skip; i < argc && n < 6; ++i) a[n++] = argv[i];
+        handle_lora_cmd(n, a);
+#else
+        glog("Meshtastic not enabled on this board\n");
 #endif
         return;
     }
