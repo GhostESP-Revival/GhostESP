@@ -13743,8 +13743,9 @@ static void blocklist_free_cache(void) {
 static const char **blocklist_load_page(void) {
     blocklist_free_cache();
 
+    /* one extra slot for the next-page peek entry */
     char (*file_names)[MAX_PORTAL_NAME] =
-        malloc(BLOCKLIST_PAGE_SIZE * MAX_PORTAL_NAME);
+        malloc((BLOCKLIST_PAGE_SIZE + 1) * MAX_PORTAL_NAME);
     if (!file_names) return NULL;
 
     int raw_count = sd_card_list_dir_paged(

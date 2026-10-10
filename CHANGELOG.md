@@ -4,6 +4,12 @@
 Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A trailing `@handle` credits a guest contributor for that specific line. "Ported from / adapted from" credits the upstream source a feature was based on, not GhostESP authorship.
 
 
+## v2.2.2
+
+### Fixed
+
+- Fixed a heap buffer overflow in the Sinkhole blocklist when the sinkhole folder held 9 or more `.txt` files
+
 ## v2.2.1
 
 ### Added
