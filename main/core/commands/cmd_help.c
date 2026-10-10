@@ -463,6 +463,14 @@ void handle_help(int argc, char **argv) {
         glog("        settings get ap_ssid\n");
         glog("        settings set rgb_mode 1\n");
         glog("        settings reset\n\n");
+        glog("power\n");
+        glog("    Description: Power profile, battery, sleep status and sleep validation\n");
+        glog("    Usage: power [status]\n");
+        glog("           power profile <performance|balanced|saver>\n");
+        glog("           power locks\n");
+        glog("           power sleeptest [seconds]\n");
+        glog("           power deepsleep [seconds]\n");
+        glog("           power off\n\n");
         glog("loglevel\n");
         glog("    Description: View or change the global ESP-IDF log level.\n");
         glog("    Usage: loglevel [none|error|warn|info|debug|verbose]\n\n");

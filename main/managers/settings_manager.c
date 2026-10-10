@@ -91,7 +91,8 @@ static const char *NVS_WEBUI_AP_ONLY_KEY = "webui_ap";
 static const char *NVS_ESP_COMM_TX_PIN_KEY = "esp_comm_tx";
 static const char *NVS_ESP_COMM_RX_PIN_KEY = "esp_comm_rx";
 static const char *NVS_AP_ENABLED_KEY = "ap_enabled";
-static const char *NVS_POWER_SAVE_KEY = "power_save";
+static const char *NVS_POWER_SAVE_KEY = "power_save"; // legacy bool, still read to migrate
+static const char *NVS_POWER_PROFILE_KEY = "pwr_profile";
 static const char *NVS_ZEBRA_MENUS_KEY = "zebra_menus";
 static const char *NVS_MAX_SCREEN_BRIGHTNESS_KEY = "max_bright";
 static const char *NVS_NAV_BUTTONS_KEY = "nav_buttons";
@@ -268,7 +269,7 @@ void settings_set_defaults(FSettings *settings) {
 #endif
   }
   settings->ap_enabled = true; // Default to enabled
-  settings->power_save_enabled = false;
+  settings->power_profile = 0;
   settings->zebra_menus_enabled = false; // or true if you want it enabled by default
   settings->max_screen_brightness = 100; // Default to 100% brightness
   settings->infrared_easy_mode = false; // Default to disabled
@@ -719,11 +720,13 @@ void settings_load(FSettings *settings) {
     settings->ap_enabled = true; // Default to enabled if not found
   }
 
-  err = nvs_get_u8(nvsHandle, NVS_POWER_SAVE_KEY, &value_u8);
-  if (err == ESP_OK) {
-    settings->power_save_enabled = (value_u8 != 0);
+  err = nvs_get_u8(nvsHandle, NVS_POWER_PROFILE_KEY, &value_u8);
+  if (err == ESP_OK && value_u8 <= 2) {
+    settings->power_profile = value_u8;
   } else {
-    settings->power_save_enabled = false; // Default to disabled if not found
+    // Migrate from the old on/off power_save flag: on -> saver, otherwise performance.
+    err = nvs_get_u8(nvsHandle, NVS_POWER_SAVE_KEY, &value_u8);
+    settings->power_profile = (err == ESP_OK && value_u8 != 0) ? 2 : 0;
   }
 
   err = nvs_get_i32(nvsHandle, NVS_ESP_COMM_TX_PIN_KEY, &tmp);
@@ -1274,9 +1277,9 @@ void settings_persist_setting(SettingsType setting) {
             err = nvs_set_u8(nvsHandle, NVS_WIFI_COUNTRY_KEY, G_Settings.wifi_country);
             key = NVS_WIFI_COUNTRY_KEY;
             break;
-        case SETTING_POWER_SAVE:
-            err = nvs_set_u8(nvsHandle, NVS_POWER_SAVE_KEY, G_Settings.power_save_enabled);
-            key = NVS_POWER_SAVE_KEY;
+        case SETTING_POWER_PROFILE:
+            err = nvs_set_u8(nvsHandle, NVS_POWER_PROFILE_KEY, G_Settings.power_profile);
+            key = NVS_POWER_PROFILE_KEY;
             break;
         case SETTING_MAX_BRIGHTNESS:
             err = nvs_set_u8(nvsHandle, NVS_MAX_SCREEN_BRIGHTNESS_KEY, G_Settings.max_screen_brightness);
@@ -1754,7 +1757,9 @@ esp_err_t settings_save(const FSettings *settings) {
     NVS_SET(nvs_set_u8(nvsHandle, NVS_USB_MSC_KEY, settings->usb_msc_enabled ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_WEBUI_AP_ONLY_KEY, settings->webui_restrict_to_ap ? 1 : 0));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_AP_ENABLED_KEY, settings->ap_enabled ? 1 : 0));
-    NVS_SET(nvs_set_u8(nvsHandle, NVS_POWER_SAVE_KEY, settings->power_save_enabled ? 1 : 0));
+    NVS_SET(nvs_set_u8(nvsHandle, NVS_POWER_PROFILE_KEY, settings->power_profile));
+    // Keep the legacy flag in step so rolling back to older firmware keeps saver on.
+    NVS_SET(nvs_set_u8(nvsHandle, NVS_POWER_SAVE_KEY, settings->power_profile == 2 ? 1 : 0));
     NVS_SET(nvs_set_i32(nvsHandle, NVS_ESP_COMM_TX_PIN_KEY, settings->esp_comm_tx_pin));
     NVS_SET(nvs_set_i32(nvsHandle, NVS_ESP_COMM_RX_PIN_KEY, settings->esp_comm_rx_pin));
     NVS_SET(nvs_set_u8(nvsHandle, NVS_ZEBRA_MENUS_KEY, settings->zebra_menus_enabled ? 1 : 0));
@@ -2137,12 +2142,24 @@ bool settings_get_ap_enabled(const FSettings *settings) {
   return settings->ap_enabled;
 }
 
+uint8_t settings_get_power_profile(const FSettings *settings) {
+  return settings->power_profile;
+}
+
+void settings_set_power_profile(FSettings *settings, uint8_t profile) {
+  settings->power_profile = profile <= 2 ? profile : 0;
+}
+
 void settings_set_power_save_enabled(FSettings *settings, bool enabled) {
-  settings->power_save_enabled = enabled;
+  if (enabled) {
+    settings->power_profile = 2;
+  } else if (settings->power_profile == 2) {
+    settings->power_profile = 0;
+  }
 }
 
 bool settings_get_power_save_enabled(const FSettings *settings) {
-  return settings->power_save_enabled;
+  return settings->power_profile == 2;
 }
 
 void settings_set_esp_comm_pins(FSettings *settings, int32_t tx_pin, int32_t rx_pin) {

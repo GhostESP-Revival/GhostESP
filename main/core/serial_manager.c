@@ -1,4 +1,5 @@
 #include "core/serial_manager.h"
+#include "managers/power_manager.h"
 #include "core/system_manager.h"
 #include "driver/uart.h"
 #include "core/glog.h"
@@ -73,7 +74,7 @@ static bool s_serial_initialized = false;
 static bool s_uart_disabled = false; // disable main serial UART for certain templates
 static bool s_uart_paused = false;   // temporarily hand the UART driver to another owner (e.g. GPS)
 #if defined(CONFIG_IS_S3TWATCH) && defined(CONFIG_PM_ENABLE)
-static esp_pm_lock_handle_t s_usb_sleep_lock = NULL;
+static power_lock_t s_usb_sleep_lock = NULL;
 static bool s_usb_sleep_locked = false;
 #endif
 
@@ -697,8 +698,7 @@ void serial_task(void *pvParameter) {
   int index = 0;
 #if defined(CONFIG_IS_S3TWATCH) && defined(CONFIG_PM_ENABLE)
   // USB Serial/JTAG cannot receive commands while the CPU is in light sleep.
-  ESP_ERROR_CHECK(esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP, 0, "serial_usb",
-                                    &s_usb_sleep_lock));
+  s_usb_sleep_lock = power_lock_create(POWER_LOCK_NO_LIGHT_SLEEP, "serial_usb");
 #endif
   static uint32_t hwm_log_counter = 0;
 
@@ -714,10 +714,10 @@ void serial_task(void *pvParameter) {
 #if defined(CONFIG_IS_S3TWATCH) && defined(CONFIG_PM_ENABLE)
     bool usb_connected = usb_serial_jtag_is_connected();
     if (usb_connected && !s_usb_sleep_locked) {
-      esp_pm_lock_acquire(s_usb_sleep_lock);
+      power_lock_acquire(s_usb_sleep_lock);
       s_usb_sleep_locked = true;
     } else if (!usb_connected && s_usb_sleep_locked) {
-      esp_pm_lock_release(s_usb_sleep_lock);
+      power_lock_release(s_usb_sleep_lock);
       s_usb_sleep_locked = false;
     }
 #endif
@@ -1082,10 +1082,10 @@ void serial_manager_deinit() {
 #if defined(CONFIG_IS_S3TWATCH) && defined(CONFIG_PM_ENABLE)
   if (s_usb_sleep_lock) {
     if (s_usb_sleep_locked) {
-      esp_pm_lock_release(s_usb_sleep_lock);
+      power_lock_release(s_usb_sleep_lock);
       s_usb_sleep_locked = false;
     }
-    esp_pm_lock_delete(s_usb_sleep_lock);
+    power_lock_delete(s_usb_sleep_lock);
     s_usb_sleep_lock = NULL;
   }
 #endif

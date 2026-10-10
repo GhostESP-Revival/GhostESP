@@ -108,36 +108,23 @@ static i2c_master_bus_handle_t s_touch_i2c_bus = NULL;
 #include "lvgl_touch/touch_driver.h"
 #endif
 
-#ifdef CONFIG_HAS_BATTERY_ADC
-#include <esp_adc/adc_oneshot.h>
-#include <esp_adc/adc_cali.h>
-#include <esp_adc/adc_cali_scheme.h>
-#include <soc/adc_channel.h>
 #include <soc/soc_caps.h>
 #include <math.h>
-#endif
 
 #ifdef CONFIG_HAS_BATTERY
 #include "vendor/drivers/axp2101.h"
 #endif
 
-#ifdef CONFIG_HAS_FUEL_GAUGE
-#include "managers/fuel_gauge_manager.h"
-#endif
+#include "managers/battery_manager.h"
+#include "managers/power_manager.h"
+#include "gui/toast.h"
 
 QueueHandle_tt input_queue = NULL;
 joystick_t joysticks[5];
 
-static volatile bool g_low_i2c_mode = false;
 static bool s_deferred_peripherals_initialized = false;
 static void display_manager_set_backlight_raw(uint8_t percentage);
 
-#ifdef CONFIG_HAS_FUEL_GAUGE
-// Background polling logic moved to get_battery_info (lazy loading)
-static volatile uint8_t g_cached_batt_percent = 0;
-static volatile bool g_cached_batt_charging = false;
-static volatile bool g_cached_batt_valid = false;
-#endif
 
 #ifdef CONFIG_HAS_RTC_CLOCK
 #include "vendor/drivers/pcf8563.h"
@@ -798,426 +785,22 @@ static void p4_buffer_copy(lv_draw_ctx_t *draw_ctx,
 
 void set_backlight_brightness(uint8_t percentage); // forward declaration
 
-#ifdef CONFIG_HAS_BATTERY_ADC
-
-static int s_filtered_mv = -1;
-static int s_charge_samples[5];
-static int s_charge_sample_idx = 0;
-static bool s_charge_samples_filled = false;
-static int s_display_percent = -1;
-
-#ifdef CONFIG_USE_CARDPUTER
-#define _batAdcCh ADC_CHANNEL_9 //sar adc1 channel 9 - ADC1_GPIO10_CHANNEL;
-
-#define CARDPUTER_SOC_TABLE_SIZE 11
-typedef struct {
-    int mv;
-    uint8_t percent;
-} cardputer_soc_point_t;
-
-static const cardputer_soc_point_t s_cardputer_soc_table[CARDPUTER_SOC_TABLE_SIZE] = {
-    {3200, 0},
-    {3300, 3},
-    {3400, 8},
-    {3500, 15},
-    {3600, 30},
-    {3700, 45},
-    {3800, 60},
-    {3900, 75},
-    {4000, 88},
-    {4100, 96},
-    {4200, 100},
-};
-
-static uint8_t cardputer_voltage_to_percent(int mv) {
-    if (mv <= s_cardputer_soc_table[0].mv) {
-        return s_cardputer_soc_table[0].percent;
-    }
-    if (mv >= s_cardputer_soc_table[CARDPUTER_SOC_TABLE_SIZE - 1].mv) {
-        return s_cardputer_soc_table[CARDPUTER_SOC_TABLE_SIZE - 1].percent;
-    }
-
-    for (int i = 1; i < CARDPUTER_SOC_TABLE_SIZE; i++) {
-        if (mv <= s_cardputer_soc_table[i].mv) {
-            const cardputer_soc_point_t *low = &s_cardputer_soc_table[i - 1];
-            const cardputer_soc_point_t *high = &s_cardputer_soc_table[i];
-            int range_mv = high->mv - low->mv;
-            if (range_mv <= 0) {
-                return high->percent;
-            }
-            int range_percent = high->percent - low->percent;
-            int offset_mv = mv - low->mv;
-            return (uint8_t)(low->percent + (range_percent * offset_mv) / range_mv);
-        }
-    }
-    return s_cardputer_soc_table[CARDPUTER_SOC_TABLE_SIZE - 1].percent;
-}
-
-#elif CONFIG_USE_TDECK
-#define _batAdcCh ADC1_GPIO4_CHANNEL
-#define _batAdcUnit ADC_UNIT_1
-#define _batAdcAtten ADC_ATTEN_DB_12
-bool _isCharging = false;
-
-// track previous battery millivolt for charging detection
-static int last_mv = 0;
-
-// T-Deck specific SOC table for more accurate battery percentage
-#define TDECK_SOC_TABLE_SIZE 11
-typedef struct {
-    int mv;
-    uint8_t percent;
-} tdeck_soc_point_t;
-
-static const tdeck_soc_point_t s_tdeck_soc_table[TDECK_SOC_TABLE_SIZE] = {
-    {3300, 0},
-    {3400, 5},
-    {3500, 12},
-    {3600, 25},
-    {3700, 40},
-    {3800, 55},
-    {3900, 70},
-    {4000, 82},
-    {4100, 92},
-    {4200, 98},
-    {4300, 100},
-};
-
-static uint8_t tdeck_voltage_to_percent(int mv) {
-    if (mv <= s_tdeck_soc_table[0].mv) {
-        return s_tdeck_soc_table[0].percent;
-    }
-    if (mv >= s_tdeck_soc_table[TDECK_SOC_TABLE_SIZE - 1].mv) {
-        return s_tdeck_soc_table[TDECK_SOC_TABLE_SIZE - 1].percent;
-    }
-
-    for (int i = 1; i < TDECK_SOC_TABLE_SIZE; i++) {
-        if (mv <= s_tdeck_soc_table[i].mv) {
-            const tdeck_soc_point_t *low = &s_tdeck_soc_table[i - 1];
-            const tdeck_soc_point_t *high = &s_tdeck_soc_table[i];
-            int range_mv = high->mv - low->mv;
-            if (range_mv <= 0) {
-                return high->percent;
-            }
-            int range_percent = high->percent - low->percent;
-            int offset_mv = mv - low->mv;
-            return (uint8_t)(low->percent + (range_percent * offset_mv) / range_mv);
-        }
-    }
-    return s_tdeck_soc_table[TDECK_SOC_TABLE_SIZE - 1].percent;
-}
-
-#elif CONFIG_USE_TDISPLAY_S3
-#define _batAdcCh ADC1_GPIO4_CHANNEL
-#endif
-
-#ifndef CONFIG_USE_TDECK
-#define _batAdcUnit ADC_UNIT_1
-#define _batAdcAtten ADC_ATTEN_DB_12
-bool _isCharging = false;
-static int last_mv = 0;
-#endif
-
-// threshold to ignore ADC noise
-#define CHARGE_THRESH_MV 30
-
-int getBattery() {
-    uint8_t percent;
-    static bool init_done = false;
-    static adc_oneshot_unit_handle_t handle = NULL;
-    static adc_cali_handle_t cali_handle = NULL;
-
-    if (!init_done) {
-        const adc_oneshot_unit_init_cfg_t init_config = {
-            .unit_id = _batAdcUnit,
-        };
-        ESP_ERROR_CHECK(adc_oneshot_new_unit(&init_config, &handle));
-        const adc_oneshot_chan_cfg_t chan_cfg = {
-            .bitwidth = ADC_BITWIDTH_DEFAULT,
-            .atten = _batAdcAtten,
-        };
-        ESP_ERROR_CHECK(adc_oneshot_config_channel(handle, _batAdcCh, &chan_cfg));
-
-        adc_cali_curve_fitting_config_t cali_cfg = {
-            .unit_id = _batAdcUnit,
-            .atten    = _batAdcAtten,
-            .bitwidth= ADC_BITWIDTH_DEFAULT,
-        };
-        if (adc_cali_create_scheme_curve_fitting(&cali_cfg, &cali_handle) == ESP_OK) {
-            ESP_LOGI(TAG, "ADC calibration scheme ready");
-        } else {
-            ESP_LOGW(TAG, "ADC calibration not supported, skipping");
-        }
-        init_done = true;
-    }
-
-    // raw ADC → calibrated millivolt
-    int raw = 0;
-    esp_err_t ret = adc_oneshot_read(handle, _batAdcCh, &raw);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "ADC read failed: %s", esp_err_to_name(ret));
-        return -1;
-    }
-
-    // Check for invalid ADC readings
-    if (raw < 0 || raw > 4095) {
-        ESP_LOGW(TAG, "Invalid ADC reading: %d", raw);
-        return -1;
-    }
-
-    int mv = 0;
-    if (cali_handle) {
-        if (adc_cali_raw_to_voltage(cali_handle, raw, &mv) != ESP_OK) {
-            ESP_LOGE(TAG, "Calibration raw_to_voltage failed");
-            mv = raw * 3300 / 4095;  // fallback to raw count
-        }
-    } else {
-        // rough estimate if no calibration
-        mv = raw * 3300 / 4095;
-    }
-
-#ifdef CONFIG_USE_CARDPUTER
-    // Cardputer divides the battery voltage roughly in half with a resistor divider.
-    // Scale the measured voltage back up to actual battery voltage.
-    mv = (mv * 2);
-#elif CONFIG_USE_TDECK
-    // T-Deck divides the battery voltage roughly in half with a resistor divider.
-    // Scale the measured voltage back up to actual battery voltage.
-    mv = (mv * 2);
-#endif
-
-    // -- charging detection using rolling window to filter noise --
-#ifdef CONFIG_USE_CARDPUTER
-    s_charge_samples[s_charge_sample_idx] = mv;
-    s_charge_sample_idx = (s_charge_sample_idx + 1) % 5;
-    if (s_charge_sample_idx == 0) s_charge_samples_filled = true;
-    
-    if (s_charge_samples_filled) {
-        int oldest_mv = s_charge_samples[s_charge_sample_idx];
-        int trend = mv - oldest_mv;
-        
-        if (trend > CHARGE_THRESH_MV) {
-            _isCharging = true;
-        } else if (trend < -CHARGE_THRESH_MV) {
-            _isCharging = false;
-        }
-    }
-#elif CONFIG_USE_TDECK
-    // T-Deck: use rolling window like Cardputer for stable charging detection
-    s_charge_samples[s_charge_sample_idx] = mv;
-    s_charge_sample_idx = (s_charge_sample_idx + 1) % 5;
-    if (s_charge_sample_idx == 0) s_charge_samples_filled = true;
-    
-    if (s_charge_samples_filled) {
-        int oldest_mv = s_charge_samples[s_charge_sample_idx];
-        int trend = mv - oldest_mv;
-        
-        // Use higher threshold for T-Deck to avoid false charging detection
-        if (trend > (CHARGE_THRESH_MV * 2)) {
-            _isCharging = true;
-        } else if (trend < -(CHARGE_THRESH_MV * 2)) {
-            _isCharging = false;
-        }
-    }
-#else
-    if (last_mv != 0) {
-        int diff = mv - last_mv;
-        if (diff >  CHARGE_THRESH_MV) _isCharging = true;
-        if (diff < -CHARGE_THRESH_MV) _isCharging = false;
-    }
-    last_mv = mv;
-#endif
-
-    ESP_LOGD(TAG, "Battery ADC raw: %d, mV: %d", raw, mv);
-
-    // Check for unrealistic voltage values
-    // Lower threshold allows for very dead batteries (down to ~2.0V)
-    if (mv < 2000 || mv > 5000) {
-        ESP_LOGW(TAG, "Battery voltage out of range: %d mV", mv);
-        return -1;
-    }
-
-    int mv_for_percent = mv;
-
-#ifdef CONFIG_USE_CARDPUTER
-    if (s_filtered_mv < 0) {
-        s_filtered_mv = mv;
-    } else {
-        // Faster exponential smoothing to follow charging curve without sudden jumps
-        s_filtered_mv = (s_filtered_mv * 7 + mv) / 8;
-    }
-    mv_for_percent = s_filtered_mv;
-#elif CONFIG_USE_TDECK
-    // T-Deck: apply filtering for stable readings like Cardputer
-    if (s_filtered_mv < 0) {
-        s_filtered_mv = mv;
-    } else {
-        // Moderate smoothing for T-Deck to balance responsiveness and stability
-        s_filtered_mv = (s_filtered_mv * 6 + mv * 2) / 8;
-    }
-    mv_for_percent = s_filtered_mv;
-#endif
-
-    // Map measured voltage to a percentage
-#ifdef CONFIG_USE_CARDPUTER
-    percent = cardputer_voltage_to_percent(mv_for_percent);
-#elif CONFIG_USE_TDECK
-    percent = tdeck_voltage_to_percent(mv_for_percent);
-#else
-    const int min_mv = 3300;
-    const int max_mv = 4200;
-    if (mv_for_percent <= min_mv) {
-        percent = 0;
-    } else if (mv_for_percent >= max_mv) {
-        percent = 100;
-    } else {
-        percent = (uint8_t)(((mv_for_percent - min_mv) * 100) / (max_mv - min_mv));
-    }
-#endif
-
-#ifdef CONFIG_USE_CARDPUTER
-    if (s_display_percent < 0) {
-        s_display_percent = percent;
-    } else {
-        int diff = percent - s_display_percent;
-        int threshold = _isCharging ? 4 : 3;
-        if (diff >= threshold) {
-            s_display_percent++;
-        } else if (diff <= -threshold) {
-            s_display_percent--;
-        }
-        if (s_display_percent < 0) s_display_percent = 0;
-        if (s_display_percent > 100) s_display_percent = 100;
-    }
-    percent = (uint8_t)s_display_percent;
-#elif CONFIG_USE_TDECK
-    // T-Deck: apply gradual display changes to prevent sudden jumps
-    if (s_display_percent < 0) {
-        s_display_percent = percent;
-    } else {
-        int diff = percent - s_display_percent;
-        int threshold = _isCharging ? 5 : 3;
-        if (diff >= threshold) {
-            s_display_percent++;
-        } else if (diff <= -threshold) {
-            s_display_percent--;
-        }
-        if (s_display_percent < 0) s_display_percent = 0;
-        if (s_display_percent > 100) s_display_percent = 100;
-    }
-    percent = (uint8_t)s_display_percent;
-#endif
-
-    ESP_LOGD(TAG, "Battery percentage: %d%%", percent);
-    return percent;
-}
-bool isCharging() { return _isCharging; }
-
-#endif
 
 /**
- * @brief Get battery information from available sources
- * @param percentage Pointer to store battery percentage
- * @param is_charging Pointer to store charging status
+ * @brief Battery info for the status bar; all backends live in battery_manager.
  * @return true if battery data is available, false otherwise
  */
 static bool get_battery_info(uint8_t *percentage, bool *is_charging) {
-    bool result = false;
-    if (!percentage || !is_charging) {
-        return result;
-    }
-
-    // Cache for non-fuel-gauge configurations to avoid I2C access in low mode
-    static uint8_t last_pct_cache = 0;
-    static bool last_chg_cache = false;
-    static bool last_valid_cache = false;
-
-    // When low-I2C mode is active, avoid any fresh I2C queries here.
-    // For fuel-gauge configs, we already maintain cached values via the background task.
-    if (g_low_i2c_mode) {
-#ifdef CONFIG_HAS_FUEL_GAUGE
-        if (g_cached_batt_valid) {
-            *percentage = g_cached_batt_percent;
-            *is_charging = g_cached_batt_charging;
-            return true;
-        }
-#endif
-        if (last_valid_cache) {
-            *percentage = last_pct_cache;
-            *is_charging = last_chg_cache;
-            return true;
-        }
-        return false;
-    }
-
-#ifdef CONFIG_HAS_FUEL_GAUGE
-    // Lazy poll on UI thread with rate limiting (every 5s)
-    static int64_t last_poll_time = 0;
-    int64_t now = esp_timer_get_time() / 1000;
-    if (!g_cached_batt_valid || (now - last_poll_time > 5000)) {
-        fuel_gauge_data_t fg;
-        if (fuel_gauge_manager_get_data(&fg)) {
-            g_cached_batt_percent = (uint8_t)fg.percentage;
-            g_cached_batt_charging = fg.is_charging;
-            g_cached_batt_valid = true;
-            last_poll_time = now;
-        }
-    }
-
-    if (g_cached_batt_valid) {
-        *percentage = g_cached_batt_percent;
-        *is_charging = g_cached_batt_charging;
-        result = true;
-    }
-#elif defined(CONFIG_HAS_BATTERY)
-    // Poll on a fixed interval even after failure; UI redraws must not flood
-    // the console or publish an uninitialized percentage when the PMU is absent.
-    static int64_t last_axp_poll_ms = -5000;
-    int64_t now_ms = esp_timer_get_time() / 1000;
-    if (now_ms - last_axp_poll_ms >= 5000) {
-        last_axp_poll_ms = now_ms;
-        if (axp2101_get_power_level(percentage) == ESP_OK) {
-            *is_charging = axp202_is_charging();
-            result = true;
-        }
-    }
-    if (!result && last_valid_cache) {
-        *percentage = last_pct_cache;
-        *is_charging = last_chg_cache;
-        result = true;
-    }
-#elif defined(CONFIG_HAS_BATTERY_ADC)
-    // Fallback to ADC
-    int battery_percent = getBattery();
-    if (battery_percent >= 0) {
-        *percentage = (uint8_t)battery_percent;
-        *is_charging = isCharging();
-        result = true;
-    } else {
-        ESP_LOGW(TAG, "ADC battery read failed, using cached values if available");
-        if (last_valid_cache) {
-            *percentage = last_pct_cache;
-            *is_charging = last_chg_cache;
-            result = true;
-        }
-    }
-#endif
-    ESP_LOGD(TAG, "get_battery_info %d%%, Charging: %d", *percentage, *is_charging);
-
-    // Update local cache for non-fuel-gauge builds
-#if !defined(CONFIG_HAS_FUEL_GAUGE)
-    if (result) {
-        last_pct_cache = *percentage;
-        last_chg_cache = *is_charging;
-        last_valid_cache = true;
-    }
-#endif
-
-    return result;
+    if (!percentage || !is_charging) return false;
+    battery_status_t st;
+    if (!battery_manager_get(&st)) return false;
+    *percentage = st.percent;
+    *is_charging = st.charging;
+    return true;
 }
 
 void display_manager_set_low_i2c_mode(bool on) {
-    g_low_i2c_mode = on;
+    battery_manager_set_low_i2c_mode(on);
 }
 
 static void slide_set_x(void *var, int32_t v) {
@@ -1620,7 +1203,7 @@ static void status_update_cb(lv_timer_t *timer) {
   // WiFi icon should always be visible - pass true for wifi_enabled
   // Color will be determined by AP state and power saving mode in update_status_bar
   update_status_bar(true, HasBluetooth, sd_card_manager.is_initialized,
-                    battery_percentage, settings_get_power_save_enabled(&G_Settings), server_running, is_charging);
+                    battery_percentage, power_manager_get_effective_profile() == POWER_PROFILE_SAVER, server_running, is_charging);
 
   if (level_label && lv_obj_is_valid(level_label) && level_text[0] != '\0') {
     if (strcmp(lv_label_get_text(level_label), level_text) != 0) {
@@ -1903,7 +1486,7 @@ void display_manager_add_status_bar(const char *CurrentMenuName) {
   // WiFi icon should always be visible - pass true for wifi_enabled
   // Color will be determined by AP state and power saving mode in update_status_bar
   update_status_bar(true, HasBluetooth, sd_card_manager.is_initialized,
-                    battery_percentage, settings_get_power_save_enabled(&G_Settings), server_running, is_charging);
+                    battery_percentage, power_manager_get_effective_profile() == POWER_PROFILE_SAVER, server_running, is_charging);
   if (!status_timer_initialized) {
     status_update_timer = lv_timer_create(status_update_cb, 500, NULL);
     status_timer_initialized = true;
@@ -1942,50 +1525,78 @@ void display_manager_restore_status_bar(void) {
   lv_obj_move_foreground(status_bar);
 }
 
-void apply_power_management_config(bool power_save_enabled) {
-  esp_pm_config_t pm_cfg = {
-      .max_freq_mhz = power_save_enabled ? 160 : CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,
-      .min_freq_mhz = power_save_enabled ? 80 : CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,
-#ifdef CONFIG_USE_TDECK
-      .light_sleep_enable = false, // Disable light sleep for T-Deck to prevent trackball issues
-#else
-      .light_sleep_enable = power_save_enabled, // Keep light sleep for other configs
-#endif
-  };
-  rgb_manager_power_transition_begin();
-  esp_err_t pm_err = esp_pm_configure(&pm_cfg);
-  if (pm_err != ESP_OK) {
-    ESP_LOGW(TAG, "pm configure failed: %s", esp_err_to_name(pm_err));
-  }
-  rgb_manager_power_transition_end();
-
+/* Runs after every power profile (re)apply. The backlight LEDC timer must be re-latched on
+ * RC_FAST after the clock tree changes or the PWM drifts/stalls across light sleep. */
+static void display_on_power_profile(power_profile_t effective, void *ctx) {
+  (void)ctx;
 #if defined(CONFIG_LV_DISP_BACKLIGHT_PWM) && !defined(CONFIG_IS_ATOMS3R)
-  // Reconfigure LEDC timer after power management changes to maintain stable PWM
   ledc_timer_config_t ledc_timer = {
       .speed_mode = LEDC_LOW_SPEED_MODE,
       .duty_resolution = LEDC_TIMER_10_BIT,
       .timer_num = BACKLIGHT_TIMER,
 #ifdef CONFIG_USE_ATOMS3R_BUTTON
-       .freq_hz = 500, // AtomS3R LP5562 backlight recommendation
+      .freq_hz = 500, // AtomS3R LP5562 backlight recommendation
 #else
-       .freq_hz = 5000, // 5 kHz
+      .freq_hz = 5000, // 5 kHz
 #endif
       .clk_cfg = LEDC_USE_RC_FAST_CLK, // Auto-select best clock for current power mode
   };
   esp_err_t timer_err = ledc_timer_config(&ledc_timer);
   uint32_t current_duty = ledc_get_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
-  ESP_LOGI(TAG, "LEDC timer reconfigured for power save mode: %s, timer_err=%s, current_duty=%lu",
-           power_save_enabled ? "enabled" : "disabled", esp_err_to_name(timer_err), (unsigned long)current_duty);
+  ESP_LOGI(TAG, "LEDC timer re-latched for profile %s: %s, duty=%lu", power_profile_name(effective),
+           esp_err_to_name(timer_err), (unsigned long)current_duty);
+#else
+  (void)effective;
 #endif
+}
 
-  // control ap based on power save mode and AP enabled setting
-  if (!wifi_manager_is_evil_portal_active()) {
-    if (power_save_enabled) {
-      ap_manager_stop_services();
-    } else if (settings_get_ap_enabled(&G_Settings)) {
-      (void)ap_manager_restore_after_attack("power save off");
-    }
+/* Deep-sleep shutdown: dark panel with the backlight pin latched off, LEDs off. */
+static void display_sleep_prepare(power_sleep_kind_t kind, void *ctx) {
+  (void)ctx;
+  if (kind != POWER_SLEEP_DEEP) return;
+  display_manager_set_backlight_raw(0);
+#ifdef CONFIG_LV_DISP_PIN_BCKL
+  if (CONFIG_LV_DISP_PIN_BCKL >= 0) gpio_hold_en(CONFIG_LV_DISP_PIN_BCKL);
+#endif
+}
+
+static void display_sleep_restore(power_sleep_kind_t kind, void *ctx) {
+  (void)ctx;
+  if (kind != POWER_SLEEP_DEEP) return;
+#ifdef CONFIG_LV_DISP_PIN_BCKL
+  if (CONFIG_LV_DISP_PIN_BCKL >= 0) gpio_hold_dis(CONFIG_LV_DISP_PIN_BCKL);
+#endif
+  set_backlight_brightness(100);
+}
+
+static void rgb_sleep_prepare(power_sleep_kind_t kind, void *ctx) {
+  (void)ctx;
+  if (kind != POWER_SLEEP_DEEP) return;
+  rgb_manager_set_color(&rgb_manager, -1, 0, 0, 0, false);
+  rgb_manager_power_transition_begin(); // clears the strip and parks the effect task
+}
+
+static void rgb_sleep_restore(power_sleep_kind_t kind, void *ctx) {
+  (void)ctx;
+  if (kind != POWER_SLEEP_DEEP) return;
+  rgb_manager_power_transition_end();
+}
+
+static void low_battery_toast_cb(void *arg) {
+  battery_level_t level = (battery_level_t)(intptr_t)arg;
+  if (level == BATTERY_LEVEL_CRITICAL) {
+    toast_show_duration("Battery critical - charge now", TOAST_ERROR, 4000);
+  } else if (level == BATTERY_LEVEL_LOW) {
+    toast_show_duration("Battery low - saver on", TOAST_WARN, 3000);
   }
+}
+
+static void display_on_battery_level(battery_level_t level, const battery_status_t *st, void *ctx) {
+  (void)st;
+  (void)ctx;
+  if (level == BATTERY_LEVEL_NORMAL) return;
+  // May fire on any task that polled the battery; the toast must run on the LVGL task.
+  (void)display_manager_run_on_lvgl_nowait(low_battery_toast_cb, (void *)(intptr_t)level);
 }
 
 #ifdef CONFIG_Waveshare_LCD
@@ -2041,19 +1652,17 @@ void display_manager_init(void) {
 #endif
 
   ESP_LOGI(TAG, "display_manager: configuring power management...");
-  esp_pm_config_t pm_cfg = {
-    .max_freq_mhz = CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,
-    .min_freq_mhz = 80,
-    .light_sleep_enable = true,
-  };
-  esp_err_t pm_err = esp_pm_configure(&pm_cfg);
-  if (pm_err != ESP_OK) {
-    ESP_LOGW(TAG, "pm configure failed: %s", esp_err_to_name(pm_err));
-  }
-  ESP_LOGI(TAG, "display_manager: power management configured, free internal RAM: %d bytes", 
+  (void)power_manager_add_profile_listener(display_on_power_profile, NULL);
+  (void)battery_manager_add_level_listener(display_on_battery_level, NULL);
+  power_manager_init();
+  // Hooks run in reverse registration order and power_manager_init registered wifi/sd, so
+  // these go last-registered-first-quiesced: panel dark, LEDs off, then SD, then radios.
+  const power_sleep_hook_t rgb_hook = {.name = "rgb", .prepare = rgb_sleep_prepare, .restore = rgb_sleep_restore};
+  const power_sleep_hook_t display_hook = {.name = "display", .prepare = display_sleep_prepare, .restore = display_sleep_restore};
+  (void)power_manager_register_sleep_hook(&rgb_hook);
+  (void)power_manager_register_sleep_hook(&display_hook);
+  ESP_LOGI(TAG, "display_manager: power management configured, free internal RAM: %d bytes",
            (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
-
-  apply_power_management_config(settings_get_power_save_enabled(&G_Settings));
 
   // Configure LEDC timer for backlight (only for PWM boards or TDisplay S3)
 #if defined(CONFIG_USE_TDISPLAY_S3) || (defined(CONFIG_LV_DISP_BACKLIGHT_PWM) && !defined(CONFIG_IS_ATOMS3R))
@@ -3693,13 +3302,9 @@ void display_manager_init_deferred_peripherals(void) {
   }
 #endif
 
-#ifdef CONFIG_HAS_FUEL_GAUGE
-  if (fuel_gauge_manager_init()) {
-    ESP_LOGI(TAG, "Fuel gauge manager initialized successfully");
-  } else {
-    ESP_LOGW(TAG, "Failed to initialize fuel gauge manager");
+  if (battery_manager_present()) {
+    if (!battery_manager_init()) ESP_LOGW(TAG, "battery backend failed to initialize");
   }
-#endif
 }
 
 /* While an overlay lock is up, the shared status bar (normally on lv_scr_act)
@@ -4510,59 +4115,23 @@ void hardware_input_task(void *pvParameters) {
             ESP_LOGI("DeepSleep", "IO6 held for 4 seconds, preparing for deep sleep");
             exit_button.deep_sleep_triggered = true;
 
-            // Pull IO15 low before sleep (TEmbed C1101 power control)
-            gpio_set_level(15, 0);
-            ESP_LOGI("DeepSleep", "IO15 pulled low");
-
-            ESP_LOGI("DeepSleep", "Configuring wake-up source");
-
-            // Disable all wake-up sources first
-            esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
-
-            // Temporarily disable the GPIO to avoid immediate wake-up
-            gpio_config_t io_conf = {
-                .pin_bit_mask = (1ULL << 6),
-                .mode = GPIO_MODE_DISABLE,  // Temporarily disable the GPIO
-                .pull_up_en = GPIO_PULLUP_DISABLE,
-                .pull_down_en = GPIO_PULLDOWN_DISABLE,
-                .intr_type = GPIO_INTR_DISABLE
-            };
-            gpio_config(&io_conf);
-
             error_popup_create_persistent("SHUTTING DOWN");
-            // Wait a couple of seconds to ignore any button releases
-            ESP_LOGI("DeepSleep", "Waiting 4 seconds before sleep to ignore button release...");
-            vTaskDelay(pdMS_TO_TICKS(4000)); // 4 second delay
-
-            // Re-enable the GPIO with proper configuration for wake-up
-            io_conf.mode = GPIO_MODE_INPUT;
-            io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
-            gpio_config(&io_conf);
-
-#if SOC_PM_SUPPORT_EXT0_WAKEUP
-            esp_err_t ret = esp_sleep_enable_ext0_wakeup(GPIO_NUM_6, 0);
-#elif SOC_PM_SUPPORT_EXT1_WAKEUP
-            esp_err_t ret = esp_sleep_enable_ext1_wakeup_io(1ULL << GPIO_NUM_6, ESP_EXT1_WAKEUP_ANY_LOW);
-#else
-            esp_err_t ret = ESP_ERR_NOT_SUPPORTED;
-#endif
-            if (ret != ESP_OK) {
-                ESP_LOGE("DeepSleep", "Failed to configure wake-up source: %s", esp_err_to_name(ret));
-                exit_button.deep_sleep_triggered = false;
-                gpio_set_level(15, 1); // Restore IO15 high
-                return;
+            // power_manager waits for the button to be released (settle + idle check), runs the
+            // sleep hooks (backlight/LEDs/SD/radios), latches the IO15 rail low and arms the wake pin.
+            power_deep_sleep_cfg_t sleep_cfg = power_manager_board_sleep_cfg();
+            if (sleep_cfg.wake_gpio == POWER_GPIO_NONE) {
+                // Config predates the Kconfig wake wiring; keep the T-Embed C1101 defaults.
+                sleep_cfg.wake_gpio = 6;
+                sleep_cfg.wake_level = 0;
+                sleep_cfg.power_rail_gpio = 15;
             }
-            ESP_LOGI("DeepSleep", "Wake-up source configured for new button press");
-
-            ESP_LOGI("DeepSleep", "Entering deep sleep now...");
-            vTaskDelay(pdMS_TO_TICKS(200)); // Give time for log to print
-
-            // Final check of GPIO state before sleep
-            ESP_LOGI("DeepSleep", "Final GPIO6 state: %d", gpio_get_level(6));
-            ESP_LOGI("DeepSleep", "Final GPIO15 state: %d", gpio_get_level(15));
-
-            // Enter deep sleep
-            esp_deep_sleep_start();
+            sleep_cfg.settle_ms = 4000;
+            esp_err_t sleep_err = power_manager_deep_sleep(&sleep_cfg);
+            // Only reached when shutdown was refused or aborted; stay up instead of killing this task.
+            ESP_LOGE("DeepSleep", "shutdown failed: %s", esp_err_to_name(sleep_err));
+            error_popup_destroy();
+            error_popup_create("Shutdown failed");
+            exit_button.deep_sleep_triggered = false;
         }
         } else {
             // Reset deep sleep trigger when button is released

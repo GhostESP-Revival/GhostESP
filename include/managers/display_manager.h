@@ -174,7 +174,6 @@ View *display_manager_get_lockscreen_return_view(void);
  */
 void display_manager_clear_lockscreen_return_view(void);
 
-void apply_power_management_config(bool power_save_enabled);
 
 void display_manager_update_status_bar_color(void);
 
