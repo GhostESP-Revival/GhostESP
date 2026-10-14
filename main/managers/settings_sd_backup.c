@@ -143,6 +143,9 @@ static cJSON *settings_to_json_object(const FSettings *s) {
   cJSON_AddNumberToObject(o, "terminal_text_color", (double)s->terminal_text_color);
   cJSON_AddNumberToObject(o, "terminal_font_size", (double)s->terminal_font_size);
   cJSON_AddBoolToObject(o, "invert_colors", s->invert_colors);
+#ifdef CONFIG_BANSHEE_LITE_C5
+  cJSON_AddBoolToObject(o, "auto_flip_enabled", s->auto_flip_enabled);
+#endif
   cJSON_AddBoolToObject(o, "web_auth_enabled", s->web_auth_enabled);
   cJSON_AddBoolToObject(o, "webui_restrict_to_ap", s->webui_restrict_to_ap);
   cJSON_AddNumberToObject(o, "esp_comm_tx_pin", (double)s->esp_comm_tx_pin);
@@ -286,6 +289,11 @@ static void json_apply_to_settings(FSettings *s, const cJSON *root) {
   if (cJSON_GetObjectItemCaseSensitive(root, "invert_colors")) {
     s->invert_colors = jget_bool(root, "invert_colors", s->invert_colors);
   }
+#ifdef CONFIG_BANSHEE_LITE_C5
+  if (cJSON_GetObjectItemCaseSensitive(root, "auto_flip_enabled")) {
+    s->auto_flip_enabled = jget_bool(root, "auto_flip_enabled", s->auto_flip_enabled);
+  }
+#endif
   if (cJSON_GetObjectItemCaseSensitive(root, "web_auth_enabled")) {
     s->web_auth_enabled = jget_bool(root, "web_auth_enabled", s->web_auth_enabled);
   }
