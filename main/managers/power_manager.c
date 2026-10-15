@@ -401,7 +401,7 @@ bool power_manager_register_sleep_hook(const power_sleep_hook_t *hook) {
     return added;
 }
 
-static void run_prepare_hooks(power_sleep_kind_t kind) {
+__attribute__((unused)) static void run_prepare_hooks(power_sleep_kind_t kind) {
     for (int i = s_hook_count - 1; i >= 0; i--) {
         if (!s_hooks[i].prepare) continue;
         int64_t t0 = esp_timer_get_time();
@@ -415,7 +415,7 @@ static void run_prepare_hooks(power_sleep_kind_t kind) {
     }
 }
 
-static void run_restore_hooks(power_sleep_kind_t kind) {
+__attribute__((unused)) static void run_restore_hooks(power_sleep_kind_t kind) {
     for (int i = 0; i < s_hook_count; i++) {
         if (s_hooks[i].restore) s_hooks[i].restore(kind, s_hooks[i].ctx);
     }
@@ -424,6 +424,8 @@ static void run_restore_hooks(power_sleep_kind_t kind) {
 /* ------------------------------------------------------------------ */
 /* Deep sleep                                                          */
 /* ------------------------------------------------------------------ */
+
+#if CONFIG_POWER_SLEEP_SUPPORT
 
 // Wake pin must read its idle level this long before we arm it, or we would wake instantly.
 #define WAKE_IDLE_STABLE_MS 50
@@ -575,6 +577,16 @@ esp_err_t power_manager_deep_sleep(const power_deep_sleep_cfg_t *cfg) {
     return ESP_FAIL;
 }
 
+#else /* !CONFIG_POWER_SLEEP_SUPPORT */
+
+esp_err_t power_manager_deep_sleep(const power_deep_sleep_cfg_t *cfg) {
+    (void)cfg;
+    ESP_LOGW(TAG, "deep sleep not built into this config (CONFIG_POWER_SLEEP_SUPPORT=n)");
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+#endif /* CONFIG_POWER_SLEEP_SUPPORT */
+
 power_deep_sleep_cfg_t power_manager_board_sleep_cfg(void) {
     power_deep_sleep_cfg_t cfg = {
         .wake_gpio = CONFIG_POWER_WAKE_GPIO,
@@ -610,6 +622,7 @@ uint32_t power_manager_wake_causes(void) {
 #endif
 }
 
+#if CONFIG_POWER_SLEEP_SUPPORT
 esp_err_t power_manager_light_sleep_timed(uint32_t ms, uint32_t *slept_ms, uint32_t *wake_causes) {
     if (ms == 0) return ESP_ERR_INVALID_ARG;
     run_prepare_hooks(POWER_SLEEP_LIGHT);
@@ -625,6 +638,17 @@ esp_err_t power_manager_light_sleep_timed(uint32_t ms, uint32_t *slept_ms, uint3
     if (wake_causes) *wake_causes = causes;
     return err;
 }
+
+#else /* !CONFIG_POWER_SLEEP_SUPPORT */
+
+esp_err_t power_manager_light_sleep_timed(uint32_t ms, uint32_t *slept_ms, uint32_t *wake_causes) {
+    (void)ms;
+    if (slept_ms) *slept_ms = 0;
+    if (wake_causes) *wake_causes = 0;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+#endif /* CONFIG_POWER_SLEEP_SUPPORT */
 
 bool power_manager_pm_compiled(void) {
 #if CONFIG_PM_ENABLE

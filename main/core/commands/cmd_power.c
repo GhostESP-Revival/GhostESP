@@ -88,7 +88,9 @@ void handle_power_cmd(int argc, char **argv) {
         esp_err_t err = power_manager_light_sleep_timed((uint32_t)sec * 1000u, &slept_ms, &causes);
         glog("light sleep result: %s, slept %u ms of %d ms, wake causes 0x%x\n", esp_err_to_name(err),
              (unsigned)slept_ms, sec * 1000, (unsigned)causes);
-        if (err != ESP_OK) {
+        if (err == ESP_ERR_NOT_SUPPORTED) {
+            glog("sleep entry is not built into this config (CONFIG_POWER_SLEEP_SUPPORT=n)\n");
+        } else if (err != ESP_OK) {
             glog("FAIL: the SoC refused light sleep (a PM lock or peripheral is blocking it)\n");
         } else if (slept_ms + 500 < (uint32_t)sec * 1000u) {
             glog("WARN: woke early - an interrupt source is waking the board; check wake cause\n");

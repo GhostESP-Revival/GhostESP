@@ -595,6 +595,16 @@ menu "Ghost ESP Options"
                 config gets CPU frequency scaling only until someone has verified it with
                 the 'power sleeptest' command and set this.
 
+        config POWER_SLEEP_SUPPORT
+            bool "Include timed light sleep / deep sleep entry in the power manager"
+            default n if IDF_TARGET_ESP32
+            default y
+            help
+                Links ESP-IDF's sleep entry code (esp_light_sleep_start / esp_deep_sleep_start),
+                which carries about 5KB of IRAM. Classic ESP32 has very little IRAM left once
+                Wi-Fi + BLE are in, and none of those boards sleep, so it defaults off there;
+                the sleep entry points then return ESP_ERR_NOT_SUPPORTED.
+
         config POWER_WAKE_GPIO
             int "Deep sleep wake GPIO (-1 = none)"
             default -1
