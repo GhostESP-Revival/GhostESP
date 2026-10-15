@@ -154,8 +154,15 @@ typedef struct {
     char* dynamic_data;
 } comm_command_t;
 
+#if CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY
 #define COMM_TX_QUEUE_DEPTH 16
 #define COMM_RX_QUEUE_DEPTH 64
+#else
+// The queue storage below is plain internal DRAM on targets without PSRAM-backed BSS
+// (e.g. ESP32-S2). Halve the depths there so the static RAM fits (~2.5KB saved).
+#define COMM_TX_QUEUE_DEPTH 8
+#define COMM_RX_QUEUE_DEPTH 32
+#endif
 #define COMM_COMMAND_QUEUE_DEPTH 4
 
 EXT_RAM_BSS_ATTR static uint8_t s_tx_queue_storage[COMM_TX_QUEUE_DEPTH * sizeof(comm_packet_t)];
