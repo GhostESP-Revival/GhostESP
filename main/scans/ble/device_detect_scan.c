@@ -51,6 +51,16 @@
 #define UUID_ASHA         0xFDF0
 #define UUID_GAEN         0xFD6F
 
+// Meta glasses (Ray-Ban Meta / Snap Spectacles): 0xFD5F is the Meta member
+// UUID; the Meta/Luxottica/Snap company IDs are SIG-assigned. Google Find My
+// Device (FMDN) trackers advertise service data under Google's 0xFEAA.
+#define UUID_META_GLASSES    0xFD5F
+#define UUID_GOOGLE_FEAA     0xFEAA
+#define META_COMPANY_ID      0x01AB
+#define META_TECH_COMPANY_ID 0x058E
+#define LUXOTTICA_COMPANY_ID 0x0D53
+#define SNAP_COMPANY_ID      0x03C2
+
 #define BLE_AD_TYPE_16BIT_UUID_COMPLETE  0x03
 #define BLE_AD_TYPE_16BIT_UUID_PARTIAL   0x02
 #define BLE_AD_TYPE_32BIT_UUID_COMPLETE  0x05
@@ -390,6 +400,10 @@ const char *ble_device_detect_type_to_string(BLEDetectDeviceType type) {
         return "Exposure Beacon";
     case BLE_DETECT_DEVICE_CHAMELEON:
         return "Chameleon";
+    case BLE_DETECT_DEVICE_META_GLASSES:
+        return "Meta Glasses";
+    case BLE_DETECT_DEVICE_GOOGLE_TAG:
+        return "Google Tag";
     default:
         return "BLE Device";
     }
@@ -514,6 +528,16 @@ static void ble_device_detect_callback(struct ble_gap_event *event, size_t len) 
     } else if (adv_has_uuid16(event->disc.data, event->disc.length_data, UUID_GAEN)) {
         detected_type = BLE_DETECT_DEVICE_GAEN;
         detected_subtype = "Exposure";
+    } else if (adv_has_uuid16(event->disc.data, event->disc.length_data, UUID_META_GLASSES) ||
+               adv_has_company(event->disc.data, event->disc.length_data, META_COMPANY_ID) ||
+               adv_has_company(event->disc.data, event->disc.length_data, META_TECH_COMPANY_ID) ||
+               adv_has_company(event->disc.data, event->disc.length_data, LUXOTTICA_COMPANY_ID) ||
+               adv_has_company(event->disc.data, event->disc.length_data, SNAP_COMPANY_ID)) {
+        detected_type = BLE_DETECT_DEVICE_META_GLASSES;
+        detected_subtype = "Glasses";
+    } else if (adv_has_uuid16(event->disc.data, event->disc.length_data, UUID_GOOGLE_FEAA)) {
+        detected_type = BLE_DETECT_DEVICE_GOOGLE_TAG;
+        detected_subtype = "Find My";
     } else if (adv_name[0] != '\0' && strstr(adv_name, "ChameleonUltra") != NULL) {
         detected_type = BLE_DETECT_DEVICE_CHAMELEON;
         detected_subtype = "Ultra";

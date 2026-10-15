@@ -92,7 +92,10 @@ typedef enum {
   STATEMENT_RMC,         /*!< RMC */
   STATEMENT_GSV,         /*!< GSV */
   STATEMENT_GLL,         /*!< GLL */
-  STATEMENT_VTG          /*!< VTG */
+  STATEMENT_VTG,         /*!< VTG */
+  STATEMENT_ZDA,         /*!< ZDA */
+  STATEMENT_GST,         /*!< GST */
+  STATEMENT_GBS          /*!< GBS */
 } nmea_statement_t;
 
 /**
@@ -122,6 +125,32 @@ typedef struct {
   float variation; /*!< Magnetic variation */
 } gps_t;
 
+/*!< Maximum number of concurrent NMEA talkers (constellations) tracked. */
+#define GPS_MAX_TALKERS (8)
+/*!< A talker's contribution is ignored once it stops emitting for this long. */
+#define GPS_TALKER_STALE_MS (5000)
+
+/**
+ * @brief Per-talker state used to arbitrate multi-constellation NMEA streams.
+ *
+ * A multi-GNSS receiver emits GSV/GSA/GGA/RMC sentences once per constellation
+ * (GPGSV, GLGSV, GAGSV, GBGSV, ...). Writing those straight into a single gps_t
+ * makes sats/fix_mode oscillate as each talker's sentence arrives. Instead each
+ * talker keeps its own last reading and the published value is derived across
+ * recently-seen talkers.
+ */
+typedef struct {
+  char id[2];            /*!< Talker ID, e.g. "GP" */
+  bool used;             /*!< Slot has been claimed */
+  uint32_t tick;         /*!< Tick of last sentence from this talker */
+  uint8_t sats_in_view;  /*!< Satellites in view reported by this talker */
+  uint8_t sats_in_use;   /*!< Satellites in use reported by this talker */
+  gps_fix_mode_t fix_mode; /*!< GSA fix mode reported by this talker */
+  bool has_gsa;          /*!< Talker has reported a GSA fix mode */
+  bool valid;            /*!< Validity reported by this talker */
+  bool has_rmc_or_gll;   /*!< RMC/GLL seen, so GGA must not clear validity */
+} gps_talker_state_t;
+
 /**
  * @brief GPS parser library runtime structure
  */
@@ -137,6 +166,9 @@ typedef struct {
   uint32_t all_statements;  /*!< All statements mask */
   char item_str[NMEA_MAX_STATEMENT_ITEM_LENGTH]; /*!< Current item */
   gps_t parent;                                  /*!< Parent class */
+  gps_t committed;                               /*!< Last CRC-validated fix */
+  gps_talker_state_t talkers[GPS_MAX_TALKERS];   /*!< Per-constellation state */
+  char cur_talker[3];                            /*!< Talker of current sentence */
   uart_port_t uart_port;                         /*!< Uart port number */
   uint8_t *buffer;                               /*!< Runtime buffer */
   esp_event_loop_handle_t event_loop_hdl;        /*!< Event loop handle */
@@ -254,6 +286,28 @@ esp_err_t nmea_parser_add_handler(nmea_parser_handle_t nmea_hdl,
  */
 esp_err_t nmea_parser_remove_handler(nmea_parser_handle_t nmea_hdl,
                                      esp_event_handler_t event_handler);
+
+/**
+ * @brief Record a parsed statement for its talker and republish arbitrated
+ *        multi-constellation fields (sats_in_view/use, fix_mode, valid).
+ *
+ * Call after the sentence has been fully parsed into gps->parent and its
+ * checksum verified. For a single-talker stream this does not change the values.
+ *
+ * @param gps     parser object whose parent has just been updated
+ * @param talker  two-character talker id (e.g. "GP"); empty string is ignored
+ * @param stmt    which statement was parsed
+ */
+void gps_tracker_note_statement(esp_gps_t *gps, const char *talker,
+                                nmea_statement_t stmt);
+
+/**
+ * @brief Whether a talker should own the shared satellite-description list.
+ *
+ * With multiple constellations only one talker's satellite list is retained to
+ * avoid slot collisions; GN (combined) wins, then GP, then any single talker.
+ */
+bool gps_tracker_is_primary_talker(const esp_gps_t *gps, const char *talker);
 
 // Helper functions
 static inline uint16_t gps_get_absolute_year(uint16_t year_offset) {

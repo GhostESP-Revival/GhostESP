@@ -9,6 +9,7 @@
 #include "core/callbacks.h"
 #include "core/esp_comm_manager.h"
 #include "core/glog.h"
+#include "core/utils.h"
 #include "gui/design_tokens.h"
 #include "gui/touch_bar.h"
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
@@ -539,6 +540,7 @@ static void update_display_cb(lv_timer_t *timer) {
         }
         char speed_buf[16];
         snprintf(speed_buf, sizeof(speed_buf), "%.0f", (double)speed_kmh);
+        privacy_redact_text(speed_buf);
         lv_label_set_text(lbl_speed, speed_buf);
     }
     
@@ -547,6 +549,7 @@ static void update_display_cb(lv_timer_t *timer) {
             int heading = ((int)gps->cog + 360) % 360;
             char heading_buf[8];
             snprintf(heading_buf, sizeof(heading_buf), "%d", heading);
+            privacy_redact_text(heading_buf);
             lv_label_set_text(lbl_heading, heading_buf);
             
             if (compass_needle) {
@@ -563,6 +566,7 @@ static void update_display_cb(lv_timer_t *timer) {
         format_coordinate(gps->latitude, true, lat_str, sizeof(lat_str));
         format_coordinate(gps->longitude, false, lon_str, sizeof(lon_str));
         snprintf(coords_buf, sizeof(coords_buf), "%s  %s", lat_str, lon_str);
+        privacy_redact_text(coords_buf);
         lv_label_set_text(lbl_coords, coords_buf);
     } else if (lbl_coords) {
         lv_label_set_text(lbl_coords, "---'N  ---'E");
@@ -573,6 +577,7 @@ static void update_display_cb(lv_timer_t *timer) {
         const char *accuracy = get_accuracy_string(hdop);
         char acc_buf[32];
         snprintf(acc_buf, sizeof(acc_buf), "%.1f %s", (double)hdop, accuracy);
+        privacy_redact_text(acc_buf);
         lv_label_set_text(lbl_accuracy, acc_buf);
     }
     

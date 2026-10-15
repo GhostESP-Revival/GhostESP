@@ -4,6 +4,29 @@
 Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A trailing `@handle` credits a guest contributor for that specific line. "Ported from / adapted from" credits the upstream source a feature was based on, not GhostESP authorship.
 
 
+## v2.2.2
+
+### Added
+
+- Added NEW Sentry view that fuses the Flock camera detector, BLE device-detect and NEW WiFi camera/ALPR/Ring/Axon detectors
+- BLE device detect scan now recognises Meta glasses and Google Find My tags
+- Added slide-to-unlock for the no-PIN lockscreen on touchscreen devices and enabled it by default
+- Added Privacy Mode which redacts third-party SSIDs, MAC addresses, BLE device names, LAN hostnames, GPS coordinates and LoRa/Mesh node identities
+
+### Fixed
+
+- Fixed a heap buffer overflow in the Sinkhole blocklist when the sinkhole folder held 9 or more `.txt` files
+- Fixed GPS satellites-in-view/fix-mode/validity flickering on multi-constellation receivers
+- Fixed the GPS NMEA parser applying fields from sentences that fail their checksum
+- Fixed GPS fix detection on receivers that supply validity through GGA only, and added ZDA/GST/GBS sentence handling
+- Fixed GPS fixes being rejected on receivers that never emit GSA
+- Fixed the setup wizard freezing on CYD boards when a long region/option list exhausted the LVGL pool
+- Setup wizard lists now scroll with touch drag like the other native views
+- Fixed the DNS sinkhole blocklist picker duplicating or skipping entries across pages when `stats.txt` was present (it now pages over the visible list)
+- Fixed the shell command registry running out of slots, which silently dropped the newest commands on the largest board configs
+- Fixed Poltergeist IR transmission from the ESP
+- Fixed long inline IR payloads being truncated by the serial line buffer, which corrupted the transmitted signal
+
 ## v2.2.1
 
 ### Added

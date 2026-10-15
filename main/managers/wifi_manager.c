@@ -5221,6 +5221,10 @@ bool wifi_manager_karma_is_running(void) {
 // rssi tracking for selected ap and sta
 static volatile bool ap_tracking_active = false;
 static volatile bool sta_tracking_active = false;
+// When set, track any MGMT/DATA frame carrying the target MAC in addr1/2/3,
+// not just its beacons -- needed for promiscuous-detected devices (cameras,
+// clients) that are not the AP beaconing on their own BSSID.
+static volatile bool track_any_frame = false;
 static int8_t tracking_last_rssi = 0;
 static int8_t tracking_min_rssi = 0;
 static int8_t tracking_max_rssi = -127;
@@ -5259,11 +5263,18 @@ static void wifi_track_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     bool match = false;
 
     if (ap_tracking_active && strlen((const char *)selected_ap.ssid) > 0) {
-        // APs: beacons only (periodic, consistent rate/power). Probe
-        // responses and other MGMT at varying rates would add jitter.
-        // addr2 carries the BSSID on beacons.
-        if (is_mgmt && (hdr->frame_ctrl & WIFI_FC_TYPE_SUBTYPE_MASK) == WIFI_FC_BEACON &&
-            memcmp(hdr->addr2, selected_ap.bssid, 6) == 0) {
+        if (track_any_frame) {
+            // Any frame that carries the target MAC, either direction.
+            if (memcmp(hdr->addr1, selected_ap.bssid, 6) == 0 ||
+                memcmp(hdr->addr2, selected_ap.bssid, 6) == 0 ||
+                memcmp(hdr->addr3, selected_ap.bssid, 6) == 0) {
+                match = true;
+            }
+        } else if (is_mgmt && (hdr->frame_ctrl & WIFI_FC_TYPE_SUBTYPE_MASK) == WIFI_FC_BEACON &&
+                   memcmp(hdr->addr2, selected_ap.bssid, 6) == 0) {
+            // APs: beacons only (periodic, consistent rate/power). Probe
+            // responses and other MGMT at varying rates would add jitter.
+            // addr2 carries the BSSID on beacons.
             match = true;
         }
     }
@@ -5351,6 +5362,7 @@ void wifi_manager_track_ap(void) {
     tracking_last_rx_us = esp_timer_get_time();
     ap_tracking_active = true;
     sta_tracking_active = false;
+    track_any_frame = false;
     
     // set channel to ap's channel
     esp_wifi_set_channel(selected_ap.primary, WIFI_SECOND_CHAN_NONE);
@@ -5390,10 +5402,38 @@ void wifi_manager_track_sta(void) {
     tracking_last_rx_us = 0; // no station packet seen yet
     ap_tracking_active = false;
     sta_tracking_active = true;
+    track_any_frame = false;
     
     esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
     
     status_display_show_status("Track STA");
+    wifi_manager_start_monitor_mode(wifi_track_callback);
+}
+
+// Track an arbitrary BSSID directly, with no ap_scan entry required -- used to
+// track surveillance-camera/sniffer hits found by promiscuous scanning. The AP
+// fast path matches on selected_ap and reports its SSID, so a non-empty label
+// is stored there.
+void wifi_manager_track_bssid(const uint8_t bssid[6], uint8_t channel, const char *label) {
+    memcpy(selected_ap.bssid, bssid, 6);
+    selected_ap.primary = channel;
+    selected_ap.rssi = -100;
+    const char *nm = (label && label[0]) ? label : "tracked";
+    strncpy((char *)selected_ap.ssid, nm, sizeof(selected_ap.ssid) - 1);
+    selected_ap.ssid[sizeof(selected_ap.ssid) - 1] = '\0';
+
+    tracking_last_rssi = -100;
+    tracking_min_rssi = -100;
+    tracking_max_rssi = -127;
+    rssi_median_reset(&tracking_med);
+    tracking_last_rx_us = 0;
+    ap_tracking_active = true;
+    sta_tracking_active = false;
+    track_any_frame = true;
+
+    esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
+
+    status_display_show_status("Track");
     wifi_manager_start_monitor_mode(wifi_track_callback);
 }
 

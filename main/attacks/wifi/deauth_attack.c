@@ -23,6 +23,7 @@
 #include "managers/views/terminal_screen.h"
 #include "core/callbacks.h"
 #include "core/glog.h"
+#include "core/utils.h"
 #include "scans/wifi/station_scan.h"
 #include "scans/wifi/hop_profile.h"
 #include "scans/wifi/wifi_channels.h"
@@ -408,7 +409,9 @@ void deauth_attack_start(void) {
                      selected_aps_local[i].bssid[3], selected_aps_local[i].bssid[4], selected_aps_local[i].bssid[5]);
 #ifdef CONFIG_WITH_STATUS_DISPLAY
                 if (i == 0) {
-                    status_display_show_attack("Deauth", sanitized_ssid);
+                    char target_disp[33];
+                    privacy_redact_ssid_copy(sanitized_ssid, target_disp, sizeof(target_disp));
+                    status_display_show_attack("Deauth", target_disp);
                 }
 #endif
             }
@@ -417,7 +420,9 @@ void deauth_attack_start(void) {
             sanitize_ssid(selected_ap_local.ssid, sanitized_ssid, sizeof(sanitized_ssid));
             glog("Starting deauth attack on selected AP: %s\n", sanitized_ssid);
 #ifdef CONFIG_WITH_STATUS_DISPLAY
-            status_display_show_attack("Deauth", sanitized_ssid);
+            char target_disp[33];
+            privacy_redact_ssid_copy(sanitized_ssid, target_disp, sizeof(target_disp));
+            status_display_show_attack("Deauth", target_disp);
 #endif
         } else {
             glog("No AP selected. Select a target AP before starting deauth.\n");
@@ -796,7 +801,9 @@ void deauth_attack_start_handshake_deauth(void) {
         }
         glog("Starting Handshake+Deauth on station (AP: %s)\n", sanitized_ssid);
 #ifdef CONFIG_WITH_STATUS_DISPLAY
-        status_display_show_attack("HS+Deauth", sanitized_ssid);
+        char target_disp[33];
+        privacy_redact_ssid_copy(sanitized_ssid, target_disp, sizeof(target_disp));
+        status_display_show_attack("HS+Deauth", target_disp);
 #endif
     } else {
         extern wifi_ap_record_t selected_ap;
@@ -813,7 +820,11 @@ void deauth_attack_start_handshake_deauth(void) {
                 sanitize_ssid(selected_aps_local[i].ssid, sanitized_ssid, sizeof(sanitized_ssid));
                 glog("  [%d] %s\n", i, sanitized_ssid);
 #ifdef CONFIG_WITH_STATUS_DISPLAY
-                if (i == 0) status_display_show_attack("HS+Deauth", sanitized_ssid);
+                if (i == 0) {
+                    char target_disp[33];
+                    privacy_redact_ssid_copy(sanitized_ssid, target_disp, sizeof(target_disp));
+                    status_display_show_attack("HS+Deauth", target_disp);
+                }
 #endif
             }
         } else if (strlen((const char *)selected_ap_local.ssid) > 0) {
@@ -821,7 +832,9 @@ void deauth_attack_start_handshake_deauth(void) {
             sanitize_ssid(selected_ap_local.ssid, sanitized_ssid, sizeof(sanitized_ssid));
             glog("Starting Handshake+Deauth on: %s\n", sanitized_ssid);
 #ifdef CONFIG_WITH_STATUS_DISPLAY
-            status_display_show_attack("HS+Deauth", sanitized_ssid);
+            char target_disp[33];
+            privacy_redact_ssid_copy(sanitized_ssid, target_disp, sizeof(target_disp));
+            status_display_show_attack("HS+Deauth", target_disp);
 #endif
         }
     }

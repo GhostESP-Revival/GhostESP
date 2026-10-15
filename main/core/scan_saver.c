@@ -133,6 +133,9 @@ esp_err_t scan_file_open(scan_file_t *sf, const char *prefix, const char *extens
 void scan_file_printf(scan_file_t *sf, const char *fmt, ...) {
     if (!scan_file_is_open(sf) || !fmt) return;
 
+    /* Scan files always store raw data: privacy mode is an on-screen display
+     * transform only and must never be applied to persisted output. */
+
     va_list args;
     va_start(args, fmt);
 

@@ -3826,6 +3826,7 @@ static bool touch_move_events_enabled_for_view_name(const char *view_name) {
           strcmp(view_name, "ENV-III") == 0 ||
           strcmp(view_name, "Favorites Manager") == 0 ||
           strcmp(view_name, "Menu Editor") == 0 ||
+          strcmp(view_name, "Setup Wizard") == 0 ||
           strcmp(view_name, "Lockscreen") == 0);
 }
 

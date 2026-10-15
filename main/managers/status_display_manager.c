@@ -21,6 +21,7 @@
 #include "freertos/task.h"
 #include "i2c_bus_lock.h"
 #include "managers/settings_manager.h"
+#include "core/utils.h"
 #include "managers/status_display_animations.h"
 #ifdef CONFIG_HAS_LORA
 #include "managers/lora_manager.h"
@@ -482,7 +483,10 @@ static void status_display_render_lora_preview_locked(void) {
              status_display_app_linked(status_display_meshcore_active()) ? "APP:LINK"
                                                                          : "APP:WAIT");
     status_display_draw_text(4, 2, line);
-    snprintf(line, sizeof(line), "FROM: %.14s", who);
+    char who_disp[sizeof(s_lora_preview_who)];
+    snprintf(who_disp, sizeof(who_disp), "%s", who);
+    privacy_redact_text(who_disp);
+    snprintf(line, sizeof(line), "FROM: %.14s", who_disp);
     status_display_draw_text(4, 15, line);
 
     const char *next = s_lora_preview_text;
@@ -583,8 +587,11 @@ static void status_display_render_lora_hud_locked(const lora_status_t *st,
     } else if (msg_text && (who_txt[0] || msg_text[0])) {
         /* Keep the most recent message on screen instead of only showing it
          * during the new-message preview. */
+        char who_disp[sizeof(s_hud_who)];
+        snprintf(who_disp, sizeof(who_disp), "%s", who_txt);
+        privacy_redact_text(who_disp);
         snprintf(line, sizeof(line), "%.7s: %.12s",
-                 who_txt[0] ? who_txt : "UNKNOWN",
+                 who_disp[0] ? who_disp : "UNKNOWN",
                  msg_text[0] ? msg_text : "(empty)");
     } else if (show_health) {
         snprintf(line, sizeof(line), "ERR:%lu Q:%lu DUP:%lu",

@@ -1,5 +1,6 @@
 #include "scans/wifi/airspace_monitor.h"
 #include "core/callbacks.h"
+#include "core/utils.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -1116,13 +1117,20 @@ void airspace_monitor_get_snapshot(airspace_monitor_snapshot_t *out) {
         }
     } else if (pattern_confirmed && pattern == AIRSPACE_PATTERN_EVIL) {
         snap.threat_level = AIRSPACE_THREAT_SUSPICIOUS;
-        snprintf(snap.reason, sizeof(snap.reason), "Evil twin: %s (sec mismatch)", evil_ssid_w);
+        /* snap.reason is display-only; redact the observed SSID in privacy mode. */
+        char ssid_disp[33];
+        privacy_redact_ssid_copy(evil_ssid_w, ssid_disp, sizeof(ssid_disp));
+        snprintf(snap.reason, sizeof(snap.reason), "Evil twin: %s (sec mismatch)", ssid_disp);
     } else if (pattern_confirmed && pattern == AIRSPACE_PATTERN_KARMA) {
         snap.threat_level = AIRSPACE_THREAT_SUSPICIOUS;
-        snprintf(snap.reason, sizeof(snap.reason),
-                 "Karma AP: %02X:%02X:%02X:%02X:%02X:%02X (%lu SSIDs)",
+        char mac_disp[18];
+        snprintf(mac_disp, sizeof(mac_disp), "%02X:%02X:%02X:%02X:%02X:%02X",
                  karma_mac[0], karma_mac[1], karma_mac[2], karma_mac[3],
-                 karma_mac[4], karma_mac[5], (unsigned long)karma_ssids);
+                 karma_mac[4], karma_mac[5]);
+        privacy_redact_mac(mac_disp);
+        snprintf(snap.reason, sizeof(snap.reason),
+                 "Karma AP: %s (%lu SSIDs)",
+                 mac_disp, (unsigned long)karma_ssids);
     } else if (pattern_confirmed && pattern == AIRSPACE_PATTERN_KICK) {
         snap.threat_level = AIRSPACE_THREAT_SUSPICIOUS;
         snprintf(snap.reason, sizeof(snap.reason), "Elevated kick traffic: %lu/s (base %lu)",

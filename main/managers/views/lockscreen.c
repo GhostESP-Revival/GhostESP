@@ -137,6 +137,35 @@ static lv_obj_t *s_fav_touch_back_btn = NULL;
 static touch_drag_t s_fav_touch_drag;
 #endif
 
+#ifdef CONFIG_USE_TOUCHSCREEN
+// Apple-style slide-to-unlock (no-PIN lockscreen, touch builds only).
+// The track/knob are plain visuals; all touch handling is done manually in
+// lockscreen_input_handler (no LVGL indev runs on these boards).
+static lv_obj_t *s_slide_track = NULL;
+static lv_obj_t *s_slide_fill = NULL;
+static lv_obj_t *s_slide_knob = NULL;
+static lv_obj_t *s_slide_label = NULL;      // light "slide to unlock" text
+static lv_obj_t *s_slide_mask = NULL;       // clip window tracking the fill
+static lv_obj_t *s_slide_dark_label = NULL; // same text, black, revealed by the fill
+static lv_obj_t *s_slide_sheen = NULL;      // moving shimmer highlight
+static lv_point_t s_slide_chev_pts[3];      // chevron polyline for the knob
+static bool s_slide_active = false;
+static bool s_slide_dragging = false;
+static int s_slide_h = 0;        // track height, resolved per-screen
+static int s_slide_travel = 0;   // knob travel distance (track inner width)
+static int s_slide_knob_x = 0;   // current knob offset from track start
+static int s_slide_pad = 0;      // inner padding of the track
+static int s_slide_knob_sz = 0;
+static int s_slide_press_x = 0;      // touch x at press (drag reference)
+static int s_slide_knob_at_press = 0; // knob offset when the drag began
+
+// Reserve measured from the bottom of the content area for the "Favorites"
+// hint that sits below the slider in no-PIN mode (its bottom offset + height).
+#define LS_FAV_HINT_RESERVE (GUI_HOME_SAFE_H + 6 + 22)
+// Small gap between the slider and the hint below it.
+#define LS_SLIDE_EDGE_PAD 8
+#endif
+
 static void lockscreen_show_favorites(void);
 static void lockscreen_hide_favorites(void);
 static void lockscreen_fav_set_selected(int idx);
@@ -193,6 +222,15 @@ static void lockscreen_normalize_input(InputEvent *event, bool *up, bool *down, 
 static void lockscreen_input_handler(InputEvent *event);
 static void lockscreen_focus_btn(int idx);
 static void lockscreen_move_focus(int dx, int dy);
+
+#ifdef CONFIG_USE_TOUCHSCREEN
+static void lockscreen_slide_create(void);
+static void lockscreen_slide_destroy(void);
+static void lockscreen_slide_set_knob(int x);
+static void lockscreen_slide_reset(void);
+static bool lockscreen_slide_hit(int x, int y);
+static bool lockscreen_handle_slide_touch(InputEvent *event);
+#endif
 
 static void derive_key(uint8_t *out, size_t len) {
     uint8_t mac[6] = {0};
@@ -312,6 +350,9 @@ void lockscreen_reset_input(void) {
     s_suppress_click_idx = -1;
     s_suppress_click_until_ms = 0;
     s_ignore_input_until_ms = (esp_timer_get_time() / 1000) + 350;
+#ifdef CONFIG_USE_TOUCHSCREEN
+    s_slide_dragging = false;
+#endif
 }
 
 void lockscreen_enter_setup(void) {
@@ -352,7 +393,13 @@ static void lockscreen_delete_last(void) {
 
 static void lockscreen_set_prompt(const char *text) {
     if (s_prompt && lv_obj_is_valid(s_prompt)) {
-        lv_label_set_text(s_prompt, text);
+        lv_label_set_text(s_prompt, text ? text : "");
+        // An empty prompt leaves a stray background pill, so hide it entirely.
+        if (text && text[0]) {
+            lv_obj_clear_flag(s_prompt, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(s_prompt, LV_OBJ_FLAG_HIDDEN);
+        }
     }
 }
 
@@ -715,10 +762,29 @@ static void lockscreen_build_companion_layout(int content_w, int content_h) {
     if (ghost_sz < 50) ghost_sz = 50;
 
     // Reserve room at the bottom for the '▼ Favorites' hint so the
-    // ghost + "Press to unlock" group never overlaps it.
+    // ghost + "Press to unlock" group never overlaps it. When the
+    // slide-to-unlock track is active it stacks above the hint, so reserve
+    // both.
     int bottom_reserve = 18;
+#ifdef CONFIG_USE_TOUCHSCREEN
+    if (s_slide_active) {
+        bottom_reserve = LS_FAV_HINT_RESERVE + LS_SLIDE_EDGE_PAD + s_slide_h + 8;
+    }
+#endif
     int usable_h = content_h - bottom_reserve;
-    if (usable_h < 60) usable_h = content_h;
+    if (usable_h < 60) {
+#ifdef CONFIG_USE_TOUCHSCREEN
+        if (s_slide_active) {
+            // Extremely short panel: the slide track + favorites hint leave no
+            // room for the companion ghost. Show just the unlock affordances.
+            s_ghost = NULL;
+            s_prompt = NULL;
+            s_dots = NULL;
+            return;
+        }
+#endif
+        usable_h = content_h;
+    }
 
     int ghost_y = (usable_h - ghost_base_sz) / 2;
     if (ghost_y < 0) ghost_y = 0;
@@ -1493,6 +1559,12 @@ static void lockscreen_input_handler(InputEvent *event) {
     bool up, down, left, right, select, back;
     lockscreen_normalize_input(event, &up, &down, &left, &right, &select, &back);
 #ifdef CONFIG_USE_TOUCHSCREEN
+    // Slide-to-unlock owns touch input in no-PIN mode while the favorites
+    // overlay is closed. Any point on the track begins a drag; a plain tap
+    // (on the track or elsewhere) never unlocks.
+    if (s_slide_active && !s_fav_active && event->type == INPUT_TYPE_TOUCH) {
+        if (lockscreen_handle_slide_touch(event)) return;
+    }
     // Live-drag samples are only meaningful while the favorites overlay is
     // up; dropping them here keeps the numpad's press/release logic exactly
     // as it was before drag events started arriving.
@@ -1594,6 +1666,14 @@ static void lockscreen_input_handler(InputEvent *event) {
                     }
                 }
             }
+#ifdef CONFIG_USE_TOUCHSCREEN
+            // Slide-to-unlock is the sole unlock affordance while it is active:
+            // the gesture must not be bypassed by joystick, encoder, keyboard or
+            // exit-button input. Favorites ('down' above, 'f', or the hint tap
+            // handled above) stay reachable; every other input is ignored until
+            // the knob is dragged to the end.
+            if (s_slide_active) return;
+#endif
             ghostchi_mood_record_event(GHOSTCHI_MOOD_EVENT_WAKE, 4);
             lockscreen_on_correct();
         }
@@ -1720,6 +1800,284 @@ static void lockscreen_input_handler(InputEvent *event) {
     }
 }
 
+#ifdef CONFIG_USE_TOUCHSCREEN
+static void lockscreen_slide_set_knob(int x) {
+    if (x < 0) x = 0;
+    if (x > s_slide_travel) x = s_slide_travel;
+    s_slide_knob_x = x;
+    if (s_slide_knob && lv_obj_is_valid(s_slide_knob)) {
+        lv_obj_set_pos(s_slide_knob, s_slide_pad + x, s_slide_pad);
+    }
+    if (s_slide_fill && lv_obj_is_valid(s_slide_fill)) {
+        // Trail the knob: fill from the left edge up to the knob's right edge.
+        lv_obj_set_width(s_slide_fill, s_slide_pad + x + s_slide_knob_sz);
+    }
+    if (s_slide_mask && lv_obj_is_valid(s_slide_mask)) {
+        // The black copy of the text is clipped to the same span as the fill,
+        // so the letters turn black exactly where the accent has covered them.
+        lv_obj_set_width(s_slide_mask, s_slide_pad + x + s_slide_knob_sz);
+    }
+}
+
+static void lockscreen_slide_anim_cb(void *var, int32_t v) {
+    (void)var;
+    lockscreen_slide_set_knob((int)v);
+}
+
+static void lockscreen_slide_sheen_cb(void *var, int32_t v) {
+    lv_obj_set_x((lv_obj_t *)var, v);
+}
+
+static void lockscreen_slide_reset(void) {
+    if (!s_slide_knob || !lv_obj_is_valid(s_slide_knob)) {
+        s_slide_knob_x = 0;
+        return;
+    }
+    lv_anim_del(s_slide_knob, NULL);
+    if (s_slide_knob_x <= 0 || settings_get_reduced_motion(&G_Settings)) {
+        lockscreen_slide_set_knob(0);
+        return;
+    }
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, s_slide_knob);
+    lv_anim_set_exec_cb(&a, lockscreen_slide_anim_cb);
+    lv_anim_set_values(&a, s_slide_knob_x, 0);
+    lv_anim_set_time(&a, GUI_ANIM_INTERACT);
+    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+    lv_anim_start(&a);
+}
+
+static bool lockscreen_slide_hit(int x, int y) {
+    if (!s_slide_track || !lv_obj_is_valid(s_slide_track)) return false;
+    lv_area_t a;
+    lv_obj_get_coords(s_slide_track, &a);
+    // Small vertical slop so the thin track is comfortable to grab.
+    const int slop = 4;
+    return x >= a.x1 && x <= a.x2 && y >= a.y1 - slop && y <= a.y2 + slop;
+}
+
+static bool lockscreen_handle_slide_touch(InputEvent *event) {
+    lv_indev_data_t *td = &event->data.touch_data;
+    if (event->is_touch_move) {
+        if (!s_slide_dragging) return false;
+        // Relative drag: the knob follows the finger's delta, so grabbing
+        // anywhere on the track never teleports the knob to the end.
+        lockscreen_slide_set_knob(s_slide_knob_at_press + (td->point.x - s_slide_press_x));
+        return true;
+    }
+    if (td->state == LV_INDEV_STATE_PR) {
+        if (lockscreen_slide_hit(td->point.x, td->point.y)) {
+            if (s_slide_knob && lv_obj_is_valid(s_slide_knob)) lv_anim_del(s_slide_knob, NULL);
+            s_slide_dragging = true;
+            s_slide_press_x = td->point.x;
+            s_slide_knob_at_press = s_slide_knob_x;
+            return true;
+        }
+        return false;
+    }
+    if (td->state == LV_INDEV_STATE_REL) {
+        if (!s_slide_dragging) return false;
+        s_slide_dragging = false;
+        // Require the knob to reach the far end (old iOS threshold) before
+        // unlocking; otherwise spring back.
+        if (s_slide_knob_x >= (s_slide_travel * 85) / 100) {
+            lockscreen_slide_set_knob(s_slide_travel);
+            ghostchi_mood_record_event(GHOSTCHI_MOOD_EVENT_WAKE, 4);
+            lockscreen_on_correct();
+        } else {
+            lockscreen_slide_reset();
+        }
+        return true;
+    }
+    return false;
+}
+
+static void lockscreen_slide_create(void) {
+    if (!s_slide_active) return;
+    if (!s_content || !lv_obj_is_valid(s_content)) return;
+
+    int content_w = (int)lv_obj_get_width(s_content);
+    if (content_w <= 0) content_w = LV_HOR_RES;
+
+    int track_h = s_slide_h;
+    // Responsive width: inset from the edges, clamped for large panels, and
+    // always leaving a little margin on very small ones.
+    int max_w = GUI_LARGE_SCREEN ? 560 : 320;
+    int track_w = content_w - GUI_SAFEAREA_HOR * 2;
+    if (track_w > max_w) track_w = max_w;
+    if (track_w < 96) track_w = content_w - 8;
+    if (track_w < 48) track_w = content_w;
+    if (track_w < 24) track_w = 24;
+
+    int pad = track_h / 10;
+    if (pad < 2) pad = 2;
+    if (pad > 7) pad = 7;
+    int knob_sz = track_h - pad * 2;
+    if (knob_sz < 12) knob_sz = 12;
+    int travel = track_w - pad * 2 - knob_sz;
+    if (travel < 6) travel = 6;
+    s_slide_pad = pad;
+    s_slide_knob_sz = knob_sz;
+    s_slide_travel = travel;
+    s_slide_knob_x = 0;
+
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    lv_color_t accent = lv_color_hex(theme_palette_get_accent(theme));
+    lv_color_t chevron = theme_palette_is_bright(theme) ? lv_color_hex(0x000000) : lv_color_hex(0xFFFFFF);
+
+    s_slide_track = lv_obj_create(s_content);
+    lv_obj_remove_style_all(s_slide_track);
+    lv_obj_set_size(s_slide_track, track_w, track_h);
+    lv_obj_align(s_slide_track, LV_ALIGN_BOTTOM_MID, 0, -(LS_FAV_HINT_RESERVE + LS_SLIDE_EDGE_PAD));
+    lv_obj_set_style_radius(s_slide_track, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(s_slide_track, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(s_slide_track, LV_OPA_50, 0);
+    lv_obj_set_style_border_width(s_slide_track, 1, 0);
+    lv_obj_set_style_border_color(s_slide_track, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_border_opa(s_slide_track, LV_OPA_20, 0);
+    lv_obj_set_style_pad_all(s_slide_track, 0, 0);
+    lv_obj_set_style_clip_corner(s_slide_track, true, 0);
+    lv_obj_clear_flag(s_slide_track, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+
+    // "slide to unlock" text, centred (old iOS look). Kept bright so it stays
+    // legible; a black copy is revealed underneath as the fill sweeps across.
+    const char *slide_text = "slide to unlock";
+    const lv_font_t *slide_font = (track_h >= 44) ? gui_font_body() : gui_font_caption();
+
+    s_slide_label = lv_label_create(s_slide_track);
+    lv_label_set_text(s_slide_label, slide_text);
+    lv_obj_set_style_text_font(s_slide_label, slide_font, 0);
+    lv_obj_set_style_text_color(s_slide_label, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_opa(s_slide_label, LV_OPA_COVER, 0);
+    lv_obj_center(s_slide_label);
+    // Force a layout pass so the label's size/position are final before we
+    // mirror its coordinates for the black copy below.
+    lv_obj_update_layout(s_slide_track);
+    int text_x = lv_obj_get_x(s_slide_label);
+    int text_y = lv_obj_get_y(s_slide_label);
+
+    // Accent fill that trails the knob.
+    s_slide_fill = lv_obj_create(s_slide_track);
+    lv_obj_remove_style_all(s_slide_fill);
+    lv_obj_set_style_radius(s_slide_fill, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(s_slide_fill, accent, 0);
+    lv_obj_set_style_bg_opa(s_slide_fill, LV_OPA_COVER, 0);
+    lv_obj_set_pos(s_slide_fill, 0, 0);
+    lv_obj_set_size(s_slide_fill, 0, track_h);
+    lv_obj_clear_flag(s_slide_fill, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+
+    // Soft sweeping shimmer. LVGL's style gradients are 2-stop with no
+    // per-stop alpha, so a single hard-edged bar just looks like a moving
+    // pill. Instead stack concentric translucent capsules to feather the
+    // edges into a glint that sweeps left-to-right (skipped on reduced
+    // motion).
+    if (!settings_get_reduced_motion(&G_Settings)) {
+        int glow_w = track_h;
+        if (glow_w < 12) glow_w = 12;
+        s_slide_sheen = lv_obj_create(s_slide_track);
+        lv_obj_remove_style_all(s_slide_sheen);
+        lv_obj_set_size(s_slide_sheen, glow_w, track_h);
+        lv_obj_set_style_bg_opa(s_slide_sheen, LV_OPA_TRANSP, 0);
+        lv_obj_set_pos(s_slide_sheen, -glow_w, 0);
+        lv_obj_clear_flag(s_slide_sheen, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+        static const lv_opa_t glow_opa[4] = {4, 7, 11, 16};
+        static const uint8_t glow_pct[4] = {100, 72, 48, 26};
+        for (int i = 0; i < 4; i++) {
+            int gw = (glow_w * glow_pct[i]) / 100;
+            if (gw < 2) gw = 2;
+            lv_obj_t *band = lv_obj_create(s_slide_sheen);
+            lv_obj_remove_style_all(band);
+            lv_obj_set_size(band, gw, track_h);
+            lv_obj_set_style_radius(band, LV_RADIUS_CIRCLE, 0);
+            lv_obj_set_style_bg_color(band, lv_color_hex(0xFFFFFF), 0);
+            lv_obj_set_style_bg_opa(band, glow_opa[i], 0);
+            lv_obj_clear_flag(band, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_set_pos(band, (glow_w - gw) / 2, 0);
+        }
+        lv_anim_t sa;
+        lv_anim_init(&sa);
+        lv_anim_set_var(&sa, s_slide_sheen);
+        lv_anim_set_exec_cb(&sa, lockscreen_slide_sheen_cb);
+        lv_anim_set_values(&sa, -glow_w, track_w);
+        lv_anim_set_time(&sa, 1800);
+        lv_anim_set_repeat_count(&sa, LV_ANIM_REPEAT_INFINITE);
+        lv_anim_set_repeat_delay(&sa, 900);
+        lv_anim_set_path_cb(&sa, lv_anim_path_linear);
+        lv_anim_start(&sa);
+    }
+
+    // Black copy of the text, clipped to the fill span so the letters turn
+    // black exactly where the accent has covered them.
+    s_slide_mask = lv_obj_create(s_slide_track);
+    lv_obj_remove_style_all(s_slide_mask);
+    lv_obj_set_style_bg_opa(s_slide_mask, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(s_slide_mask, 0, 0);
+    lv_obj_set_style_pad_all(s_slide_mask, 0, 0);
+    // Rectangular clip only: the black copy is well clear of the track's
+    // rounded ends, so a circular corner clip would just crop letters oddly.
+    lv_obj_set_pos(s_slide_mask, 0, 0);
+    lv_obj_set_size(s_slide_mask, 0, track_h);
+    lv_obj_clear_flag(s_slide_mask, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    s_slide_dark_label = lv_label_create(s_slide_mask);
+    lv_label_set_text(s_slide_dark_label, slide_text);
+    lv_obj_set_style_text_font(s_slide_dark_label, slide_font, 0);
+    lv_obj_set_style_text_color(s_slide_dark_label, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_text_opa(s_slide_dark_label, LV_OPA_COVER, 0);
+    lv_obj_set_pos(s_slide_dark_label, text_x, text_y);
+
+    // Knob with a right chevron.
+    s_slide_knob = lv_obj_create(s_slide_track);
+    lv_obj_remove_style_all(s_slide_knob);
+    lv_obj_set_size(s_slide_knob, knob_sz, knob_sz);
+    lv_obj_set_style_radius(s_slide_knob, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(s_slide_knob, accent, 0);
+    lv_obj_set_style_bg_opa(s_slide_knob, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(s_slide_knob, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    // Chevron drawn as a polyline so it is geometrically centred in the knob
+    // (the FontAwesome symbol glyph has lopsided side bearings).
+    int chev_h = knob_sz * 45 / 100;
+    if (chev_h < 6) chev_h = 6;
+    int chev_w = chev_h / 2;
+    if (chev_w < 3) chev_w = 3;
+    s_slide_chev_pts[0].x = 0;
+    s_slide_chev_pts[0].y = 0;
+    s_slide_chev_pts[1].x = chev_w;
+    s_slide_chev_pts[1].y = chev_h / 2;
+    s_slide_chev_pts[2].x = 0;
+    s_slide_chev_pts[2].y = chev_h;
+    lv_obj_t *chev = lv_line_create(s_slide_knob);
+    lv_line_set_points(chev, s_slide_chev_pts, 3);
+    lv_obj_set_style_line_width(chev, knob_sz >= 30 ? 3 : 2, 0);
+    lv_obj_set_style_line_color(chev, chevron, 0);
+    lv_obj_set_style_line_rounded(chev, true, 0);
+    lv_obj_center(chev);
+
+    lockscreen_slide_set_knob(0);
+}
+
+static void lockscreen_slide_destroy(void) {
+    if (s_slide_sheen && lv_obj_is_valid(s_slide_sheen)) {
+        lv_anim_del(s_slide_sheen, NULL);
+    }
+    if (s_slide_knob && lv_obj_is_valid(s_slide_knob)) {
+        lv_anim_del(s_slide_knob, NULL);
+    }
+    if (s_slide_track && lv_obj_is_valid(s_slide_track)) {
+        lv_obj_del(s_slide_track);
+    }
+    s_slide_track = NULL;
+    s_slide_fill = NULL;
+    s_slide_knob = NULL;
+    s_slide_label = NULL;
+    s_slide_mask = NULL;
+    s_slide_dark_label = NULL;
+    s_slide_sheen = NULL;
+    s_slide_dragging = false;
+    s_slide_knob_x = 0;
+}
+#endif // CONFIG_USE_TOUCHSCREEN
+
 void lockscreen_create(void) {
     uint8_t theme = settings_get_menu_theme(&G_Settings);
     lv_color_t bg_color = lv_color_hex(theme_palette_get_background(theme));
@@ -1747,6 +2105,28 @@ void lockscreen_create(void) {
     int content_w = lv_obj_get_width(s_content);
     if (content_w <= 0) content_w = LV_HOR_RES;
     bool landscape = (content_w > content_h && content_h <= 146);
+
+#ifdef CONFIG_USE_TOUCHSCREEN
+    // Decide up-front whether the no-PIN lockscreen gets the slide-to-unlock
+    // track, and resolve its responsive height before laying out the ghost so
+    // the two never overlap.
+    s_slide_active = s_no_pin_mode && settings_get_lockscreen_slide_unlock(&G_Settings);
+    s_slide_h = 0;
+    s_slide_travel = 0;
+    s_slide_knob_x = 0;
+    s_slide_dragging = false;
+    if (s_slide_active) {
+        int th;
+        if (content_h >= 400) th = 56;
+        else if (content_h >= 300) th = 48;
+        else if (content_h >= 200) th = 42;
+        else th = 32;
+        int cap = content_h / 3;
+        if (th > cap) th = cap;
+        if (th < 22) th = 22;
+        s_slide_h = th;
+    }
+#endif
 
     if (s_no_pin_mode) {
         lockscreen_build_companion_layout(content_w, content_h);
@@ -1872,7 +2252,13 @@ void lockscreen_create(void) {
         s_setup_first[0] = '\0';
         lockscreen_set_prompt("Set PIN/OK none");
     } else if (s_no_pin_mode) {
+#ifdef CONFIG_USE_TOUCHSCREEN
+        // The slider carries its own "slide to unlock" text, so keep the
+        // ghost prompt empty (hidden) to avoid duplicating it.
+        lockscreen_set_prompt(s_slide_active ? "" : "Press to unlock");
+#else
         lockscreen_set_prompt("Press to unlock");
+#endif
     } else {
         lockscreen_set_prompt("Enter PIN");
     }
@@ -1882,6 +2268,11 @@ void lockscreen_create(void) {
     }
     // Favorites pill/hint (responsive, pre-PIN)
     lockscreen_create_fav_pill();
+#ifdef CONFIG_USE_TOUCHSCREEN
+    // Slide-to-unlock track, stacked just above the favorites hint. Created
+    // after the hint so the track's bottom offset can clear it.
+    lockscreen_slide_create();
+#endif
 
     lockscreen_update_dots();
     s_ghost_state = GHOST_SLEEPING;
@@ -1919,6 +2310,10 @@ void lockscreen_destroy(void) {
     lockscreen_destroy_numpad();
     lockscreen_hide_favorites();
     lockscreen_destroy_fav_pill();
+#ifdef CONFIG_USE_TOUCHSCREEN
+    lockscreen_slide_destroy();
+    s_slide_active = false;
+#endif
     s_pending_fav_launch = NULL;
     s_touch_started = false;
     s_touch_pressed_idx = -1;

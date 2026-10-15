@@ -1,6 +1,7 @@
 #include "managers/views/airspace_monitor_screen.h"
 #include "core/callbacks.h"
 #include "core/ouis.h"
+#include "core/utils.h"
 #include "esp_timer.h"
 #include "gui/lvgl_safe.h"
 #include "gui/screen_layout.h"
@@ -105,6 +106,7 @@ static lv_obj_t *create_card_title(lv_obj_t *card, const char *text) {
 static void format_mac(const uint8_t mac[6], char *out, size_t out_size) {
     snprintf(out, out_size, "%02X:%02X:%02X:%02X:%02X:%02X",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    privacy_redact_mac(out);  /* display only; OUI retained for vendor lookup */
 }
 
 static uint32_t color_for_level(airspace_threat_level_t level) {

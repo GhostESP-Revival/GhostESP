@@ -65,6 +65,72 @@ void log_heap_status(const char *tag, const char *event);
  */
 void format_mac_address(const uint8_t *mac, char *buffer, size_t buffer_len, bool uppercase);
 
+// ============================================================================
+// Privacy Mode (PII redaction for on-screen display)
+// ============================================================================
+//
+// Privacy mode hides identifying Wi-Fi/BLE data (SSIDs, MAC addresses) that
+// would otherwise end up in wardriving maps and screenshots. It is strictly a
+// display-time transform: it never mutates stored scan data, never affects the
+// data written to wardrive/scan files (CSV, pcap, wigle), and uses no heap or
+// static buffers, so it costs nothing in RAM/BSS when disabled.
+//
+// Callers redact a *copy* of the text they are about to show and must not feed
+// the redacted string back into parsing/lookup logic.
+
+/**
+ * @brief Whether privacy mode is currently enabled (persisted setting).
+ */
+bool privacy_mode_is_enabled(void);
+
+/**
+ * @brief Redact an arbitrary third-party display string in place.
+ *
+ * Masks every printable character with '*' (BLE device names, LAN hostnames,
+ * usernames, GPS coordinates, mesh node names/ids, ...). No-op when privacy
+ * mode is disabled or @p text is NULL.
+ */
+void privacy_redact_text(char *text);
+
+/**
+ * @brief Copy a display string into @p dst (bounded) and redact the copy.
+ */
+void privacy_redact_text_copy(const char *src, char *dst, size_t dst_size);
+
+/**
+ * @brief Redact a real SSID in place for display.
+ *
+ * Printable characters are replaced with '*' so the on-screen length and
+ * layout are preserved. Placeholder labels that carry no PII ("(Hidden)",
+ * "<Hidden>", "Hidden Network", "(Unknown AP)") are left untouched. No-op when
+ * privacy mode is disabled or @p ssid is NULL.
+ *
+ * @param ssid Null-terminated SSID buffer to redact in place
+ */
+void privacy_redact_ssid(char *ssid);
+
+/**
+ * @brief Copy an SSID into @p dst (bounded) and redact the copy for display.
+ */
+void privacy_redact_ssid_copy(const char *src, char *dst, size_t dst_size);
+
+/**
+ * @brief Redact the device-specific half of a formatted MAC string in place.
+ *
+ * "AA:BB:CC:DD:EE:FF" becomes "AA:BB:CC:xx:xx:xx", keeping the vendor OUI.
+ * An 8-character "DD:EE:FF" device-id suffix (no OUI) becomes "xx:xx:xx".
+ * Other lengths are left untouched. No-op when privacy mode is disabled or
+ * @p mac_text is NULL.
+ *
+ * @param mac_text Null-terminated formatted MAC string to redact in place
+ */
+void privacy_redact_mac(char *mac_text);
+
+/**
+ * @brief Format a MAC address and immediately redact it for display.
+ */
+void format_mac_address_masked(const uint8_t *mac, char *buffer, size_t buffer_len, bool uppercase);
+
 /**
  * @brief Build an IP address string from subnet prefix and host number
  * 

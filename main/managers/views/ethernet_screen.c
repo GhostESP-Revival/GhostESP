@@ -13,6 +13,7 @@
 #include "gui/lvgl_safe.h"
 #include "lvgl.h"
 #include "core/esp_comm_manager.h"
+#include "core/utils.h"
 #include "sdkconfig.h"
 #include <string.h>
 #include <stdio.h>
@@ -619,7 +620,10 @@ static void refresh_dashboard_labels(void) {
     lv_label_set_text(s_lbl_ip,   s_iface.ip[0]   ? s_iface.ip   : "--");
     lv_label_set_text(s_lbl_mask, s_iface.mask[0] ? s_iface.mask : "--");
     lv_label_set_text(s_lbl_gw,   s_iface.gw[0]   ? s_iface.gw   : "--");
-    lv_label_set_text(s_lbl_mac,  s_iface.mac[0]  ? s_iface.mac  : "--");
+    char mac_disp[sizeof(s_iface.mac)];
+    snprintf(mac_disp, sizeof(mac_disp), "%s", s_iface.mac);
+    privacy_redact_mac(mac_disp);  /* s_iface.mac stays raw */
+    lv_label_set_text(s_lbl_mac,  s_iface.mac[0]  ? mac_disp : "--");
     if (s_lbl_link) {
         char link_str[32];
         if (s_iface.speed_mbps > 0)
@@ -1046,8 +1050,11 @@ static void build_fp_list(void) {
         eth_disp_fp_host_t *h = fp_hosts_list ? &fp_hosts_list[i] : NULL;
         if (!h) break;
         char label[96];
-        if (h->name[0])
-            snprintf(label, sizeof(label), "%s  %s", h->ip_str, h->name);
+        if (h->name[0]) {
+            char name_disp[64];
+            privacy_redact_text_copy(h->name, name_disp, sizeof(name_disp));
+            snprintf(label, sizeof(label), "%s  %s", h->ip_str, name_disp);
+        }
         else if (h->device_type[0])
             snprintf(label, sizeof(label), "%s  [%s]", h->ip_str, h->device_type);
         else
@@ -1074,13 +1081,18 @@ static void build_arp_list(void) {
         eth_disp_host_t *h = arp_hosts_list ? &arp_hosts_list[i] : NULL;
         if (!h) break;
         char label[80];
-        if (h->hostname[0])
-            snprintf(label, sizeof(label), "%s  %s", h->ip_str, h->hostname);
-        else
-            snprintf(label, sizeof(label), "%s  %02X:%02X:%02X:%02X:%02X:%02X",
-                     h->ip_str,
+        if (h->hostname[0]) {
+            char host_disp[48];
+            privacy_redact_text_copy(h->hostname, host_disp, sizeof(host_disp));
+            snprintf(label, sizeof(label), "%s  %s", h->ip_str, host_disp);
+        } else {
+            char mac_str[18];
+            snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
                      h->mac[0], h->mac[1], h->mac[2],
                      h->mac[3], h->mac[4], h->mac[5]);
+            privacy_redact_mac(mac_str);
+            snprintf(label, sizeof(label), "%s  %s", h->ip_str, mac_str);
+        }
         options_view_add_item(s_action_ov, label, on_arp_host_selected, (void *)(intptr_t)i);
     }
     if (s_scan.arp_count == 0)
@@ -1108,11 +1120,19 @@ static void build_fp_results(void) {
     if (!s_result_dv) return;
 
     detail_view_add_info(s_result_dv, "IP", h->ip_str);
-    if (h->name[0])         detail_view_add_info(s_result_dv, "Name",     h->name);
+    if (h->name[0]) {
+        char name_disp[64];
+        privacy_redact_text_copy(h->name, name_disp, sizeof(name_disp));
+        detail_view_add_info(s_result_dv, "Name",     name_disp);
+    }
     if (h->device_type[0])  detail_view_add_info(s_result_dv, "Type",     h->device_type);
     if (h->protocol[0])     detail_view_add_info(s_result_dv, "Protocol", h->protocol);
     if (h->service_type[0]) detail_view_add_info(s_result_dv, "Service",  h->service_type);
-    if (h->os_info[0])      detail_view_add_info(s_result_dv, "OS",       h->os_info);
+    if (h->os_info[0]) {
+        char os_disp[64];
+        privacy_redact_text_copy(h->os_info, os_disp, sizeof(os_disp));
+        detail_view_add_info(s_result_dv, "OS",       os_disp);
+    }
     detail_view_add_back(s_result_dv, on_back_to_fp_list, NULL);
     detail_view_set_selected(s_result_dv, 0);
 }
@@ -1135,9 +1155,14 @@ static void build_arp_results(void) {
     char mac_str[24];
     snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
              h->mac[0], h->mac[1], h->mac[2], h->mac[3], h->mac[4], h->mac[5]);
+    privacy_redact_mac(mac_str);
     detail_view_add_info(s_result_dv, "IP",  h->ip_str);
     detail_view_add_info(s_result_dv, "MAC", mac_str);
-    if (h->hostname[0]) detail_view_add_info(s_result_dv, "Host", h->hostname);
+    if (h->hostname[0]) {
+        char host_disp[48];
+        privacy_redact_text_copy(h->hostname, host_disp, sizeof(host_disp));
+        detail_view_add_info(s_result_dv, "Host", host_disp);
+    }
     detail_view_add_back(s_result_dv, on_back_to_arp_list, NULL);
     detail_view_set_selected(s_result_dv, 0);
 }

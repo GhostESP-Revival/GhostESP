@@ -196,6 +196,7 @@ static cJSON *settings_to_json_object(const FSettings *s) {
   cJSON_AddBoolToObject(o, "theme_background_effects", s->theme_background_effects);
   cJSON_AddBoolToObject(o, "high_contrast", s->high_contrast);
   cJSON_AddBoolToObject(o, "sun_mode", s->sun_mode);
+  cJSON_AddBoolToObject(o, "privacy_mode", s->privacy_mode);
   cJSON_AddBoolToObject(o, "menu_rounded", s->menu_rounded);
   cJSON_AddBoolToObject(o, "menu_item_borders", s->menu_item_borders);
   cJSON_AddBoolToObject(o, "menu_card_bg", s->menu_card_bg);
@@ -396,6 +397,9 @@ static void json_apply_to_settings(FSettings *s, const cJSON *root) {
   }
   if (cJSON_GetObjectItemCaseSensitive(root, "sun_mode")) {
     s->sun_mode = jget_bool(root, "sun_mode", s->sun_mode);
+  }
+  if (cJSON_GetObjectItemCaseSensitive(root, "privacy_mode")) {
+    s->privacy_mode = jget_bool(root, "privacy_mode", s->privacy_mode);
   }
   settings_normalize_modes(s);
   if (cJSON_GetObjectItemCaseSensitive(root, "menu_rounded")) {

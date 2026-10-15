@@ -359,6 +359,11 @@ void wifi_manager_track_ap(void);
 void wifi_manager_track_sta(void);
 void wifi_manager_stop_tracking(void);
 
+// Track an arbitrary BSSID directly, with no ap_scan entry required -- used to
+// track surveillance-camera/sniffer hits found by promiscuous scanning. The
+// label is only shown; channel is the channel to sit on while tracking.
+void wifi_manager_track_bssid(const uint8_t bssid[6], uint8_t channel, const char *label);
+
 // Reports the latest tracking RSSI for the live RSSI meter view. Returns false
 // when neither AP nor STA tracking is active. When active, *out_rssi receives the
 // most recent matched RSSI and *out_fresh whether a packet arrived recently.
