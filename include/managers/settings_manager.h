@@ -160,6 +160,7 @@ typedef enum {
     SETTING_LOCKSCREEN_TYPE,
     SETTING_LOCKSCREEN_TIMEOUT,
     SETTING_LOCKSCREEN_CHANGE_PIN,
+    SETTING_LOCKSCREEN_SLIDE,
     // Wardriving settings
     SETTING_WD_HOP_PRIMARY,
     SETTING_WD_HOP_HELPER,
@@ -187,6 +188,7 @@ typedef enum {
     SETTING_OTA_UPDATE_PEER,
     SETTING_OTA_INSTALL_FROM_SD,
     SETTING_SUN_MODE,
+    SETTING_PRIVACY_MODE,
     SETTING_LOG_LEVEL,
     SETTING_FAVORITES,
     SETTING_FAVORITES_BYPASS,
@@ -378,6 +380,7 @@ typedef struct {
     bool touch_drag_scroll;          // Drag-to-scroll on the options screen
     bool sun_mode;                   // Outdoor visibility: forces max brightness + high contrast
     uint8_t sun_mode_saved_brightness; // Brightness to restore when Sun Mode is turned off
+    bool privacy_mode;               // Redact SSIDs and MAC addresses on screen (wardriving PII)
     uint8_t log_level;                 // ESP-IDF global log level (esp_log_level_t)
     uint8_t favorites_count;
     char favorites[FAVORITES_MAX][FAVORITE_NAME_LEN];
@@ -390,6 +393,7 @@ typedef struct {
     char lockscreen_obfuscated[32]; // Length-prefixed obfuscated PIN blob
     uint16_t lockscreen_timeout_sec;   // Auto-lock after inactivity (0=off)
     bool lockscreen_wake_lock;        // Lock on wake-from-sleep
+    bool lockscreen_slide_unlock;     // Touch-only: Apple-style slide-to-unlock (no-PIN mode)
 
     // Wardriving settings
     uint16_t wd_hop_primary_ms;      // Primary chip hop interval (50-500ms)
@@ -692,6 +696,8 @@ void settings_set_high_contrast(FSettings *settings, bool enabled);
 bool settings_get_high_contrast(const FSettings *settings);
 void settings_set_sun_mode(FSettings *settings, bool enabled);
 bool settings_get_sun_mode(const FSettings *settings);
+void settings_set_privacy_mode(FSettings *settings, bool enabled);
+bool settings_get_privacy_mode(const FSettings *settings);
 void settings_set_log_level(FSettings *settings, uint8_t level);
 uint8_t settings_get_log_level(const FSettings *settings);
 bool settings_is_favorite(const FSettings *settings, const char *name);
@@ -720,6 +726,8 @@ void settings_set_lockscreen_timeout_sec(FSettings *settings, uint16_t sec);
 uint16_t settings_get_lockscreen_timeout_sec(const FSettings *settings);
 void settings_set_lockscreen_wake_lock(FSettings *settings, bool enabled);
 bool settings_get_lockscreen_wake_lock(const FSettings *settings);
+void settings_set_lockscreen_slide_unlock(FSettings *settings, bool enabled);
+bool settings_get_lockscreen_slide_unlock(const FSettings *settings);
 
 // Wardriving settings
 void settings_set_wd_hop_primary_ms(FSettings *settings, uint16_t ms);

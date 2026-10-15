@@ -946,6 +946,8 @@ esp_err_t csv_write_data_to_buffer(wardriving_data_t *data) {
         int frequency = (data->channel == 14) ? 2484 :
                         (data->channel > 14) ? 5000 + (data->channel * 5) :
                                                2407 + (data->channel * 5);
+        /* Wardrive CSVs always store the raw BSSID/SSID: privacy mode is an
+         * on-screen display transform only and must never affect saved data. */
         const char *ssid_for_csv = name_empty ? "<hidden>" : data->ssid;
         int o = snprintf(data_line, CSV_GPS_BUFFER_SIZE, "%s,", data->bssid);
         o = csv_escape_append(data_line, o, CSV_GPS_BUFFER_SIZE, ssid_for_csv);

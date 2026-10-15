@@ -68,7 +68,12 @@ void infrared_manager_free_list(infrared_signal_t *signals, size_t count);
  */
 bool infrared_manager_transmit(const infrared_signal_t *signal);
 
-// Optional poltergeist helper: keep IO24 asserted across a batch of transmits
+// Poltergeist dedicated IR-blaster select line. The board's onboard logic routes
+// the shared IR blaster between the Flipper (default) and the ESP32; driving this
+// pin high selects the ESP32 path, so it must be asserted around ESP IR TX.
+#define INFRARED_POLTERGEIST_SELECT_PIN 24
+
+// Optional poltergeist helper: keep the select line asserted across a batch of transmits
 void infrared_manager_poltergeist_hold_io24_begin(void);
 void infrared_manager_poltergeist_hold_io24_end(void);
 

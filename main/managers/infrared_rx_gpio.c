@@ -120,10 +120,10 @@ bool infrared_manager_rx_init(void) {
 
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
     if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "poltergeist") == 0) {
-        gpio_reset_pin(infrared_get_tx_pin());
-        gpio_set_direction(infrared_get_tx_pin(), GPIO_MODE_OUTPUT);
-        gpio_set_level(infrared_get_tx_pin(), 0);
-        ESP_LOGI(TAG, "IO%d configured for poltergeist template", infrared_get_tx_pin());
+        gpio_reset_pin(INFRARED_POLTERGEIST_SELECT_PIN);
+        gpio_set_direction(INFRARED_POLTERGEIST_SELECT_PIN, GPIO_MODE_OUTPUT);
+        gpio_set_level(INFRARED_POLTERGEIST_SELECT_PIN, 0);
+        ESP_LOGI(TAG, "IO%d configured for poltergeist template", INFRARED_POLTERGEIST_SELECT_PIN);
     }
 #endif
 

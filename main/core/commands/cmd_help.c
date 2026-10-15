@@ -398,6 +398,9 @@ void handle_help(int argc, char **argv) {
         glog("webauth\n");
         glog("    Description: Enable/disable web authentication.\n");
         glog("    Usage: webauth [on|off|toggle|status]\n\n");
+        glog("privacy\n");
+        glog("    Description: Redact Wi-Fi/BLE SSIDs and MAC addresses on screen.\n");
+        glog("    Usage: privacy [on|off|toggle|status]\n\n");
         glog("pineap\n");
         glog("    Description: Start/Stop detecting WiFi Pineapples.\n");
         glog("    Usage: pineap [-s]\n");

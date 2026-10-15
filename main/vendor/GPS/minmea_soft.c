@@ -323,6 +323,13 @@ static void minmea_soft_apply_sentence(minmea_soft_ctx_t *ctx, const char *line)
     gps_t *gps = &ctx->gps.parent;
     enum minmea_sentence_id sid = minmea_sentence_id(line, false);
 
+    /* Extract talker id (e.g. "GP") for per-constellation arbitration. */
+    char talker[3] = {0};
+    if (!minmea_talker_id(talker, line)) {
+        talker[0] = '\0';
+    }
+    memcpy(ctx->gps.cur_talker, talker, sizeof(talker));
+
     switch (sid) {
         case MINMEA_SENTENCE_RMC: {
             s_minmea_soft_stats.rmc_count++;
@@ -366,6 +373,7 @@ static void minmea_soft_apply_sentence(minmea_soft_ctx_t *ctx, const char *line)
             }
 
             gps->valid = frame.valid;
+            gps_tracker_note_statement(&ctx->gps, talker, STATEMENT_RMC);
             minmea_soft_emit_update(ctx);
             break;
         }
@@ -424,6 +432,7 @@ static void minmea_soft_apply_sentence(minmea_soft_ctx_t *ctx, const char *line)
                 gps->valid = true;
             }
 
+            gps_tracker_note_statement(&ctx->gps, talker, STATEMENT_GGA);
             minmea_soft_emit_update(ctx);
             break;
         }
@@ -442,6 +451,7 @@ static void minmea_soft_apply_sentence(minmea_soft_ctx_t *ctx, const char *line)
             for (int i = 0; i < GPS_MAX_SATELLITES_IN_USE; i++) {
                 gps->sats_id_in_use[i] = (uint8_t)((frame.sats[i] > 0) ? frame.sats[i] : 0);
             }
+            gps_tracker_note_statement(&ctx->gps, talker, STATEMENT_GSA);
             break;
         }
         case MINMEA_SENTENCE_GSV: {
@@ -453,7 +463,8 @@ static void minmea_soft_apply_sentence(minmea_soft_ctx_t *ctx, const char *line)
 
             gps->sats_in_view = (uint8_t)frame.total_sats;
             int base_idx = (frame.msg_nr - 1) * 4;
-            for (int i = 0; i < 4; i++) {
+            bool primary = gps_tracker_is_primary_talker(&ctx->gps, talker);
+            for (int i = 0; i < 4 && primary; i++) {
                 int out_idx = base_idx + i;
                 if (out_idx >= GPS_MAX_SATELLITES_IN_VIEW) {
                     break;
@@ -465,6 +476,7 @@ static void minmea_soft_apply_sentence(minmea_soft_ctx_t *ctx, const char *line)
                 float snr = minmea_tofloat(&frame.sats[i].snr);
                 gps->sats_desc_in_view[out_idx].snr = (uint8_t)(isnan(snr) ? 0 : (snr < 0 ? 0 : snr));
             }
+            gps_tracker_note_statement(&ctx->gps, talker, STATEMENT_GSV);
             break;
         }
         case MINMEA_SENTENCE_GLL: {
@@ -495,6 +507,7 @@ static void minmea_soft_apply_sentence(minmea_soft_ctx_t *ctx, const char *line)
             } else if (gps->fix == GPS_FIX_INVALID || gps->fix_mode == GPS_MODE_INVALID) {
                 gps->valid = false;
             }
+            gps_tracker_note_statement(&ctx->gps, talker, STATEMENT_GLL);
             break;
         }
         case MINMEA_SENTENCE_VTG: {

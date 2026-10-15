@@ -145,7 +145,7 @@ static Command *command_list_head = NULL;
 static Command *command_pool = NULL;
 static Command *command_free_list = NULL;
 
-#define COMMAND_REGISTRY_MAX 192
+#define COMMAND_REGISTRY_MAX 256
 TaskHandle_t VisualizerHandle = NULL;
 TaskHandle_t gps_info_task_handle = NULL;
 
@@ -539,6 +539,7 @@ void register_commands() {
     register_command("setcountry", handle_setcountry);
     register_command("webauth", handle_web_auth_cmd);
     register_command("webuiap", handle_webuiap_cmd);
+    register_command("privacy", handle_privacy_cmd);
     register_command("clockstyle", handle_clockstyle_cmd);
     register_command("statusbarclock", handle_statusbarclock_cmd);
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)

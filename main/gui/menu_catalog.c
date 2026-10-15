@@ -10,6 +10,7 @@
 #include "managers/views/music_visualizer.h"
 #include "managers/views/terminal_screen.h"
 #include "managers/views/sd_browser_screen.h"
+#include "managers/views/sentry_view.h"
 #if CONFIG_CROWPANEL_EPAPER_42
 #include "managers/views/book_reader_view.h"
 #endif
@@ -77,6 +78,7 @@ LV_IMG_DECLARE(description);
 LV_IMG_DECLARE(storefront);
 LV_IMG_DECLARE(enviii);
 LV_IMG_DECLARE(accelerometer_icon);
+LV_IMG_DECLARE(sentry_icon);
 
 #define ITEM(key, label, asset, image, target, type, place) \
     {.id = key, .name = label, .asset_key = asset, .icon = &image, \
@@ -151,6 +153,7 @@ static const menu_catalog_item_t builtin_items[] = {
 #ifdef CONFIG_WITH_SCREEN
     ITEM_CAT("ghostchi", "Ghostchi", "ghost", ghost, ghostchi_view, 0, MENU_PLACE_APPS, "Tools"),
 #endif
+    ITEM_CAT("sentry", "Sentry", "sentry_icon", sentry_icon, sentry_view, 0, MENU_PLACE_APPS, "Tools"),
 #ifdef CONFIG_HAS_COMPASS
     ITEM_CAT("compass", "Compass", "compass", compass, compass_view, 0, MENU_PLACE_APPS, "Sensors"),
 #endif

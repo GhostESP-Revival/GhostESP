@@ -51,6 +51,15 @@
 #ifndef CONFIG_NMEA_STATEMENT_VTG
 #define CONFIG_NMEA_STATEMENT_VTG 1
 #endif
+#ifndef CONFIG_NMEA_STATEMENT_ZDA
+#define CONFIG_NMEA_STATEMENT_ZDA 1
+#endif
+#ifndef CONFIG_NMEA_STATEMENT_GST
+#define CONFIG_NMEA_STATEMENT_GST 1
+#endif
+#ifndef CONFIG_NMEA_STATEMENT_GBS
+#define CONFIG_NMEA_STATEMENT_GBS 1
+#endif
 
 #define NMEA_PARSER_RUNTIME_BUFFER_SIZE                                        \
   (CONFIG_NMEA_PARSER_RING_BUFFER_SIZE / 2)
@@ -165,6 +174,13 @@ static void parse_gga(esp_gps_t *esp_gps) {
     break;
   case 6: /* Fix status */
     esp_gps->parent.fix = (gps_fix_t)strtol(esp_gps->item_str, NULL, 10);
+    /* Some receivers never emit GSA, so fix_mode would stay unset and the fix
+     * would be rejected by the fix_mode >= 2D gate. Fall back to 2D when GGA
+     * reports a fix; a real GSA (2D/3D) supersedes this via arbitration. */
+    if (esp_gps->parent.fix != GPS_FIX_INVALID &&
+        esp_gps->parent.fix_mode < GPS_MODE_2D) {
+      esp_gps->parent.fix_mode = GPS_MODE_2D;
+    }
     break;
   case 7: /* Satellites in use */
     esp_gps->parent.sats_in_use = (uint8_t)strtol(esp_gps->item_str, NULL, 10);
@@ -236,7 +252,8 @@ static void parse_gsv(esp_gps_t *esp_gps) {
     esp_gps->parent.sats_in_view = (uint8_t)strtol(esp_gps->item_str, NULL, 10);
     break;
   default:
-    if (esp_gps->item_num >= 4 && esp_gps->item_num <= 19) {
+    if (esp_gps->item_num >= 4 && esp_gps->item_num <= 19 &&
+        gps_tracker_is_primary_talker(esp_gps, esp_gps->cur_talker)) {
       uint8_t item_num =
           esp_gps->item_num - 4; /* Normalize item number from 4-19 to 0-15 */
       uint8_t index;
@@ -389,6 +406,64 @@ static void parse_vtg(esp_gps_t *esp_gps) {
 }
 #endif
 
+#if CONFIG_NMEA_STATEMENT_ZDA
+/**
+ * @brief Parse ZDA statements (UTC date/time)
+ *
+ * Not all receivers emit RMC; some supply date/time only via ZDA.
+ *
+ * @param esp_gps esp_gps_t type object
+ */
+static void parse_zda(esp_gps_t *esp_gps) {
+  switch (esp_gps->item_num) {
+  case 1: /* UTC time */
+    parse_utc_time(esp_gps);
+    break;
+  case 2: /* Day */
+    esp_gps->parent.date.day = (uint8_t)strtol(esp_gps->item_str, NULL, 10);
+    break;
+  case 3: /* Month */
+    esp_gps->parent.date.month = (uint8_t)strtol(esp_gps->item_str, NULL, 10);
+    break;
+  case 4: { /* Four-digit year -> offset from 2000 */
+    int year = (int)strtol(esp_gps->item_str, NULL, 10);
+    if (year >= 2000) {
+      year -= 2000;
+    } else if (year >= 1900) {
+      year -= 1900;
+    }
+    esp_gps->parent.date.year = (uint16_t)year;
+    break;
+  }
+  default:
+    break;
+  }
+}
+#endif
+
+#if CONFIG_NMEA_STATEMENT_GST
+/**
+ * @brief Recognize GST statements.
+ *
+ * Position error statistics are not currently mapped onto a gps_t field; the
+ * sentence is accepted so it is not treated as unknown.
+ */
+static void parse_gst(esp_gps_t *esp_gps) {
+  (void)esp_gps;
+}
+#endif
+
+#if CONFIG_NMEA_STATEMENT_GBS
+/**
+ * @brief Recognize GBS statements (GNSS satellite fault detection).
+ *
+ * Not currently mapped onto a gps_t field; accepted so it is not unknown.
+ */
+static void parse_gbs(esp_gps_t *esp_gps) {
+  (void)esp_gps;
+}
+#endif
+
 /**
  * @brief Parse received item
  *
@@ -399,6 +474,11 @@ static esp_err_t parse_item(esp_gps_t *esp_gps) {
   esp_err_t err = ESP_OK;
   /* start of a statement */
   if (esp_gps->item_num == 0 && esp_gps->item_str[0] == '$') {
+    /* Capture the talker id (chars 1-2, e.g. "GP" in $GPGGA) so per-talker
+     * arbitration can tell constellations apart. */
+    esp_gps->cur_talker[0] = esp_gps->item_str[1];
+    esp_gps->cur_talker[1] = esp_gps->item_str[2];
+    esp_gps->cur_talker[2] = '\0';
     if (0) {
     }
 #if CONFIG_NMEA_STATEMENT_GGA
@@ -429,6 +509,21 @@ static esp_err_t parse_item(esp_gps_t *esp_gps) {
 #if CONFIG_NMEA_STATEMENT_VTG
     else if (strstr(esp_gps->item_str, "VTG")) {
       esp_gps->cur_statement = STATEMENT_VTG;
+    }
+#endif
+#if CONFIG_NMEA_STATEMENT_ZDA
+    else if (strstr(esp_gps->item_str, "ZDA")) {
+      esp_gps->cur_statement = STATEMENT_ZDA;
+    }
+#endif
+#if CONFIG_NMEA_STATEMENT_GST
+    else if (strstr(esp_gps->item_str, "GST")) {
+      esp_gps->cur_statement = STATEMENT_GST;
+    }
+#endif
+#if CONFIG_NMEA_STATEMENT_GBS
+    else if (strstr(esp_gps->item_str, "GBS")) {
+      esp_gps->cur_statement = STATEMENT_GBS;
     }
 #endif
     else {
@@ -470,11 +565,160 @@ static esp_err_t parse_item(esp_gps_t *esp_gps) {
     parse_vtg(esp_gps);
   }
 #endif
+#if CONFIG_NMEA_STATEMENT_ZDA
+  else if (esp_gps->cur_statement == STATEMENT_ZDA) {
+    parse_zda(esp_gps);
+  }
+#endif
+#if CONFIG_NMEA_STATEMENT_GST
+  else if (esp_gps->cur_statement == STATEMENT_GST) {
+    parse_gst(esp_gps);
+  }
+#endif
+#if CONFIG_NMEA_STATEMENT_GBS
+  else if (esp_gps->cur_statement == STATEMENT_GBS) {
+    parse_gbs(esp_gps);
+  }
+#endif
   else {
     err = ESP_FAIL;
   }
 out:
   return err;
+}
+
+/**
+ * @brief Find (or claim) the arbitration slot for a talker id.
+ *
+ * @return the slot, or NULL when the id is empty or the table is full
+ */
+static gps_talker_state_t *gps_talker_slot(esp_gps_t *gps, const char *talker) {
+  if (!gps || !talker || talker[0] == '\0') {
+    return NULL;
+  }
+
+  gps_talker_state_t *free_slot = NULL;
+  for (int i = 0; i < GPS_MAX_TALKERS; i++) {
+    gps_talker_state_t *slot = &gps->talkers[i];
+    if (slot->used) {
+      if (slot->id[0] == talker[0] && slot->id[1] == talker[1]) {
+        return slot;
+      }
+    } else if (!free_slot) {
+      free_slot = slot;
+    }
+  }
+
+  if (free_slot) {
+    memset(free_slot, 0, sizeof(*free_slot));
+    free_slot->used = true;
+    free_slot->id[0] = talker[0];
+    free_slot->id[1] = talker[1];
+    free_slot->fix_mode = GPS_MODE_INVALID;
+  }
+  return free_slot;
+}
+
+bool gps_tracker_is_primary_talker(const esp_gps_t *gps, const char *talker) {
+  if (!gps || !talker || talker[0] == '\0') {
+    return false;
+  }
+
+  bool has_gn = false;
+  bool has_gp = false;
+  for (int i = 0; i < GPS_MAX_TALKERS; i++) {
+    const gps_talker_state_t *slot = &gps->talkers[i];
+    if (!slot->used) {
+      continue;
+    }
+    if (slot->id[0] == 'G' && slot->id[1] == 'N') {
+      has_gn = true;
+    } else if (slot->id[0] == 'G' && slot->id[1] == 'P') {
+      has_gp = true;
+    }
+  }
+
+  if (has_gn) {
+    return talker[0] == 'G' && talker[1] == 'N';
+  }
+  if (has_gp) {
+    return talker[0] == 'G' && talker[1] == 'P';
+  }
+  return true;
+}
+
+void gps_tracker_note_statement(esp_gps_t *gps, const char *talker,
+                                nmea_statement_t stmt) {
+  if (!gps || !talker || talker[0] == '\0') {
+    return;
+  }
+
+  gps_talker_state_t *slot = gps_talker_slot(gps, talker);
+  if (!slot) {
+    return;
+  }
+
+  slot->tick = xTaskGetTickCount();
+  switch (stmt) {
+  case STATEMENT_GGA:
+    slot->sats_in_use = gps->parent.sats_in_use;
+    if (!slot->has_rmc_or_gll) {
+      /* GGA is the only validity source when RMC/GLL are absent. */
+      slot->valid = (gps->parent.fix != GPS_FIX_INVALID);
+    }
+    break;
+  case STATEMENT_GSA:
+    slot->fix_mode = gps->parent.fix_mode;
+    slot->has_gsa = true;
+    break;
+  case STATEMENT_GSV:
+    slot->sats_in_view = gps->parent.sats_in_view;
+    break;
+  case STATEMENT_RMC:
+  case STATEMENT_GLL:
+    slot->valid = gps->parent.valid;
+    slot->has_rmc_or_gll = true;
+    break;
+  default:
+    break;
+  }
+
+  uint32_t now = xTaskGetTickCount();
+  uint8_t best_view = 0;
+  uint8_t best_use = 0;
+  gps_fix_mode_t best_mode = (gps_fix_mode_t)0;
+  bool any_valid = false;
+  bool any_fresh = false;
+  bool any_mode = false;
+
+  for (int i = 0; i < GPS_MAX_TALKERS; i++) {
+    const gps_talker_state_t *s = &gps->talkers[i];
+    if (!s->used) {
+      continue;
+    }
+    if ((now - s->tick) > pdMS_TO_TICKS(GPS_TALKER_STALE_MS)) {
+      continue;
+    }
+    any_fresh = true;
+    if (s->sats_in_view > best_view) best_view = s->sats_in_view;
+    if (s->sats_in_use > best_use) best_use = s->sats_in_use;
+    if (s->has_gsa) {
+      any_mode = true;
+      if (s->fix_mode > best_mode) best_mode = s->fix_mode;
+    }
+    if (s->valid) any_valid = true;
+  }
+
+  if (any_fresh) {
+    gps->parent.sats_in_view = best_view;
+    gps->parent.sats_in_use = best_use;
+    gps->parent.valid = any_valid;
+    /* Only override the published fix mode once a GSA has been seen, so a
+     * GGA-derived 2D fallback (software parser) is not clobbered. */
+    if (any_mode) {
+      gps->parent.fix_mode = best_mode;
+    }
+  }
 }
 
 /**
@@ -489,11 +733,15 @@ static esp_err_t gps_decode(esp_gps_t *esp_gps, size_t len) {
   while (*d) {
     /* Start of a statement */
     if (*d == '$') {
+      /* Roll back to the last fully-validated fix so a corrupt or truncated
+       * sentence can never leak partial fields into the published state. */
+      esp_gps->parent = esp_gps->committed;
       /* Reset runtime information */
       esp_gps->asterisk = 0;
       esp_gps->item_num = 0;
       esp_gps->item_pos = 0;
       esp_gps->cur_statement = 0;
+      esp_gps->cur_talker[0] = '\0';
       esp_gps->crc = 0;
       esp_gps->sat_count = 0;
       esp_gps->sat_num = 0;
@@ -574,10 +822,30 @@ static esp_err_t gps_decode(esp_gps_t *esp_gps, size_t len) {
           sentence_supported = true;
           break;
 #endif
+#if CONFIG_NMEA_STATEMENT_ZDA
+        case STATEMENT_ZDA:
+          sentence_supported = true;
+          break;
+#endif
+#if CONFIG_NMEA_STATEMENT_GST
+        case STATEMENT_GST:
+          sentence_supported = true;
+          break;
+#endif
+#if CONFIG_NMEA_STATEMENT_GBS
+        case STATEMENT_GBS:
+          sentence_supported = true;
+          break;
+#endif
         default:
           break;
         }
         if (sentence_supported) {
+          /* Arbitrate multi-constellation fields, then commit this sentence as
+           * the new known-good baseline before publishing it. */
+          gps_tracker_note_statement(esp_gps, esp_gps->cur_talker,
+                                     (nmea_statement_t)esp_gps->cur_statement);
+          esp_gps->committed = esp_gps->parent;
           esp_event_post_to(esp_gps->event_loop_hdl, ESP_NMEA_EVENT, GPS_UPDATE,
                             &(esp_gps->parent), sizeof(gps_t),
                             100 / portTICK_PERIOD_MS);
@@ -590,6 +858,9 @@ static esp_err_t gps_decode(esp_gps_t *esp_gps, size_t len) {
         }
       } else {
         ESP_LOGD(GPS_TAG, "CRC Error for statement:%s", esp_gps->buffer);
+        /* A checksum failure must not leave the partially-parsed fields behind;
+         * roll back to the last known-good fix. */
+        esp_gps->parent = esp_gps->committed;
       }
       if (esp_gps->cur_statement == STATEMENT_UNKNOWN) {
         /* Send signal to notify that one unknown statement has been met */

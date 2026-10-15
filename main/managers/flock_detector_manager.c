@@ -37,6 +37,35 @@ static const uint32_t flock_oui_packed[] = {
 };
 #define FLOCK_OUI_COUNT (sizeof(flock_oui_packed) / sizeof(flock_oui_packed[0]))
 
+// Additional WiFi surveillance signatures, each tagged with its device class
+// in the top byte (see FLOCK_CLS). Camera-specific makers (Wyze, Verkada,
+// Avigilon, Axis), ALPR (Motorola Solutions, Genetec), Ring LLC doorbells,
+// Axon body cams and the Hak5 Pineapple default MAC (00:13:37, same signature
+// the PineAP detector uses). Broad vendor blocks (Amazon, Hikvision) are left
+// out to keep the hit rate meaningful.
+#define FLOCK_CLS(cls, oui) (((uint32_t)(cls) << 24) | (uint32_t)(oui))
+static const uint32_t camera_oui_packed[] = {
+    FLOCK_CLS(FLOCK_CLASS_CAMERA, 0x2CAA8E), FLOCK_CLS(FLOCK_CLASS_CAMERA, 0xD03F27),
+    FLOCK_CLS(FLOCK_CLASS_CAMERA, 0x7C78B2),  // Wyze Labs
+    FLOCK_CLS(FLOCK_CLASS_CAMERA, 0xE0A700),  // Verkada
+    FLOCK_CLS(FLOCK_CLASS_CAMERA, 0x701AD5),  // Avigilon
+    FLOCK_CLS(FLOCK_CLASS_CAMERA, 0x00408C), FLOCK_CLS(FLOCK_CLASS_CAMERA, 0xB8A44F),  // Axis
+    FLOCK_CLS(FLOCK_CLASS_ALPR, 0x00047D), FLOCK_CLS(FLOCK_CLASS_ALPR, 0x001885),
+    FLOCK_CLS(FLOCK_CLASS_ALPR, 0x001F92), FLOCK_CLS(FLOCK_CLASS_ALPR, 0x4CCC34),
+    FLOCK_CLS(FLOCK_CLASS_ALPR, 0xB8E28C),   // Motorola Solutions
+    FLOCK_CLS(FLOCK_CLASS_ALPR, 0x00BF15), FLOCK_CLS(FLOCK_CLASS_ALPR, 0x0CBF15),  // Genetec
+    FLOCK_CLS(FLOCK_CLASS_RING, 0xAC9FC3), FLOCK_CLS(FLOCK_CLASS_RING, 0x187F88),
+    FLOCK_CLS(FLOCK_CLASS_RING, 0x343EA4), FLOCK_CLS(FLOCK_CLASS_RING, 0x54E019),
+    FLOCK_CLS(FLOCK_CLASS_RING, 0x5C475E), FLOCK_CLS(FLOCK_CLASS_RING, 0x649A63),
+    FLOCK_CLS(FLOCK_CLASS_RING, 0x90486C), FLOCK_CLS(FLOCK_CLASS_RING, 0x9C7613),
+    FLOCK_CLS(FLOCK_CLASS_RING, 0xCC3BFB), FLOCK_CLS(FLOCK_CLASS_RING, 0xC4DBAD),
+    FLOCK_CLS(FLOCK_CLASS_RING, 0x242BD6), FLOCK_CLS(FLOCK_CLASS_RING, 0x00B463),
+    FLOCK_CLS(FLOCK_CLASS_RING, 0x50E467),   // Ring LLC
+    FLOCK_CLS(FLOCK_CLASS_AXON, 0x0025DF),   // Axon Enterprise
+    FLOCK_CLS(FLOCK_CLASS_HAK5, 0x001337),   // Hak5 Pineapple default MAC (mirrors PineAP detect)
+};
+#define CAMERA_OUI_COUNT (sizeof(camera_oui_packed) / sizeof(camera_oui_packed[0]))
+
 typedef struct __attribute__((packed)) {
     uint16_t frame_ctrl, duration;
     uint8_t addr1[6], addr2[6], addr3[6];
@@ -54,6 +83,7 @@ typedef struct {
     uint8_t mac[6];
     int8_t rssi;
     uint8_t channel;
+    uint8_t cls;                      // FlockDeviceClass
     char ssid[FLOCK_ALERT_SSID_LEN];  // empty string if no SSID
 } FlockAlertEntry;
 
@@ -63,7 +93,8 @@ static volatile size_t s_alert_tail = 0;
 static portMUX_TYPE s_alert_mux = portMUX_INITIALIZER_UNLOCKED;
 
 static void IRAM_ATTR enqueue_alert(FlockDetectMethod method, const uint8_t *mac,
-                                     int8_t rssi, uint8_t ch, const char *ssid) {
+                                     int8_t rssi, uint8_t ch, const char *ssid,
+                                     uint8_t cls) {
     portENTER_CRITICAL_ISR(&s_alert_mux);
     size_t next = (s_alert_head + 1) % FLOCK_ALERT_QUEUE_SIZE;
     if (next == s_alert_tail) { portEXIT_CRITICAL_ISR(&s_alert_mux); return; }
@@ -71,6 +102,7 @@ static void IRAM_ATTR enqueue_alert(FlockDetectMethod method, const uint8_t *mac
     e->method = method;
     e->rssi = rssi;
     e->channel = ch;
+    e->cls = cls;
     memcpy((void *)e->mac, mac, 6);
     if (ssid && ssid[0]) strlcpy((char *)e->ssid, ssid, FLOCK_ALERT_SSID_LEN);
     else e->ssid[0] = '\0';
@@ -122,7 +154,7 @@ static int det_find(const char *mac) {
     return -1;
 }
 
-static int det_insert(const char *mac, FlockDetectMethod method, int8_t rssi, uint8_t ch, const char *ssid) {
+static int det_insert(const char *mac, FlockDetectMethod method, int8_t rssi, uint8_t ch, const char *ssid, uint8_t cls) {
     if (s_count >= FLOCK_MAX_DETECTIONS) return -1;
     uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
     int idx = s_count;
@@ -130,6 +162,7 @@ static int det_insert(const char *mac, FlockDetectMethod method, int8_t rssi, ui
     strlcpy(d->mac, mac, FLOCK_MAC_STR_LEN);
     strlcpy(d->method, flock_detector_method_str(method), FLOCK_METHOD_STR_LEN);
     d->rssi = rssi; d->channel = ch;
+    d->device_class = cls;
     d->first_seen_ms = now; d->last_seen_ms = now; d->count = 1;
     d->confidence = (method == FLOCK_DETECT_WILDCARD_PROBE || method == FLOCK_DETECT_SSID)
                     ? FLOCK_CONF_HIGH : FLOCK_CONF_LOW;
@@ -192,10 +225,11 @@ static void drain_task_fn(void *arg) {
                     s_dets[idx].rssi = e.rssi;
                     s_dets[idx].channel = e.channel;
                     if (conf == FLOCK_CONF_HIGH) s_dets[idx].confidence = FLOCK_CONF_HIGH;
+                    if (s_dets[idx].device_class == FLOCK_CLASS_NONE) s_dets[idx].device_class = e.cls;
                     if (e.ssid[0] && !s_dets[idx].ssid[0])
                         strlcpy(s_dets[idx].ssid, e.ssid, FLOCK_SSID_STR_LEN);
                 } else {
-                    idx = det_insert(ms, e.method, e.rssi, e.channel, e.ssid);
+                    idx = det_insert(ms, e.method, e.rssi, e.channel, e.ssid, e.cls);
                 }
                 if (conf == FLOCK_CONF_HIGH) {
                     const char *sig = (e.rssi > -50) ? "Strong" : (e.rssi > -70) ? "Medium" : "Weak";
@@ -230,12 +264,15 @@ static void hop_cb(void *arg) {
 
 // ---- WiFi sniffer callback (ISR context — no blocking, no glog, no mutex) ----
 
-static inline bool IRAM_ATTR oui_match(const uint8_t *mac) {
+static inline uint8_t IRAM_ATTR oui_class(const uint8_t *mac) {
     uint32_t oui = ((uint32_t)mac[0] << 16) | ((uint32_t)mac[1] << 8) | mac[2];
     for (size_t i = 0; i < FLOCK_OUI_COUNT; i++) {
-        if (oui == flock_oui_packed[i]) return true;
+        if (oui == flock_oui_packed[i]) return FLOCK_CLASS_FLOCK;
     }
-    return false;
+    for (size_t i = 0; i < CAMERA_OUI_COUNT; i++) {
+        if ((camera_oui_packed[i] & 0xFFFFFF) == oui) return (uint8_t)(camera_oui_packed[i] >> 24);
+    }
+    return FLOCK_CLASS_NONE;
 }
 
 static int IRAM_ATTR is_wildcard_probe(const uint8_t *body, int len) {
@@ -270,12 +307,24 @@ static const char * const flock_ssid_keywords[] = {
 };
 #define FLOCK_SSID_KW_COUNT (sizeof(flock_ssid_keywords) / sizeof(flock_ssid_keywords[0]))
 
-static bool IRAM_ATTR match_ssid_keyword(const char *ssid) {
-    if (!ssid || !ssid[0]) return false;
+// Vendors whose cameras leak an SSID prefix (Axon body-cam SSIDs are
+// agency-set; low confidence, kept as a hint).
+static const struct { const char *kw; uint8_t cls; } flock_ssid_extra[] = {
+    {"AXON-", FLOCK_CLASS_AXON}, {"AB2-", FLOCK_CLASS_AXON},
+    {"AB3-", FLOCK_CLASS_AXON}, {"AB4-", FLOCK_CLASS_AXON},
+    {"Pineapple", FLOCK_CLASS_HAK5},
+};
+#define FLOCK_SSID_EXTRA_COUNT (sizeof(flock_ssid_extra) / sizeof(flock_ssid_extra[0]))
+
+static uint8_t IRAM_ATTR match_ssid_class(const char *ssid) {
+    if (!ssid || !ssid[0]) return FLOCK_CLASS_NONE;
     for (size_t i = 0; i < FLOCK_SSID_KW_COUNT; i++) {
-        if (strstr(ssid, flock_ssid_keywords[i])) return true;
+        if (strstr(ssid, flock_ssid_keywords[i])) return FLOCK_CLASS_FLOCK;
     }
-    return false;
+    for (size_t i = 0; i < FLOCK_SSID_EXTRA_COUNT; i++) {
+        if (strstr(ssid, flock_ssid_extra[i].kw)) return flock_ssid_extra[i].cls;
+    }
+    return FLOCK_CLASS_NONE;
 }
 
 static void IRAM_ATTR flock_sniffer_cb(void *buf, wifi_promiscuous_pkt_type_t type) {
@@ -289,7 +338,8 @@ static void IRAM_ATTR flock_sniffer_cb(void *buf, wifi_promiscuous_pkt_type_t ty
     if (rssi < -95) return;
     uint8_t ch = (uint8_t)pkt->rx_ctrl.channel;
 
-    if (oui_match(hdr->addr2)) {
+    uint8_t c2 = oui_class(hdr->addr2);
+    if (c2) {
         bool emitted = false;
         if (type == WIFI_PKT_MGMT) {
             uint8_t fc0 = hdr->frame_ctrl & 0xFF;
@@ -299,17 +349,19 @@ static void IRAM_ATTR flock_sniffer_cb(void *buf, wifi_promiscuous_pkt_type_t ty
                 const uint8_t *body = pkt->payload + sizeof(flock_mac_hdr_t);
                 int r = (bl > 0) ? is_wildcard_probe(body, bl) : -1;
                 if (r == -1 && bl > 4) r = is_wildcard_probe(body, bl - 4);
-                if (r == 1) { enqueue_alert(FLOCK_DETECT_WILDCARD_PROBE, hdr->addr2, rssi, ch, NULL); emitted = true; }
+                if (r == 1) { enqueue_alert(FLOCK_DETECT_WILDCARD_PROBE, hdr->addr2, rssi, ch, NULL, c2); emitted = true; }
             }
         }
-        if (!emitted) enqueue_alert(FLOCK_DETECT_OUI_ADDR2, hdr->addr2, rssi, ch, NULL);
+        if (!emitted) enqueue_alert(FLOCK_DETECT_OUI_ADDR2, hdr->addr2, rssi, ch, NULL, c2);
     }
 
-    if (!(hdr->addr1[0] & 0x01) && oui_match(hdr->addr1))
-        enqueue_alert(FLOCK_DETECT_OUI_ADDR1, hdr->addr1, rssi, ch, NULL);
+    uint8_t c1 = oui_class(hdr->addr1);
+    if (!(hdr->addr1[0] & 0x01) && c1)
+        enqueue_alert(FLOCK_DETECT_OUI_ADDR1, hdr->addr1, rssi, ch, NULL, c1);
 
-    if (type == WIFI_PKT_MGMT && oui_match(hdr->addr3))
-        enqueue_alert(FLOCK_DETECT_OUI_ADDR3, hdr->addr3, rssi, ch, NULL);
+    uint8_t c3 = oui_class(hdr->addr3);
+    if (type == WIFI_PKT_MGMT && c3)
+        enqueue_alert(FLOCK_DETECT_OUI_ADDR3, hdr->addr3, rssi, ch, NULL, c3);
 
     // SSID keyword matching on management frames (beacon, probe resp, probe req)
     if (type == WIFI_PKT_MGMT) {
@@ -326,8 +378,10 @@ static void IRAM_ATTR flock_sniffer_cb(void *buf, wifi_promiscuous_pkt_type_t ty
         }
         if (body && blen > 0) {
             char ssid[FLOCK_ALERT_SSID_LEN];
-            if (extract_ssid(body, blen, ssid, sizeof(ssid)) && match_ssid_keyword(ssid)) {
-                enqueue_alert(FLOCK_DETECT_SSID, hdr->addr2, rssi, ch, ssid);
+            uint8_t sc = FLOCK_CLASS_NONE;
+            if (extract_ssid(body, blen, ssid, sizeof(ssid)) &&
+                (sc = match_ssid_class(ssid)) != FLOCK_CLASS_NONE) {
+                enqueue_alert(FLOCK_DETECT_SSID, hdr->addr2, rssi, ch, ssid, sc);
             }
         }
     }

@@ -78,10 +78,10 @@ bool infrared_manager_init(void) {
 #endif
 #if defined(CONFIG_BUILD_CONFIG_TEMPLATE) && defined(CONFIG_HAS_INFRARED)
     if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "poltergeist") == 0) {
-        gpio_reset_pin(infrared_get_tx_pin());
-        gpio_set_direction(infrared_get_tx_pin(), GPIO_MODE_OUTPUT);
-        gpio_set_level(infrared_get_tx_pin(), 0);
-        ESP_LOGI(TAG_IR_MANAGER, "IO%d configured for poltergeist template", infrared_get_tx_pin());
+        gpio_reset_pin(INFRARED_POLTERGEIST_SELECT_PIN);
+        gpio_set_direction(INFRARED_POLTERGEIST_SELECT_PIN, GPIO_MODE_OUTPUT);
+        gpio_set_level(INFRARED_POLTERGEIST_SELECT_PIN, 0);
+        ESP_LOGI(TAG_IR_MANAGER, "IO%d configured for poltergeist template", INFRARED_POLTERGEIST_SELECT_PIN);
     }
 #endif
     return ok;
@@ -788,9 +788,9 @@ void infrared_manager_poltergeist_hold_io24_begin(void) {
 #if defined(CONFIG_BUILD_CONFIG_TEMPLATE) && defined(CONFIG_HAS_INFRARED)
     if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "poltergeist") != 0) return;
     if (s_poltergeist_io24_hold_refcount == 0) {
-        gpio_reset_pin(infrared_get_tx_pin());
-        gpio_set_direction(infrared_get_tx_pin(), GPIO_MODE_OUTPUT);
-        gpio_set_level(infrared_get_tx_pin(), 1);
+        gpio_reset_pin(INFRARED_POLTERGEIST_SELECT_PIN);
+        gpio_set_direction(INFRARED_POLTERGEIST_SELECT_PIN, GPIO_MODE_OUTPUT);
+        gpio_set_level(INFRARED_POLTERGEIST_SELECT_PIN, 1);
         vTaskDelay(pdMS_TO_TICKS(250));
     }
     s_poltergeist_io24_hold_refcount++;
@@ -803,7 +803,7 @@ void infrared_manager_poltergeist_hold_io24_end(void) {
     if (s_poltergeist_io24_hold_refcount == 0) return;
     s_poltergeist_io24_hold_refcount--;
     if (s_poltergeist_io24_hold_refcount == 0) {
-        gpio_set_level(infrared_get_tx_pin(), 0);
+        gpio_set_level(INFRARED_POLTERGEIST_SELECT_PIN, 0);
     }
 #endif
 }
