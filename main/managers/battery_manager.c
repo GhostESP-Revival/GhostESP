@@ -25,8 +25,6 @@
 #include "soc/adc_channel.h"
 #endif
 
-static const char *TAG = "Battery";
-
 const char *battery_level_name(battery_level_t level) {
     switch (level) {
         case BATTERY_LEVEL_LOW: return "low";
@@ -52,6 +50,8 @@ bool battery_manager_add_level_listener(battery_level_cb_t cb, void *ctx) {
 }
 
 #else /* BATTERY_HAS_BACKEND */
+
+static const char *TAG = "Battery";
 
 /* ------------------------------------------------------------------ */
 /* State                                                               */
