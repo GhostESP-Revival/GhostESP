@@ -436,7 +436,12 @@ static esp_err_t arm_gpio_wake(int gpio, int level) {
 #endif
 #if SOC_PM_SUPPORT_EXT1_WAKEUP
     {
+#if CONFIG_IDF_TARGET_ESP32
+        // Classic ESP32 only has ALL_LOW; with a single wake pin it behaves like ANY_LOW.
+        esp_sleep_ext1_wakeup_mode_t mode = level ? ESP_EXT1_WAKEUP_ANY_HIGH : ESP_EXT1_WAKEUP_ALL_LOW;
+#else
         esp_sleep_ext1_wakeup_mode_t mode = level ? ESP_EXT1_WAKEUP_ANY_HIGH : ESP_EXT1_WAKEUP_ANY_LOW;
+#endif
         esp_err_t err1 = esp_sleep_enable_ext1_wakeup_io(1ULL << gpio, mode);
         if (err1 == ESP_OK) return err1;
     }
