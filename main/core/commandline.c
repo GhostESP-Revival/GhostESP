@@ -457,6 +457,7 @@ void register_commands() {
     register_command("listenprobes", handle_listen_probes_cmd);
     register_command("mdnssniff", handle_mdns_sniff);
     register_command("settings", handle_settings_cmd);
+    register_command("power", handle_power_cmd);
     register_command("loglevel", handle_log_level_cmd);
     register_command("fav", handle_fav_cmd);
     register_command("favorites", handle_fav_cmd);

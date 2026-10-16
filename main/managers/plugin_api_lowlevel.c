@@ -1,5 +1,6 @@
 #include "managers/plugin_api_internal.h"
-#include "managers/fuel_gauge_manager.h"
+#include "managers/battery_manager.h"
+#include "managers/power_manager.h"
 #include "managers/joystick_manager.h"
 #include "managers/settings_manager.h"
 #include "managers/microphone/mic_driver.h"
@@ -616,15 +617,20 @@ bool plugin_api_app_storage_mkdir_recursive(const char *path) {
 }
 
 int plugin_api_battery_percent(void) {
-    return has_permission(PLUGIN_PERMISSION_POWER) ? fuel_gauge_manager_get_percentage() : -1;
+    battery_status_t st;
+    if (!has_permission(PLUGIN_PERMISSION_POWER)) return -1;
+    return battery_manager_get(&st) ? (int)st.percent : -1;
 }
 
 int plugin_api_battery_voltage_mv(void) {
-    return has_permission(PLUGIN_PERMISSION_POWER) ? (int)fuel_gauge_manager_get_voltage_mv() : -1;
+    battery_status_t st;
+    if (!has_permission(PLUGIN_PERMISSION_POWER)) return -1;
+    return battery_manager_get(&st) ? (int)st.voltage_mv : 0;
 }
 
 bool plugin_api_battery_is_charging(void) {
-    return has_permission(PLUGIN_PERMISSION_POWER) && fuel_gauge_manager_is_charging();
+    battery_status_t st;
+    return has_permission(PLUGIN_PERMISSION_POWER) && battery_manager_get(&st) && st.charging;
 }
 
 uint8_t plugin_api_display_get_brightness(void) {
@@ -1562,6 +1568,7 @@ bool plugin_api_settings_get_u8(const char *key, uint8_t *out) {
     else if (strcmp(key, "nav_buttons") == 0) *out = settings_get_nav_buttons_enabled(&G_Settings) ? 1 : 0;
     else if (strcmp(key, "neopixel_brightness") == 0) *out = settings_get_neopixel_max_brightness(&G_Settings);
     else if (strcmp(key, "power_save") == 0) *out = settings_get_power_save_enabled(&G_Settings) ? 1 : 0;
+    else if (strcmp(key, "power_profile") == 0) *out = settings_get_power_profile(&G_Settings);
     else return false;
     return true;
 }
@@ -1572,7 +1579,11 @@ bool plugin_api_settings_set_u8(const char *key, uint8_t value) {
     else if (strcmp(key, "max_brightness") == 0) settings_set_max_screen_brightness(&G_Settings, value);
     else if (strcmp(key, "nav_buttons") == 0) settings_set_nav_buttons_enabled(&G_Settings, value != 0);
     else if (strcmp(key, "neopixel_brightness") == 0) settings_set_neopixel_max_brightness(&G_Settings, value);
-    else if (strcmp(key, "power_save") == 0) settings_set_power_save_enabled(&G_Settings, value != 0);
+    else if (strcmp(key, "power_save") == 0) power_manager_set_power_save(value != 0);
+    else if (strcmp(key, "power_profile") == 0) {
+        if (value >= POWER_PROFILE_COUNT) return false;
+        return power_manager_set_profile((power_profile_t)value, true) == ESP_OK;
+    }
     else return false;
     return true;
 }

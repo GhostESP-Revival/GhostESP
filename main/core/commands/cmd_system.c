@@ -54,14 +54,18 @@ void handle_log_level_cmd(int argc, char **argv) {
     }
 
     if (argc != 2) {
+#if CONFIG_LOG_MAXIMUM_LEVEL >= 5
         glog("Usage: loglevel [none|error|warn|info|debug|verbose]\n");
+#else
+        glog("Usage: loglevel [none|error|warn|info|debug]\n");
+#endif
         return;
     }
 
     static const char *names[] = {"none", "error", "warn", "info", "debug", "verbose"};
     esp_log_level_t level = ESP_LOG_NONE;
     bool found = false;
-    for (int i = 0; i <= ESP_LOG_VERBOSE; i++) {
+    for (int i = 0; i <= CONFIG_LOG_MAXIMUM_LEVEL && i <= ESP_LOG_VERBOSE; i++) {
         if (strcasecmp(argv[1], names[i]) == 0) {
             level = (esp_log_level_t)i;
             found = true;
@@ -69,7 +73,11 @@ void handle_log_level_cmd(int argc, char **argv) {
         }
     }
     if (!found) {
+#if CONFIG_LOG_MAXIMUM_LEVEL >= 5
         glog("Unknown log level. Use none, error, warn, info, debug, or verbose.\n");
+#else
+        glog("Unknown log level. Use none, error, warn, info or debug (verbose is compiled out).\n");
+#endif
         return;
     }
 

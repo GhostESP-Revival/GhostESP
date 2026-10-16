@@ -80,6 +80,7 @@ bool lora_manager_get_hw(lora_hw_t *o) { (void)o; return false; }
 #include "managers/lora_store.h"
 #include "managers/lora_pki.h"
 #include "managers/lora_sx1262.h"
+#include "managers/power_manager.h"
 #include "managers/lora_phoneapi.h"
 #include "managers/lora_pb.h"
 #include "managers/lora_ble.h"
@@ -1360,6 +1361,7 @@ bool lora_manager_start(void) {
         ESP_LOGW(TAG, "LoRa radio init failed at stage '%s'", lora_radio_step());
         return false;
     }
+    power_manager_set_radio_needs_wifi(s_companion == LORA_COMPANION_WIFI);
     if (lora_radio_start_rx(lora_rx_cb, NULL) != 0) {
         set_err(lora_radio_step());
         ESP_LOGW(TAG, "LoRa RX start failed at stage '%s'", lora_radio_step());
@@ -1383,6 +1385,7 @@ bool lora_manager_start(void) {
 void lora_manager_stop(void) {
     lora_ble_stop();
     lora_radio_stop();
+    power_manager_set_radio_needs_wifi(false);
     lora_radio_deinit();
     lora_mesh_routing_reset();
     s_running = false;

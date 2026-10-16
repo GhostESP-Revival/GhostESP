@@ -46,6 +46,15 @@ const char *lora_radio_step(void);
 int lora_radio_start_rx(lora_rx_cb_t cb, void *ctx);
 void lora_radio_stop(void);
 
+// Light-sleep integration (see power_manager). In wake mode DIO1 is level-triggered so it
+// can wake the chip from automatic light sleep, and the radio's pads keep their configuration
+// while the chip sleeps. Off = the original edge-triggered behavior. Idempotent.
+void lora_radio_set_wake_mode(bool on);
+
+// Weak hook, true when continuous RX is up and false when it stops. power_manager
+// provides the strong definition so the driver stays layer-clean.
+void lora_radio_rx_state_hook(bool on);
+
 // Blocking-ish TX (CAD + timeout inside). len 1..240.
 int lora_radio_send(const uint8_t *data, uint8_t len);
 

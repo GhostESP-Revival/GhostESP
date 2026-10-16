@@ -48,6 +48,7 @@ void handle_sae_flood_help_cmd(int argc, char **argv);
 
 // Settings, time, timezone, web auth, WebUI AP, and config load
 void handle_settings_cmd(int argc, char **argv);
+void handle_power_cmd(int argc, char **argv);
 void handle_settime_cmd(int argc, char **argv);
 void handle_time_cmd(int argc, char **argv);
 void handle_timezone_cmd(int argc, char **argv);

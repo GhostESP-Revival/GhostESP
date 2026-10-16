@@ -11,6 +11,7 @@
 #include "core/ghostesp_version.h"
 #include "core/memory_debug.h"
 #include "managers/ap_manager.h"
+#include "managers/power_manager.h"
 #include "managers/display_manager.h"
 #include "managers/ghostchi_manager.h"
 #include "managers/ghostchi_mood.h"
@@ -716,6 +717,7 @@ static void deferred_sd_init_task(void *arg) {
 }
 
 void app_main(void) {
+    power_manager_log_boot_wake(); // release deep-sleep pad holds before anything configures GPIO
 #if defined(CONFIG_IDF_TARGET_ESP32) && defined(CONFIG_BT_ENABLED)
     /* BLE is only used on demand, but the Classic BT controller's ~15KB DRAM
      * is otherwise held until the first ble_init(). Nothing uses Classic BT

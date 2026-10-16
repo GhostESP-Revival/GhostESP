@@ -6,6 +6,7 @@
 #include "gui/theme_palette_api.h"
 #include "managers/config_manager.h"
 #include "managers/settings_manager.h"
+#include "managers/power_manager.h"
 #include "scans/wifi/hop_profile.h"
 #include "managers/settings_sd_backup.h"
 #include "managers/status_display_manager.h"
@@ -98,7 +99,7 @@ static const SettingDescriptor k_settings_desc[] = {
     {"gps_baud_rate", ST_U32, OFF(gps_baud_rate), "System", 0, 0, 0},
     {"ir_tx_pin", ST_I32, OFF(ir_tx_pin), "System", 0, -1, 127},
     {"ir_rx_pin", ST_I32, OFF(ir_rx_pin), "System", 0, -1, 127},
-    {"power_save", ST_BOOL, OFF(power_save_enabled), "System", 0, 0, 0},
+    {"power_profile", ST_ENUM8, OFF(power_profile), "System", 0, 0, 3},
     {"zebra_menus", ST_BOOL, OFF(zebra_menus_enabled), "System", 0, 0, 0},
     {"nav_buttons", ST_BOOL, OFF(nav_buttons_enabled), "System", 0, 0, 0},
     {"menu_layout", ST_U8, OFF(menu_layout), "System", 0, 0, 4},
@@ -643,7 +644,8 @@ void handle_settings_cmd(int argc, char **argv) {
         glog("    gps_baud_rate     - GPS UART baud rate (0 = Kconfig default)\n");
         glog("    ir_tx_pin         - IR TX pin (-1 = board default)\n");
         glog("    ir_rx_pin         - IR RX pin (-1 = board default)\n");
-        glog("    power_save        - Power save mode (true/false)\n");
+        glog("    power_profile     - Power profile (performance/balanced/saver/auto or 0-3)\n");
+        glog("    power_save        - Alias: true = saver, false = performance (see also: power)\n");
         glog("    zebra_menus       - Zebra menus (true/false)\n");
         glog("    nav_buttons       - Navigation buttons (true/false)\n");
         glog("    menu_layout       - Menu layout (0=Carousel, 1=Grid, 2=List, 3=Compact, 4=Hero)\n");
@@ -670,6 +672,10 @@ void handle_settings_cmd(int argc, char **argv) {
     if (strcmp(argv[1], "get") == 0) {
         if (argc < 3) { glog("Usage: settings get <setting>\n"); return; }
         const char *setting = argv[2];
+        if (strcmp(setting, "power_save") == 0) {
+            glog("power_save = %s\n", settings_get_power_save_enabled(&G_Settings) ? "true" : "false");
+            return;
+        }
         const SettingDescriptor *d = find_setting_desc(setting);
         if (!d) {
             glog("Unknown setting: %s\n", setting);
@@ -684,6 +690,26 @@ void handle_settings_cmd(int argc, char **argv) {
         if (argc < 4) { glog("Usage: settings set <setting> <value>\n"); return; }
         const char *setting = argv[2];
         const char *value = argv[3];
+        if (strcmp(setting, "power_save") == 0) {
+            if (strcmp(value, "true") != 0 && strcmp(value, "false") != 0) {
+                glog("Invalid power_save. Use true or false\n");
+                return;
+            }
+            power_manager_set_power_save(strcmp(value, "true") == 0);
+            glog("Set power_save = %s (profile: %s)\n", value,
+                 power_profile_name(power_manager_get_profile()));
+            return;
+        }
+        if (strcmp(setting, "power_profile") == 0) {
+            power_profile_t pp;
+            if (!power_profile_parse(value, &pp)) {
+                glog("Invalid power_profile. Use performance, balanced, saver or auto\n");
+                return;
+            }
+            power_manager_set_profile(pp, true);
+            glog("Set power_profile = %s\n", power_profile_name(pp));
+            return;
+        }
         const SettingDescriptor *d = find_setting_desc(setting);
         if (!d) {
             glog("Unknown setting: %s\n", setting);
@@ -731,6 +757,7 @@ void handle_settings_cmd(int argc, char **argv) {
         if (argc == 2) {
             settings_set_defaults(&G_Settings);
             settings_save(&G_Settings);
+            power_manager_apply_settings();
             glog("Reset all settings to defaults\n");
         } else if (argc == 3) {
             const char *setting = argv[2];
@@ -752,6 +779,7 @@ void handle_settings_cmd(int argc, char **argv) {
             reset_setting_value(d, &G_Settings, defaults);
             free(defaults);
             settings_save(&G_Settings);
+            if (strcmp(d->name, "power_profile") == 0) power_manager_apply_settings();
             glog("Reset %s to default\n", d->name);
         } else {
             glog("Usage: settings reset [setting]\n");

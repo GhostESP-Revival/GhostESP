@@ -4,7 +4,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <string.h>
-#include "esp_pm.h"
+#include "managers/power_manager.h"
 #include "io_manager/i2c_bus_lock.h"
 #include "nvs_flash.h"
 #include "nvs.h"
@@ -60,21 +60,15 @@ static i2c_master_dev_handle_t fg_i2c_dev = NULL;
 static fuel_gauge_data_t last_data = {0};
 static volatile bool s_paused = false;
 
-#if CONFIG_PM_ENABLE
-static esp_pm_lock_handle_t fg_i2c_pm_lock = NULL;
-#endif
+static power_lock_t fg_i2c_pm_lock = NULL;
 
 static uint16_t bq27220_read_word(uint8_t reg) {
     uint8_t data[2] = {0};
-#if CONFIG_PM_ENABLE
-    if (fg_i2c_pm_lock) esp_pm_lock_acquire(fg_i2c_pm_lock);
-#endif
+    power_lock_acquire(fg_i2c_pm_lock);
     bool locked = i2c_bus_lock(I2C_MASTER_NUM, I2C_MASTER_TIMEOUT_MS);
     esp_err_t ret = locked ? i2c_master_transmit_receive(fg_i2c_dev, &reg, 1, data, 2, I2C_MASTER_TIMEOUT_MS) : ESP_ERR_TIMEOUT;
     if (locked) i2c_bus_unlock(I2C_MASTER_NUM);
-#if CONFIG_PM_ENABLE
-    if (fg_i2c_pm_lock) esp_pm_lock_release(fg_i2c_pm_lock);
-#endif
+    power_lock_release(fg_i2c_pm_lock);
 
     if (ret != ESP_OK) {
         return 0xFFFF;
@@ -88,15 +82,11 @@ static esp_err_t bq27220_write_word(uint8_t reg, uint16_t data) {
     write_data[0] = reg;
     write_data[1] = data & 0xFF;
     write_data[2] = (data >> 8) & 0xFF;
-#if CONFIG_PM_ENABLE
-    if (fg_i2c_pm_lock) esp_pm_lock_acquire(fg_i2c_pm_lock);
-#endif
+    power_lock_acquire(fg_i2c_pm_lock);
     bool locked = i2c_bus_lock(I2C_MASTER_NUM, I2C_MASTER_TIMEOUT_MS);
     esp_err_t ret = locked ? i2c_master_transmit(fg_i2c_dev, write_data, 3, I2C_MASTER_TIMEOUT_MS) : ESP_ERR_TIMEOUT;
     if (locked) i2c_bus_unlock(I2C_MASTER_NUM);
-#if CONFIG_PM_ENABLE
-    if (fg_i2c_pm_lock) esp_pm_lock_release(fg_i2c_pm_lock);
-#endif
+    power_lock_release(fg_i2c_pm_lock);
     return ret;
 }
 
@@ -192,15 +182,11 @@ static esp_err_t bq27220_exit_config_update(void) {
 
 static uint8_t bq27220_read_byte(uint8_t reg) {
     uint8_t data = 0xFF;
-#if CONFIG_PM_ENABLE
-    if (fg_i2c_pm_lock) esp_pm_lock_acquire(fg_i2c_pm_lock);
-#endif
+    power_lock_acquire(fg_i2c_pm_lock);
     bool locked = i2c_bus_lock(I2C_MASTER_NUM, I2C_MASTER_TIMEOUT_MS);
     esp_err_t ret = locked ? i2c_master_transmit_receive(fg_i2c_dev, &reg, 1, &data, 1, I2C_MASTER_TIMEOUT_MS) : ESP_ERR_TIMEOUT;
     if (locked) i2c_bus_unlock(I2C_MASTER_NUM);
-#if CONFIG_PM_ENABLE
-    if (fg_i2c_pm_lock) esp_pm_lock_release(fg_i2c_pm_lock);
-#endif
+    power_lock_release(fg_i2c_pm_lock);
     if (ret != ESP_OK) {
         return 0xFF;
     }
@@ -344,11 +330,9 @@ static esp_err_t fuel_gauge_i2c_init(void) {
     }
     if (ret != ESP_OK) return ret;
 
-#if CONFIG_PM_ENABLE
     if (fg_i2c_pm_lock == NULL) {
-        esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP, 0, "fg_i2c", &fg_i2c_pm_lock);
+        fg_i2c_pm_lock = power_lock_create(POWER_LOCK_NO_LIGHT_SLEEP, "fg_i2c");
     }
-#endif
     return ret;
 }
 
@@ -684,15 +668,11 @@ static int8_t nvs_load_soc(void) {
     return (err == ESP_OK) ? (int8_t)val : -1;
 }
 
-#if CONFIG_PM_ENABLE
-static esp_pm_lock_handle_t fg_i2c_pm_lock = NULL;
-#endif
+static power_lock_t fg_i2c_pm_lock = NULL;
 
 static uint16_t max17048_read_word(uint8_t reg) {
     uint8_t data[2] = {0};
-#if CONFIG_PM_ENABLE
-    if (fg_i2c_pm_lock) esp_pm_lock_acquire(fg_i2c_pm_lock);
-#endif
+    power_lock_acquire(fg_i2c_pm_lock);
 
     uint16_t result = 0xFFFF;
     for (int retry = 0; retry < 3; retry++) {
@@ -707,9 +687,7 @@ static uint16_t max17048_read_word(uint8_t reg) {
         vTaskDelay(pdMS_TO_TICKS(5));
     }
 
-#if CONFIG_PM_ENABLE
-    if (fg_i2c_pm_lock) esp_pm_lock_release(fg_i2c_pm_lock);
-#endif
+    power_lock_release(fg_i2c_pm_lock);
     return result;
 }
 
@@ -718,9 +696,7 @@ static esp_err_t max17048_write_word(uint8_t reg, uint16_t data) {
     write_data[0] = reg;
     write_data[1] = (data >> 8) & 0xFF;
     write_data[2] = data & 0xFF;
-#if CONFIG_PM_ENABLE
-    if (fg_i2c_pm_lock) esp_pm_lock_acquire(fg_i2c_pm_lock);
-#endif
+    power_lock_acquire(fg_i2c_pm_lock);
 
     esp_err_t ret = ESP_ERR_TIMEOUT;
     for (int retry = 0; retry < 3; retry++) {
@@ -732,9 +708,7 @@ static esp_err_t max17048_write_word(uint8_t reg, uint16_t data) {
         vTaskDelay(pdMS_TO_TICKS(5));
     }
 
-#if CONFIG_PM_ENABLE
-    if (fg_i2c_pm_lock) esp_pm_lock_release(fg_i2c_pm_lock);
-#endif
+    power_lock_release(fg_i2c_pm_lock);
     return ret;
 }
 
@@ -771,11 +745,9 @@ static esp_err_t fuel_gauge_i2c_init(void) {
     }
     if (ret != ESP_OK) return ret;
 
-#if CONFIG_PM_ENABLE
     if (fg_i2c_pm_lock == NULL) {
-        esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP, 0, "fg_i2c", &fg_i2c_pm_lock);
+        fg_i2c_pm_lock = power_lock_create(POWER_LOCK_NO_LIGHT_SLEEP, "fg_i2c");
     }
-#endif
     return ret;
 }
 
