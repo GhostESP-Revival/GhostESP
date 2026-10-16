@@ -8,6 +8,7 @@
 #ifdef CONFIG_HAS_LORA
 
 #include "driver/gpio.h"
+#include "esp_sleep.h"
 #include "driver/spi_master.h"
 #include "esp_err.h"
 #include "esp_heap_caps.h"
@@ -102,6 +103,7 @@ static int s_preamble_len = 16;
 static int8_t s_ldro = -1; // -1 = auto
 static volatile bool s_ready = false;
 static volatile bool s_rx_on = false;
+static volatile bool s_wake_mode = false; // DIO1 level-triggered for light-sleep wake
 static TaskHandle_t s_task = NULL;
 /* RX task stack/TCB, allocated once and reused across start/stop cycles. The
  * stack prefers PSRAM so a running radio does not price the boot-critical
@@ -285,6 +287,9 @@ static uint8_t ldro_for(int sf, int bw_khz_x10) {
 
 static void dio1_isr(void *arg) {
     (void)arg;
+    // Level-triggered in wake mode: mask the line until the RX task has cleared the IRQ,
+    // otherwise it would re-enter continuously while DIO1 stays high.
+    if (s_wake_mode) gpio_intr_disable((gpio_num_t)s_hw.dio1_pin);
     if (s_task) {
         BaseType_t hp = pdFALSE;
         vTaskNotifyGiveFromISR(s_task, &hp);
@@ -314,6 +319,34 @@ static int set_lora_packet_params(uint8_t payload_len) {
 // Background hook for mesh housekeeping (NodeInfo timer). Weak: mesh.c
 // provides the real one; driver stays layer-clean without the include.
 __attribute__((weak)) void lora_bg_tick(void) {}
+__attribute__((weak)) void lora_radio_rx_state_hook(bool on) { (void)on; }
+
+// Wake mode: DIO1 level-high wakes the chip from automatic light sleep, and the radio-facing
+// pads opt out of CONFIG_PM_SLP_DISABLE_GPIO (which would float NSS while the radio keeps
+// receiving). The SX1262 stays in continuous RX the whole time; only the MCU sleeps.
+void lora_radio_set_wake_mode(bool on) {
+    if (on == s_wake_mode || s_hw.dio1_pin < 0) return;
+    gpio_num_t dio1 = (gpio_num_t)s_hw.dio1_pin;
+    if (on) {
+        const int pins[] = {s_hw.nss_pin, s_hw.dio1_pin, s_hw.busy_pin, s_hw.rst_pin,
+                            s_hw.sck_pin, s_hw.mosi_pin, s_hw.miso_pin};
+        for (size_t i = 0; i < sizeof(pins) / sizeof(pins[0]); i++) {
+            if (pins[i] >= 0) gpio_sleep_sel_dis((gpio_num_t)pins[i]);
+        }
+        s_wake_mode = true;
+        gpio_set_intr_type(dio1, GPIO_INTR_HIGH_LEVEL);
+        gpio_wakeup_enable(dio1, GPIO_INTR_HIGH_LEVEL);
+        esp_sleep_enable_gpio_wakeup();
+        gpio_intr_enable(dio1);
+        ESP_LOGI(TAG, "light-sleep wake armed on DIO1 (GPIO%d)", (int)dio1);
+    } else {
+        s_wake_mode = false;
+        gpio_wakeup_disable(dio1);
+        gpio_set_intr_type(dio1, GPIO_INTR_POSEDGE);
+        gpio_intr_enable(dio1);
+        ESP_LOGI(TAG, "light-sleep wake disarmed");
+    }
+}
 
 static int set_rx_continuous(void) {
     if (set_lora_packet_params(0xFF) != 0) return -1;
@@ -322,10 +355,28 @@ static int set_rx_continuous(void) {
     return cmdN(OP_SET_RX, p, 3);
 }
 
+// Wake mode only: unmask DIO1 once everything we handled is cleared. If the line is still
+// asserted by an IRQ nothing consumed, clear it (never RX_DONE) so it cannot storm.
+static void rearm_dio1(void) {
+    gpio_num_t pin = (gpio_num_t)s_hw.dio1_pin;
+    if (gpio_get_level(pin)) {
+        uint8_t st[2];
+        lock();
+        if (cmdN_resp(OP_GET_IRQ, NULL, 0, st, 2) == 0) {
+            uint16_t f = (uint16_t)((st[0] << 8) | st[1]);
+            f &= (uint16_t)~IRQ_RX_DONE;
+            if (f) clear_irq(f);
+        }
+        unlock();
+    }
+    gpio_intr_enable(pin);
+}
+
 static void radio_task(void *arg) {
     (void)arg;
     uint8_t irq[2];
     while (s_rx_on) {
+        if (s_wake_mode) rearm_dio1();
         // Wake on DIO1 or 200ms poll (covers missed edges on shared GPIO).
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(200));
         if (!s_rx_on) break;
@@ -802,10 +853,12 @@ int lora_radio_start_rx(lora_rx_cb_t cb, void *ctx) {
         return -1;
     }
     s_fail_step = "none";
+    lora_radio_rx_state_hook(true);
     return 0;
 }
 
 void lora_radio_stop(void) {
+    lora_radio_rx_state_hook(false);
     s_rx_on = false;
     if (s_task) {
         TaskHandle_t task = s_task;

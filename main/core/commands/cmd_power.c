@@ -25,6 +25,8 @@ static void power_print_status(void) {
     glog("pm compiled:    %s\n", power_manager_pm_compiled() ? "yes" : "no (no DFS / light sleep on this build)");
     glog("light sleep:    %s (validated flag: %s)\n", power_manager_light_sleep_available() ? "available" : "off",
          power_manager_light_sleep_validated() ? "set" : "not set");
+    glog("radio rx:       %s%s\n", power_manager_radio_rx_active() ? "listening" : "idle",
+         power_manager_radio_rx_active() ? " (light sleep only in saver; DIO1 wakes the chip)" : "");
     power_deep_sleep_cfg_t cfg = power_manager_board_sleep_cfg();
     if (cfg.wake_gpio == POWER_GPIO_NONE) {
         glog("deep sleep:     no wake pin declared (CONFIG_POWER_WAKE_GPIO)\n");

@@ -24,6 +24,9 @@
 
 #include "managers/ap_manager.h"
 #include "managers/battery_manager.h"
+#ifdef CONFIG_HAS_LORA
+#include "managers/lora_sx1262.h"
+#endif
 #include "managers/rgb_manager.h"
 #include "managers/sd_card_manager.h"
 #include "managers/settings_manager.h"
@@ -42,16 +45,43 @@ static const char *TAG = "Power";
 /* Board capabilities                                                  */
 /* ------------------------------------------------------------------ */
 
+static volatile bool s_radio_rx_active;
+static bool s_radio_wake_on;
+
+static bool board_blocks_light_sleep(void) {
+#if defined(CONFIG_USE_TDECK)
+    return true; // trackball interrupts are lost across light sleep
+#else
+    return false;
+#endif
+}
+
 /*
- * Automatic light sleep needs PM + tickless idle in the sdkconfig AND the config must be flagged
- * CONFIG_POWER_LIGHT_SLEEP_VALIDATED. Light sleep interacts with backlight PWM, GPIO interrupts,
- * USB and peripherals in board-specific ways; a config that merely turns PM on gets CPU frequency
- * scaling only until someone has validated it (power sleeptest) and set the flag.
+ * Automatic light sleep needs PM + tickless idle in the sdkconfig, and one of:
+ *   - the config is flagged CONFIG_POWER_LIGHT_SLEEP_VALIDATED (someone tested it), or
+ *   - an always-listening LoRa radio is running AND the profile is SAVER. The radio keeps
+ *     receiving while the MCU sleeps and DIO1 wakes it, so no per-board validation is needed.
+ * While a radio is listening, every profile other than SAVER stays awake.
  */
-bool power_manager_light_sleep_available(void) {
-#if CONFIG_PM_ENABLE && CONFIG_FREERTOS_USE_TICKLESS_IDLE && defined(CONFIG_POWER_LIGHT_SLEEP_VALIDATED)
+static bool light_sleep_allowed(power_profile_t p) {
+#if CONFIG_PM_ENABLE && CONFIG_FREERTOS_USE_TICKLESS_IDLE
+    if (board_blocks_light_sleep()) return false;
+    if (s_radio_rx_active) {
+#ifdef CONFIG_HAS_LORA
+        return p == POWER_PROFILE_SAVER;
+#else
+        return false;
+#endif
+    }
+#ifdef CONFIG_POWER_LIGHT_SLEEP_VALIDATED
+    (void)p;
     return true;
 #else
+    (void)p;
+    return false;
+#endif
+#else
+    (void)p;
     return false;
 #endif
 }
@@ -93,7 +123,7 @@ static profile_params_t params_for(power_profile_t p) {
             out.ap_allowed = true;
             break;
     }
-    out.light_sleep = out.light_sleep && power_manager_light_sleep_available();
+    out.light_sleep = out.light_sleep && light_sleep_allowed(p);
     return out;
 }
 
@@ -165,6 +195,9 @@ static power_profile_t compute_effective(void) {
     return user;
 }
 
+bool power_manager_light_sleep_available(void) { return light_sleep_allowed(s_effective); }
+bool power_manager_radio_rx_active(void) { return s_radio_rx_active; }
+
 power_profile_t power_manager_get_profile(void) { return user_profile(); }
 power_profile_t power_manager_get_effective_profile(void) { return s_effective; }
 
@@ -174,6 +207,15 @@ bool power_manager_ap_allowed(void) { return params_for(s_effective).ap_allowed;
 static void apply_locked(void) {
     power_profile_t eff = compute_effective();
     profile_params_t p = params_for(eff);
+
+    // Arm the radio's wake line before light sleep can start, disarm it after it has ended.
+    const bool want_radio_wake = s_radio_rx_active && p.light_sleep;
+#ifdef CONFIG_HAS_LORA
+    if (want_radio_wake && !s_radio_wake_on) {
+        lora_radio_set_wake_mode(true);
+        s_radio_wake_on = true;
+    }
+#endif
 
 #if CONFIG_PM_ENABLE
     esp_pm_config_t cfg = {
@@ -192,6 +234,13 @@ static void apply_locked(void) {
     }
 #else
     ESP_LOGI(TAG, "profile %s (PM compiled out: no DFS/light sleep on this build)", power_profile_name(eff));
+#endif
+
+#ifdef CONFIG_HAS_LORA
+    if (!want_radio_wake && s_radio_wake_on) {
+        lora_radio_set_wake_mode(false);
+        s_radio_wake_on = false;
+    }
 #endif
 
     s_effective = eff;
@@ -250,6 +299,19 @@ void power_manager_set_power_save(bool enabled) {
 }
 
 void power_manager_apply_settings(void) { apply_and_notify(); }
+
+void power_manager_set_radio_rx_active(bool active) {
+    if (s_radio_rx_active == active) return;
+    s_radio_rx_active = active;
+    ESP_LOGI(TAG, "radio rx %s -> light sleep %s", active ? "up" : "down",
+             active ? "Saver only" : "per board");
+    if (s_initialized) apply_and_notify();
+}
+
+#ifdef CONFIG_HAS_LORA
+// Strong definition of the driver's weak hook.
+void lora_radio_rx_state_hook(bool on) { power_manager_set_radio_rx_active(on); }
+#endif
 
 bool power_manager_add_profile_listener(power_profile_cb_t cb, void *ctx) {
     if (!cb) return false;

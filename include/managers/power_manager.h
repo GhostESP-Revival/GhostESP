@@ -60,7 +60,16 @@ bool power_manager_ap_allowed(void);
 /** Legacy power_save alias. */
 void power_manager_set_power_save(bool enabled);
 
-/** true when this build+board will actually use automatic light sleep. */
+/**
+ * An always-listening radio (LoRa) is receiving. While it is, automatic light sleep is only
+ * allowed in the SAVER profile (on any board whose build has PM + tickless idle, validated or
+ * not), and the radio's interrupt line is armed as a wake source. Called by the LoRa driver
+ * through lora_radio_rx_state_hook().
+ */
+void power_manager_set_radio_rx_active(bool active);
+bool power_manager_radio_rx_active(void);
+
+/** true when this build+board will actually use automatic light sleep (right now). */
 bool power_manager_light_sleep_available(void);
 
 /** Notified after each apply (display uses it to re-latch the backlight timer). */
