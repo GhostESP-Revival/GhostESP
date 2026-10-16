@@ -303,11 +303,11 @@ static void json_apply_to_settings(FSettings *s, const cJSON *root) {
     s->ap_enabled = jget_bool(root, "ap_enabled", s->ap_enabled);
   }
   if (cJSON_GetObjectItemCaseSensitive(root, "power_profile")) {
-    int pp = jget_int_clamp(root, "power_profile", (int)s->power_profile, 0, 2);
+    int pp = jget_int_clamp(root, "power_profile", (int)s->power_profile, 0, 3);
     s->power_profile = (uint8_t)pp;
   } else if (cJSON_GetObjectItemCaseSensitive(root, "power_save_enabled")) {
     // Backup from older firmware: bool -> saver / performance.
-    s->power_profile = jget_bool(root, "power_save_enabled", false) ? 2 : 0;
+    s->power_profile = jget_bool(root, "power_save_enabled", false) ? 2 : 3;
   }
   if (cJSON_GetObjectItemCaseSensitive(root, "zebra_menus_enabled")) {
     s->zebra_menus_enabled = jget_bool(root, "zebra_menus_enabled", s->zebra_menus_enabled);

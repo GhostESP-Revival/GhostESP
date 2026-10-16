@@ -271,7 +271,7 @@ void settings_set_defaults(FSettings *settings) {
 #endif
   }
   settings->ap_enabled = true; // Default to enabled
-  settings->power_profile = 0;
+  settings->power_profile = 3; // auto
   settings->zebra_menus_enabled = false; // or true if you want it enabled by default
   settings->max_screen_brightness = 100; // Default to 100% brightness
   settings->infrared_easy_mode = false; // Default to disabled
@@ -725,12 +725,13 @@ void settings_load(FSettings *settings) {
   }
 
   err = nvs_get_u8(nvsHandle, NVS_POWER_PROFILE_KEY, &value_u8);
-  if (err == ESP_OK && value_u8 <= 2) {
+  if (err == ESP_OK && value_u8 <= 3) {
     settings->power_profile = value_u8;
   } else {
-    // Migrate from the old on/off power_save flag: on -> saver, otherwise performance.
+    // Migrate from the old on/off power_save flag: on -> saver, off -> auto (which behaves like
+    // the old default everywhere except a standalone LoRa node).
     err = nvs_get_u8(nvsHandle, NVS_POWER_SAVE_KEY, &value_u8);
-    settings->power_profile = (err == ESP_OK && value_u8 != 0) ? 2 : 0;
+    settings->power_profile = (err == ESP_OK && value_u8 != 0) ? 2 : 3;
   }
 
   err = nvs_get_i32(nvsHandle, NVS_ESP_COMM_TX_PIN_KEY, &tmp);
@@ -2169,7 +2170,7 @@ uint8_t settings_get_power_profile(const FSettings *settings) {
 }
 
 void settings_set_power_profile(FSettings *settings, uint8_t profile) {
-  settings->power_profile = profile <= 2 ? profile : 0;
+  settings->power_profile = profile <= 3 ? profile : 3;
 }
 
 void settings_set_power_save_enabled(FSettings *settings, bool enabled) {

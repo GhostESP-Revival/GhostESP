@@ -47,6 +47,7 @@ static const char *TAG = "Power";
 
 static volatile bool s_radio_rx_active;
 static bool s_radio_wake_on;
+static volatile bool s_radio_needs_wifi;
 
 static bool board_blocks_light_sleep(void) {
 #if defined(CONFIG_USE_TDECK)
@@ -131,6 +132,7 @@ const char *power_profile_name(power_profile_t profile) {
     switch (profile) {
         case POWER_PROFILE_BALANCED: return "balanced";
         case POWER_PROFILE_SAVER: return "saver";
+        case POWER_PROFILE_AUTO: return "auto";
         case POWER_PROFILE_PERFORMANCE:
         default: return "performance";
     }
@@ -149,6 +151,8 @@ bool power_profile_parse(const char *text, power_profile_t *out) {
         *out = POWER_PROFILE_BALANCED;
     } else if (!strcmp(buf, "saver") || !strcmp(buf, "save") || !strcmp(buf, "2")) {
         *out = POWER_PROFILE_SAVER;
+    } else if (!strcmp(buf, "auto") || !strcmp(buf, "3")) {
+        *out = POWER_PROFILE_AUTO;
     } else {
         return false;
     }
@@ -191,6 +195,11 @@ static power_profile_t user_profile(void) {
 
 static power_profile_t compute_effective(void) {
     power_profile_t user = user_profile();
+    if (user == POWER_PROFILE_AUTO) {
+        // A standalone listening radio is a node: sleep between packets. Otherwise behave
+        // exactly like the old default.
+        user = (s_radio_rx_active && !s_radio_needs_wifi) ? POWER_PROFILE_SAVER : POWER_PROFILE_PERFORMANCE;
+    }
     if (s_lowbatt_override && user != POWER_PROFILE_SAVER) return POWER_PROFILE_SAVER;
     return user;
 }
@@ -300,11 +309,17 @@ void power_manager_set_power_save(bool enabled) {
 
 void power_manager_apply_settings(void) { apply_and_notify(); }
 
+void power_manager_set_radio_needs_wifi(bool needs_wifi) {
+    if (s_radio_needs_wifi == needs_wifi) return;
+    s_radio_needs_wifi = needs_wifi;
+    if (s_initialized) apply_and_notify();
+}
+
 void power_manager_set_radio_rx_active(bool active) {
     if (s_radio_rx_active == active) return;
     s_radio_rx_active = active;
-    ESP_LOGI(TAG, "radio rx %s -> light sleep %s", active ? "up" : "down",
-             active ? "Saver only" : "per board");
+    ESP_LOGI(TAG, "radio rx %s%s", active ? "up" : "down",
+             active ? " (auto/saver profiles sleep between packets)" : "");
     if (s_initialized) apply_and_notify();
 }
 

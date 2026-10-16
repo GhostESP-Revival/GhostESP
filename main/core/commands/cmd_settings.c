@@ -99,7 +99,7 @@ static const SettingDescriptor k_settings_desc[] = {
     {"gps_baud_rate", ST_U32, OFF(gps_baud_rate), "System", 0, 0, 0},
     {"ir_tx_pin", ST_I32, OFF(ir_tx_pin), "System", 0, -1, 127},
     {"ir_rx_pin", ST_I32, OFF(ir_rx_pin), "System", 0, -1, 127},
-    {"power_profile", ST_ENUM8, OFF(power_profile), "System", 0, 0, 2},
+    {"power_profile", ST_ENUM8, OFF(power_profile), "System", 0, 0, 3},
     {"zebra_menus", ST_BOOL, OFF(zebra_menus_enabled), "System", 0, 0, 0},
     {"nav_buttons", ST_BOOL, OFF(nav_buttons_enabled), "System", 0, 0, 0},
     {"menu_layout", ST_U8, OFF(menu_layout), "System", 0, 0, 4},
@@ -644,7 +644,7 @@ void handle_settings_cmd(int argc, char **argv) {
         glog("    gps_baud_rate     - GPS UART baud rate (0 = Kconfig default)\n");
         glog("    ir_tx_pin         - IR TX pin (-1 = board default)\n");
         glog("    ir_rx_pin         - IR RX pin (-1 = board default)\n");
-        glog("    power_profile     - Power profile (performance/balanced/saver or 0-2)\n");
+        glog("    power_profile     - Power profile (performance/balanced/saver/auto or 0-3)\n");
         glog("    power_save        - Alias: true = saver, false = performance (see also: power)\n");
         glog("    zebra_menus       - Zebra menus (true/false)\n");
         glog("    nav_buttons       - Navigation buttons (true/false)\n");
@@ -703,7 +703,7 @@ void handle_settings_cmd(int argc, char **argv) {
         if (strcmp(setting, "power_profile") == 0) {
             power_profile_t pp;
             if (!power_profile_parse(value, &pp)) {
-                glog("Invalid power_profile. Use performance, balanced or saver\n");
+                glog("Invalid power_profile. Use performance, balanced, saver or auto\n");
                 return;
             }
             power_manager_set_profile(pp, true);

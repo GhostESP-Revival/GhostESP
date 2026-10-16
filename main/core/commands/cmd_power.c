@@ -54,12 +54,12 @@ void handle_power_cmd(int argc, char **argv) {
 
     if (strcmp(argv[1], "profile") == 0) {
         if (argc < 3) {
-            glog("Usage: power profile <performance|balanced|saver>\n");
+            glog("Usage: power profile <performance|balanced|saver|auto>\n");
             return;
         }
         power_profile_t pp;
         if (!power_profile_parse(argv[2], &pp)) {
-            glog("Invalid profile. Use performance, balanced or saver\n");
+            glog("Invalid profile. Use performance, balanced, saver or auto\n");
             return;
         }
         power_manager_set_profile(pp, true);
@@ -127,7 +127,7 @@ void handle_power_cmd(int argc, char **argv) {
     }
 
     glog("Usage: power [status]\n");
-    glog("       power profile <performance|balanced|saver>\n");
+    glog("       power profile <performance|balanced|saver|auto>\n");
     glog("       power locks\n");
     glog("       power sleeptest [seconds]    timed light sleep, reports how long it really slept\n");
     glog("       power deepsleep [seconds]    timed deep sleep through the full shutdown path\n");

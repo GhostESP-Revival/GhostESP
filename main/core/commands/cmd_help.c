@@ -469,7 +469,7 @@ void handle_help(int argc, char **argv) {
         glog("power\n");
         glog("    Description: Power profile, battery, sleep status and sleep validation\n");
         glog("    Usage: power [status]\n");
-        glog("           power profile <performance|balanced|saver>\n");
+        glog("           power profile <performance|balanced|saver|auto>\n");
         glog("           power locks\n");
         glog("           power sleeptest [seconds]\n");
         glog("           power deepsleep [seconds]\n");

@@ -17,6 +17,9 @@ extern "C" {
  *   PERFORMANCE  fixed max clock, no automatic light sleep, AP allowed
  *   BALANCED     max clock under load, DFS down to 80 MHz, light sleep, AP allowed
  *   SAVER        capped clock, DFS to 80 MHz, light sleep, AP stopped
+ * AUTO (the default) behaves like PERFORMANCE, except that while a standalone always-listening
+ * radio (LoRa) is running it acts as SAVER so the node sleeps between packets without the user
+ * having to ask. A Wi-Fi companion link needs the AP, so it keeps AUTO at PERFORMANCE.
  * Light sleep is only ever enabled on builds with CONFIG_PM_ENABLE and boards
  * whose capability table allows it (e.g. T-Deck's trackball does not).
  *
@@ -27,11 +30,12 @@ typedef enum {
     POWER_PROFILE_PERFORMANCE = 0,
     POWER_PROFILE_BALANCED = 1,
     POWER_PROFILE_SAVER = 2,
+    POWER_PROFILE_AUTO = 3, // user choice only; the effective profile is never AUTO
     POWER_PROFILE_COUNT
 } power_profile_t;
 
 const char *power_profile_name(power_profile_t profile);
-/** Case-insensitive parse of "performance"/"balanced"/"saver" (or 0-2). */
+/** Case-insensitive parse of "performance"/"balanced"/"saver"/"auto" (or 0-3). */
 bool power_profile_parse(const char *text, power_profile_t *out);
 
 /** Called after the effective profile is (re)applied. Runs on the caller's task. */
@@ -67,6 +71,8 @@ void power_manager_set_power_save(bool enabled);
  * through lora_radio_rx_state_hook().
  */
 void power_manager_set_radio_rx_active(bool active);
+/** The radio's companion link rides on the Wi-Fi AP, so AUTO must not stop it. Set before RX starts. */
+void power_manager_set_radio_needs_wifi(bool needs_wifi);
 bool power_manager_radio_rx_active(void);
 
 /** true when this build+board will actually use automatic light sleep (right now). */

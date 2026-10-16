@@ -333,6 +333,10 @@ void lora_radio_set_wake_mode(bool on) {
         for (size_t i = 0; i < sizeof(pins) / sizeof(pins[0]); i++) {
             if (pins[i] >= 0) gpio_sleep_sel_dis((gpio_num_t)pins[i]);
         }
+#if CONFIG_LORA_VEXT_PIN >= 0
+        // Powers the radio rail on boards that gate it; isolating it would cut the radio off.
+        gpio_sleep_sel_dis((gpio_num_t)CONFIG_LORA_VEXT_PIN);
+#endif
         s_wake_mode = true;
         gpio_set_intr_type(dio1, GPIO_INTR_HIGH_LEVEL);
         gpio_wakeup_enable(dio1, GPIO_INTR_HIGH_LEVEL);

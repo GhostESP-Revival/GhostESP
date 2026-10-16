@@ -1775,7 +1775,7 @@ static const char * const rgb_mode_options[] = {"Normal", "Rainbow", "Stealth", 
 static const char * const timeout_options[] = {"5s", "10s", "15s", "30s", "60s", "2m", "5m", "Never"};
 static const char *theme_options[THEME_PALETTE_THEME_COUNT];
 static const char * const bool_options[] = {"Off", "On"};
-static const char * const power_profile_options[] = {"Performance", "Balanced", "Saver"};
+static const char * const power_profile_options[] = {"Performance", "Balanced", "Saver", "Auto"};
 #ifdef CONFIG_USE_ENCODER
 static const char * const encoder_latch_options[] = {"2 transitions", "4 transitions (legacy)"};
 #endif
@@ -1962,7 +1962,7 @@ static SettingsItem settings_items[] = {
     {"Clock Style", SETTING_CLOCK_STYLE, clock_style_options, 3, 0, SETTINGS_CAT_DATE_TIME, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
     {"Status Bar Clock", SETTING_STATUS_BAR_CLOCK, bool_options, 2, 1, SETTINGS_CAT_DATE_TIME, false, NULL, SETTING_WIDGET_TOGGLE},
 
-    {"Power Profile", SETTING_POWER_PROFILE, power_profile_options, 3, 0, SETTINGS_CAT_POWER, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
+    {"Power Profile", SETTING_POWER_PROFILE, power_profile_options, 4, 3, SETTINGS_CAT_POWER, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
 #if CONFIG_IDF_TARGET_ESP32S3
     {"USB Host Mode", SETTING_USB_HOST_MODE, bool_options, 2, 0, SETTINGS_CAT_POWER, true, "CONFIG_IDF_TARGET_ESP32S3", SETTING_WIDGET_TOGGLE},
 #ifdef CONFIG_HAS_USB_MSC_SD

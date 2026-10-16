@@ -308,7 +308,7 @@ typedef struct {
   int32_t esp_comm_tx_pin; // ESP communication TX pin
   int32_t esp_comm_rx_pin; // ESP communication RX pin
   bool ap_enabled; // Enable/disable AP across reboots
-  uint8_t power_profile; // power_profile_t: 0 performance, 1 balanced, 2 saver
+  uint8_t power_profile; // power_profile_t: 0 performance, 1 balanced, 2 saver, 3 auto
   bool zebra_menus_enabled;
   uint8_t max_screen_brightness; // Max screen brightness (0-100)
 
