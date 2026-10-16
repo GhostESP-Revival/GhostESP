@@ -74,6 +74,10 @@ void power_manager_set_radio_rx_active(bool active);
 /** The radio's companion link rides on the Wi-Fi AP, so AUTO must not stop it. Set before RX starts. */
 void power_manager_set_radio_needs_wifi(bool needs_wifi);
 bool power_manager_radio_rx_active(void);
+/** Re-arm sleep wake sources (radio DIO1) after something called esp_sleep_disable_wakeup_source(ALL). */
+void power_manager_restore_wake_sources(void);
+/** true while the low-battery auto-Saver override is in force. */
+bool power_manager_low_battery_override_active(void);
 
 /** true when this build+board will actually use automatic light sleep (right now). */
 bool power_manager_light_sleep_available(void);

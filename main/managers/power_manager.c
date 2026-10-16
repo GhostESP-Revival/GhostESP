@@ -34,6 +34,20 @@
 
 static const char *TAG = "Power";
 
+// IDF 6.x capability macros (the old SOC_GPIO_SUPPORT_HOLD_IO_IN_DSLP no longer exists, which
+// silently compiled the deep-sleep rail hold out): pad hold exists wherever FORCE_HOLD or the
+// per-IO deep-sleep hold exists; the global deep-sleep hold switch only on chips without the latter.
+#if SOC_GPIO_SUPPORT_FORCE_HOLD || SOC_GPIO_SUPPORT_HOLD_SINGLE_IO_IN_DSLP
+#define POWER_HAVE_PAD_HOLD 1
+#else
+#define POWER_HAVE_PAD_HOLD 0
+#endif
+#if SOC_GPIO_SUPPORT_FORCE_HOLD && !SOC_GPIO_SUPPORT_HOLD_SINGLE_IO_IN_DSLP
+#define POWER_HAVE_DSLP_HOLD_ALL 1
+#else
+#define POWER_HAVE_DSLP_HOLD_ALL 0
+#endif
+
 // Automatically fall back to SAVER while the battery is low (user can still override).
 #ifndef POWER_LOW_BATTERY_AUTO_SAVER
 #define POWER_LOW_BATTERY_AUTO_SAVER 1
@@ -198,7 +212,11 @@ static power_profile_t compute_effective(void) {
     if (user == POWER_PROFILE_AUTO) {
         // A standalone listening radio is a node: sleep between packets. Otherwise behave
         // exactly like the old default.
-        user = (s_radio_rx_active && !s_radio_needs_wifi) ? POWER_PROFILE_SAVER : POWER_PROFILE_PERFORMANCE;
+        // Only when it buys something: PM + tickless compiled in and the board allows light sleep.
+        // Otherwise Saver would just take the AP away for no power benefit.
+        user = (s_radio_rx_active && !s_radio_needs_wifi && light_sleep_allowed(POWER_PROFILE_SAVER))
+                   ? POWER_PROFILE_SAVER
+                   : POWER_PROFILE_PERFORMANCE;
     }
     if (s_lowbatt_override && user != POWER_PROFILE_SAVER) return POWER_PROFILE_SAVER;
     return user;
@@ -206,6 +224,13 @@ static power_profile_t compute_effective(void) {
 
 bool power_manager_light_sleep_available(void) { return light_sleep_allowed(s_effective); }
 bool power_manager_radio_rx_active(void) { return s_radio_rx_active; }
+bool power_manager_low_battery_override_active(void) { return s_lowbatt_override; }
+
+void power_manager_restore_wake_sources(void) {
+    // gpio_wakeup_enable() per-pin state survives esp_sleep_disable_wakeup_source(ALL); only the
+    // GPIO wake *source* is dropped, so turn it back on while the radio's wake line is armed.
+    if (s_radio_wake_on) esp_sleep_enable_gpio_wakeup();
+}
 
 power_profile_t power_manager_get_profile(void) { return user_profile(); }
 power_profile_t power_manager_get_effective_profile(void) { return s_effective; }
@@ -302,7 +327,9 @@ void power_manager_set_power_save(bool enabled) {
     power_profile_t cur = user_profile();
     if (enabled) {
         (void)power_manager_set_profile(POWER_PROFILE_SAVER, true);
-    } else if (cur == POWER_PROFILE_SAVER) {
+    } else if (cur == POWER_PROFILE_SAVER ||
+               (cur == POWER_PROFILE_AUTO && s_effective == POWER_PROFILE_SAVER)) {
+        // Includes Auto currently acting as Saver (LoRa node): "off" must mean full power.
         (void)power_manager_set_profile(POWER_PROFILE_PERFORMANCE, true);
     }
 }
@@ -478,7 +505,8 @@ bool power_manager_register_sleep_hook(const power_sleep_hook_t *hook) {
     return added;
 }
 
-__attribute__((unused)) static void run_prepare_hooks(power_sleep_kind_t kind) {
+#if CONFIG_POWER_SLEEP_SUPPORT
+static void run_prepare_hooks(power_sleep_kind_t kind) {
     for (int i = s_hook_count - 1; i >= 0; i--) {
         if (!s_hooks[i].prepare) continue;
         int64_t t0 = esp_timer_get_time();
@@ -492,11 +520,12 @@ __attribute__((unused)) static void run_prepare_hooks(power_sleep_kind_t kind) {
     }
 }
 
-__attribute__((unused)) static void run_restore_hooks(power_sleep_kind_t kind) {
+static void run_restore_hooks(power_sleep_kind_t kind) {
     for (int i = 0; i < s_hook_count; i++) {
         if (s_hooks[i].restore) s_hooks[i].restore(kind, s_hooks[i].ctx);
     }
 }
+#endif /* CONFIG_POWER_SLEEP_SUPPORT */
 
 /* ------------------------------------------------------------------ */
 /* Deep sleep                                                          */
@@ -630,12 +659,12 @@ esp_err_t power_manager_deep_sleep(const power_deep_sleep_cfg_t *cfg) {
     // domain powers down and the peripherals it gates come back on mid-"sleep".
     if (have_rail) {
         rail_set(cfg->power_rail_gpio, 0);
-#if SOC_GPIO_SUPPORT_HOLD_IO_IN_DSLP
+#if POWER_HAVE_PAD_HOLD
         gpio_hold_en((gpio_num_t)cfg->power_rail_gpio);
 #endif
     }
-#if SOC_GPIO_SUPPORT_HOLD_IO_IN_DSLP
-    gpio_deep_sleep_hold_en();
+#if POWER_HAVE_DSLP_HOLD_ALL
+    gpio_deep_sleep_hold_en(); // S3/C3/S2/ESP32: pad holds only survive deep sleep with this on
 #endif
 
     ESP_LOGI(TAG, "entering deep sleep (wake gpio %d level %d, timer %llu us, rail gpio %d)",
@@ -646,7 +675,7 @@ esp_err_t power_manager_deep_sleep(const power_deep_sleep_cfg_t *cfg) {
 
     // Only reached when the SoC rejected deep sleep.
     ESP_LOGE(TAG, "esp_deep_sleep_start returned; aborting shutdown");
-#if SOC_GPIO_SUPPORT_HOLD_IO_IN_DSLP
+#if POWER_HAVE_DSLP_HOLD_ALL
     gpio_deep_sleep_hold_dis();
 #endif
     if (have_rail) rail_set(cfg->power_rail_gpio, 1);
@@ -710,6 +739,7 @@ esp_err_t power_manager_light_sleep_timed(uint32_t ms, uint32_t *slept_ms, uint3
     int64_t dt = (esp_timer_get_time() - t0) / 1000;
     uint32_t causes = power_manager_wake_causes();
     esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+    power_manager_restore_wake_sources(); // keep the LoRa DIO1 wake armed if the radio is listening
     run_restore_hooks(POWER_SLEEP_LIGHT);
     if (slept_ms) *slept_ms = (uint32_t)dt;
     if (wake_causes) *wake_causes = causes;
@@ -744,12 +774,21 @@ bool power_manager_light_sleep_validated(void) {
 }
 
 void power_manager_log_boot_wake(void) {
+    static bool done;
+    if (done) return;
+    done = true;
     uint32_t causes = power_manager_wake_causes();
     ESP_LOGI(TAG, "boot: reset reason %d, sleep wake causes 0x%x%s", (int)esp_reset_reason(),
              (unsigned)causes, causes == 0 ? " (cold boot)" : "");
-    // Holds latched for deep sleep persist across the wake reset until released.
-#if SOC_GPIO_SUPPORT_HOLD_IO_IN_DSLP
+    if (causes == 0) return;
+    // Pad holds latched for deep sleep persist across the wake reset until released. Release them
+    // all first thing (before SD/radio/display init) so nothing that follows finds a frozen pad.
+#if POWER_HAVE_DSLP_HOLD_ALL
     gpio_deep_sleep_hold_dis();
 #endif
-    if (CONFIG_POWER_RAIL_GPIO >= 0) gpio_hold_dis((gpio_num_t)CONFIG_POWER_RAIL_GPIO);
+#if POWER_HAVE_PAD_HOLD
+    for (int g = 0; g < GPIO_NUM_MAX; g++) {
+        if (GPIO_IS_VALID_OUTPUT_GPIO(g)) gpio_hold_dis((gpio_num_t)g);
+    }
+#endif
 }

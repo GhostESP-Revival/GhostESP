@@ -72,8 +72,16 @@ EXT_RAM_BSS_ATTR static char serial_buffer[SERIAL_BUFFER_SIZE];
 static TaskHandle_t s_serial_task_handle = NULL;
 static bool s_serial_initialized = false;
 static bool s_uart_disabled = false; // disable main serial UART for certain templates
+// Automatic light sleep drops the USB Serial/JTAG link, so hold the CPU awake while a host is
+// attached. Needed on every PM build with that peripheral as a console, not just S3TWatch,
+// now that a LoRa node can light-sleep on its own.
+#if CONFIG_PM_ENABLE && (defined(CONFIG_IS_S3TWATCH) || defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG) || defined(CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG))
+#define SERIAL_USB_SLEEP_LOCK 1
+#else
+#define SERIAL_USB_SLEEP_LOCK 0
+#endif
 static bool s_uart_paused = false;   // temporarily hand the UART driver to another owner (e.g. GPS)
-#if defined(CONFIG_IS_S3TWATCH) && defined(CONFIG_PM_ENABLE)
+#if SERIAL_USB_SLEEP_LOCK
 static power_lock_t s_usb_sleep_lock = NULL;
 static bool s_usb_sleep_locked = false;
 #endif
@@ -711,7 +719,7 @@ void serial_task(void *pvParameter) {
     return;
   }
   int index = 0;
-#if defined(CONFIG_IS_S3TWATCH) && defined(CONFIG_PM_ENABLE)
+#if SERIAL_USB_SLEEP_LOCK
   // USB Serial/JTAG cannot receive commands while the CPU is in light sleep.
   s_usb_sleep_lock = power_lock_create(POWER_LOCK_NO_LIGHT_SLEEP, "serial_usb");
 #endif
@@ -726,7 +734,7 @@ void serial_task(void *pvParameter) {
 
   bool first_iteration = true;
   while (1) {
-#if defined(CONFIG_IS_S3TWATCH) && defined(CONFIG_PM_ENABLE)
+#if SERIAL_USB_SLEEP_LOCK
     bool usb_connected = usb_serial_jtag_is_connected();
     if (usb_connected && !s_usb_sleep_locked) {
       power_lock_acquire(s_usb_sleep_lock);
@@ -1119,7 +1127,7 @@ void serial_manager_deinit() {
     vTaskDelete(s_serial_task_handle);
     s_serial_task_handle = NULL;
   }
-#if defined(CONFIG_IS_S3TWATCH) && defined(CONFIG_PM_ENABLE)
+#if SERIAL_USB_SLEEP_LOCK
   if (s_usb_sleep_lock) {
     if (s_usb_sleep_locked) {
       power_lock_release(s_usb_sleep_lock);

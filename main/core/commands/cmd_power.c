@@ -70,7 +70,20 @@ void handle_power_cmd(int argc, char **argv) {
     if (strcmp(argv[1], "locks") == 0) {
 #if CONFIG_PM_ENABLE
         // Anything listed with a non-zero count is what is currently preventing sleep/DFS.
-        esp_pm_dump_locks(stdout);
+        // Captured and sent through glog so it shows up on BLE/WebUI/mirrored consoles too.
+        char *dump = NULL;
+        size_t dump_len = 0;
+        FILE *mem = open_memstream(&dump, &dump_len);
+        if (!mem) {
+            glog("out of memory\n");
+            return;
+        }
+        esp_pm_dump_locks(mem);
+        fclose(mem);
+        for (char *line = strtok(dump, "\n"); line; line = strtok(NULL, "\n")) {
+            glog("%s\n", line);
+        }
+        free(dump);
 #else
         glog("PM is not compiled into this build\n");
 #endif

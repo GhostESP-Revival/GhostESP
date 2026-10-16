@@ -104,6 +104,7 @@ static int8_t s_ldro = -1; // -1 = auto
 static volatile bool s_ready = false;
 static volatile bool s_rx_on = false;
 static volatile bool s_wake_mode = false; // DIO1 level-triggered for light-sleep wake
+static volatile bool s_tx_busy = false;   // lora_radio_send owns the IRQ flags until it returns
 static TaskHandle_t s_task = NULL;
 /* RX task stack/TCB, allocated once and reused across start/stop cycles. The
  * stack prefers PSRAM so a running radio does not price the boot-critical
@@ -363,6 +364,10 @@ static int set_rx_continuous(void) {
 // asserted by an IRQ nothing consumed, clear it (never RX_DONE) so it cannot storm.
 static void rearm_dio1(void) {
     gpio_num_t pin = (gpio_num_t)s_hw.dio1_pin;
+    // A transmit polls TX_DONE itself across several lock/unlock cycles; clearing its flag or
+    // letting the level interrupt spin while it waits would break it. The 200ms loop poll
+    // re-arms us once the send has finished.
+    if (s_tx_busy) return;
     if (gpio_get_level(pin)) {
         uint8_t st[2];
         lock();
@@ -877,7 +882,16 @@ void lora_radio_stop(void) {
     s_cb = NULL;
 }
 
+static int radio_send_impl(const uint8_t *data, uint8_t len);
+
 int lora_radio_send(const uint8_t *data, uint8_t len) {
+    s_tx_busy = true;
+    int r = radio_send_impl(data, len);
+    s_tx_busy = false;
+    return r;
+}
+
+static int radio_send_impl(const uint8_t *data, uint8_t len) {
     if (!lora_radio_is_ready() || !data || len == 0 || len > 240) return -1;
     lock();
     // Configuration writes and buffer setup are performed from standby in

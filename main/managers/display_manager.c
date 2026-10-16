@@ -1527,8 +1527,21 @@ void display_manager_restore_status_bar(void) {
 
 /* Runs after every power profile (re)apply. The backlight LEDC timer must be re-latched on
  * RC_FAST after the clock tree changes or the PWM drifts/stalls across light sleep. */
+static void auto_saver_toast_cb(void *arg) {
+  (void)arg;
+  toast_show_duration("LoRa node: saver on (AP off)", TOAST_INFO, 3000);
+}
+
 static void display_on_power_profile(power_profile_t effective, void *ctx) {
   (void)ctx;
+  static int s_last_effective = -1;
+  if ((int)effective == s_last_effective) return; // battery/LoRa events that change nothing: leave the backlight timer alone
+  const bool was_saver = (s_last_effective == (int)POWER_PROFILE_SAVER);
+  s_last_effective = (int)effective;
+  if (effective == POWER_PROFILE_SAVER && !was_saver && power_manager_get_profile() == POWER_PROFILE_AUTO) {
+    // Auto just put a listening LoRa node into Saver on its own; say so (it stopped the AP).
+    (void)display_manager_run_on_lvgl_nowait(auto_saver_toast_cb, NULL);
+  }
 #if defined(CONFIG_LV_DISP_BACKLIGHT_PWM) && !defined(CONFIG_IS_ATOMS3R)
   ledc_timer_config_t ledc_timer = {
       .speed_mode = LEDC_LOW_SPEED_MODE,
@@ -1587,7 +1600,10 @@ static void low_battery_toast_cb(void *arg) {
   if (level == BATTERY_LEVEL_CRITICAL) {
     toast_show_duration("Battery critical - charge now", TOAST_ERROR, 4000);
   } else if (level == BATTERY_LEVEL_LOW) {
-    toast_show_duration("Battery low - saver on", TOAST_WARN, 3000);
+    // Evaluated here (LVGL task, after the power listener ran) so the text matches what happened.
+    toast_show_duration(power_manager_low_battery_override_active() ? "Battery low - saver on"
+                                                                    : "Battery low",
+                        TOAST_WARN, 3000);
   }
 }
 
@@ -3642,6 +3658,7 @@ void set_backlight_brightness(uint8_t percentage) {
         esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
         esp_sleep_disable_wifi_wakeup();
         esp_sleep_disable_wifi_beacon_wakeup();
+        power_manager_restore_wake_sources(); // do not drop the LoRa DIO1 wake when the screen goes dark
 
 #ifdef CONFIG_IS_S3TWATCH
         // Explicit light sleep ignores PM locks. Keep the USB console and UI
