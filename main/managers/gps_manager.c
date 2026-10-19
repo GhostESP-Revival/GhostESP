@@ -113,6 +113,19 @@ static uint32_t gps_soft_baud_rate = 0;
 #ifdef CONFIG_PM_ENABLE
 static esp_pm_lock_handle_t gps_soft_pm_lock = NULL;
 #endif
+
+static bool gps_is_peer_only_profile(void) {
+#ifdef CONFIG_BANSHEE_LITE_C5
+    return true;
+#else
+    return false;
+#endif
+}
+
+static bool gps_peer_mode_active(void) {
+    return gps_is_peer_only_profile() || gps_peer_preferred;
+}
+
 static void check_gps_connection_task(void *pvParameters);
 static void gps_soft_watchdog_task(void *pvParameters);
 static void gps_soft_try_release_rgb_rmt(void);
@@ -404,7 +417,7 @@ static esp_err_t gps_soft_restart_parser(const char *reason, const minmea_soft_s
 
 void gps_manager_set_peer_gps_preferred(bool enabled) {
     taskENTER_CRITICAL(&gps_state_lock);
-    gps_peer_preferred = enabled;
+    gps_peer_preferred = gps_is_peer_only_profile() || enabled;
     if (!enabled) {
         gps_peer_last_update_tick = 0;
         gps_peer_has_seen_update = false;
@@ -414,7 +427,7 @@ void gps_manager_set_peer_gps_preferred(bool enabled) {
 
 bool gps_manager_is_peer_gps_preferred(void) {
     taskENTER_CRITICAL(&gps_state_lock);
-    bool preferred = gps_peer_preferred;
+    bool preferred = gps_peer_mode_active();
     taskEXIT_CRITICAL(&gps_state_lock);
     return preferred;
 }
@@ -518,7 +531,7 @@ bool gps_manager_get_wardrive_snapshot(gps_t *out_gps, bool *using_peer) {
                    xTaskGetTickCount() - gps_peer_last_update_tick <= pdMS_TO_TICKS(GPS_STALE_UPDATE_TIMEOUT_MS) &&
                    gps_peer_fix_snapshot.valid && gps_peer_fix_snapshot.fix >= GPS_FIX_GPS &&
                    gps_peer_fix_snapshot.fix_mode >= GPS_MODE_2D && gps_peer_fix_snapshot.sats_in_use >= 3;
-    bool use_peer = peer_ok && (gps_peer_preferred || !local_ok);
+    bool use_peer = peer_ok && (gps_peer_mode_active() || !local_ok);
     if (use_peer) *out_gps = gps_peer_fix_snapshot;
     taskEXIT_CRITICAL(&gps_state_lock);
     if (!use_peer && local_ok) *out_gps = local;
@@ -531,7 +544,7 @@ bool gps_manager_get_active_gps_snapshot(gps_t *out_gps, bool *using_peer) {
         return false;
     }
 
-    if (gps_peer_preferred) {
+    if (gps_peer_mode_active()) {
         taskENTER_CRITICAL(&gps_state_lock);
         TickType_t last_tick = gps_peer_last_update_tick;
         if (last_tick != 0) {
@@ -588,7 +601,7 @@ static bool gps_manager_get_wd_lite(gps_wd_lite_t *out, bool *using_peer) {
     if (!out) return false;
     memset(out, 0, sizeof(*out));
 
-    if (gps_peer_preferred) {
+    if (gps_peer_mode_active()) {
         taskENTER_CRITICAL(&gps_state_lock);
         TickType_t last_tick = gps_peer_last_update_tick;
         if (last_tick != 0) {
@@ -720,6 +733,12 @@ void gps_manager_init(GPSManager *manager) {
         return;
     }
 
+    if (gps_is_peer_only_profile()) {
+        manager->isinitilized = false;
+        gps_lifecycle_end();
+        return;
+    }
+
     if (manager->isinitilized || nmea_hdl != NULL || gps_check_task_handle != NULL ||
         gps_soft_watchdog_task_handle != NULL) {
         ESP_LOGW(GPS_TAG, "GPS already active; restarting parser");
@@ -792,7 +811,9 @@ void gps_manager_init(GPSManager *manager) {
         current_rx_pin = 4;
     } else if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething2") == 0 &&
                custom_gps_pin == 0) {
+#if !defined(CONFIG_BANSHEE_LITE_S3)
         current_rx_pin = 17;
+#endif
     }
 #endif
  
@@ -837,6 +858,15 @@ void gps_manager_init(GPSManager *manager) {
             comm_tx = 9;
             comm_rx = 10;
         }
+#endif
+#if (defined(CONFIG_BANSHEE_LITE_C5) || defined(CONFIG_BANSHEE_LITE_S3)) && \
+    defined(CONFIG_GHOSTLINK_TX_PIN) && defined(CONFIG_GHOSTLINK_RX_PIN)
+#if CONFIG_GHOSTLINK_TX_PIN >= 0 && CONFIG_GHOSTLINK_RX_PIN >= 0
+        if (comm_tx == 6 && comm_rx == 7) {
+            comm_tx = CONFIG_GHOSTLINK_TX_PIN;
+            comm_rx = CONFIG_GHOSTLINK_RX_PIN;
+        }
+#endif
 #endif
         if (comm_tx == (int32_t)current_rx_pin || comm_rx == (int32_t)current_rx_pin) {
             ESP_LOGW(GPS_TAG,
@@ -1272,7 +1302,7 @@ void gps_manager_note_update(void) {
 }
 
 bool gps_manager_has_recent_update(void) {
-    TickType_t last_tick = gps_peer_preferred ? gps_peer_last_update_tick : gps_last_update_tick;
+    TickType_t last_tick = gps_peer_mode_active() ? gps_peer_last_update_tick : gps_last_update_tick;
     if (last_tick == 0) {
         return false;
     }
@@ -1282,7 +1312,7 @@ bool gps_manager_has_recent_update(void) {
 }
 
 bool gps_manager_has_seen_update(void) {
-    return gps_peer_preferred ? gps_peer_has_seen_update : gps_has_seen_update;
+    return gps_peer_mode_active() ? gps_peer_has_seen_update : gps_has_seen_update;
 }
 
 static esp_err_t gps_manager_log_wardriving_data_impl(wardriving_data_t *data,
@@ -1476,7 +1506,7 @@ bool gps_manager_get_recent_active_gps_snapshot(gps_t *out_gps, bool *using_peer
 
     TickType_t now = xTaskGetTickCount();
     taskENTER_CRITICAL(&gps_state_lock);
-    bool peer = gps_peer_preferred;
+    bool peer = gps_peer_mode_active();
     TickType_t last_tick = peer ? gps_peer_last_update_tick : gps_last_update_tick;
     bool available = peer ? gps_peer_has_seen_update : (g_gpsManager.isinitilized && gps_has_seen_update);
     bool recent = available && last_tick != 0 &&

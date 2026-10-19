@@ -69,8 +69,43 @@ static esp_err_t tca9535_read_inputs(uint8_t *port0, uint8_t *port1);
 static esp_err_t tca9535_write_port(uint8_t reg, uint8_t data);
 static esp_err_t io_manager_get_or_create_bus(void);
 static esp_err_t io_manager_add_device(uint8_t addr, i2c_master_dev_handle_t *dev_out);
+static esp_err_t io_manager_probe_device(void);
 static void io_manager_process_sample(uint8_t port0, uint8_t port1, btn_event_t *event_out);
 static void io_manager_task(void *arg);
+
+static void io_manager_drop_device(void)
+{
+    if (!g_tca9535_dev) {
+        return;
+    }
+
+    bool locked = i2c_bus_lock(g_config.i2c_port, 100);
+    if (locked) {
+        esp_err_t ret = i2c_master_bus_rm_device(g_tca9535_dev);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to remove TCA9535 device: %s", esp_err_to_name(ret));
+        }
+        i2c_bus_unlock(g_config.i2c_port);
+    } else {
+        ESP_LOGW(TAG, "Failed to lock I2C bus while removing TCA9535 device");
+    }
+    g_tca9535_dev = NULL;
+}
+
+static esp_err_t io_manager_probe_device(void)
+{
+    if (!g_i2c_bus) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (!i2c_bus_lock(g_config.i2c_port, 100)) {
+        return ESP_ERR_TIMEOUT;
+    }
+
+    esp_err_t ret = i2c_master_probe(g_i2c_bus, g_config.i2c_addr, 50);
+    i2c_bus_unlock(g_config.i2c_port);
+    return ret;
+}
 
 esp_err_t io_manager_init(const io_manager_config_t *config)
 {
@@ -102,14 +137,22 @@ esp_err_t io_manager_init(const io_manager_config_t *config)
         return ret;
     }
 
-    ret = io_manager_add_device(g_config.i2c_addr, &g_tca9535_dev);
+    ret = io_manager_probe_device();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "I2C expander probe failed at 7-bit address 0x%02X (SDA=%d SCL=%d): %s",
+                 (unsigned)g_config.i2c_addr, g_config.sda_pin, g_config.scl_pin,
+                 esp_err_to_name(ret));
+        return ret;
+    }
+
+    bool bus_locked = i2c_bus_lock(g_config.i2c_port, 100);
+    ret = bus_locked ? io_manager_add_device(g_config.i2c_addr, &g_tca9535_dev)
+                     : ESP_ERR_TIMEOUT;
+    if (bus_locked) {
+        i2c_bus_unlock(g_config.i2c_port);
+    }
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to attach TCA9535 device: %s", esp_err_to_name(ret));
-        if (g_i2c_bus_owned && g_i2c_bus) {
-            i2c_del_master_bus(g_i2c_bus);
-            g_i2c_bus = NULL;
-            g_i2c_bus_owned = false;
-        }
         return ret;
     }
 
@@ -117,17 +160,23 @@ esp_err_t io_manager_init(const io_manager_config_t *config)
     // Note: TCA9535 inputs are high-impedance. If using PCF8575 or similar, writing 1 to output enables weak pull-up.
     // Writing to output register for inputs doesn't hurt TCA9535.
     ret = tca9535_write_port(TCA9535_OUTPUT_PORT0, 0xFF);
-    if (ret != ESP_OK) ESP_LOGW(TAG, "Failed to write output port 0");
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize expander output port 0: %s", esp_err_to_name(ret));
+        io_manager_drop_device();
+        return ret;
+    }
     
     ret = tca9535_write_port(TCA9535_CONFIG_PORT0, 0xFF);  // All pins as inputs
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to configure TCA9535 port 0: %s", esp_err_to_name(ret));
+        io_manager_drop_device();
         return ret;
     }
 
     ret = tca9535_write_port(TCA9535_CONFIG_PORT1, 0xFF);  // All pins as inputs
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to configure TCA9535 port 1: %s", esp_err_to_name(ret));
+        io_manager_drop_device();
         return ret;
     }
     
@@ -135,12 +184,14 @@ esp_err_t io_manager_init(const io_manager_config_t *config)
     ret = tca9535_write_port(TCA9535_OUTPUT_PORT0, 0xFF);  // Set output high to enable pull-ups
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to enable pull-ups on port 0: %s", esp_err_to_name(ret));
+        io_manager_drop_device();
         return ret;
     }
     
     ret = tca9535_write_port(TCA9535_OUTPUT_PORT1, 0xFF);  // Set output high to enable pull-ups
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to enable pull-ups on port 1: %s", esp_err_to_name(ret));
+        io_manager_drop_device();
         return ret;
     }
 
@@ -200,15 +251,7 @@ esp_err_t io_manager_init(const io_manager_config_t *config)
         if (task_ret != pdPASS) {
             ESP_LOGE(TAG, "Failed to create IO manager task");
             g_initialized = false;
-            if (g_tca9535_dev) {
-                i2c_master_bus_rm_device(g_tca9535_dev);
-                g_tca9535_dev = NULL;
-            }
-            if (g_i2c_bus_owned && g_i2c_bus) {
-                i2c_del_master_bus(g_i2c_bus);
-                g_i2c_bus = NULL;
-                g_i2c_bus_owned = false;
-            }
+            io_manager_drop_device();
             if (g_i2c_mutex) {
                 vSemaphoreDelete(g_i2c_mutex);
                 g_i2c_mutex = NULL;
@@ -237,24 +280,12 @@ esp_err_t io_manager_deinit(void)
     }
 
     esp_err_t ret = ESP_OK;
-    if (g_tca9535_dev) {
-        ret = i2c_master_bus_rm_device(g_tca9535_dev);
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to remove TCA9535 device: %s", esp_err_to_name(ret));
-            return ret;
-        }
-        g_tca9535_dev = NULL;
-    }
+    io_manager_drop_device();
 
-    if (g_i2c_bus_owned && g_i2c_bus) {
-        ret = i2c_del_master_bus(g_i2c_bus);
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to delete I2C bus: %s", esp_err_to_name(ret));
-            return ret;
-        }
-        g_i2c_bus = NULL;
-        g_i2c_bus_owned = false;
-    }
+    // The bus is registered as shared and may still be used by touch, NFC, or
+    // another client. Leave it alive rather than invalidating the registry.
+    g_i2c_bus = NULL;
+    g_i2c_bus_owned = false;
 
     if (g_i2c_mutex) {
         vSemaphoreDelete(g_i2c_mutex);
