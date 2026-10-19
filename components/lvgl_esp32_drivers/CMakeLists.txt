@@ -64,6 +64,10 @@ if(CONFIG_USE_C5_PARLIO_DISPLAY)
     list(APPEND SOURCES "lvgl_tft/banshee_c5_parlio.c")
 endif()
 
+if(CONFIG_WAVESHARE_C5_35_LCD)
+    list(APPEND SOURCES "lvgl_tft/ws_c5_exio.c")
+endif()
+
 # Add touch driver to compilation only if it is selected in menuconfig
 # Add touch driver to compilation only if it is selected in menuconfig or for specific templates
 if(CONFIG_LV_TOUCH_CONTROLLER OR CONFIG_BUILD_CONFIG_TEMPLATE MATCHES "somethingsomething")

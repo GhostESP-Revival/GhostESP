@@ -430,6 +430,7 @@ def get_build_targets() -> List[Dict[str, str]]:
         {"name": "Cardputer ADV", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.cardputeradv", "zip_name": "CardputerADV.zip"},
         {"name": "Marauder V8", "idf_target": "esp32c5", "sdkconfig_file": "configs/sdkconfig.MarauderV8", "zip_name": "MarauderV8.zip"},
         {"name": "Marauder Pancake", "idf_target": "esp32c5", "sdkconfig_file": "configs/sdkconfig.Pancake", "zip_name": "MarauderPancake.zip"},
+        {"name": "Waveshare C5 3.5", "idf_target": "esp32c5", "sdkconfig_file": "configs/sdkconfig.WaveshareC5_35", "zip_name": "Waveshare_C5_35.zip"},
         {"name": "Banshee C5", "idf_target": "esp32c5", "sdkconfig_file": "configs/sdkconfig.somethingsomething", "zip_name": "Banshee-C5.zip"}
     ]
 

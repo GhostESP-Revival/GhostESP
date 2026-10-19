@@ -1014,6 +1014,12 @@ void app_main(void) {
             comm_rx = UART_PIN_NO_CHANGE;
         }
 #endif
+#ifdef CONFIG_WAVESHARE_C5_35_LCD
+        /* The default comm pins (6/7) are this board's display SPI SCLK/MOSI
+         * and 11/12 are the UART0 console; there is no peer-comm header. */
+        comm_tx = UART_PIN_NO_CHANGE;
+        comm_rx = UART_PIN_NO_CHANGE;
+#endif
 #ifdef CONFIG_CROWPANEL_EPAPER_42
         /* GPIO7 is the factory display-power enable, not a UART input. This
          * board has no wired peer-comm header, so leave the optional manager

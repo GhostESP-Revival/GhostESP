@@ -14,6 +14,9 @@
 #ifdef CONFIG_USE_C5_PARLIO_DISPLAY
 #include "lvgl_tft/banshee_c5_parlio.h"
 #endif
+#ifdef CONFIG_WAVESHARE_C5_35_LCD
+#include "lvgl_tft/ws_c5_exio.h"
+#endif
 #include "managers/sd_card_manager.h"
 #include "managers/plugin_api.h"
 #include "managers/settings_manager.h"
@@ -2321,6 +2324,11 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
    * display helper out of this branch; only initialize GT911 touch here. */
   touch_driver_init();
 #else
+#if defined(CONFIG_WAVESHARE_C5_35_LCD)
+  /* Panel power, LCD reset and touch reset are on the 0x24 I/O expander;
+   * bring it up once before the ST7796 and FT6336 are initialized. */
+  ws_c5_exio_init();
+#endif
   lvgl_driver_init();
 #endif
   ESP_LOGI(TAG, "display_manager: display driver init done, free internal RAM: %d bytes", 
@@ -3988,6 +3996,12 @@ static void display_manager_set_backlight_raw(uint8_t percentage) {
     esp_err_t err = crowpanel_p4_display_set_backlight(percentage);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "CrowPanel 5-inch backlight update failed: %s", esp_err_to_name(err));
+    }
+#elif defined(CONFIG_WAVESHARE_C5_35_LCD)
+    /* Backlight PWM lives on the 0x24 I/O expander (reg 0x05), 0..255. */
+    esp_err_t err = ws_c5_exio_set_backlight((uint8_t)((percentage * 255u) / 100u));
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Waveshare C5 3.5 backlight update failed: %s", esp_err_to_name(err));
     }
 #elif defined(CONFIG_CROWPANEL_ADVANCE_43_LCD)
     /* Factory firmware leaves TCA9534 P1 high and exposes no dimming control. */

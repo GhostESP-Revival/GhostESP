@@ -115,12 +115,15 @@ static void live_ap_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type);
 static void wifi_track_callback(void *buf, wifi_promiscuous_pkt_type_t type);
 static esp_err_t start_live_ap_channel_hopping(void);
 static void stop_live_ap_channel_hopping(void);
+static void stop_live_ap_print_task(void);
 static bool callback_uses_selected_ap_capture_plan(wifi_promiscuous_cb_t_t callback);
 static void apply_selected_ap_capture_channel_plan(wifi_promiscuous_cb_t_t callback);
 static esp_timer_handle_t live_ap_channel_hop_timer = NULL;
 static volatile bool live_ap_hopping_active = false;
 static uint32_t last_live_print_ms = 0;
 static uint16_t live_last_printed_index = 0;
+static TaskHandle_t live_ap_print_task_handle = NULL;
+static volatile bool live_ap_print_task_run = false;
 
 #if defined(CONFIG_IDF_TARGET_ESP32C5)
 static const uint8_t live_ap_channels[] = {
@@ -3704,6 +3707,8 @@ static void stop_live_ap_channel_hopping(void) {
         live_ap_channel_hop_timer = NULL;
     }
     live_ap_hopping_active = false;
+    /* Stop the print task before any caller frees scanned_aps. */
+    stop_live_ap_print_task();
 }
 
 static bool bssid_already_listed(const uint8_t *bssid) {
@@ -3829,15 +3834,39 @@ static void live_ap_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
         ghostscript_emit_event("wifi_ap_found", ap_payload);
     }
 
-    uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
-    if (now_ms - last_live_print_ms < 100) return;
-    last_live_print_ms = now_ms;
+    /* Printing each AP (OUI lookup + multi-line TERMINAL_VIEW_ADD_TEXT) is far
+     * too heavy to run inside this promiscuous callback: on the single-core C5
+     * it starves the touch/UI task so the user cannot back out until the scan
+     * stops. The callback only records now; the low-priority live_ap_print_task
+     * drains newly-found entries to the terminal. */
+}
 
-    while (live_last_printed_index < ap_count) {
-        uint16_t idx = live_last_printed_index;
-        wifi_ap_record_t *rec = &scanned_aps[idx];
-        wifi_manager_print_ap_entry_formatted(idx, rec, true);
-        live_last_printed_index++;
+/* Drains newly-recorded live-scan APs to the terminal off the Wi-Fi callback.
+ * Runs below the UI/input task so a busy scan never blocks touch. */
+static void live_ap_print_task(void *arg) {
+    (void)arg;
+    while (live_ap_print_task_run) {
+        while (live_ap_print_task_run &&
+               live_last_printed_index < ap_count &&
+               scanned_aps != NULL) {
+            uint16_t idx = live_last_printed_index;
+            wifi_manager_print_ap_entry_formatted(idx, &scanned_aps[idx], true);
+            live_last_printed_index++;
+        }
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    live_ap_print_task_handle = NULL;
+    vTaskDelete(NULL);
+}
+
+static void stop_live_ap_print_task(void) {
+    if (live_ap_print_task_handle == NULL) {
+        return;
+    }
+    live_ap_print_task_run = false;
+    /* Wait for the task to exit before any caller frees scanned_aps. */
+    for (int i = 0; i < 50 && live_ap_print_task_handle != NULL; i++) {
+        vTaskDelay(pdMS_TO_TICKS(20));
     }
 }
 
@@ -3851,6 +3880,16 @@ void wifi_manager_start_live_ap_scan(void) {
     last_live_print_ms = 0;
     wifi_manager_start_monitor_mode(live_ap_scan_callback);
     start_live_ap_channel_hopping();
+    if (live_ap_print_task_handle == NULL) {
+        live_ap_print_task_run = true;
+        if (xTaskCreate(live_ap_print_task, "live_ap_print", 4096, NULL,
+                        HARDWARE_INPUT_TASK_PRIORITY - 2,
+                        &live_ap_print_task_handle) != pdPASS) {
+            live_ap_print_task_run = false;
+            live_ap_print_task_handle = NULL;
+            ESP_LOGW(TAG, "live AP print task create failed; scan will not print");
+        }
+    }
     printf("Live AP scan started. Type 'stopscan' to stop.\n");
     TERMINAL_VIEW_ADD_TEXT("Live AP scan started.\n");
 }

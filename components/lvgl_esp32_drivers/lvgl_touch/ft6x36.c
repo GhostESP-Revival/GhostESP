@@ -29,6 +29,9 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lvgl_i2c/i2c_manager.h"
+#ifdef CONFIG_WAVESHARE_C5_35_LCD
+#include "esp_timer.h"
+#endif
 
 #define TAG "FT6X36"
 #define FT6X36_TOUCH_QUEUE_ELEMENTS 1
@@ -120,6 +123,14 @@ void ft6x06_init(uint16_t dev_addr) {
 
     ft6x06_i2c_read8(dev_addr, FT6X36_RELEASECODE_REG, &data_buf);
     ESP_LOGI(TAG, "\tRelease code: 0x%02x", data_buf);
+
+#ifdef CONFIG_WAVESHARE_C5_35_LCD
+    /* IDTHRESHOLD (lower = more sensitive). The factory value needs firm
+     * presses on this bare panel; 16 gives a light-tap feel. */
+    uint8_t threshold = 16;
+    if (lvgl_i2c_write(CONFIG_LV_I2C_TOUCH_PORT, dev_addr, 0x80, &threshold, 1) != ESP_OK)
+        ESP_LOGW(TAG, "Could not set touch threshold");
+#endif
     
 #if CONFIG_LV_FT6X36_COORDINATES_QUEUE
     ft6x36_touch_queue_handle = xQueueCreate( FT6X36_TOUCH_QUEUE_ELEMENTS, sizeof( ft6x36_touch_t ) );
@@ -145,11 +156,43 @@ bool ft6x36_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
     }
     uint8_t data_buf[5];        // 1 byte status, 2 bytes X, 2 bytes Y
 
+#ifdef CONFIG_WAVESHARE_C5_35_LCD
+    /* On the ESP32-C5 the FT6336 read intermittently drops out (a failed
+     * transaction or zero points with a finger held down). Retry within this
+     * poll, accept only 1-2 points on the panel, and hold the last good
+     * contact for a short grace window so a dropout that slips through does
+     * not read as a finger lift. A real release still fails every try. */
+    static int64_t last_ok_us;
+    esp_err_t ret = ESP_FAIL;
+    uint8_t touch_pnt_cnt = 0;
+    for (int attempt = 0; attempt < 3; attempt++) {
+        ret = lvgl_i2c_read(CONFIG_LV_I2C_TOUCH_PORT, current_dev_addr, FT6X36_TD_STAT_REG, &data_buf[0], 5);
+        if (ret != ESP_OK) continue;
+        uint8_t points = data_buf[0] & 0x0F;
+        uint16_t rx = ((data_buf[1] & FT6X36_MSB_MASK) << 8) | (data_buf[2] & FT6X36_LSB_MASK);
+        uint16_t ry = ((data_buf[3] & FT6X36_MSB_MASK) << 8) | (data_buf[4] & FT6X36_LSB_MASK);
+        if (points >= 1 && points <= 2 && rx < CONFIG_LV_HOR_RES_MAX && ry < CONFIG_LV_VER_RES_MAX) {
+            touch_pnt_cnt = 1;
+            break;
+        }
+        ret = ESP_ERR_INVALID_RESPONSE;
+    }
+    if (ret == ESP_OK) {
+        last_ok_us = esp_timer_get_time();
+    } else if (last_ok_us && touch_inputs.current_state == LV_INDEV_STATE_PR &&
+               (esp_timer_get_time() - last_ok_us) < 90000) {
+        data->point.x = touch_inputs.last_x;
+        data->point.y = touch_inputs.last_y;
+        data->state = LV_INDEV_STATE_PR;
+        return false;
+    }
+#else
     esp_err_t ret = lvgl_i2c_read(CONFIG_LV_I2C_TOUCH_PORT, current_dev_addr, FT6X36_TD_STAT_REG, &data_buf[0], 5);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Error talking to touch IC: %s", esp_err_to_name(ret));
     }
     uint8_t touch_pnt_cnt = data_buf[0];  // Number of detected touch points
+#endif
 
     if (ret != ESP_OK || touch_pnt_cnt != 1) {    // ignore no touch & multi touch
         if ( touch_inputs.current_state != LV_INDEV_STATE_REL)
