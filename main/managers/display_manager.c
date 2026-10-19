@@ -247,6 +247,25 @@ static esp_err_t crowpanel_advance_small_factory_reset(void) {
 #define CROWPANEL_ADVANCE43_FACTORY_OUTPUT_MASK 0x1e /* P1..P4 */
 #define CROWPANEL_ADVANCE43_RESET_BIT           0x04 /* TCA9534 P2 */
 
+/* V1.1 backlight compatibility: older CrowPanel boards accept a single-byte
+ * brightness command (0x10 = on) at I2C address 0x30. This is an additional
+ * best-effort write; keep the factory TCA9534 sequence for other revisions. */
+#define CROWPANEL_ADVANCE43_V11_BL_ADDR       0x30
+#define CROWPANEL_ADVANCE43_V11_BL_ON         0x10
+
+static void crowpanel_advance43_v11_backlight_on(void) {
+    uint8_t command = CROWPANEL_ADVANCE43_V11_BL_ON;
+    esp_err_t err = lvgl_i2c_write(CONFIG_LV_I2C_TOUCH_PORT,
+                                   CROWPANEL_ADVANCE43_V11_BL_ADDR,
+                                   I2C_NO_REG, &command, 1);
+    if (err == ESP_OK) {
+        ESP_LOGI("DisplayManager", "CrowPanel Advance 4.3 V1.1 backlight ON (0x30 <- 0x10)");
+    } else {
+        ESP_LOGW("DisplayManager", "CrowPanel Advance 4.3 V1.1 backlight command not acknowledged: %s",
+                 esp_err_to_name(err));
+    }
+}
+
 static esp_err_t crowpanel_advance43_tca9534_read(uint8_t reg, uint8_t *value) {
     return lvgl_i2c_read(CONFIG_LV_I2C_TOUCH_PORT,
                          CROWPANEL_ADVANCE43_TCA9534_ADDR,
@@ -2249,6 +2268,8 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
 #ifdef CONFIG_CROWPANEL_ADVANCE_43_LCD
   else {
     crowpanel_advance43_factory_power_sequence();
+    /* V1.1 needs an explicit backlight-on command after the power sequence. */
+    crowpanel_advance43_v11_backlight_on();
   }
 #else
   else if (crowpanel_advance_stc8_prepare() == ESP_OK) {
