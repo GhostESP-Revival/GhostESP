@@ -138,12 +138,17 @@ bool gui_touch_bar_hit(const lv_obj_t *btn, int x, int y) {
     lv_area_t a;
     lv_obj_get_coords((lv_obj_t *)btn, &a);
 #if defined(CONFIG_WAVESHARE_C5_35_LCD)
-    /* The 51x27 bar buttons sit a few px above the screen bottom, so a finger
-     * on this 3.5" panel easily lands in the dead strip just below Back (or
-     * just off a button) and the press does nothing -- or worse, misses onto a
-     * menu row underneath. Grow the hit area (mostly downward, to the bezel)
-     * so the bottom bar is forgiving. */
-    const int slop_x = 12, slop_up = 4, slop_down = 16;
+    /* The bar buttons sit a few px above the screen bottom, so a finger on this
+     * 3.5" panel easily lands in the dead strip just below a button and the
+     * press does nothing -- or worse, misses onto a menu row underneath. Grow
+     * the hit area downward to the bezel (and a little up) for every button.
+     * Horizontal slop is applied ONLY to the wide Back button, never the narrow
+     * round arrows: widening all three could overlap adjacent controls whose
+     * gap is under the slop, so a boundary tap could hit the wrong one. Back is
+     * the wide (non-round) button, so key off its width. */
+    const int slop_up = 4, slop_down = 16;
+    const bool is_back = (a.x2 - a.x1) > GUI_TOUCH_BAR_BTN_SIZE;
+    const int slop_x = is_back ? 12 : 0;
     return x >= a.x1 - slop_x && x <= a.x2 + slop_x &&
            y >= a.y1 - slop_up && y <= a.y2 + slop_down;
 #else
