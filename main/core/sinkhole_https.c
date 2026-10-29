@@ -1304,6 +1304,7 @@ void sinkhole_https_stop(void) {
 #else // !CONFIG_GHOSTESP_SINKHOLE_HTTPS
 
 // Stubs so the command line keeps compiling when the feature is disabled.
+sinkhole_https_mode_t sinkhole_https_prepare(void) { return SINKHOLE_HTTPS_MODE_OFF; }
 bool sinkhole_https_start(const sinkhole_https_config_t *cfg) {
     (void)cfg;
     return false;

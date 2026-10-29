@@ -60,7 +60,21 @@ static volatile bool beacon_task_running = false;
 static char *beacon_task_ssid = NULL;
 // Channels the driver permanently refused during this run (e.g. DFS in AP
 // mode); skip them instead of retrying and flooding the log every hop.
-static bool g_tx_channel_unusable[256];
+// A bitmap keeps this at 32 bytes instead of a 256-byte bool array, which
+// matters on the DRAM-tight ESP32-S2 builds.
+static uint32_t g_tx_channel_unusable[8];
+
+static inline bool tx_channel_unusable(uint8_t ch) {
+    return (g_tx_channel_unusable[ch >> 5] >> (ch & 31)) & 1u;
+}
+
+static inline void mark_tx_channel_unusable(uint8_t ch) {
+    g_tx_channel_unusable[ch >> 5] |= 1u << (ch & 31);
+}
+
+static inline void clear_tx_channel_unusable(void) {
+    memset(g_tx_channel_unusable, 0, sizeof(g_tx_channel_unusable));
+}
 
 // Forward declarations
 static void beacon_spam_task(void *param);
@@ -126,7 +140,7 @@ esp_err_t beacon_spam_broadcast(const char *ssid) {
          channel_index < channel_count && beacon_task_running;
          channel_index++) {
         uint8_t ch = channels[channel_index];
-        if (g_tx_channel_unusable[ch]) continue;
+        if (tx_channel_unusable(ch)) continue;
         if (!wifi_channels_is_tx_channel(ch)) continue;
         // Check if we should stop
         if (!beacon_task_running) {
@@ -138,7 +152,7 @@ esp_err_t beacon_spam_broadcast(const char *ssid) {
             if (channel_err != ESP_OK) {
                 if (channel_err == ESP_ERR_INVALID_ARG ||
                     channel_err == ESP_ERR_NOT_SUPPORTED) {
-                    g_tx_channel_unusable[ch] = true;
+                    mark_tx_channel_unusable(ch);
                 }
                 ESP_LOGW(TAG, "Beacon channel %u unavailable: %s",
                          (unsigned)ch, esp_err_to_name(channel_err));
@@ -418,7 +432,7 @@ void beacon_spam_start(const char *ssid) {
         // The AP is torn down for the attack, so no station can still hold an
         // address from it. Clear the stale flag before the hop loop reads it.
         ap_sta_has_ip = false;
-        memset(g_tx_channel_unusable, 0, sizeof(g_tx_channel_unusable));
+        clear_tx_channel_unusable();
         beacon_task_running = true;
         char *ssid_copy = ssid ? strdup(ssid) : NULL;
         if (ssid && !ssid_copy) {
@@ -517,7 +531,7 @@ void beacon_spam_start_list(void) {
     ESP_ERROR_CHECK(ap_manager_apply_attack_radio());
 
     ap_sta_has_ip = false;
-    memset(g_tx_channel_unusable, 0, sizeof(g_tx_channel_unusable));
+    clear_tx_channel_unusable();
 
     // Launch the beacon list task
     beacon_task_running = true;

@@ -2223,6 +2223,10 @@ menu "Ghost ESP Options"
         config GHOSTESP_SINKHOLE_HTTPS
             bool "Enable HTTPS interception for the DNS sinkhole"
             default y
+            # The TLS server and its certificate cache need PSRAM-class memory.
+            # ESP32-S2 has only 320 KB of internal DRAM and no room for it
+            # without PSRAM, so keep the option off on those builds.
+            depends on !IDF_TARGET_ESP32S2 || SPIRAM
             select ESP_HTTPS_SERVER_ENABLE
             select ESP_HTTPS_SERVER_CERT_SELECT_HOOK
             help
