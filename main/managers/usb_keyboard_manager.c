@@ -15,6 +15,9 @@
 #include "usb/usb_host.h"
 #include "usb/hid_host.h"
 #include "usb/hid_usage_keyboard.h"
+#if defined(CONFIG_BANSHEE_LITE_S3)
+#include "driver/gpio.h"
+#endif
 
 #define USB_KBD_EVENT_FLAG_RELEASE 0x01
 
@@ -116,6 +119,20 @@ typedef struct {
 static TaskHandle_t s_usb_host_task = NULL;
 static bool s_host_mode_active = false;
 static volatile bool s_usb_host_ready = false;
+
+#if defined(CONFIG_BANSHEE_LITE_S3)
+static void usb_kbd_set_select(bool active)
+{
+#if defined(CONFIG_USB_KBD_SELECT_PIN) && \
+    CONFIG_USB_KBD_SELECT_PIN >= 0
+    gpio_reset_pin(CONFIG_USB_KBD_SELECT_PIN);
+    gpio_set_direction(CONFIG_USB_KBD_SELECT_PIN, GPIO_MODE_OUTPUT);
+    gpio_set_level(CONFIG_USB_KBD_SELECT_PIN, active ? 1 : 0);
+#else
+    (void)active;
+#endif
+}
+#endif
 
 static int usb_kbd_get_joystick_index(uint8_t key_code) {
     switch (key_code) {
@@ -295,11 +312,18 @@ void usb_keyboard_manager_init(void) {
         return;
     }
 
+#if defined(CONFIG_BANSHEE_LITE_S3)
+    usb_kbd_set_select(true);
+#endif
+
     if (!s_usb_host_task) {
         s_usb_host_ready = false;
         if (xTaskCreatePinnedToCore(usb_kbd_host_task, "usb_events", 6144, NULL, 2, &s_usb_host_task, 0) != pdPASS) {
             TERMINAL_VIEW_ADD_TEXT("USB host task failed\n");
             s_usb_host_task = NULL;
+#if defined(CONFIG_BANSHEE_LITE_S3)
+            usb_kbd_set_select(false);
+#endif
             return;
         }
     }
@@ -311,6 +335,9 @@ void usb_keyboard_manager_init(void) {
     }
     if (!s_usb_host_ready) {
         TERMINAL_VIEW_ADD_TEXT("USB host init timeout\n");
+#if defined(CONFIG_BANSHEE_LITE_S3)
+        usb_kbd_set_select(false);
+#endif
         return;
     }
 
@@ -326,6 +353,9 @@ void usb_keyboard_manager_init(void) {
     esp_err_t err = hid_host_install(&hid_cfg);
     if (err != ESP_OK) {
         TERMINAL_VIEW_ADD_TEXT("HID install fail: %s\n", esp_err_to_name(err));
+#if defined(CONFIG_BANSHEE_LITE_S3)
+        usb_kbd_set_select(false);
+#endif
     } else {
         s_host_mode_active = true;
         TERMINAL_VIEW_ADD_TEXT("USB Host enabled\n");
@@ -345,6 +375,9 @@ static void usb_kbd_stop(void) {
     
     s_usb_host_ready = false;
     s_host_mode_active = false;
+#if defined(CONFIG_BANSHEE_LITE_S3)
+    usb_kbd_set_select(false);
+#endif
     TERMINAL_VIEW_ADD_TEXT("USB Host disabled\n");
 }
 

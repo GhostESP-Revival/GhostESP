@@ -7,6 +7,32 @@ menu "Ghost ESP Options"
         default "unknown_board"
         help
             Specify GESP build config template that was used at build time.
+
+    config BANSHEE_LITE_C5
+        bool "Banshee Lite C5 profile"
+        default n
+
+    config BANSHEE_LITE_S3
+        bool "Banshee Lite S3 profile"
+        default n
+
+    config GHOSTLINK_TX_PIN
+        int "GhostLink TX Pin"
+        range -1 48
+        default -1
+        depends on BANSHEE_LITE_C5 || BANSHEE_LITE_S3
+        help
+            Fixed GhostLink UART TX pin for board profiles that have a wired
+            peer link. Set to -1 to use the board/template default.
+
+    config GHOSTLINK_RX_PIN
+        int "GhostLink RX Pin"
+        range -1 48
+        default -1
+        depends on BANSHEE_LITE_C5 || BANSHEE_LITE_S3
+        help
+            Fixed GhostLink UART RX pin for board profiles that have a wired
+            peer link. Set to -1 to use the board/template default.
     endmenu
     
     menu "LED Options"
@@ -32,6 +58,7 @@ menu "Ghost ESP Options"
     
     config RED_RGB_PIN
         int "Red RGB Pin"
+        default -1 if BANSHEE_LITE_C5
         default 0
         depends on !USE_NEOPIXEL
         help
@@ -39,6 +66,7 @@ menu "Ghost ESP Options"
     
     config GREEN_RGB_PIN
         int "Green RGB Pin"
+        default -1 if BANSHEE_LITE_C5
         default 0
         depends on !USE_NEOPIXEL
         help
@@ -46,6 +74,7 @@ menu "Ghost ESP Options"
     
     config BLUE_RGB_PIN
         int "Blue RGB Pin"
+        default -1 if BANSHEE_LITE_C5
         default 0
         depends on !USE_NEOPIXEL
         help
@@ -275,6 +304,7 @@ menu "Ghost ESP Options"
 
     config C5_PARLIO_CLOCK_HZ
         int "ESP32-C5 PARLIO pixel clock (Hz)"
+        default 40000000 if BANSHEE_LITE_C5
         default 80000000
         range 1 80000000
         depends on USE_C5_PARLIO_DISPLAY
@@ -503,6 +533,15 @@ menu "Ghost ESP Options"
             help
                 GPIO pin for USB D+ (keyboard). On ESP32-S3 this is normally GPIO20.
 
+        config USB_KBD_SELECT_PIN
+            int "USB Host Select Pin"
+            range -1 48
+            default -1
+            depends on BANSHEE_LITE_S3 && USE_USB_KEYBOARD
+            help
+                Optional GPIO driven HIGH while USB host keyboard mode is active.
+                Set to -1 when the board has no host/device select signal.
+
         config HAS_BADUSB
             bool "Enable BadUSB (HID Script Injection)"
             default n
@@ -666,7 +705,35 @@ menu "Ghost ESP Options"
             depends on USE_MAX17048_FUEL_GAUGE
             help
                 GPIO pin for MAX17048 I2C SCL line.
-    
+
+        config USE_IP5306_POWER_MANAGER
+            bool "Use IP5306 Power Manager"
+            default n
+            depends on I2C_MANAGER_0_ENABLED
+            help
+                Enable IP5306 charger configuration and status support on the
+                shared I2C port 0. The IP5306 does not provide voltage/current
+                measurements, so this does not replace a fuel gauge.
+
+        config IP5306_I2C_ADDRESS
+            hex "IP5306 I2C Address"
+            default 0x75
+            depends on USE_IP5306_POWER_MANAGER
+            help
+                Seven-bit I2C address for the IP5306. The datasheet's 0xEA
+                address is the eight-bit write address; ESP-IDF uses 0x75.
+
+        config IP5306_CHARGE_CURRENT_CODE
+            hex "IP5306 VIN Charge Current Code"
+            default 0x02
+            range 0x00 0x1F
+            depends on USE_IP5306_POWER_MANAGER
+            help
+                Raw CHG_DIG_CTL0[4:0] code. The IP5306 has no exact 400 mA
+                setting: 0x02 is 250 mA and is the highest setting below the
+                requested 400 mA maximum; 0x04 is the next setting (450 mA
+                nominal per the datasheet equation).
+
         config HAS_RTC_CLOCK
             bool "Enable RTC Clock"
             default n
@@ -1684,6 +1751,7 @@ menu "Ghost ESP Options"
     
     config HAS_GPS
         bool "Enable GPS"
+        depends on !BANSHEE_LITE_C5
         default n
         help
             Enable GPS support.

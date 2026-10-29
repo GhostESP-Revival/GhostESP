@@ -1936,6 +1936,9 @@ static SettingsItem settings_items[] = {
     {"Max Brightness", SETTING_MAX_BRIGHTNESS, brightness_options, 10, 9, SETTINGS_CAT_DISPLAY, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
 #endif
     {"Invert Colors", SETTING_INVERT_COLORS, bool_options, 2, 0, SETTINGS_CAT_DISPLAY, false, NULL, SETTING_WIDGET_TOGGLE},
+#ifdef CONFIG_BANSHEE_LITE_C5
+    {"Auto Flip", SETTING_AUTO_FLIP, bool_options, 2, 0, SETTINGS_CAT_DISPLAY, false, NULL, SETTING_WIDGET_TOGGLE},
+#endif
     {"Sun Mode", SETTING_SUN_MODE, bool_options, 2, 0, SETTINGS_CAT_DISPLAY, false, NULL, SETTING_WIDGET_TOGGLE},
     {"Privacy Mode", SETTING_PRIVACY_MODE, bool_options, 2, 0, SETTINGS_CAT_DISPLAY, false, NULL, SETTING_WIDGET_TOGGLE},
     {"Log Level", SETTING_LOG_LEVEL, log_level_options, 6, ESP_LOG_WARN, SETTINGS_CAT_LOGGING, false, NULL, SETTING_WIDGET_VALUE_CYCLE},
@@ -5200,6 +5203,11 @@ static void load_current_settings_values(void) {
             case SETTING_INVERT_COLORS:
                 settings_items[i].current_value = settings_get_invert_colors(&G_Settings) ? 1 : 0;
                 break;
+#ifdef CONFIG_BANSHEE_LITE_C5
+            case SETTING_AUTO_FLIP:
+                settings_items[i].current_value = settings_get_auto_flip_enabled(&G_Settings) ? 1 : 0;
+                break;
+#endif
             case SETTING_SUN_MODE:
                 settings_items[i].current_value = settings_get_sun_mode(&G_Settings) ? 1 : 0;
                 break;
@@ -5551,6 +5559,12 @@ static void apply_setting_change(int setting_index, int new_value) {
                 lv_obj_invalidate(touch_bar);
             }
             break;
+#ifdef CONFIG_BANSHEE_LITE_C5
+        case SETTING_AUTO_FLIP:
+            settings_set_auto_flip_enabled(&G_Settings, new_value == 1);
+            display_manager_set_auto_flip_enabled(new_value == 1);
+            break;
+#endif
         case SETTING_SUN_MODE: {
             bool enabling = (new_value == 1);
             settings_set_sun_mode(&G_Settings, enabling);
