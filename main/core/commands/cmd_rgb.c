@@ -196,6 +196,18 @@ void handle_rgb_mode(int argc, char **argv) {
 }
 
 void handle_setrgb(int argc, char **argv) {
+#ifdef CONFIG_ATTAKY_TARGET
+    /* Nothing to configure: the Attaky Core's status LED is three expander
+     * bits, not a data pin and not three PWM pins. Re-initialising the manager
+     * here would unbind the working LED and drive an unrelated GPIO, so the
+     * command reports what the hardware is instead of accepting a pin. */
+    (void)argc;
+    (void)argv;
+    glog("Status LED is fixed on this board: RGB LED on expander P10/P11/P12,\n");
+    glog("on/off only. Use rgbmode <color|rainbow|police|strobe|knight|off>.\n");
+    status_display_show_status("RGB Fixed");
+    return;
+#else
     if (argc != 4) {
         glog("Usage: setrgbpins <red> <green> <blue>\n");
         glog("           (use same value for all pins for single-pin LED strips)\n\n");
@@ -247,9 +259,19 @@ void handle_setrgb(int argc, char **argv) {
             status_display_show_status("RGB Init Fail");
         }
     }
+#endif // CONFIG_ATTAKY_TARGET
 }
 
 void handle_setrgbcount(int argc, char **argv) {
+#ifdef CONFIG_ATTAKY_TARGET
+    /* Exactly one physical LED, and effects are meant to cycle its colour
+     * rather than address a strip. */
+    (void)argc;
+    (void)argv;
+    glog("Status LED count is fixed at 1 on this board (single RGB LED).\n");
+    status_display_show_status("RGB Fixed");
+    return;
+#else
     if (argc != 2) {
         glog("Usage: setrgbcount <1-512>\n");
         status_display_show_status("Count Usage");
@@ -296,4 +318,5 @@ void handle_setrgbcount(int argc, char **argv) {
         glog("RGB count set to %d. Configure pins with setrgbpins to apply.\n", count);
         status_display_show_status("RGB Count Saved");
     }
+#endif // CONFIG_ATTAKY_TARGET
 }

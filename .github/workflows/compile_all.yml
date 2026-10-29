@@ -99,6 +99,7 @@ jobs:
           - { name: "Marauder V8",             idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.MarauderV8",                      zip_name: "MarauderV8.zip" }
           - { name: "Marauder Pancake",        idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.Pancake",                         zip_name: "MarauderPancake.zip" }
           - { name: "XIAO ESP32S3 Wio-SX1262", idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.xiao_esp32s3_wio_sx1262",         zip_name: "XIAO_S3_WIO_SX1262.zip", ota: true, board_key: "xiao_esp32s3_wio_sx1262" }
+          - { name: "Attaky Cyber Deck Plus",  idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.attaky",                         zip_name: "Attaky-Cyber-Deck-Plus.zip" }
 
     steps:
       - uses: actions/checkout@v4

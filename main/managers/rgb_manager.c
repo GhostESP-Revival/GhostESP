@@ -13,6 +13,9 @@
 #include "managers/settings_manager.h"
 #include "vendor/led/led_strip.h"
 #include "driver/ledc.h"
+#if CONFIG_ATTAKY_TARGET
+#include "vendor/attaky/attaky_led_strip.h"
+#endif
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -1134,6 +1137,53 @@ void rgb_manager_power_transition_end(void) {
 }
 
 // Initialize the RGB LED manager
+#if CONFIG_ATTAKY_TARGET
+/*
+ * Status LEDs (Attaky): five RGB lights on I2C expanders, not a strip.
+ *
+ * num_leds is pinned to 1 because the whole build shows one colour - effects
+ * that ask for more pixels then land on that colour through the backend's
+ * index handling, instead of writing past the end of a buffer. The backend
+ * writes real 8-bit brightness to the three AW9523B sites (Core, keyboard
+ * halves); the gamepad's two TCA9555 LEDs have no PWM and quantise to on/off.
+ * So brightness here is a dimmer wherever the silicon offers one, and a gate
+ * only where it does not.
+ */
+esp_err_t rgb_manager_init_expander(RGBManager_t *rgb_manager) {
+  if (!rgb_manager) {
+    return ESP_ERR_INVALID_ARG;
+  }
+
+  if (rgb_mutex == NULL) {
+    rgb_mutex = xSemaphoreCreateRecursiveMutex();
+    if (rgb_mutex == NULL) {
+      ESP_LOGE(TAG, "Failed to create RGB mutex");
+      return ESP_ERR_NO_MEM;
+    }
+  }
+
+  led_strip_handle_t strip = attaky_led_strip_create();
+  if (strip == NULL) {
+    ESP_LOGE(TAG, "Failed to create the discrete status LED backend");
+    return ESP_ERR_NO_MEM;
+  }
+
+  rgb_manager->pin = GPIO_NUM_NC;
+  rgb_manager->red_pin = GPIO_NUM_NC;
+  rgb_manager->green_pin = GPIO_NUM_NC;
+  rgb_manager->blue_pin = GPIO_NUM_NC;
+  rgb_manager->strip = strip;
+  rgb_manager->num_leds = 1;
+  rgb_manager->is_separate_pins = false;
+  rgb_manager->effect_active = false;
+
+  (void)led_strip_clear(strip);
+
+  ESP_LOGI(TAG, "RGBManager initialized for the expander status LEDs (1 colour)");
+  return ESP_OK;
+}
+#endif
+
 esp_err_t rgb_manager_init(RGBManager_t *rgb_manager, gpio_num_t pin,
                            int num_leds, led_pixel_format_t pixel_format,
                            led_model_t model, gpio_num_t red_pin,

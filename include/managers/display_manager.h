@@ -121,6 +121,8 @@ bool display_manager_switch_view_and_wait_for_refresh(View *view);
  */
 void display_manager_go_back(void);
 
+
+
 /**
  * @brief Initialize slower display-adjacent peripherals after the first UI frame.
  */

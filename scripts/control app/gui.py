@@ -2134,6 +2134,31 @@ class ESP32ControlGUI(QMainWindow):
         if ports:
             self.port_combo.setCurrentIndex(0)
 
+    def open_serial_port(self, port):
+        """
+        Open a serial port with DTR and RTS deasserted.
+
+        On boards that wire the USB-UART bridge's DTR/RTS into the auto-reset /
+        auto-download circuit (most CH340/CP210x boards, including the Attaky
+        Cyber Deck Plus), pyserial's defaults matter: SerialBase starts with
+        _dtr_state = _rts_state = True, so serial.Serial(...) opens the port
+        with both lines asserted (DTR_CONTROL_ENABLE / RTS_CONTROL_ENABLE on
+        Windows). That holds the ESP32 in reset - or drops it into the ROM
+        downloader - for as long as the port stays open, so the device connects
+        but never answers a command and the mirror stays black.
+
+        scripts/screen_mirror/ghost_mirror.py avoids this the same way; keep
+        these two in step.
+        """
+        ser = serial.Serial()
+        ser.port = port
+        ser.baudrate = 115200
+        ser.timeout = 1
+        ser.dtr = False
+        ser.rts = False
+        ser.open()
+        return ser
+
     def toggle_connection(self):
         """Connect or disconnect from the selected serial port."""
         if not self.serial_port or not self.serial_port.is_open:
@@ -2141,7 +2166,7 @@ class ESP32ControlGUI(QMainWindow):
                 # get actual device from combo data if available
                 data = self.port_combo.currentData()
                 port = data if data else self.port_combo.currentText().split()[0]
-                self.serial_port = serial.Serial(port, 115200, timeout=1)
+                self.serial_port = self.open_serial_port(port)
                 self.connect_btn.setText("Disconnect")
                 self.connect_btn.setStyleSheet("")
                 log_message(self.log_text, f"Connected to {port}", self.app_settings.get("show_timestamps", True))
@@ -2478,7 +2503,7 @@ class ESP32ControlGUI(QMainWindow):
                 port = data if data else self.port_combo.currentText().split()[0]
                 if port:
                     try:
-                        self.serial_port = serial.Serial(port, 115200, timeout=1)
+                        self.serial_port = self.open_serial_port(port)
                         self.connect_btn.setText("Disconnect")
                         self.connect_btn.setStyleSheet("")
                         log_message(self.log_text, f"Auto-reconnected to {port}", self.app_settings.get("show_timestamps", True))

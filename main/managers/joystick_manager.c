@@ -28,6 +28,16 @@ void joystick_init(joystick_t *joystick, int pin, uint32_t hold_lim,
   }
 #endif
 
+  /* A negative pin means "this slot has no button on this board". Board
+   * profiles that route every button through the IO expander set the five
+   * CONFIG_*_BTN fallback pins to -1 for exactly that reason: they are only
+   * reachable when io_manager fails to start, and their Kconfig default is 0,
+   * which would hand the same GPIO to all five slots and read as five held
+   * buttons. Without this guard the shift below is also undefined. */
+  if (pin < 0) {
+    return;
+  }
+
   gpio_config_t io_conf = {
       .pin_bit_mask = (1ULL << pin),
       .mode = GPIO_MODE_INPUT,

@@ -17,6 +17,7 @@
 #include <math.h>
 #include "managers/gps_manager.h"
 #include "managers/bmi270_driver.h"
+#include "vendor/drivers/qmi8658.h"
 
 #ifdef CONFIG_HAS_ACCELEROMETER
 
@@ -167,6 +168,16 @@ static void accel_init_hw(void) {
         ESP_LOGI(TAG, "BMI270 initialized");
     }
     return;
+#elif defined(CONFIG_ACCEL_USE_QMI8658)
+    /* QMI8658A (Attaky Core). qmi8658_init() verifies the chip ID and that the
+     * accelerometer is actually converting, so success here is a live sensor.
+     * Like the BMI270 path there is no host-side calibration pass: the part is
+     * factory-trimmed and orientation classification is calibration-free by
+     * design. */
+    if (qmi8658_init() == ESP_OK) {
+        accel_initialized = true;
+    }
+    return;
 #else
 
     uint8_t devid = 0;
@@ -251,6 +262,9 @@ static void accel_timer_cb(lv_timer_t *timer) {
 #ifdef CONFIG_ACCEL_USE_BMI270
     int16_t raw_x, raw_y, raw_z;
     if (bmi270_read_accel(&raw_x, &raw_y, &raw_z) != ESP_OK) return;
+#elif defined(CONFIG_ACCEL_USE_QMI8658)
+    int16_t raw_x, raw_y, raw_z;
+    if (qmi8658_read_accel(&raw_x, &raw_y, &raw_z) != ESP_OK) return;
 #else
     uint8_t data[6];
     if (adxl345_read_bytes(ADXL345_REG_DATAX0, data, 6) != ESP_OK) {
@@ -273,6 +287,10 @@ static void accel_timer_cb(lv_timer_t *timer) {
     float ax = raw_x * BMI270_G_PER_LSB;
     float ay = raw_y * BMI270_G_PER_LSB;
     float az = raw_z * BMI270_G_PER_LSB;
+#elif defined(CONFIG_ACCEL_USE_QMI8658)
+    float ax = raw_x * QMI8658_G_PER_LSB;
+    float ay = raw_y * QMI8658_G_PER_LSB;
+    float az = raw_z * QMI8658_G_PER_LSB;
 #else
     float ax = raw_x * MG_PER_LSB;
     float ay = raw_y * MG_PER_LSB;

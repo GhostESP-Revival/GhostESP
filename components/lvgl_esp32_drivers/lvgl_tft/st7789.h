@@ -116,6 +116,13 @@ void st7789_flush(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *color_m
 void st7789_send_cmd(uint8_t cmd);
 void st7789_send_data(const void *data, uint16_t length);
 
+/* Memory data access control (0x36). The orientation table in st7789.c picks a
+ * byte from CONFIG_LV_DISPLAY_ORIENTATION and st7789_set_madctl() applies it
+ * immediately (live); st7789_get_madctl() reports the byte the panel is
+ * currently driven with. */
+void st7789_set_madctl(uint8_t madctl);
+uint8_t st7789_get_madctl(void);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

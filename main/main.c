@@ -38,6 +38,9 @@
 #endif
 #include "vendor/drivers/aw9523.h"
 #include "vendor/drivers/pcf8563.h"
+#ifdef CONFIG_ATTAKY_TARGET
+#include "vendor/attaky/attaky_board.h"
+#endif
 #include <sys/time.h>
 #include <time.h>
 #include <stdlib.h>
@@ -83,7 +86,7 @@
 #include "managers/motion_detector_manager.h"
 #include "managers/camera_stream_manager.h"
 #endif
-#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER) || defined(CONFIG_HAS_CROWPANEL_NS4168) || defined(CONFIG_HAS_TDECK_SPEAKER)
+#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER) || defined(CONFIG_HAS_CROWPANEL_NS4168) || defined(CONFIG_HAS_TDECK_SPEAKER) || defined(CONFIG_HAS_ATTAKY_SPEAKER)
 #include "managers/audio_receiver_manager.h"
 #endif
 
@@ -793,6 +796,17 @@ void app_main(void) {
 
 
     MEASURE_INIT_RAM("Serial Manager", serial_manager_init());
+#ifdef CONFIG_ATTAKY_TARGET
+    /* Chain-integration shim (see port/plan.md §3): the banner pair and the
+     * milestone marker go out as soon as the console is up and before any
+     * feature init, so a boot that dies mid-init still shows them. Attaky
+     * board bring-up follows immediately: the display manager's touch
+     * controller needs the Core expanders configured and the touch reset
+     * released first. */
+    attaky_board_emit_banner();
+    attaky_board_init();
+    attaky_board_emit_presence();
+#endif
 #if defined(CONFIG_IDF_TARGET_ESP32P4)
     /* Start ESP-Hosted from app_main instead of a C constructor.  IDF 6.1
      * performs P4 sleep-retention startup after C constructors; initializing
@@ -1060,7 +1074,7 @@ void app_main(void) {
     mic_visualizer_start();
 #endif
 #endif
-#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER) || defined(CONFIG_HAS_CROWPANEL_NS4168) || defined(CONFIG_HAS_TDECK_SPEAKER)
+#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER) || defined(CONFIG_HAS_CROWPANEL_NS4168) || defined(CONFIG_HAS_TDECK_SPEAKER) || defined(CONFIG_HAS_ATTAKY_SPEAKER)
 #if !defined(CONFIG_WITH_SCREEN)
     // Headless boards only need the receiver when `audio start` runs; it
     // self-initializes there. Skip the boot-time I2S + decode task + 96KB
@@ -1267,18 +1281,28 @@ void app_main(void) {
         }
         int32_t red_pin, green_pin, blue_pin;
         settings_get_rgb_separate_pins(&G_Settings, &red_pin, &green_pin, &blue_pin);
-        if (data_pin != GPIO_NUM_NC) {
+        bool discrete_led = false;
+#if defined(CONFIG_ATTAKY_TARGET)
+        /* Attaky Core: no addressable strip and no PWM pins - the status LED is
+         * three discrete expander bits (P10/P11/P12, active low), so each
+         * channel is on or off. Bring up the discrete backend here and skip the
+         * pin probing below entirely; a leftover saved pin in NVS would
+         * otherwise claim a GPIO with no LED on it and drive RMT forever. */
+        discrete_led = (rgb_manager_init_expander(&rgb_manager) == ESP_OK);
+        initialized = discrete_led;
+#endif
+        if (!discrete_led && data_pin != GPIO_NUM_NC) {
             esp_err_t rgb_err;
             MEASURE_INIT_RAM("RGB Manager (data pin) init", rgb_err = rgb_manager_init(&rgb_manager, data_pin, rgb_led_count, LED_PIXEL_FORMAT_GRB,
                                                  LED_MODEL_WS2812, GPIO_NUM_NC, GPIO_NUM_NC, GPIO_NUM_NC));
             initialized = (rgb_err == ESP_OK);
-        } else if (red_pin != GPIO_NUM_NC && green_pin != GPIO_NUM_NC && blue_pin != GPIO_NUM_NC) {
+        } else if (!discrete_led && red_pin != GPIO_NUM_NC && green_pin != GPIO_NUM_NC && blue_pin != GPIO_NUM_NC) {
             esp_err_t rgb_err;
             MEASURE_INIT_RAM("RGB Manager (separate pins) init", rgb_err = rgb_manager_init(&rgb_manager, GPIO_NUM_NC, rgb_led_count, LED_PIXEL_FORMAT_GRB,
                                                  LED_MODEL_WS2812, red_pin, green_pin, blue_pin));
             initialized = (rgb_err == ESP_OK);
         }
-            if (!initialized && rgb_led_count > 0) {
+            if (!discrete_led && !initialized && rgb_led_count > 0) {
 #ifdef CONFIG_LED_DATA_PIN
             if (CONFIG_LED_DATA_PIN >= 0) {
             esp_err_t rgb_err;

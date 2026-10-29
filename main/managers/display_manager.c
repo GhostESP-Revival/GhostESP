@@ -125,6 +125,11 @@ static i2c_master_bus_handle_t s_touch_i2c_bus = NULL;
 #include "managers/fuel_gauge_manager.h"
 #endif
 
+#if defined(CONFIG_ATTAKY_TARGET)
+#include "vendor/attaky/attaky_gamepad.h"
+#include "vendor/attaky/attaky_keyboard.h"
+#endif
+
 QueueHandle_tt input_queue = NULL;
 joystick_t joysticks[5];
 
@@ -669,6 +674,10 @@ static void kb_repeat_fire_cb(void *arg) {
 }
 
 static void kb_repeat_start(uint8_t key) {
+    /* Back never auto-repeats: one press backs out exactly one level, so a
+     * held B button cannot walk the whole route stack out from under the
+     * user. (Enter/Backspace still repeat normally.) */
+    if (key == 27 || key == 29 || key == '`') return;
     s_kb_repeat_key = key;
     if (!s_kb_repeat_timer) return;
     if (esp_timer_is_active(s_kb_repeat_timer)) {
@@ -2621,6 +2630,19 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
 #ifdef CONFIG_USE_CARDPUTER
   keyboard_init(&gkeyboard);
   keyboard_begin(&gkeyboard);
+#endif
+
+#if defined(CONFIG_ATTAKY_TARGET)
+  /* The Attaky Control modules deliver their input by pushing onto the queue
+   * created just above, so they start here rather than in app_main. An absent
+   * module returns ESP_ERR_NOT_FOUND and is not an error: a Core-only device
+   * has neither. */
+  if (attaky_keyboard_init() != ESP_OK) {
+    ESP_LOGI(TAG, "Attaky keyboard not started (module absent or failed)");
+  }
+  if (attaky_gamepad_init() != ESP_OK) {
+    ESP_LOGI(TAG, "Attaky gamepad not started (module absent or failed)");
+  }
 #endif
 
 #ifdef CONFIG_HAS_BATTERY
@@ -5043,14 +5065,20 @@ void hardware_input_task(void *pvParameters) {
                             display_manager_switch_view(&infrared_view);
 #endif
                         } else if (strcmp(cmd, "view:badusb") == 0) {
+#if defined(CONFIG_HAS_BADUSB) || defined(CONFIG_HAS_BADUSB_REMOTE)
                             display_manager_switch_view(&badusb_view);
+#endif
                         } else if (strcmp(cmd, "view:gps") == 0) {
                             SelectedMenuType = OT_GPS;
                             display_manager_switch_view(&options_menu_view);
                         } else if (strcmp(cmd, "view:compass") == 0) {
+#ifdef CONFIG_HAS_COMPASS
                             display_manager_switch_view(&compass_view);
+#endif
                         } else if (strcmp(cmd, "view:enviii") == 0) {
+#ifdef CONFIG_HAS_ENVIII
                             display_manager_switch_view(&enviii_view);
+#endif
                         } else if (strcmp(cmd, "view:accel") == 0) {
                             display_manager_switch_view(&accelerometer_view);
                         } else if (strcmp(cmd, "view:clock") == 0) {
@@ -5061,7 +5089,9 @@ void hardware_input_task(void *pvParameters) {
                             SelectedMenuType = OT_NRF24;
                             display_manager_switch_view(&options_menu_view);
                         } else if (strcmp(cmd, "view:subghz") == 0) {
+#if defined(CONFIG_HAS_SUBGHZ) || defined(CONFIG_HAS_SUBGHZ_REMOTE)
                             display_manager_switch_view(&subghz_view);
+#endif
                         } else if (strcmp(cmd, "view:settings") == 0) {
                             SelectedMenuType = OT_Settings;
                             display_manager_switch_view(&options_menu_view);
@@ -5097,14 +5127,20 @@ void hardware_input_task(void *pvParameters) {
                             display_manager_switch_view(&infrared_view);
 #endif
                         } else if (strcmp(cmd, "view:badusb") == 0) {
+#if defined(CONFIG_HAS_BADUSB) || defined(CONFIG_HAS_BADUSB_REMOTE)
                             display_manager_switch_view(&badusb_view);
+#endif
                         } else if (strcmp(cmd, "view:gps") == 0) {
                             SelectedMenuType = OT_GPS;
                             display_manager_switch_view(&options_menu_view);
                         } else if (strcmp(cmd, "view:compass") == 0) {
+#ifdef CONFIG_HAS_COMPASS
                             display_manager_switch_view(&compass_view);
+#endif
                         } else if (strcmp(cmd, "view:enviii") == 0) {
+#ifdef CONFIG_HAS_ENVIII
                             display_manager_switch_view(&enviii_view);
+#endif
                         } else if (strcmp(cmd, "view:accel") == 0) {
                             display_manager_switch_view(&accelerometer_view);
                         } else if (strcmp(cmd, "view:clock") == 0) {
@@ -5115,7 +5151,9 @@ void hardware_input_task(void *pvParameters) {
                             SelectedMenuType = OT_NRF24;
                             display_manager_switch_view(&options_menu_view);
                         } else if (strcmp(cmd, "view:subghz") == 0) {
+#if defined(CONFIG_HAS_SUBGHZ) || defined(CONFIG_HAS_SUBGHZ_REMOTE)
                             display_manager_switch_view(&subghz_view);
+#endif
                         } else if (strcmp(cmd, "view:settings") == 0) {
                             SelectedMenuType = OT_Settings;
                             display_manager_switch_view(&options_menu_view);
@@ -5151,14 +5189,20 @@ void hardware_input_task(void *pvParameters) {
                             display_manager_switch_view(&infrared_view);
 #endif
                         } else if (strcmp(cmd, "view:badusb") == 0) {
+#if defined(CONFIG_HAS_BADUSB) || defined(CONFIG_HAS_BADUSB_REMOTE)
                             display_manager_switch_view(&badusb_view);
+#endif
                         } else if (strcmp(cmd, "view:gps") == 0) {
                             SelectedMenuType = OT_GPS;
                             display_manager_switch_view(&options_menu_view);
                         } else if (strcmp(cmd, "view:compass") == 0) {
+#ifdef CONFIG_HAS_COMPASS
                             display_manager_switch_view(&compass_view);
+#endif
                         } else if (strcmp(cmd, "view:enviii") == 0) {
+#ifdef CONFIG_HAS_ENVIII
                             display_manager_switch_view(&enviii_view);
+#endif
                         } else if (strcmp(cmd, "view:accel") == 0) {
                             display_manager_switch_view(&accelerometer_view);
                         } else if (strcmp(cmd, "view:clock") == 0) {
@@ -5169,7 +5213,9 @@ void hardware_input_task(void *pvParameters) {
                             SelectedMenuType = OT_NRF24;
                             display_manager_switch_view(&options_menu_view);
                         } else if (strcmp(cmd, "view:subghz") == 0) {
+#if defined(CONFIG_HAS_SUBGHZ) || defined(CONFIG_HAS_SUBGHZ_REMOTE)
                             display_manager_switch_view(&subghz_view);
+#endif
                         } else if (strcmp(cmd, "view:settings") == 0) {
                             SelectedMenuType = OT_Settings;
                             display_manager_switch_view(&options_menu_view);
@@ -5557,6 +5603,28 @@ void display_manager_flush_input_queue(void) {
     xQueueReset(input_queue);
 }
 
+/* ---- Back key ----------------------------------------------------------
+ *
+ * The Attaky's B button emits LV_KEY_ESC (attaky_gamepad.c), which is the same
+ * key the views' own back paths are wired to - the touch back button, the
+ * Escape fallbacks, and the hardware exit button's escape fallback. There is
+ * deliberately nothing else here: no second, "forced" back for views that look
+ * idle. Views legitimately consume Escape without navigating - a BLE scan
+ * overlay cancels the scan and stays on its menu, the Terminal stops its
+ * operations before it leaves - so guessing from the outside whether the key
+ * was handled produced exactly the wrong result in both directions: a double
+ * back out of slow views, and an unasked-for exit out of views that consumed
+ * the press without changing screen.
+ *
+ * A view that needs Escape added gets it in the view, where the rest of its
+ * back handling already lives. */
+
+/* Single entry point for handing an event to the current view. */
+static void dm_dispatch_to_view(void (*input_callback)(InputEvent *), View *view, InputEvent *event) {
+  (void)view;
+  if (input_callback) input_callback(event);
+}
+
 void processEvent() {  // do not process events until the display manager is up
   if (!display_manager_init_success) {
     return;
@@ -5647,6 +5715,11 @@ void processEvent() {  // do not process events until the display manager is up
       // Global keyboard repeat: start on press, stop on release.
       // Release events are consumed here for all views except Trackpad
       // (which needs them for tap/hold click detection).
+      // A repeat event is this timer's own output and must not re-arm it: doing
+      // so replaces the initial-delay + periodic pair with a chain of one-shots
+      // that outlives the key. If one of them is already queued when the release
+      // is handled, the chain restarts with no press behind it and repeats
+      // forever - the same runaway as a missing release, and just as random.
       if (event.type == INPUT_TYPE_KEYBOARD) {
           if (event.is_touch_move) {
               kb_repeat_stop();
@@ -5654,11 +5727,11 @@ void processEvent() {  // do not process events until the display manager is up
                   processed++;
                   continue;
               }
-          } else {
+          } else if (!event.is_repeat) {
               kb_repeat_start(event.data.key_value);
           }
       }
-      if (input_callback) input_callback(&event);
+      dm_dispatch_to_view(input_callback, current, &event);
     }
     processed++;
   }
@@ -5732,10 +5805,11 @@ void processEvent() {  // do not process events until the display manager is up
               input_callback(&event);
           }
         } else {
-          if (event.type == INPUT_TYPE_KEYBOARD && !event.is_touch_move) {
+          if (event.type == INPUT_TYPE_KEYBOARD && !event.is_touch_move &&
+              !event.is_repeat) {
               kb_repeat_start(event.data.key_value);
           }
-          if (input_callback) input_callback(&event);
+          dm_dispatch_to_view(input_callback, current, &event);
         }
       }
     }

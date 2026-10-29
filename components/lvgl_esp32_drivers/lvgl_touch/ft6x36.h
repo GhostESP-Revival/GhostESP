@@ -176,6 +176,16 @@ uint8_t ft6x36_get_gesture_id();
   */
 bool ft6x36_read(lv_indev_drv_t *drv, lv_indev_data_t *data);
 
+/**
+  * @brief  Last point the driver reported, already in screen coordinates.
+  * @param  x, y:   out, touched point in the LVGL frame (post transform)
+  * @param  pressed: out, whether the controller reports a finger down
+  * @retval false when the controller never initialized (probe failed), in
+  *         which case nothing is written. Intended for on-screen diagnostics
+  *         that must not touch I2C themselves.
+  */
+bool ft6x36_get_last_point(int16_t *x, int16_t *y, bool *pressed);
+
 #ifdef __cplusplus
 }
 #endif

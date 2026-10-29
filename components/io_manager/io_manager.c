@@ -18,27 +18,103 @@ static i2c_master_dev_handle_t g_tca9535_dev = NULL;
 static bool g_i2c_bus_owned = false;
 static SemaphoreHandle_t g_i2c_mutex = NULL;
 
-// TCA9535 register addresses
+// Expander register addresses.
+// TCA9535 / TCA9555 and the AW9523B share the input (0x00/0x01) and output
+// (0x02/0x03) register layout; only the direction registers and the
+// chip-specific extras differ, so the whole register set is selected by the
+// chip variant instead of being hardcoded.
 #define TCA9535_INPUT_PORT0     0x00
 #define TCA9535_INPUT_PORT1     0x01
 #define TCA9535_OUTPUT_PORT0    0x02
 #define TCA9535_OUTPUT_PORT1    0x03
+#ifdef CONFIG_IO_EXPANDER_CHIP_AW9523
+#define TCA9535_CONFIG_PORT0    0x04
+#define TCA9535_CONFIG_PORT1    0x05
+#define AW9523_REG_ID           0x10
+#define AW9523_REG_LEDMODE_P0   0x12
+#define AW9523_REG_LEDMODE_P1   0x13
+#define AW9523_REG_SOFT_RESET   0x7F
+#define AW9523_ID_VALUE         0x23
+/* Status RGB LED on P1: P10 red, P11 green, P12 blue, common anode, so a
+ * cleared bit lights the channel. P13 is the touch reset and must stay high. */
+#define AW9523_P1_LED_RED       0x01
+#define AW9523_P1_LED_GREEN     0x02
+#define AW9523_P1_LED_BLUE      0x04
+#define AW9523_P1_LED_MASK      0x07
+/* Constant-current dimming, 256 steps per pin (AW9523B datasheet "Table 13,
+ * 256 step dimming control"). The DIM registers are NOT in pin order: pins
+ * 0-7 use 0x24+pin, pins 8-11 use 0x20+(pin-8) and pins 12-15 use
+ * 0x2C+(pin-12). P10/P11/P12 are pins 8/9/10, hence 0x20/0x21/0x22. */
+#define AW9523_REG_DIM_RED      0x20   /* pin 8  = P10 */
+#define AW9523_REG_DIM_GREEN    0x21   /* pin 9  = P11 */
+#define AW9523_REG_DIM_BLUE     0x22   /* pin 10 = P12 */
+static uint8_t g_out_p1_shadow = 0xFF;   /* last value written to P1 outputs */
+static uint8_t g_led_dim[3] = {0, 0, 0}; /* red/green/blue as last written */
+static bool g_led_dim_mode = false;      /* P10-P12 in constant-current mode */
+#else
 #define TCA9535_CONFIG_PORT0    0x06
 #define TCA9535_CONFIG_PORT1    0x07
+#endif
 
-// Button pin definitions (P00-P04)
-#define BTN_UP      0   // P00
-#define BTN_DOWN    1   // P01
-#define BTN_SELECT  2   // P02
-#define BTN_LEFT    3   // P03
-#define BTN_RIGHT   4   // P04
+// Button-to-bit map.
+//
+// Both expander families expose their inputs as two 8-bit port registers, but
+// they wire their buttons to different bits, so the map is data rather than a
+// set of #defines: each logical button is a (port, bit) pair and every read
+// path below goes through the helpers. Every button is active-low.
+typedef struct {
+    uint8_t port;   // 0 = P0 register (0x00), 1 = P1 register (0x01)
+    uint8_t bit;    // bit position inside that register
+} io_bit_t;
 
-// Additional port1 buttons (P10-P12 -> port1 bits 0-2)
-#define BTN_B1      0
-#define BTN_B2      1
-#define BTN_B3      2
+typedef struct {
+    io_bit_t up, down, select, left, right;
+    io_bit_t b1, b2, b3;   // extra face buttons (L1 / R1 / POWER on Attaky)
+    uint8_t dir_p0, dir_p1;   // direction masks written at init (1 = input)
+    uint8_t out_p0, out_p1;   // output values written at init
+} io_manager_map_t;
 
-// Encoder pins on port0
+#ifdef CONFIG_IO_EXPANDER_CHIP_AW9523
+// AW9523B: the Attaky Core's button expander @ 0x59. All eight buttons sit on
+// P0 - P00 Down, P01 Left, P02 Enter/Select, P03 Right, P04 Up, P05 L1,
+// P06 R1, P07 POWER (short press; a long press is a hardware power toggle the
+// PMIC owns). P1 drives the RGB status LED (P10-P12) and the touch reset
+// (P13), so P1's low nibble must stay an output driving high: writing a
+// whole-bank "all inputs" direction there would float the touch reset line.
+// P1's high nibble (P14-P17) is unused and left as input.
+static const io_manager_map_t g_io_map = {
+    .up = {0, 4}, .down = {0, 0}, .select = {0, 2}, .left = {0, 1}, .right = {0, 3},
+    .b1 = {0, 5}, .b2 = {0, 6}, .b3 = {0, 7},
+    .dir_p0 = 0xFF, .dir_p1 = 0xF0,
+    .out_p0 = 0xFF, .out_p1 = 0x0F,   // LED off + touch reset released (active low)
+};
+#else
+// TCA9535 / TCA9555 default map (upstream's wiring: D-pad + select on P0,
+// b1-b3 on P1, encoder A/B/button on P05-P07).
+static const io_manager_map_t g_io_map = {
+    .up = {0, 0}, .down = {0, 1}, .select = {0, 2}, .left = {0, 3}, .right = {0, 4},
+    .b1 = {1, 0}, .b2 = {1, 1}, .b3 = {1, 2},
+    .dir_p0 = 0xFF, .dir_p1 = 0xFF,
+    .out_p0 = 0xFF, .out_p1 = 0xFF,
+};
+#endif
+
+static inline bool io_bit_pressed(io_bit_t b, uint8_t port0, uint8_t port1)
+{
+    uint8_t v = (b.port == 0) ? port0 : port1;
+    return (v & (uint8_t)(1u << b.bit)) == 0;   // active-low
+}
+
+static inline bool io_bit_falling_edge(io_bit_t b, uint8_t prev0, uint8_t prev1,
+                                       uint8_t now0, uint8_t now1)
+{
+    uint8_t prev = (b.port == 0) ? prev0 : prev1;
+    uint8_t now = (b.port == 0) ? now0 : now1;
+    uint8_t mask = (uint8_t)(1u << b.bit);
+    return (prev & mask) && !(now & mask);
+}
+
+// Encoder pins on port0 (only meaningful when an encoder is fitted)
 #define ENC_PIN_A   5   // P05
 #define ENC_PIN_B   6   // P06
 #define ENC_PIN_BTN 7   // P07
@@ -113,36 +189,62 @@ esp_err_t io_manager_init(const io_manager_config_t *config)
         return ret;
     }
 
-    // Configure TCA9535 ports as inputs with pull-ups enabled
-    // Note: TCA9535 inputs are high-impedance. If using PCF8575 or similar, writing 1 to output enables weak pull-up.
-    // Writing to output register for inputs doesn't hurt TCA9535.
-    ret = tca9535_write_port(TCA9535_OUTPUT_PORT0, 0xFF);
-    if (ret != ESP_OK) ESP_LOGW(TAG, "Failed to write output port 0");
-    
-    ret = tca9535_write_port(TCA9535_CONFIG_PORT0, 0xFF);  // All pins as inputs
+#ifdef CONFIG_IO_EXPANDER_CHIP_AW9523
+    // The AW9523B powers up with its P-pins configured as outputs (the exact
+    // pattern depends on the AD0/AD1 address strap), so a software reset and
+    // explicit direction writes are mandatory before the first read - otherwise
+    // the expander drives the button lines itself and every button reads as
+    // pressed. LEDMODE is written to 0xFF on both banks so P0/P1 are plain
+    // GPIO outputs rather than constant-current LED sinks; the status LED
+    // moves its own three pins into sink mode on first use (see
+    // io_manager_set_status_led).
+    ret = tca9535_write_port(AW9523_REG_SOFT_RESET, 0x00);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to configure TCA9535 port 0: %s", esp_err_to_name(ret));
+        ESP_LOGW(TAG, "AW9523 software reset failed: %s", esp_err_to_name(ret));
+    }
+    vTaskDelay(pdMS_TO_TICKS(2));   // datasheet does not specify; 1-2 ms is safe
+    if (tca9535_write_port(AW9523_REG_LEDMODE_P0, 0xFF) != ESP_OK ||
+        tca9535_write_port(AW9523_REG_LEDMODE_P1, 0xFF) != ESP_OK) {
+        ESP_LOGW(TAG, "AW9523 LEDMODE init failed; LED/reset pins may stay in sink mode");
+    }
+    uint8_t id = 0;
+    if (tca9535_read_port(AW9523_REG_ID, &id) == ESP_OK) {
+        if (id != AW9523_ID_VALUE) {
+            ESP_LOGW(TAG, "Expander at 0x%02X reports ID 0x%02X (expected 0x%02X)",
+                     g_config.i2c_addr, id, AW9523_ID_VALUE);
+        }
+    } else {
+        ESP_LOGW(TAG, "Expander at 0x%02X did not answer its ID register", g_config.i2c_addr);
+    }
+#endif
+
+    // Configure the expander from the selected button map.
+    // Note: inputs are high-impedance. Writing 1 to the output register for a
+    // high-impedance input is harmless on both families and is kept because it
+    // enables the weak pull-up on PCF8575-style parts.
+    ret = tca9535_write_port(TCA9535_OUTPUT_PORT0, g_io_map.out_p0);
+    if (ret != ESP_OK) ESP_LOGW(TAG, "Failed to write output port 0");
+
+    ret = tca9535_write_port(TCA9535_CONFIG_PORT0, g_io_map.dir_p0);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to configure expander port 0: %s", esp_err_to_name(ret));
         return ret;
     }
 
-    ret = tca9535_write_port(TCA9535_CONFIG_PORT1, 0xFF);  // All pins as inputs
+    ret = tca9535_write_port(TCA9535_CONFIG_PORT1, g_io_map.dir_p1);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to configure TCA9535 port 1: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to configure expander port 1: %s", esp_err_to_name(ret));
         return ret;
     }
-    
-    // Enable pull-ups on input pins (TCA9535 has internal pull-ups)
-    ret = tca9535_write_port(TCA9535_OUTPUT_PORT0, 0xFF);  // Set output high to enable pull-ups
+
+    ret = tca9535_write_port(TCA9535_OUTPUT_PORT1, g_io_map.out_p1);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to enable pull-ups on port 0: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to set expander port 1 outputs: %s", esp_err_to_name(ret));
         return ret;
     }
-    
-    ret = tca9535_write_port(TCA9535_OUTPUT_PORT1, 0xFF);  // Set output high to enable pull-ups
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to enable pull-ups on port 1: %s", esp_err_to_name(ret));
-        return ret;
-    }
+#ifdef CONFIG_IO_EXPANDER_CHIP_AW9523
+    g_out_p1_shadow = g_io_map.out_p1;   /* LED off, touch reset released */
+#endif
 
     io_manager_reset_events();
 
@@ -298,14 +400,14 @@ esp_err_t io_manager_get_button_states(btn_event_t *states)
 
     io_manager_process_sample(current_port0, current_port1, NULL);
 
-    states->up = !(current_port0 & (1 << BTN_UP));
-    states->down = !(current_port0 & (1 << BTN_DOWN));
-    states->select = !(current_port0 & (1 << BTN_SELECT));
-    states->left = !(current_port0 & (1 << BTN_LEFT));
-    states->right = !(current_port0 & (1 << BTN_RIGHT));
-    states->b1 = !(current_port1 & (1 << BTN_B1));
-    states->b2 = !(current_port1 & (1 << BTN_B2));
-    states->b3 = !(current_port1 & (1 << BTN_B3));
+    states->up = io_bit_pressed(g_io_map.up, current_port0, current_port1);
+    states->down = io_bit_pressed(g_io_map.down, current_port0, current_port1);
+    states->select = io_bit_pressed(g_io_map.select, current_port0, current_port1);
+    states->left = io_bit_pressed(g_io_map.left, current_port0, current_port1);
+    states->right = io_bit_pressed(g_io_map.right, current_port0, current_port1);
+    states->b1 = io_bit_pressed(g_io_map.b1, current_port0, current_port1);
+    states->b2 = io_bit_pressed(g_io_map.b2, current_port0, current_port1);
+    states->b3 = io_bit_pressed(g_io_map.b3, current_port0, current_port1);
 
     return ESP_OK;
 }
@@ -316,14 +418,14 @@ esp_err_t io_manager_get_cached_button_states(btn_event_t *states)
         return ESP_ERR_INVALID_STATE;
     }
 
-    states->up = !(g_cached_state_port0 & (1 << BTN_UP));
-    states->down = !(g_cached_state_port0 & (1 << BTN_DOWN));
-    states->select = !(g_cached_state_port0 & (1 << BTN_SELECT));
-    states->left = !(g_cached_state_port0 & (1 << BTN_LEFT));
-    states->right = !(g_cached_state_port0 & (1 << BTN_RIGHT));
-    states->b1 = !(g_cached_state_port1 & (1 << BTN_B1));
-    states->b2 = !(g_cached_state_port1 & (1 << BTN_B2));
-    states->b3 = !(g_cached_state_port1 & (1 << BTN_B3));
+    states->up = io_bit_pressed(g_io_map.up, g_cached_state_port0, g_cached_state_port1);
+    states->down = io_bit_pressed(g_io_map.down, g_cached_state_port0, g_cached_state_port1);
+    states->select = io_bit_pressed(g_io_map.select, g_cached_state_port0, g_cached_state_port1);
+    states->left = io_bit_pressed(g_io_map.left, g_cached_state_port0, g_cached_state_port1);
+    states->right = io_bit_pressed(g_io_map.right, g_cached_state_port0, g_cached_state_port1);
+    states->b1 = io_bit_pressed(g_io_map.b1, g_cached_state_port0, g_cached_state_port1);
+    states->b2 = io_bit_pressed(g_io_map.b2, g_cached_state_port0, g_cached_state_port1);
+    states->b3 = io_bit_pressed(g_io_map.b3, g_cached_state_port0, g_cached_state_port1);
 
     return ESP_OK;
 }
@@ -347,15 +449,15 @@ void io_manager_debug_states(void)
     ESP_LOGI(TAG, "Debug - PORT0 last: 0x%02X stable: 0x%02X", g_last_state_port0, g_stable_state_port0);
     ESP_LOGI(TAG, "Debug - PORT1 last: 0x%02X stable: 0x%02X", g_last_state_port1, g_stable_state_port1);
     ESP_LOGI(TAG, "Debug - Up:%s Down:%s Select:%s Left:%s Right:%s",
-             (g_stable_state_port0 & (1 << BTN_UP)) ? "HIGH" : "LOW",
-             (g_stable_state_port0 & (1 << BTN_DOWN)) ? "HIGH" : "LOW",
-             (g_stable_state_port0 & (1 << BTN_SELECT)) ? "HIGH" : "LOW",
-             (g_stable_state_port0 & (1 << BTN_LEFT)) ? "HIGH" : "LOW",
-             (g_stable_state_port0 & (1 << BTN_RIGHT)) ? "HIGH" : "LOW");
+             io_bit_pressed(g_io_map.up, g_stable_state_port0, g_stable_state_port1) ? "LOW" : "HIGH",
+             io_bit_pressed(g_io_map.down, g_stable_state_port0, g_stable_state_port1) ? "LOW" : "HIGH",
+             io_bit_pressed(g_io_map.select, g_stable_state_port0, g_stable_state_port1) ? "LOW" : "HIGH",
+             io_bit_pressed(g_io_map.left, g_stable_state_port0, g_stable_state_port1) ? "LOW" : "HIGH",
+             io_bit_pressed(g_io_map.right, g_stable_state_port0, g_stable_state_port1) ? "LOW" : "HIGH");
     ESP_LOGI(TAG, "Debug - B1:%s B2:%s B3:%s",
-             (g_stable_state_port1 & (1 << BTN_B1)) ? "HIGH" : "LOW",
-             (g_stable_state_port1 & (1 << BTN_B2)) ? "HIGH" : "LOW",
-             (g_stable_state_port1 & (1 << BTN_B3)) ? "HIGH" : "LOW");
+             io_bit_pressed(g_io_map.b1, g_stable_state_port0, g_stable_state_port1) ? "LOW" : "HIGH",
+             io_bit_pressed(g_io_map.b2, g_stable_state_port0, g_stable_state_port1) ? "LOW" : "HIGH",
+             io_bit_pressed(g_io_map.b3, g_stable_state_port0, g_stable_state_port1) ? "LOW" : "HIGH");
 }
 
 void io_manager_reset_events(void)
@@ -464,14 +566,14 @@ static void io_manager_process_sample(uint8_t port0, uint8_t port1, btn_event_t 
         g_stable_state_port0 = port0;
         g_stable_state_port1 = port1;
 
-        tmp.up = ((prev0 & (1 << BTN_UP)) && !(port0 & (1 << BTN_UP)));
-        tmp.down = ((prev0 & (1 << BTN_DOWN)) && !(port0 & (1 << BTN_DOWN)));
-        tmp.select = ((prev0 & (1 << BTN_SELECT)) && !(port0 & (1 << BTN_SELECT)));
-        tmp.left = ((prev0 & (1 << BTN_LEFT)) && !(port0 & (1 << BTN_LEFT)));
-        tmp.right = ((prev0 & (1 << BTN_RIGHT)) && !(port0 & (1 << BTN_RIGHT)));
-        tmp.b1 = ((prev1 & (1 << BTN_B1)) && !(port1 & (1 << BTN_B1)));
-        tmp.b2 = ((prev1 & (1 << BTN_B2)) && !(port1 & (1 << BTN_B2)));
-        tmp.b3 = ((prev1 & (1 << BTN_B3)) && !(port1 & (1 << BTN_B3)));
+        tmp.up = io_bit_falling_edge(g_io_map.up, prev0, prev1, port0, port1);
+        tmp.down = io_bit_falling_edge(g_io_map.down, prev0, prev1, port0, port1);
+        tmp.select = io_bit_falling_edge(g_io_map.select, prev0, prev1, port0, port1);
+        tmp.left = io_bit_falling_edge(g_io_map.left, prev0, prev1, port0, port1);
+        tmp.right = io_bit_falling_edge(g_io_map.right, prev0, prev1, port0, port1);
+        tmp.b1 = io_bit_falling_edge(g_io_map.b1, prev0, prev1, port0, port1);
+        tmp.b2 = io_bit_falling_edge(g_io_map.b2, prev0, prev1, port0, port1);
+        tmp.b3 = io_bit_falling_edge(g_io_map.b3, prev0, prev1, port0, port1);
         emit = true;
     }
 
@@ -734,6 +836,72 @@ void io_manager_scan_i2c(void)
 
     xSemaphoreGive(g_i2c_mutex);
 }
+esp_err_t io_manager_set_status_led(uint8_t red, uint8_t green, uint8_t blue)
+{
+#ifdef CONFIG_IO_EXPANDER_CHIP_AW9523
+    if (!g_initialized || !g_tca9535_dev || !g_i2c_mutex) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    esp_err_t ret = ESP_OK;
+
+    if (!g_led_dim_mode) {
+        /* Dark first: once the pins stop being GPIO their brightness comes from
+         * the DIM registers, and their power-on value is not zero. */
+        ret = tca9535_write_port(AW9523_REG_DIM_RED, 0);
+        if (ret == ESP_OK) ret = tca9535_write_port(AW9523_REG_DIM_GREEN, 0);
+        if (ret == ESP_OK) ret = tca9535_write_port(AW9523_REG_DIM_BLUE, 0);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "status LED dimming unavailable: %s", esp_err_to_name(ret));
+            return ret;
+        }
+
+        /* Only P10-P12 join the constant-current bank. P13 is the touch reset
+         * and P14/P15 are unused, so this is a read-modify-write: a blind 0x00
+         * would drop the touch controller into reset. */
+        uint8_t mode = 0xFF;
+        if (tca9535_read_port(AW9523_REG_LEDMODE_P1, &mode) == ESP_OK) {
+            mode = (uint8_t)(mode & (uint8_t)~AW9523_P1_LED_MASK);
+            if (tca9535_write_port(AW9523_REG_LEDMODE_P1, mode) != ESP_OK) {
+                ESP_LOGW(TAG, "failed to switch the status LED to constant current");
+            }
+        }
+
+        /* In that mode a pin sinks while its output bit is low, and the DIM
+         * value sets the brightness. Hold the three bits low and keep the
+         * shadow in step, because the touch-reset path rewrites this port from
+         * the shadow. */
+        g_out_p1_shadow = (uint8_t)(g_out_p1_shadow & (uint8_t)~AW9523_P1_LED_MASK);
+        ret = tca9535_write_port(TCA9535_OUTPUT_PORT1, g_out_p1_shadow);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+
+        g_led_dim_mode = true;
+    }
+
+    const uint8_t regs[3] = {AW9523_REG_DIM_RED, AW9523_REG_DIM_GREEN, AW9523_REG_DIM_BLUE};
+    const uint8_t values[3] = {red, green, blue};
+    for (int i = 0; i < 3; i++) {
+        if (g_led_dim[i] == values[i]) {
+            continue;   /* no change: avoid pointless I2C traffic in effects */
+        }
+        ret = tca9535_write_port(regs[i], values[i]);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+        g_led_dim[i] = values[i];
+    }
+
+    return ESP_OK;
+#else
+    (void)red;
+    (void)green;
+    (void)blue;
+    return ESP_ERR_NOT_SUPPORTED;
+#endif
+}
+
 esp_err_t io_manager_dac_reset_pulse(void)
 {
 #ifndef CONFIG_TLV320DAC_RESET_IO_EXPANDER_PIN

@@ -36,6 +36,13 @@ static bool mic_initialized = false;
 
 // Amplitude smoothing (asymmetric like sensory_bridge)
 static float amplitude_follower = 0.0f;
+
+// Latest analysed spectrum, published for local consumers (the on-device
+// Visualizer screen) so they share this one I2S capture instead of opening a
+// second channel on the same pins.
+static volatile uint8_t s_band_snapshot[4];
+static volatile uint8_t s_level_snapshot;
+static volatile bool s_snapshot_valid;
 #define AMP_ATTACK_RATE 0.25f
 #define AMP_RELEASE_RATE 0.02f
 
@@ -106,6 +113,10 @@ static void mic_visualizer_task(void *arg) {
         payload[2] = goertzel_get_band(GOERTZEL_BAND_HIGH_MID);
         payload[3] = goertzel_get_band(GOERTZEL_BAND_TREBLE);
         payload[4] = (uint8_t)(amplitude_follower * 255.0f);
+
+        for (int i = 0; i < 4; i++) s_band_snapshot[i] = payload[i];
+        s_level_snapshot = payload[4];
+        s_snapshot_valid = true;
         
         // Log periodically
         if (loop_counter % 500 == 0) {
@@ -262,6 +273,13 @@ esp_err_t mic_visualizer_deinit(void) {
     return ESP_OK;
 }
 
+bool mic_visualizer_get_bands(uint8_t bands[4], uint8_t *level) {
+    if (!bands || !s_snapshot_valid) return false;
+    for (int i = 0; i < 4; i++) bands[i] = s_band_snapshot[i];
+    if (level) *level = s_level_snapshot;
+    return true;
+}
+
 #endif // CONFIG_HAS_MIC
 
 // Stub implementations when MIC is not enabled
@@ -285,6 +303,12 @@ bool mic_visualizer_is_running(void) {
 
 esp_err_t mic_visualizer_deinit(void) {
     return ESP_OK;
+}
+
+bool mic_visualizer_get_bands(uint8_t bands[4], uint8_t *level) {
+    (void)bands;
+    (void)level;
+    return false;
 }
 
 #endif // !CONFIG_HAS_MIC

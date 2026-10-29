@@ -400,6 +400,7 @@ def get_build_targets() -> List[Dict[str, str]]:
         {"name": "MarauderV6&AwokDual", "idf_target": "esp32", "sdkconfig_file": "configs/sdkconfig.marauderv6", "zip_name": "MarauderV6_AwokDual.zip"},
         {"name": "AwokMini", "idf_target": "esp32s2", "sdkconfig_file": "configs/sdkconfig.awokmini", "zip_name": "AwokMini.zip"},
         {"name": "ESP32-S3-Cardputer", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.cardputer", "zip_name": "ESP32-S3-Cardputer.zip"},
+        {"name": "Attaky Cyber Deck Plus", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.attaky", "zip_name": "Attaky-Cyber-Deck-Plus.zip"},
         {"name": "CYD2USB", "idf_target": "esp32", "sdkconfig_file": "configs/sdkconfig.CYD2USB", "zip_name": "CYD2USB.zip"},
         {"name": "CYDMicroUSB", "idf_target": "esp32", "sdkconfig_file": "configs/sdkconfig.CYDMicroUSB", "zip_name": "CYDMicroUSB.zip"},
         {"name": "CYDDualUSB", "idf_target": "esp32", "sdkconfig_file": "configs/sdkconfig.CYDDualUSB", "zip_name": "CYDDualUSB.zip"},

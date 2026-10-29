@@ -36,6 +36,19 @@ typedef struct {
     uint8_t databytes; //No of data in data; bit 7 = delay after set; 0xFF = end of cmds.
 } lcd_init_cmd_t;
 
+/* MADCTL the panel is actually driven with. The orientation table below is the
+ * only thing that decides it on the Attaky - there is no on-device tuner and no
+ * stored override. */
+static uint8_t s_madctl_applied = 0;
+
+/* Attaky Cyber Deck Plus: the glass is mounted 180 degrees from the byte that
+ * renders this UI correctly, so every byte gets MX+MY toggled on its way to the
+ * controller. Kept as a plain bring-up constant rather than a Kconfig symbol so
+ * turning it off is a one-line edit here. Display-side only: the touch mapping
+ * in ft6x36.c needs no matching change - a both-axis mirror there was measured
+ * wrong on the glass and was removed. */
+#define ATTAKY_PANEL_FLIP_180 1
+
 /**********************
  *  STATIC PROTOTYPES
  **********************/
@@ -296,7 +309,38 @@ static void st7789_set_orientation(uint8_t orientation)
 
     uint8_t data[] =
     {
-#if defined(CONFIG_CROWPANEL_ADVANCE_SMALL_SPI_LCD)
+#if defined(CONFIG_ATTAKY_TARGET)
+    /* Attaky Core's 2.0-inch ST7789 (240x320 glass, 320x240 UI frame). Two
+     * readings of the same panel existed and only one of them survives the
+     * hardware:
+     *
+     *   - The vendor's own bring-up drives it as swap_xy + mirror_y, i.e.
+     *     MADCTL 0xA0 (the esp_lcd equivalent of the Arduino TFT_eSPI
+     *     setRotation(3) their notes quote for this 180-degree mount).
+     *   - On this unit, driven by THIS driver with a 320x240 LVGL frame,
+     *     0xA0 is what put the whole UI 90 degrees out and unreadable: MV
+     *     addresses the GRAM along the 240px axis while LVGL pushes
+     *     320-wide rows. That is the failure ili9341.c documents for the
+     *     CoreS3's native-landscape ILI9342C.
+     *
+     * So the MV-clear family is what this panel is driven with: 0x00 for the
+     * profile's landscape frame, corrected to 0xC0 (MX|MY) on the wire by the
+     * 180-degree mount flip in st7789_set_madctl(). That pair was confirmed
+     * upright on the glass, so it is simply the value the panel gets - earlier
+     * builds carried an on-device orientation tuner to find it, and that is
+     * gone now that the answer is known.
+     *
+     * Colour order is a separate bit (D3, RGB/BGR) and the glass has answered
+     * it: driven as 0xC8 (D3 set, "BGR") the panel drew red as blue and blue
+     * as red - unmistakable in the terminal, where errors and the prompt sit
+     * side by side. This panel is RGB-order, so D3 stays clear.
+     *
+     * MV-clear family (this table, RGB order): 0x00 = none (index 2, the
+     * profile's LANDSCAPE), 0x40 = MX, 0xC0 = MX|MY, 0x80 = MY.
+     * MV-set family (portrait-addressed panel): 0xA0 = MY|MV, 0x60 = MX|MV.
+     * Portrait entries keep the stock values; this profile is landscape. */
+    0xC0, 0x00, 0x00, 0xC0
+#elif defined(CONFIG_CROWPANEL_ADVANCE_SMALL_SPI_LCD)
     /* Match Elecrow's ESP-IDF LVGL port: swap_xy=true, mirror_x=false,
      * mirror_y=true, RGB element order.  The previous 0xB8 also enabled
      * BGR and ML, which produced incorrect colors and panel orientation. */
@@ -308,8 +352,32 @@ static void st7789_set_orientation(uint8_t orientation)
 #endif
     };
 
-    ESP_LOGI(TAG, "0x36 command value: 0x%02X", data[orientation]);
+    uint8_t madctl = data[orientation];
 
+    st7789_set_madctl(madctl);
+}
+
+void st7789_set_madctl(uint8_t madctl)
+{
+    /* The orientation table is the only caller, which makes this the one place
+     * the Attaky's extra 180-degree mount correction belongs. Toggling MX and
+     * MY rotates the frame by 180 degrees whatever the rest of the byte says
+     * (MV and the RGB/BGR bit are untouched), so the table stays readable as
+     * "the byte for this orientation" and the panel still gets the mount fix. */
+#if defined(CONFIG_ATTAKY_TARGET) && ATTAKY_PANEL_FLIP_180
+    madctl ^= 0xC0;
+#endif
+
+    /* Send the byte straight through: the controller applies it to the next
+     * frame, and st7789_flush() re-asserts CASET/RASET on every flush, so a
+     * live change while the UI keeps drawing is safe. */
     st7789_send_cmd(ST7789_MADCTL);
-    st7789_send_data((void *) &data[orientation], 1);
+    st7789_send_data(&madctl, 1);
+    s_madctl_applied = madctl;
+    ESP_LOGI(TAG, "MADCTL (0x36) = 0x%02X", madctl);
+}
+
+uint8_t st7789_get_madctl(void)
+{
+    return s_madctl_applied;
 }

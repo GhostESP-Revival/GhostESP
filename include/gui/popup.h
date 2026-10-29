@@ -38,6 +38,8 @@ popup_t *popup_show_simple(lv_obj_t *parent, int width, int height, const char *
 // popup is closed by touch or by popup_confirm_cancel/select().
 popup_confirm_t *popup_confirm_show(popup_confirm_t **handle, lv_obj_t *parent, const char *title, const char *body, const char *confirm_label, const char *cancel_label, popup_confirm_cb_t on_confirm, void *user_data);
 bool popup_confirm_is_open(popup_confirm_t *p);
+// True while any popup_confirm_show() sheet is on screen anywhere in the UI.
+bool popup_confirm_any_open(void);
 bool popup_confirm_handle_touch(popup_confirm_t **handle, const lv_indev_data_t *data);
 void popup_confirm_close(popup_confirm_t **handle);
 void popup_confirm_cancel(popup_confirm_t **handle);

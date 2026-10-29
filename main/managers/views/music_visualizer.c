@@ -9,6 +9,7 @@
 #include "managers/settings_manager.h"
 #include "gui/accessibility_fonts.h"
 #include "managers/views/app_gallery_screen.h"
+#include "managers/microphone/mic_visualizer.h"
 #include "managers/wifi_manager.h"
 
 #include <freertos/FreeRTOS.h>
@@ -42,6 +43,14 @@ static int display_amplitudes_fp[NUM_BARS] = {0};
 static uint32_t last_stream_tick = 0;
 static uint32_t frame_counter = 0;
 static uint32_t last_debug_label_tick = 0;
+/* True while the bars are driven by the onboard microphone rather than by a
+ * USB-serial or UDP audio stream from a host. */
+static bool s_mic_active = false;
+/* Latest microphone bands + level, kept only so the debug line can show what the
+ * mic is actually delivering (all zeros with a live mic = silence, no bands at
+ * all = the capture is not running). */
+static uint8_t s_mic_bands[4] = {0};
+static uint8_t s_mic_level = 0;
 static char current_track[33] = "VISUALIZER";
 static char current_artist[33] = "Waiting for signal";
 static lv_color_t theme_bg = {0};
@@ -95,6 +104,9 @@ static void update_status_text(void) {
     if (age < STREAM_STALE_MS) {
         lv_label_set_text(view.status_label, current_track);
         lv_label_set_text(view.endpoint_label, current_artist);
+    } else if (s_mic_active) {
+        lv_label_set_text(view.status_label, "MIC INPUT");
+        lv_label_set_text(view.endpoint_label, "Media I/O microphone");
     } else {
         lv_label_set_text(view.status_label, "VISUALIZER");
         lv_label_set_text(view.endpoint_label, "USB serial / UDP ready");
@@ -106,9 +118,18 @@ static void update_status_text(void) {
     if (debug_label) {
         if (last_debug_label_tick == 0 || (now - last_debug_label_tick) >= 100) {
             char debug[96];
-            snprintf(debug, sizeof(debug), "frames %lu  %s",
-                     (unsigned long)frame_counter,
-                     age < STREAM_STALE_MS ? "streaming" : "idle");
+            if (age < STREAM_STALE_MS) {
+                snprintf(debug, sizeof(debug), "frames %lu  stream",
+                         (unsigned long)frame_counter);
+            } else if (s_mic_active) {
+                snprintf(debug, sizeof(debug), "mic %u/%u/%u/%u  lvl %u",
+                         s_mic_bands[0], s_mic_bands[1], s_mic_bands[2], s_mic_bands[3],
+                         s_mic_level);
+            } else if (mic_visualizer_is_running()) {
+                snprintf(debug, sizeof(debug), "mic starting");
+            } else {
+                snprintf(debug, sizeof(debug), "mic off");
+            }
             lv_label_set_text(debug_label, debug);
             lv_obj_set_style_text_color(debug_label, theme_muted, 0);
             last_debug_label_tick = now;
@@ -236,6 +257,22 @@ static void visual_canvas_draw_event(lv_event_t *e) {
     }
 }
 
+/* The Media I/O module's ICS-43434 microphone is captured once by the mic task,
+ * which publishes four Goertzel bands (bass / low-mid / high-mid / treble).
+ * Stretch those across the bar field so the visualizer animates from the room
+ * when no host is streaming audio to it. */
+static void mic_bands_to_bars(const uint8_t bands[4], int out[NUM_BARS]) {
+    for (int i = 0; i < NUM_BARS; i++) {
+        int pos = (NUM_BARS > 1) ? (i * 3 * 256) / (NUM_BARS - 1) : 0;
+        int lo_idx = pos >> 8;
+        int hi_idx = (lo_idx < 3) ? lo_idx + 1 : 3;
+        int frac = pos & 0xFF;
+        int lo = bands[lo_idx];
+        int hi = bands[hi_idx];
+        out[i] = lo + (((hi - lo) * frac) >> 8);
+    }
+}
+
 static void animation_timer_callback(lv_timer_t *timer) {
     (void)timer;
 
@@ -252,6 +289,29 @@ static void animation_timer_callback(lv_timer_t *timer) {
         copy_text_safely(current_artist, sizeof(current_artist), frame.artist_name, "Desktop Audio");
         last_stream_tick = get_tick_ms();
         got_frame = true;
+    }
+
+    /* No host stream on the wire? Animate from the Media I/O microphone. */
+    const uint32_t now_tick = get_tick_ms();
+    const bool stream_live = last_stream_tick != 0 &&
+                             (now_tick - last_stream_tick) < STREAM_STALE_MS;
+    s_mic_active = false;
+    if (!stream_live) {
+        uint8_t mic_bands[4];
+        uint8_t mic_level = 0;
+        if (mic_visualizer_get_bands(mic_bands, &mic_level)) {
+            int mic_bars[NUM_BARS];
+            for (int i = 0; i < 4; i++) s_mic_bands[i] = mic_bands[i];
+            s_mic_level = mic_level;
+            mic_bands_to_bars(mic_bands, mic_bars);
+            for (int i = 0; i < NUM_BARS; i++) {
+                target_amplitudes[i] = mic_bars[i];
+                if (mic_bars[i] > peak_amplitudes[i]) peak_amplitudes[i] = mic_bars[i];
+            }
+            /* A fresh source arrived, so skip the idle decay below. */
+            got_frame = true;
+            s_mic_active = true;
+        }
     }
 
     for (int i = 0; i < NUM_BARS; i++) {

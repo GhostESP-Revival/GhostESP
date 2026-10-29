@@ -1,6 +1,6 @@
 #include "managers/audio_i2s_output.h"
 
-#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER) || defined(CONFIG_HAS_CROWPANEL_NS4168) || defined(CONFIG_HAS_TDECK_SPEAKER)
+#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER) || defined(CONFIG_HAS_CROWPANEL_NS4168) || defined(CONFIG_HAS_TDECK_SPEAKER) || defined(CONFIG_HAS_ATTAKY_SPEAKER)
 
 #include "esp_log.h"
 #include "esp_heap_caps.h"
@@ -256,6 +256,16 @@ esp_err_t audio_i2s_output_init(void)
     const gpio_num_t bclk_pin = GPIO_NUM_7;
     const gpio_num_t ws_pin = GPIO_NUM_5;
     const gpio_num_t dout_pin = GPIO_NUM_6;
+#elif defined(CONFIG_HAS_ATTAKY_SPEAKER)
+    /* Attaky Expand: Media I/O onboard NS4168 mono class-D amplifier. The amp
+     * is fixed-wired exactly like the T-Deck's MAX98357A (no enable line, no
+     * gain pin, no I2C control), just on the module's own pins: BCLK IO17,
+     * LRCLK IO21, SDATA IO18 - do not transpose them, the microphone's I2S
+     * lines sit on the same BTB and swapping BCLK/SDATA leaves the amp silent
+     * while the clocks look healthy. Volume is applied in software below. */
+    const gpio_num_t bclk_pin = (gpio_num_t)CONFIG_ATTAKY_SPK_BCLK_PIN;
+    const gpio_num_t ws_pin = (gpio_num_t)CONFIG_ATTAKY_SPK_WS_PIN;
+    const gpio_num_t dout_pin = (gpio_num_t)CONFIG_ATTAKY_SPK_DIN_PIN;
 #else
     const gpio_num_t bclk_pin = (gpio_num_t)CONFIG_TLV320DAC_I2S_BCLK_PIN;
     const gpio_num_t ws_pin = (gpio_num_t)CONFIG_TLV320DAC_I2S_WCLK_PIN;
@@ -587,4 +597,4 @@ bool audio_i2s_output_is_initialized(void) { return false; }
 void audio_i2s_output_set_volume(uint8_t percent) { (void)percent; }
 uint8_t audio_i2s_output_get_volume(void) { return 100; }
 
-#endif /* CONFIG_HAS_TLV320DAC_I2S || CONFIG_HAS_AW88298_SPEAKER || CONFIG_HAS_CROWPANEL_NS4168 || CONFIG_HAS_TDECK_SPEAKER */
+#endif /* CONFIG_HAS_TLV320DAC_I2S || CONFIG_HAS_AW88298_SPEAKER || CONFIG_HAS_CROWPANEL_NS4168 || CONFIG_HAS_TDECK_SPEAKER || CONFIG_HAS_ATTAKY_SPEAKER */

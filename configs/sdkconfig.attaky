@@ -1,0 +1,438 @@
+# =====================================================================
+# Attaky board profile — Cyber Deck Plus 1.0
+# =====================================================================
+# Port: GhostESP v2.2.2 -> Attaky modular handhelds (2.2.2-A001).
+#
+# Hardware this profile targets (Attaky Cyber Deck Plus 1.0):
+#   Core:    ESP32 1.0            ESP32-S3-WROOM-1U-N16R8, 2.0" 240x320
+#                                 ST7789 + FT6636 touch, AW9523 x2
+#   Expand:  Media I/O 1.0        microSD (SPI), NS4168 speaker, ICS-43434 mic
+#   Control: Keyboard (Bottom)    AW9523 x2, two 5x5 matrices
+#   Control: Gamepad (Bottom)     TCA9555 x2, D-pad/ABXY/shoulders/FN
+#   Power:   Standard Cell 1.0    MAX17048 fuel gauge @ 0x36
+#
+# Every module except the Core is optional: the firmware probes for it and
+# degrades cleanly when it is absent, so the same image runs on a
+# Core-only device.
+#
+# This is a curated profile (only the settings that differ from the IDF
+# esp32s3 defaults). Two ways to build it:
+#   python build.py                 # pick "Attaky Cyber Deck Plus"; this
+#                                   # path also fetches ESP-IDF v6.1 itself
+# or upstream's manual flow, which copies this file in as the seeding
+# defaults (sdkconfig.defaults is gitignored upstream, so that copy is
+# local build state, never the source of truth):
+#   cp configs/sdkconfig.attaky sdkconfig.defaults && rm -f sdkconfig
+#   idf.py set-target esp32s3 && idf.py build
+#   cp sdkconfig configs/sdkconfig.attaky      # save the full profile back
+# ---------------------------------------------------------------------
+
+# --- Board identity -------------------------------------------------
+# Read by board-gated code paths and reported by `chipinfo`.
+CONFIG_BUILD_CONFIG_TEMPLATE="attaky"
+
+# --- MCU / memory ---------------------------------------------------
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_IDF_TARGET_ESP32S3=y
+CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240=y
+CONFIG_ESP32S3_DEFAULT_CPU_FREQ_MHZ=240
+CONFIG_ESP32S3_INSTRUCTION_CACHE_16KB=y
+CONFIG_ESP32S3_DATA_CACHE_32KB=y
+
+# 8 MB octal PSRAM on the ESP32-S3-WROOM-1U-N16R8 package.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_TYPE_AUTO=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_SPEED=80
+CONFIG_SPIRAM_USE_MALLOC=y
+
+# --- Flash: 16 MB quad-SPI ------------------------------------------
+# The datasheet specifies QuadSPI flash ("16 MB (QuadSPI)") and OctalSPI
+# PSRAM, so the flash interface is qio while the PSRAM stays octal.
+# Flash mode is left on auto-detect as well, so a module that straps
+# differently still boots.
+# NOTE: the octal PSRAM below takes the flash's IO4-IO7, so IDF force-sets
+# the effective mode to DIO in the generated sdkconfig (FLASHMODE="dio",
+# FLASHMODE_VAL=1) whatever this line asks for. Build the merged image with
+# --flash-mode dio so its header matches the bootloader's and the app's.
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHMODE="qio"
+CONFIG_ESPTOOLPY_FLASH_SAMPLE_MODE_STR=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESPTOOLPY_FLASHFREQ="80m"
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+CONFIG_ESPTOOLPY_BEFORE_RESET=y
+CONFIG_ESPTOOLPY_BEFORE="default_reset"
+CONFIG_ESPTOOLPY_AFTER_RESET=y
+CONFIG_ESPTOOLPY_AFTER="hard_reset"
+CONFIG_ESPTOOLPY_MONITOR_BAUD=115200
+
+# --- Partitions: 16 MB with A/B OTA slots (6 MB app each) -----------
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_ota_16mb.csv"
+CONFIG_PARTITION_TABLE_FILENAME="partitions_ota_16mb.csv"
+CONFIG_PARTITION_TABLE_OFFSET=0x8000
+CONFIG_PARTITION_TABLE_MD5=y
+
+# --- Console --------------------------------------------------------
+# USB-C is a CH340X USB-UART bridge (no native USB device mode), so the
+# log console is UART0 only.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_UART_NUM=0
+CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_ENABLE=y
+CONFIG_LOG_DEFAULT_LEVEL_WARN=y
+CONFIG_LOG_MAXIMUM_LEVEL_VERBOSE=y
+CONFIG_LOG_DYNAMIC_LEVEL_CONTROL=y
+CONFIG_LOG_COLORS=y
+CONFIG_LOG_TIMESTAMP_SOURCE_RTOS=y
+
+# --- Bluetooth LE (Core radio) --------------------------------------
+# BLE only: the host has no Bluetooth Classic radio.
+CONFIG_BT_ENABLED=y
+CONFIG_BT_CONTROLLER_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_INTERNAL=y
+CONFIG_BT_NIMBLE_ROLE_CENTRAL=y
+CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=y
+CONFIG_BT_NIMBLE_ROLE_BROADCASTER=y
+CONFIG_BT_NIMBLE_ROLE_OBSERVER=y
+CONFIG_BT_NIMBLE_GATT_CLIENT=y
+CONFIG_BT_NIMBLE_GATT_SERVER=y
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
+CONFIG_BT_NIMBLE_MAX_BONDS=3
+CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=4096
+CONFIG_BT_NIMBLE_NVS_PERSIST=y
+
+# --- Wi-Fi radio: local (no remote co-processor) --------------------
+# The ESP32-S3 has its own Wi-Fi/BLE radio. Left at the defaults this
+# build's sdkconfig selected esp_wifi_remote's *hosted* transport, which
+# pulls in esp_hosted - a component this project only declares for the P4
+# host, and which #errors out on an S3 host ("ESP32 co-processor only
+# supports BLE 4.2"). Every shipping S3 profile carries these two lines.
+# CONFIG_ESP_WIFI_REMOTE_ENABLED is not set
+# CONFIG_ESP_HOSTED_ENABLED is not set
+
+# --- Shared I2C bus (main bus, IO1/IO2 @ 400 kHz) -------------------
+# One bus carries the touch controller (0x38), both Core expanders
+# (0x58/0x59), the fuel gauge (0x36) and - when attached - the keyboard
+# (0x5A/0x5B) and gamepad (0x22/0x26) expanders.
+CONFIG_I2C_MANAGER_0_ENABLED=y
+CONFIG_I2C_MANAGER_0_SDA=2
+CONFIG_I2C_MANAGER_0_SCL=1
+CONFIG_I2C_MANAGER_0_FREQ_HZ=400000
+CONFIG_I2C_MANAGER_0_TIMEOUT=100
+CONFIG_I2C_MANAGER_0_LOCK_TIMEOUT=50
+
+# --- Display: ST7789, 240x320, SPI2 --------------------------------
+# Panel pins (Core-internal): SCLK IO11, MOSI IO13, CS IO45, DC IO12,
+# RST IO10, backlight IO14 (PWM-capable; this profile runs switch mode).
+# No MISO: the panel is write-only.
+#
+# The controller choice below is load-bearing and must not be repeated
+# later in this file: those two symbols are a Kconfig choice, so the LAST
+# assignment wins. A profile that repeats ILI9341 after ST7789 builds the
+# ILI9341 driver, which drives this panel with the wrong init sequence and
+# the ILI9341 MADCTL table (index 0 = 0x48 = mirror-X + BGR) - the image
+# comes up mirrored left to right.
+CONFIG_WITH_SCREEN=y
+CONFIG_TFT_WIDTH=320
+CONFIG_TFT_HEIGHT=240
+CONFIG_LV_TFT_DISPLAY_CONTROLLER_ST7789=y
+CONFIG_LV_TFT_DISPLAY_PROTOCOL_SPI=y
+CONFIG_LV_TFT_DISPLAY_USER_CONTROLLER_ST7789=y
+# Orientation is a Kconfig choice too: exactly one member belongs here.
+#
+# This choice is the ONLY thing that decides the panel's MADCTL byte.
+# st7789.c's CONFIG_ATTAKY_TARGET branch maps the four indices to bytes, and
+# there is no on-device tuner and no NVS override any more: what is compiled
+# here is what the glass is driven with.
+#
+# What the hardware has actually shown, with the 320x240 LVGL frame this
+# profile builds:
+#   * MADCTL 0xA0 (swap_xy + mirror_y - the byte the vendor's own bring-up
+#     uses for this 180-degree mount, i.e. TFT_eSPI setRotation(3)) put the
+#     whole UI 90 degrees out and unreadable: MV addresses the GRAM along the
+#     240px axis while LVGL pushes 320-wide rows, the failure ili9341.c
+#     documents for the CoreS3's native-landscape ILI9342C.
+#   * The ILI9341 table's index-0 byte, 0x48 = MX|BGR, produced a readable
+#     landscape frame that was mirrored left to right.
+# Read together those say this panel answers natively as 320x240 landscape
+# (MV clear), so LANDSCAPE (index 2) is the member to use: that branch gives
+# 0x00, and st7789_set_madctl() flips it to 0xC0 (MX|MY) on the wire for the
+# 180-degree mount. Both bits are now measured, not inferred:
+#   * mirroring - LANDSCAPE + the mount flip reads upright on this unit;
+#   * element order - D3 (RGB/BGR) stays CLEAR. Driven with D3 set the panel
+#     drew red as blue and blue as red, plainly visible in the terminal.
+# So the compiled byte is the final answer, and confirming it needs no
+# special mode: any asymmetric screen (the terminal prompt, the battery icon)
+# shows it immediately.
+CONFIG_LV_DISPLAY_ORIENTATION_LANDSCAPE=y
+CONFIG_LV_DISPLAY_ORIENTATION=2
+CONFIG_LV_TFT_DISPLAY_SPI2_HOST=y
+CONFIG_LV_TFT_DISPLAY_SPI_TRANS_MODE_SIO=y
+CONFIG_LV_TFT_DISPLAY_SPI_HALF_DUPLEX=y
+# 80 MHz / 2 = 40 MHz. The divider is a Kconfig choice: the member below
+# is the only effective knob (the divider int just mirrors it), and the
+# choice's own default for ST7789 is 20 MHz. 40 MHz is the value this
+# profile targets; 80 MHz (divider 1) is outside the panel's spec.
+CONFIG_LV_TFT_USE_CUSTOM_SPI_CLK_DIVIDER=y
+CONFIG_LV_TFT_SPI_CLK_DIVIDER_2=y
+CONFIG_LV_DISP_SPI_MOSI=13
+CONFIG_LV_DISP_SPI_CLK=11
+CONFIG_LV_DISP_SPI_INPUT_DELAY_NS=0
+CONFIG_LV_DISPLAY_USE_SPI_CS=y
+CONFIG_LV_DISP_SPI_CS=45
+CONFIG_LV_DISPLAY_USE_DC=y
+CONFIG_LV_DISP_PIN_DC=12
+CONFIG_LV_DISP_PIN_RST=10
+# Switch mode (on/off) rather than PWM: this is the value the bring-up
+# build ran with and the panel lights correctly. Backlight mode is also a
+# Kconfig choice, so only one of PWM/SWITCH may appear in this file.
+CONFIG_LV_DISP_BACKLIGHT_SWITCH=y
+CONFIG_LV_DISP_PIN_BCKL=14
+CONFIG_LV_COLOR_DEPTH_16=y
+CONFIG_LV_COLOR_DEPTH=16
+CONFIG_LV_COLOR_16_SWAP=y
+
+# --- Touch: FT6636 (FocalTech FT6x36 family) @ 0x38 ------------------
+# Poll-only: the touch interrupt is on expander 0x58 P04 and the reset
+# on expander 0x59 P13, so there is no host GPIO to interrupt on. The
+# reset is released by attaky_board_init() before touch_driver_init().
+CONFIG_USE_TOUCHSCREEN=y
+CONFIG_LV_I2C=y
+CONFIG_LV_I2C_DISPLAY_PORT=0
+CONFIG_LV_TOUCH_CONTROLLER=2
+CONFIG_LV_TOUCH_CONTROLLER_FT6X06=y
+CONFIG_LV_I2C_TOUCH=y
+# The touch controller sits on the SHARED MAIN BUS (port 0: SDA IO2 / SCL
+# IO1), the same bus attaky_board_init() and io_manager use. This is a
+# Kconfig choice and the LAST member in the file wins: a profile that
+# leaves a stray "CONFIG_LV_I2C_TOUCH_PORT_1=y" later on sends every touch
+# read to I2C port 1, which this build does not configure, so the probe
+# fails ("Invalid port or not configured for I2C Manager: 1"), the driver
+# never marks itself inited and touch is dead from boot.
+CONFIG_LV_I2C_TOUCH_PORT_0=y
+CONFIG_LV_I2C_TOUCH_PORT=0
+CONFIG_LV_TOUCH_DETECT_PRESSURE=y
+# Panel-to-screen axis mapping. The display section above shows this panel is
+# addressed as landscape (320 wide) in the controller's own frame, but the
+# FT6636 is a separate chip whose native frame is its own 240x320 ITO grid,
+# so the driver still has to swap the two axes before it can hand LVGL screen
+# coordinates. The mirrors are the part no document states: with the axes
+# swapped, the screen's X is the touch's Y and vice versa, and the two chips
+# can disagree on both directions independently.
+# SWAPXY + INVERT_X is the starting pair - it is what the closest sibling in
+# this tree uses (CrowPanel 2.4/2.8: 240x320 ST7789 with an FT6336U, and
+# Elecrow's own config for it is swap_xy + mirror_y, which this driver can
+# only express as an X inversion after its swap).
+# If a unit comes up with touch mirrored horizontally, flip INVERT_X; if
+# vertically, set INVERT_Y; if the axes are not swapped at all, clear
+# SWAPXY. Verify with a four-corner crosshair, never by tapping the middle.
+CONFIG_LV_FT6X36_SWAPXY=y
+CONFIG_LV_FT6X36_INVERT_X=y
+# CONFIG_LV_FT6X36_INVERT_Y is not set
+
+# --- Input: Core buttons on AW9523 @ 0x59 ---------------------------
+# Read through io_manager's AW9523 register set. P00 Down, P01 Left,
+# P02 Enter/Select, P03 Right, P04 Up, P05 L1, P06 R1, P07 POWER
+# (short press only - a long press is a hardware power toggle owned by
+# the PMIC and is never seen by firmware).
+#
+# The five direct-GPIO button pins are explicitly "absent" (-1): this Core
+# has no button on a GPIO, its D-pad lives on the expander above. They are
+# the pins main.c's GPIO fallback binds only if io_manager_init() fails,
+# and their Kconfig default is 0 - i.e. GPIO0, which would present the same
+# pin to all five D-pad slots. A floating or held-low GPIO0 then reads as
+# five held buttons, which is exactly the "buttons stay pressed" failure.
+CONFIG_USE_JOYSTICK=y
+CONFIG_L_BTN=-1
+CONFIG_C_BTN=-1
+CONFIG_U_BTN=-1
+CONFIG_R_BTN=-1
+CONFIG_D_BTN=-1
+CONFIG_USE_IO_EXPANDER=y
+CONFIG_IO_EXPANDER_CHIP_AW9523=y
+CONFIG_IO_EXPANDER_SDA_PIN=2
+CONFIG_IO_EXPANDER_SCL_PIN=1
+CONFIG_IO_EXPANDER_I2C_ADDR=0x59
+
+# --- Input (feature flags) ------------------------------------------
+# The Keyboard module is a real 48-key QWERTY keyboard, so the generic
+# hardware-keyboard feature flag is on: plugins are told the device has a
+# physical keyboard, and the touch/terminal views lay out for one. Its keys
+# arrive as INPUT_TYPE_KEYBOARD events from main/vendor/attaky/.
+CONFIG_USE_HW_KB=y
+
+# --- Attaky board support -------------------------------------------
+CONFIG_ATTAKY_TARGET=y
+CONFIG_ATTAKY_MILESTONE=8
+# The glass mounts the panel 180 degrees from the byte that renders the UI
+# correctly, so that correction is applied once inside st7789_set_madctl() (MX
+# and MY toggled) via ATTAKY_PANEL_FLIP_180 - the table entry stays readable as
+# "the byte for this orientation" and the panel still gets the mount fix.
+# ft6x36.c needs no matching change: a both-axis touch mirror was measured
+# wrong on the glass.
+CONFIG_ATTAKY_HAS_MEDIA_IO=y
+CONFIG_ATTAKY_HAS_KEYBOARD=y
+CONFIG_ATTAKY_HAS_GAMEPAD=y
+CONFIG_ATTAKY_HAS_POWER=y
+CONFIG_ATTAKY_KEYBOARD_SCAN_MS=15
+
+# --- Storage: microSD on the Media I/O module (SPI) -----------------
+# CLK IO5, CMD/MOSI IO6, DAT0/MISO IO7, CD/DAT3/CS IO8. Separate pins
+# from the display, so the SD lands on a free SPI host (SPI3) while the
+# panel keeps SPI2. Absence of the module is not an error.
+CONFIG_USING_SPI=y
+CONFIG_SD_SPI_CS_PIN=8
+CONFIG_SD_SPI_CLK_PIN=5
+CONFIG_SD_SPI_MISO_PIN=7
+CONFIG_SD_SPI_MOSI_PIN=6
+
+# --- Audio: Media I/O NS4168 speaker + ICS-43434 microphone ---------
+# Speaker: BCLK IO17, LRCLK IO21, SDATA IO18 (fixed-wired amp).
+# Microphone: SCK IO39, WS IO9, SD IO16 (no MCLK, LR strapped on the module).
+CONFIG_HAS_ATTAKY_SPEAKER=y
+CONFIG_HAS_AUDIO_PLAYER=y
+CONFIG_ATTAKY_SPK_BCLK_PIN=17
+CONFIG_ATTAKY_SPK_WS_PIN=21
+CONFIG_ATTAKY_SPK_DIN_PIN=18
+CONFIG_HAS_MIC=y
+CONFIG_MIC_I2S_BCLK_PIN=39
+CONFIG_MIC_I2S_WS_PIN=9
+CONFIG_MIC_I2S_DIN_PIN=16
+CONFIG_MIC_I2S_MCLK_PIN=-1
+CONFIG_MIC_I2S_PORT=0
+CONFIG_MIC_SAMPLE_RATE=16000
+CONFIG_MIC_BUFFER_SAMPLES=512
+
+# --- Power: Power Standard Cell MAX17048 fuel gauge @ 0x36 ----------
+# On the shared main bus (SDA IO2 / SCL IO1). No AXP2101 PMIC is present,
+# so CONFIG_HAS_BATTERY stays off; a silent gauge reads as "USB only".
+CONFIG_HAS_FUEL_GAUGE=y
+CONFIG_USE_MAX17048_FUEL_GAUGE=y
+CONFIG_MAX17048_I2C_ADDRESS=0x36
+CONFIG_MAX17048_I2C_SDA_PIN=2
+CONFIG_MAX17048_I2C_SCL_PIN=1
+
+# --- Sensors: QMI8658A 6-axis IMU @ 0x6B ---------------------------
+CONFIG_HAS_ACCELEROMETER=y
+CONFIG_ACCEL_USE_QMI8658=y
+CONFIG_ACCEL_I2C_ADDR=0x6B
+CONFIG_ACCEL_I2C_PORT=0
+
+# --- NFC: Chameleon Ultra over BLE ---------------------------------
+# The Attaky carries no local NFC frontend (no PN532/ST25R3916), so the
+# NFC app runs on the Chameleon Ultra backend over BLE - the ESP32-S3
+# NimBLE stack below already provides the link. Both flags are set
+# explicitly because NFC_CHAMELEON's Kconfig default keys off
+# BT_BLE_ENABLED, which no symbol in this tree defines, so every upstream
+# BLE board profile sets them by hand the same way.
+CONFIG_NFC_CHAMELEON=y
+CONFIG_HAS_NFC=y
+
+# --- Not present on this build (explicitly off) ---------------------
+# No PN532/ST25R3916 frontend, infrared, sub-GHz, NRF24, LoRa/GPIO
+# radio, GPS, camera, Ethernet, haptics, RTC, env-III sensor or
+# ambient-light sensor. No native USB device mode either (the USB-C port
+# is a UART bridge behind CH340X), so the BadUSB menu entry stays off.
+# Compass and ENVIII stay off for the missing magnetometer and M5
+# ENV-III unit; the D-pad/IMU cover motion, so no external parts are
+# invented for them.
+
+# --- LVGL component settings --------------------------------------
+# Mirrors what every full upstream board profile carries. These are
+# component-Kconfig options whose defaults do NOT match what the GUI
+# code needs (the Montserrat font set especially: main/gui/*.c
+# references 8/10/12/16/18/24 and the component enables only 14).
+# Taken from the esp32s3 SPI-display profiles (tdeck / cardputer /
+# crowpanel_advance*).
+#
+# Keep this block to non-choice symbols. It was originally pasted in as a
+# dump of a whole generated sdkconfig, sorted alphabetically, so it
+# re-stated four Kconfig *choices* after the display/touch sections above
+# had already made the right call:
+#
+#   LV_TFT_DISPLAY_CONTROLLER_ILI9341  (last wins -> ILI9341 driver build)
+#   LV_DISPLAY_ORIENTATION_PORTRAIT    (last wins -> portrait, 320x240 wrong)
+#   LV_I2C_TOUCH_PORT_1                (last wins -> touch probe on a bus
+#                                       this build never configures)
+#   LV_TFT_SPI_CLK_DIVIDER_1           (last wins -> 80 MHz, out of spec)
+#
+# Symptoms were a mirrored image (the ILI9341 table's index-0 MADCTL is
+# 0x48 = mirror-X) and touch that never initialised. Options are listed
+# alphabetically below, but if one of them is a choice member, set it in
+# the section that owns it instead - never here.
+#
+# The panel needs INVERT_COLORS on, like the other ST7789 SPI builds.
+CONFIG_LV_ASSERT_HANDLER_INCLUDE="assert.h"
+CONFIG_LV_ATTRIBUTE_FAST_MEM_USE_IRAM=y
+CONFIG_LV_ATTRIBUTE_MEM_ALIGN_SIZE=1
+CONFIG_LV_BACKLIGHT_ACTIVE_LVL=y
+CONFIG_LV_CIRCLE_CACHE_SIZE=4
+CONFIG_LV_COLOR_CHROMA_KEY_HEX=0x00FF00
+CONFIG_LV_COLOR_MIX_ROUND_OFS=128
+CONFIG_LV_CONF_SKIP=y
+CONFIG_LV_DISP_DEF_REFR_PERIOD=16
+CONFIG_LV_DISP_ROT_MAX_BUF=6400
+CONFIG_LV_DISP_ST7789_SOFT_RESET=y
+CONFIG_LV_DISP_USE_RST=y
+CONFIG_LV_DPI_DEF=217
+CONFIG_LV_DRAW_COMPLEX=y
+CONFIG_LV_FONT_DEFAULT_MONTSERRAT_14=y
+CONFIG_LV_FONT_MONTSERRAT_10=y
+CONFIG_LV_FONT_MONTSERRAT_12=y
+CONFIG_LV_FONT_MONTSERRAT_14=y
+CONFIG_LV_FONT_MONTSERRAT_16=y
+CONFIG_LV_FONT_MONTSERRAT_18=y
+CONFIG_LV_FONT_MONTSERRAT_24=y
+CONFIG_LV_FONT_MONTSERRAT_40=y
+CONFIG_LV_FONT_MONTSERRAT_8=y
+CONFIG_LV_GRADIENT_MAX_STOPS=2
+CONFIG_LV_GRAD_CACHE_DEF_SIZE=0
+CONFIG_LV_HOR_RES_MAX=320
+CONFIG_LV_IMG_CACHE_DEF_SIZE=0
+CONFIG_LV_INDEV_DEF_READ_PERIOD=30
+CONFIG_LV_INVERT_COLORS=y
+CONFIG_LV_LABEL_LONG_TXT_HINT=y
+CONFIG_LV_LABEL_TEXT_SELECTION=y
+CONFIG_LV_LAYER_SIMPLE_BUF_SIZE=6400
+CONFIG_LV_MEM_BUF_MAX_NUM=16
+CONFIG_LV_MEM_CUSTOM=y
+CONFIG_LV_MEM_CUSTOM_INCLUDE="stdlib.h"
+CONFIG_LV_PREDEFINED_DISPLAY_NONE=y
+CONFIG_LV_PREDEFINED_PINS_NONE=y
+CONFIG_LV_SHADOW_CACHE_SIZE=0
+CONFIG_LV_THEME_DEFAULT_GROW=y
+CONFIG_LV_THEME_DEFAULT_TRANSITION_TIME=80
+CONFIG_LV_TICK_CUSTOM=y
+CONFIG_LV_TICK_CUSTOM_INCLUDE="esp_timer.h"
+CONFIG_LV_TXT_BREAK_CHARS=" ,.;:-_"
+CONFIG_LV_TXT_COLOR_CMD="#"
+CONFIG_LV_TXT_ENC_UTF8=y
+CONFIG_LV_TXT_LINE_BREAK_LONG_LEN=0
+CONFIG_LV_USE_ARC=y
+CONFIG_LV_USE_ASSERT_MALLOC=y
+CONFIG_LV_USE_ASSERT_NULL=y
+CONFIG_LV_USE_BTN=y
+CONFIG_LV_USE_BTNMATRIX=y
+CONFIG_LV_USE_CALENDAR_HEADER_ARROW=y
+CONFIG_LV_USE_CALENDAR_HEADER_DROPDOWN=y
+CONFIG_LV_USE_CANVAS=y
+CONFIG_LV_USE_FLEX=y
+CONFIG_LV_USE_FONT_PLACEHOLDER=y
+CONFIG_LV_USE_GIF=y
+CONFIG_LV_USE_GRID=y
+CONFIG_LV_USE_IMG=y
+CONFIG_LV_USE_LABEL=y
+CONFIG_LV_USE_LINE=y
+CONFIG_LV_USE_LIST=y
+CONFIG_LV_USE_MSGBOX=y
+CONFIG_LV_USE_THEME_BASIC=y
+CONFIG_LV_USE_THEME_DEFAULT=y
+CONFIG_LV_USE_USER_DATA=y
+CONFIG_LV_VER_RES_MAX=240

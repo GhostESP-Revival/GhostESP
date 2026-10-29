@@ -64,6 +64,31 @@ esp_err_t i2c_read_reg8_direct(uint8_t addr, uint8_t reg, uint8_t *val);
  */
 esp_err_t io_manager_dac_reset_pulse(void);
 
+/**
+ * @brief Set the board's status RGB LED, where it is wired to the expander.
+ *
+ * On the Attaky Core the "RGB LED" is not an addressable pixel: it is three
+ * pins on the button expander (@ 0x59), P10 red, P11 green, P12 blue, common
+ * anode and therefore active low. The expander is an AW9523B, so those three
+ * pins can run as constant-current sinks with a 256-step dimming register per
+ * pin, and that is how this drives them - a real 8-bit brightness per channel,
+ * not an on/off gate.
+ *
+ * The first call switches P10-P12 into constant-current mode (a
+ * read-modify-write of the mode register, so P13 touch reset and the unused
+ * pins keep their GPIO state), zeroes their dimming registers so the switch
+ * cannot flash white, and holds their output bits low so brightness is set by
+ * the DIM value alone. Later calls write only the channels that changed.
+ *
+ * @param red    red channel, 0 = dark .. 255 = full brightness
+ * @param green  green channel, same scale
+ * @param blue   blue channel, same scale
+ *
+ * @return ESP_OK on success, ESP_ERR_NOT_SUPPORTED when the fitted expander
+ *         has no status LED wired to it, ESP_ERR_INVALID_STATE before init.
+ */
+esp_err_t io_manager_set_status_led(uint8_t red, uint8_t green, uint8_t blue);
+
 #ifdef __cplusplus
 }
 #endif

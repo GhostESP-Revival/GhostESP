@@ -131,17 +131,53 @@ esp_err_t mic_read_samples(int32_t *samples, size_t num_samples, size_t *bytes_r
         return ret;
     }
 
-    // Stereo mic: data is interleaved left/right in 32-bit slots
+    // Stereo mic: data is interleaved left/right in 32-bit slots.
     size_t total_read = *bytes_read;
     size_t stereo_samples = total_read / sizeof(int32_t);
     size_t mono_samples = stereo_samples / 2;
-    
+
+    // A mono MEMS mic drives ONE half of the I2S frame, and which half is set
+    // by its L/R select pin - a module wiring detail this driver cannot read
+    // back (Media I/O ties ICS-43434.LR to host IO46, a strapping pin). Reading
+    // a fixed channel is therefore silent on the other wiring, which is exactly
+    // how "the microphone sees no noise" looks. Pick the half that carries the
+    // signal, per frame, so either wiring works.
+    static int s_live_channel = -1;      // -1 until the first frame decides
+    int32_t left_peak = 0;
+    int32_t right_peak = 0;
+    for (size_t i = 0; i < mono_samples; i++) {
+        int32_t l = samples[i * 2] >> 8;
+        int32_t r = samples[i * 2 + 1] >> 8;
+        int32_t al = (l < 0) ? -l : l;
+        int32_t ar = (r < 0) ? -r : r;
+        if (al > left_peak) left_peak = al;
+        if (ar > right_peak) right_peak = ar;
+    }
+    // Latch onto the live slot and stay there: the dead one is exactly zero,
+    // so the only thing worth following is a slot that dies while the other
+    // starts carrying signal (the mic's first frames are zeros from auto_clear,
+    // which would otherwise latch the wrong half).
+    if (s_live_channel < 0) {
+        s_live_channel = (right_peak > left_peak) ? 1 : 0;
+        ESP_LOGI(TAG, "Mic data on the %s I2S slot (peak L=%ld R=%ld)",
+                 s_live_channel ? "right" : "left", (long)left_peak, (long)right_peak);
+    } else {
+        const int32_t live = s_live_channel ? right_peak : left_peak;
+        const int32_t other = s_live_channel ? left_peak : right_peak;
+        if (live == 0 && other > 0) {
+            s_live_channel = 1 - s_live_channel;
+            ESP_LOGI(TAG, "Mic data moved to the %s I2S slot (peak L=%ld R=%ld)",
+                     s_live_channel ? "right" : "left", (long)left_peak, (long)right_peak);
+        }
+    }
+    const size_t ch = (size_t)s_live_channel;
+
     // Accumulate for DC offset calculation
     float frame_sum = 0.0f;
     
     for (size_t i = 0; i < mono_samples; i++) {
-        // Left channel is at even indices (0, 2, 4...)
-        int32_t left_sample = samples[i * 2];
+        // The live channel is at even (left) or odd (right) indices.
+        int32_t left_sample = samples[i * 2 + ch];
         // SPH0645LM4H-1-8 outputs left-aligned 18-bit data in 32-bit I2S slots
         // (audio in bits 31..14, zeros in bits 13..0). Arithmetic right-shift
         // by 8 gives a value in the same ±8388608 24-bit range (bottom 6 bits

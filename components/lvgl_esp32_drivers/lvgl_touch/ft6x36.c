@@ -33,6 +33,12 @@
 #define TAG "FT6X36"
 #define FT6X36_TOUCH_QUEUE_ELEMENTS 1
 
+/* The MADCTL rotation in lvgl_tft/st7789.c is a display-side transform only and
+ * has no counterpart here: the mapping in ft6x36_read() below (SWAPXY +
+ * INVERT_X) is what puts the FT6x36's own grid onto the frame LVGL thinks it
+ * has. A build that mirrored both axes here to "follow" the panel flip came up
+ * inverted on both axes on the glass, so that mapping is the correct one. */
+
 
 static ft6x36_status_t ft6x36_status;
 static uint8_t current_dev_addr;       // set during init
@@ -138,6 +144,17 @@ void ft6x06_init(uint16_t dev_addr) {
   * @param  data: Store data here
   * @retval Always false
   */
+bool ft6x36_get_last_point(int16_t *x, int16_t *y, bool *pressed)
+{
+    if (!ft6x36_status.inited) {
+        return false;
+    }
+    if (x) *x = touch_inputs.last_x;
+    if (y) *y = touch_inputs.last_y;
+    if (pressed) *pressed = (touch_inputs.current_state == LV_INDEV_STATE_PR);
+    return true;
+}
+
 bool ft6x36_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
     if (!ft6x36_status.inited) {
         data->state = LV_INDEV_STATE_REL;
@@ -182,6 +199,13 @@ bool ft6x36_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
 #if CONFIG_LV_FT6X36_INVERT_Y
     touch_inputs.last_y = (LV_VER_RES - 1) - touch_inputs.last_y;
 #endif
+
+    /* Nothing Attaky-specific goes here on purpose: the panel's 180-degree
+     * mount is corrected display-side (MADCTL in st7789_set_madctl()) and the
+     * touch controller reports in the same grid as before that correction, so
+     * the Kconfig mapping above already lands taps where the user aims.
+     * Measured on the glass: adding a both-axis mirror here put every tap in
+     * the diagonally opposite corner. */
     data->point.x = touch_inputs.last_x;
     data->point.y = touch_inputs.last_y;
     data->state = touch_inputs.current_state;

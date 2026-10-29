@@ -44,6 +44,10 @@ struct popup_confirm_t {
 
 static const lv_coord_t DEFAULT_MARGIN = 6;
 static const char *TAG = "PopupLayout";
+/* Live confirm popups. Views own Escape themselves while a modal is up (it
+ * closes the sheet, it does not leave the screen), so the global back handler
+ * asks here before it backs anything out. */
+static int s_open_confirm_count = 0;
 
 static lv_color_t popup_get_accent_color(void) {
     uint8_t theme = settings_get_menu_theme(&G_Settings);
@@ -387,6 +391,7 @@ popup_confirm_t *popup_confirm_show(popup_confirm_t **handle, lv_obj_t *parent, 
 #endif
 
     p->owner = handle;
+    s_open_confirm_count++;
     p->on_confirm = on_confirm;
     p->user_data = user_data;
     bool has_cancel = (cancel_label != NULL);
@@ -395,6 +400,7 @@ popup_confirm_t *popup_confirm_show(popup_confirm_t **handle, lv_obj_t *parent, 
     p->root = lv_obj_create(parent);
     if (!p->root) {
         free(p);
+        if (s_open_confirm_count > 0) s_open_confirm_count--;
         return NULL;
     }
     lv_obj_remove_style_all(p->root);
@@ -479,10 +485,15 @@ bool popup_confirm_handle_touch(popup_confirm_t **handle, const lv_indev_data_t 
     return true;
 }
 
+bool popup_confirm_any_open(void) {
+    return s_open_confirm_count > 0;
+}
+
 void popup_confirm_close(popup_confirm_t **handle) {
     if (!handle || !*handle) return;
     popup_confirm_t *p = *handle;
     *handle = NULL;
+    if (s_open_confirm_count > 0) s_open_confirm_count--;
     lvgl_obj_del_safe(&p->root);
     free(p);
 }

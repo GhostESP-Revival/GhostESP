@@ -16,6 +16,8 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - BadBLE's Run Script list and `badble run`/`badble list` now also find scripts in `/mnt/ghostesp/badusb/`, not just `/mnt/ghostesp/badble/`
 - Renamed the "mDNS Discovery" menu entry to "Local Scan" and added "List Local Scan" to reopen the last results without rescanning
 - Add support for [XIAO ESP32S3 & Wio-SX1262 Kit](https://wiki.seeedstudio.com/wio_sx1262_with_xiao_esp32s3_kit/) - @antonionardella (#428)
+- Added support for the Attaky Cyber Deck Plus 1.0 (ESP32-S3, 16 MB flash, 8 MB octal PSRAM, ST7789 240x320 panel with FT6636 touch, QMI8658A IMU, ICS-43434 mic, NS4168 speaker, microSD, two TCA9555 gamepad halves and two AW9523B keyboard halves) - @WRLS6H05T
+- Added AW9523B support to io_manager behind `CONFIG_IO_EXPANDER_CHIP_AW9523`, with 8-bit per-channel RGB dimming and an optional interrupt pin - @WRLS6H05T
 
 ### Changed
 - Sentry now detects Google Nest cameras and doorbells over BLE and over WiFi - pre2
@@ -30,6 +32,12 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Fixed touch drag scrolling in the Sentry list and detail views
 - Fixed touch scrolling and the Back row not working in the Local Scan host detail view
 - Fixed CrowPanel Advance 4.3" V1.1 backlight initialization - @patlaluci-prog (#432)
+## Unreleased
+
+### Added
+
+- Added support for the Attaky Cyber Deck Plus 1.0 (ESP32-S3, 16 MB flash, 8 MB octal PSRAM, ST7789 240x320 panel with FT6636 touch, QMI8658A IMU, ICS-43434 mic, NS4168 speaker, microSD, two TCA9555 gamepad halves and two AW9523B keyboard halves) - @WRLS6H05T
+- Added AW9523B support to io_manager behind `CONFIG_IO_EXPANDER_CHIP_AW9523`, with 8-bit per-channel RGB dimming and an optional interrupt pin - @WRLS6H05T
 
 ## v2.2.2
 

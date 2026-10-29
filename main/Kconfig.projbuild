@@ -410,7 +410,20 @@ menu "Ghost ESP Options"
             depends on USE_IO_EXPANDER
             help
                 Set the I2C address for the TCA9535 IO expander.
-                
+
+        config IO_EXPANDER_CHIP_AW9523
+            bool "Expander is an AW9523 (not TCA9535/TCA9555)"
+            default n
+            depends on USE_IO_EXPANDER
+            help
+                Select the AW9523B register set for the button expander.
+                The AW9523B shares the TCA9535/TCA9555 port register layout
+                for inputs (0x00/0x01) but puts the direction registers at
+                0x04/0x05, adds a device-ID register at 0x10 and a software
+                reset at 0x7F, and powers up with its P-pins driven (see the
+                AW9523 driver notes), so init must write directions
+                explicitly. Used by the Attaky Core's expander @ 0x59.
+
         config L_BTN
             int "Left button data pin"
             default 0
@@ -1933,6 +1946,15 @@ menu "Ghost ESP Options"
         help
             Select the I2C controller port used for the accelerometer.
 
+    config ACCEL_USE_QMI8658
+        bool "Use QMI8658A 6-axis IMU"
+        default n
+        depends on HAS_ACCELEROMETER
+        help
+            Use the QMI8658A accelerometer + gyroscope register map
+            instead of the ADXL345 / BMI270 drivers. The chip sits at
+            I2C address 0x6B by default on the Attaky Core.
+
     endmenu
 
     menu "Native SD Apps"
@@ -2093,7 +2115,7 @@ menu "Ghost ESP Options"
             config HAS_AUDIO_PLAYER
                 bool "Enable Audio Player App"
                 default n
-                depends on WITH_SCREEN && (USING_SPI || USING_MMC_1_BIT) && (HAS_TLV320DAC_I2C || HAS_AW88298_SPEAKER || HAS_CROWPANEL_NS4168 || HAS_TDECK_SPEAKER)
+                depends on WITH_SCREEN && (USING_SPI || USING_MMC_1_BIT) && (HAS_TLV320DAC_I2C || HAS_AW88298_SPEAKER || HAS_CROWPANEL_NS4168 || HAS_TDECK_SPEAKER || HAS_ATTAKY_SPEAKER)
                 help
                     Enable MP3 audio player UI and SD card playback. Streams to a
                     GhostLink peer when one is connected, or plays through the
@@ -2215,6 +2237,106 @@ menu "Ghost ESP Options"
                     Default I2S sample rate in Hz. The MP3 decoder will auto-detect
                     the actual rate from the MP3 file and configure the DAC accordingly.
         endmenu
+
+    endmenu
+
+    menu "Attaky Options"
+
+    config ATTAKY_TARGET
+        bool "Build for Attaky modular handhelds"
+        default n
+        help
+            Enable the Attaky board additions: the Core's AW9523
+            expander button map, the Control: Keyboard and Control:
+            Gamepad module drivers, the capacitive-touch reset release
+            on expander 0x59, and module presence probing. Set by the
+            Attaky board profile (configs/sdkconfig.attaky).
+
+    config ATTAKY_MILESTONE
+        int "Port milestone marker (1-8)"
+        range 1 8
+        default 8
+        depends on ATTAKY_TARGET
+        help
+            The milestone identity emitted on serial as
+            "[INFO] [APP] milestone: M<N> (<name>)". Advanced as the
+            port's bring-up ladder is walked.
+
+    config ATTAKY_HAS_MEDIA_IO
+        bool "Support the Media I/O module (microSD, speaker, mic)"
+        default y
+        depends on ATTAKY_TARGET
+        help
+            Probe for the Expand: Media I/O module and enable its
+            microSD slot, NS4168 speaker path and ICS-43434 microphone
+            capture when it is present. When the module is absent the
+            firmware keeps running without storage or audio.
+
+    config ATTAKY_HAS_KEYBOARD
+        bool "Support the Keyboard (Bottom) module"
+        default y
+        depends on ATTAKY_TARGET
+        help
+            Probe for the Control: Keyboard module's two AW9523
+            expanders (0x5A / 0x5B) and scan their 5x5 key matrices.
+
+    config ATTAKY_HAS_GAMEPAD
+        bool "Support the Gamepad (Bottom) module"
+        default y
+        depends on ATTAKY_TARGET
+        help
+            Probe for the Control: Gamepad module's two TCA9555
+            expanders (0x22 / 0x26) and read its buttons.
+
+    config ATTAKY_HAS_POWER
+        bool "Support the Power: Standard Cell module"
+        default y
+        depends on ATTAKY_TARGET
+        help
+            Treat a silent MAX17048 at 0x36 as "no battery module"
+            rather than an error, and report battery state when it is
+            present.
+
+    config ATTAKY_KEYBOARD_SCAN_MS
+        int "Keyboard matrix scan period (ms)"
+        range 5 100
+        default 15
+        depends on ATTAKY_TARGET && ATTAKY_HAS_KEYBOARD
+        help
+            Period of the polled 5x5 matrix scan. 15 ms is ~66 Hz,
+            comfortably faster than typing while keeping I2C traffic
+            low; the scan is skipped once the bus is idle.
+
+    config HAS_ATTAKY_SPEAKER
+        bool "Enable Attaky Media I/O NS4168 I2S speaker"
+        default n
+        depends on IDF_TARGET_ESP32S3 && ATTAKY_TARGET && ATTAKY_HAS_MEDIA_IO
+        help
+            Enable I2S master TX to the Media I/O module's NS4168 mono
+            class-D speaker amplifier. The amp is fixed-wired (no enable
+            line, no I2C control), so it plays as soon as the three I2S
+            lines are driven; volume stays software-scaled.
+
+    config ATTAKY_SPK_BCLK_PIN
+        int "Speaker I2S BCLK pin"
+        default 17
+        depends on HAS_ATTAKY_SPEAKER
+        help
+            NS4168 bit clock. Media I/O M-BTB31 / host IO17.
+
+    config ATTAKY_SPK_WS_PIN
+        int "Speaker I2S LRCLK/WS pin"
+        default 21
+        depends on HAS_ATTAKY_SPEAKER
+        help
+            NS4168 left-right clock. Media I/O M-BTB39 / host IO21.
+
+    config ATTAKY_SPK_DIN_PIN
+        int "Speaker I2S SDATA pin"
+        default 18
+        depends on HAS_ATTAKY_SPEAKER
+        help
+            NS4168 serial data in. Media I/O M-BTB32 / host IO18.
 
     endmenu
 

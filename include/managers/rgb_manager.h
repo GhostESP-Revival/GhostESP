@@ -44,6 +44,22 @@ esp_err_t rgb_manager_init(RGBManager_t *rgb_manager, gpio_num_t pin,
                            led_model_t model, gpio_num_t red_pin,
                            gpio_num_t green_pin, gpio_num_t blue_pin);
 
+#ifdef CONFIG_ATTAKY_TARGET
+/**
+ * @brief Initialize the RGB manager for a discrete (on/off) status LED.
+ *
+ * For boards whose status LED is plain GPIO bits rather than an addressable
+ * strip: the Attaky Core drives red/green/blue from expander pins, so no
+ * channel can dim. The manager still exposes one logical LED, which keeps every
+ * effect and static-colour path working, and the backend thresholds each
+ * channel at refresh time - on/off colour, or colour cycling over time.
+ *
+ * @param rgb_manager Pointer to the RGBManager_t structure
+ * @return esp_err_t ESP_OK on success
+ */
+esp_err_t rgb_manager_init_expander(RGBManager_t *rgb_manager);
+#endif
+
 /**
  * @brief Set the color of a specific LED in the strip
  * @param rgb_manager Pointer to the RGBManager_t structure

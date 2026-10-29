@@ -31,6 +31,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "soc/uart_pins.h"
+
 #if defined(CONFIG_IDF_TARGET_ESP32S3) ||                                      \
     defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
 #define JTAG_SUPPORTED 1
@@ -47,6 +49,35 @@
 #define SERIAL_TASK_STACK_SIZE_INTERNAL 8192
 #define SERIAL_TASK_STACK_SIZE_PSRAM 8192
 #define SERIAL_TASK_USE_PSRAM_STACK 0
+
+/* Console UART pads can be attached explicitly: either the console is on this
+ * UART with its ROM-default pins (nothing custom), or there is nothing to
+ * attach. Boards that remap the console UART opt out via Kconfig. */
+#if defined(CONFIG_ESP_CONSOLE_UART_NUM) && !defined(CONFIG_ESP_CONSOLE_UART_CUSTOM) && \
+    defined(U0TXD_GPIO_NUM) && defined(U0RXD_GPIO_NUM)
+#define SERIAL_CAN_BIND_CONSOLE_PADS 1
+#else
+#define SERIAL_CAN_BIND_CONSOLE_PADS 0
+#endif
+
+/* Console reader priority.
+ *
+ * Must sit above RENDERING_TASK_PRIORITY (15) and HARDWARE_INPUT_TASK_PRIORITY
+ * (14). At the historical priority 2 this task is the lowest thing in the
+ * system, and on a board whose render task and hardware-input task both run
+ * continuously it never gets a slice. The symptom is one-sided and easy to
+ * misread as a dead USB link: the IDF console keeps printing the banner,
+ * prompts and logs (that path is not this task) while every byte the host
+ * sends is never read, so no command is answered and nothing is echoed.
+ * Same reasoning as COMM_RX_TASK_PRIO in esp_comm_manager.c, raised to 16 for
+ * exactly this reason; stays below the ESP-IDF system tasks (esp_timer 22,
+ * IPC 24) so they still get their slices. */
+#define SERIAL_TASK_PRIORITY 16
+
+/* Priority this task drops to while it *runs* a command. Commands can take
+ * seconds (scans, captures, on-screen work), and running them at
+ * SERIAL_TASK_PRIORITY would preempt the render task for that whole time. */
+#define SERIAL_COMMAND_PRIORITY 2
 
 #if defined(CONFIG_SPIRAM) && SERIAL_TASK_USE_PSRAM_STACK
 #define SERIAL_TASK_STACK_SIZE SERIAL_TASK_STACK_SIZE_PSRAM
@@ -69,6 +100,13 @@ static StaticTask_t *s_serial_task_buffer = NULL;
 
 EXT_RAM_BSS_ATTR static char serial_buffer[SERIAL_BUFFER_SIZE];
 static TaskHandle_t s_serial_task_handle = NULL;
+
+/* Bytes the console UART driver has actually delivered, and a one-shot flag so
+ * the first delivery is logged the moment it happens. Without this the deck
+ * cannot tell "the app sends nothing" from "the bytes never reach the pad":
+ * both look like a silent CLI, and host-side output keeps working either way. */
+static volatile uint32_t s_uart_rx_bytes = 0;
+static bool s_uart_rx_first_reported = false;
 static bool s_serial_initialized = false;
 static bool s_uart_disabled = false; // disable main serial UART for certain templates
 static bool s_uart_paused = false;   // temporarily hand the UART driver to another owner (e.g. GPS)
@@ -747,6 +785,8 @@ void serial_task(void *pvParameter) {
       ESP_LOGI("SerialTask", "Stack HWM: %u bytes free", hwm);
       UBaseType_t queue_avail = uxQueueSpacesAvailable(commandQueue);
       ESP_LOGI("SerialTask", "Command queue available: %u/%u", queue_avail, 6);
+      ESP_LOGI("SerialTask", "UART%d RX total: %lu bytes (expected if nothing has been sent)",
+               (int)UART_NUM, (unsigned long)s_uart_rx_bytes);
       hwm_log_counter = 0;
     }
     int length = 0;
@@ -771,6 +811,15 @@ void serial_task(void *pvParameter) {
       // instead of letting these bytes append onto it and form a bogus
       // merged command (e.g. a typed-but-unsent "startwd" plus an
       // app-triggered "stop\n" becoming "startwdstop").
+      if (read_source == 0) {
+        s_uart_rx_bytes += (uint32_t)length;
+        if (!s_uart_rx_first_reported) {
+          s_uart_rx_first_reported = true;
+          ESP_LOGI("SerialManager", "UART%d RX alive: first %d byte(s) received",
+                   (int)UART_NUM, length);
+        }
+      }
+
       if (index > 0 && last_input_source != -1 && last_input_source != read_source) {
         memset(serial_buffer, 0, sizeof(serial_buffer));
         index = 0;
@@ -956,7 +1005,9 @@ void serial_task(void *pvParameter) {
             arrow_state = ARROW_STATE_NONE;
             // Reset cursor position
             cursor_position = 0;
+            vTaskPrioritySet(NULL, SERIAL_COMMAND_PRIORITY);
             process_html_line(serial_buffer);
+            vTaskPrioritySet(NULL, SERIAL_TASK_PRIORITY);
             // Clear the buffer completely
             memset(serial_buffer, 0, sizeof(serial_buffer));
             index = 0;
@@ -996,7 +1047,9 @@ void serial_task(void *pvParameter) {
     // Check command queue for simulated commands
     SerialCommand command;
     if (xQueueReceive(commandQueue, &command, 0) == pdTRUE) {
+      vTaskPrioritySet(NULL, SERIAL_COMMAND_PRIORITY);
       handle_serial_command(command.command);
+      vTaskPrioritySet(NULL, SERIAL_TASK_PRIORITY);
       // Schedule prompt after simulated command too
       prompt_displayed = false;
       prompt_pending = true;
@@ -1044,8 +1097,48 @@ void serial_manager_init() {
 
   if (!s_uart_disabled) {
     uart_param_config(UART_NUM, &uart_config);
-    uart_driver_install(UART_NUM, BUF_SIZE * 2, 0, 0, NULL, 0);
-    ESP_LOGI("SerialManager", "UART installed: RX buffer=%d bytes", BUF_SIZE * 2);
+    /* The IDF console keeps printing through its own path even when this
+     * install fails, so a failure here is invisible from the host: the deck
+     * still prints its banner, prompts and logs while never reading a command.
+     * The return value used to be dropped, which made that state silent.
+     * Note uart_param_config() does not touch the pins, so the console keeps the
+     * ROM/console IOMUX pins (IO43/IO44 on the Attaky) - nothing here reroutes
+     * UART0, which is why a failure of this call is the only way the reader can
+     * come up deaf. */
+    esp_err_t uart_err = uart_driver_install(UART_NUM, BUF_SIZE * 2, 0, 0, NULL, 0);
+    if (uart_err != ESP_OK) {
+      ESP_LOGE("SerialManager",
+               "UART%d driver install FAILED: %s - console input will not work",
+               (int)UART_NUM, esp_err_to_name(uart_err));
+    } else {
+      ESP_LOGI("SerialManager", "UART%d installed at %d baud: RX buffer=%d bytes",
+               (int)UART_NUM, (int)CONFIG_CONSOLE_UART_BAUDRATE, BUF_SIZE * 2);
+#if SERIAL_CAN_BIND_CONSOLE_PADS
+      /* Attach the console pads to the driver instead of trusting the routing
+       * left behind at boot.
+       *
+       * Console *output* never needs this: the ROM console pokes the TX
+       * register directly, so a deck prints prompts and command output even
+       * when this driver is dead. *Input* is the opposite - uart_read_bytes()
+       * only ever sees bytes while the RX pad is attached to this UART. When
+       * the pad belongs to something else, or was released by an earlier
+       * uart_driver_delete(), the CLI comes up perfectly readable on the host
+       * and completely deaf on the deck, with no error anywhere. Binding both
+       * pads costs one register write when they are already correct, and the
+       * log line says which pins the receiver is actually listening on. */
+      if ((int)UART_NUM == (int)CONFIG_ESP_CONSOLE_UART_NUM) {
+        esp_err_t pin_err = uart_set_pin(UART_NUM, U0TXD_GPIO_NUM, U0RXD_GPIO_NUM,
+                                         UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+        if (pin_err != ESP_OK) {
+          ESP_LOGE("SerialManager", "UART%d pad bind FAILED: %s - RX on IO%d may be deaf",
+                   (int)UART_NUM, esp_err_to_name(pin_err), (int)U0RXD_GPIO_NUM);
+        } else {
+          ESP_LOGI("SerialManager", "UART%d pads bound: TX=IO%d RX=IO%d",
+                   (int)UART_NUM, (int)U0TXD_GPIO_NUM, (int)U0RXD_GPIO_NUM);
+        }
+      }
+#endif
+    }
   }
 
 #if JTAG_SUPPORTED
@@ -1076,7 +1169,7 @@ void serial_manager_init() {
   }
   if (s_serial_task_stack && s_serial_task_buffer) {
     s_serial_task_handle = xTaskCreateStatic(serial_task, "SerialTask",
-                                            SERIAL_TASK_STACK_SIZE, NULL, 2,
+                                            SERIAL_TASK_STACK_SIZE, NULL, SERIAL_TASK_PRIORITY,
                                             s_serial_task_stack,
                                             s_serial_task_buffer);
     task_rc = s_serial_task_handle ? pdPASS : pdFAIL;
@@ -1091,7 +1184,7 @@ void serial_manager_init() {
     s_serial_task_stack = NULL;
     s_serial_task_buffer = NULL;
 #endif
-  task_rc = xTaskCreate(serial_task, "SerialTask", SERIAL_TASK_STACK_SIZE_INTERNAL, NULL, 2, &s_serial_task_handle);
+  task_rc = xTaskCreate(serial_task, "SerialTask", SERIAL_TASK_STACK_SIZE_INTERNAL, NULL, SERIAL_TASK_PRIORITY, &s_serial_task_handle);
 #if defined(CONFIG_SPIRAM) && SERIAL_TASK_USE_PSRAM_STACK
   }
 #endif
@@ -1209,6 +1302,19 @@ void serial_manager_reacquire_uart(void) {
     return;
   }
   s_uart_paused = false;
+#if SERIAL_CAN_BIND_CONSOLE_PADS
+  /* uart_driver_delete() releases the pads, so a reacquire that only reinstalls
+   * the driver leaves the receiver unattached - the exact deaf-but-printing
+   * state this driver is prone to. Rebind on every reacquire. */
+  if ((int)UART_NUM == (int)CONFIG_ESP_CONSOLE_UART_NUM) {
+    esp_err_t pin_err = uart_set_pin(UART_NUM, U0TXD_GPIO_NUM, U0RXD_GPIO_NUM,
+                                     UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    if (pin_err != ESP_OK) {
+      ESP_LOGW("SerialManager", "UART%d reacquire pad bind failed: %s",
+               (int)UART_NUM, esp_err_to_name(pin_err));
+    }
+  }
+#endif
   ESP_LOGI("SerialManager", "UART%d reacquired", (int)UART_NUM);
 }
 
