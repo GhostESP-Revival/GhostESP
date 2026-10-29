@@ -15,6 +15,10 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Cloud Store now shows a clear "No internet. Connect GhostESP to WiFi" message when opened, refreshed or installing without a connection
 - BadBLE's Run Script list and `badble run`/`badble list` now also find scripts in `/mnt/ghostesp/badusb/`, not just `/mnt/ghostesp/badble/`
 - Renamed the "mDNS Discovery" menu entry to "Local Scan" and added "List Local Scan" to reopen the last results without rescanning
+- Added Cert Scan (`certscan` / Wi-Fi → Cert Scan) to see which hosts still accept a certificate from one of the eight compromised eMudhra intermediates
+  - `certscan hosts` discovers hosts and checks them automatically
+  - Setup works on-device: `certscan cacert <url>` fetches the CA certificate, `certscan key <number>` derives `ca.crt`/`ca.key` from a raw EC scalar, and `certscan genleaf` generates the leaf key; the matching CA is labelled automatically
+- Added optional HTTPS to the DNS sinkhole, signing a certificate per hostname from the SD-card CA and showing results per client
 - Add support for [XIAO ESP32S3 & Wio-SX1262 Kit](https://wiki.seeedstudio.com/wio_sx1262_with_xiao_esp32s3_kit/) - @antonionardella (#428)
 
 ### Changed
@@ -30,6 +34,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Fixed touch drag scrolling in the Sentry list and detail views
 - Fixed touch scrolling and the Back row not working in the Local Scan host detail view
 - Fixed CrowPanel Advance 4.3" V1.1 backlight initialization - @patlaluci-prog (#432)
+- Fixed HTML uploaded from the Flipper app being truncated or discarded when it contained long/minified lines, which made the uploaded Evil Portal page impossible to start
 
 ## v2.2.2
 

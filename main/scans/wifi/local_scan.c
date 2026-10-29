@@ -601,14 +601,18 @@ static void report_results(void) {
         char ip[16], mac_str[18] = "??:??:??:??:??:??", svc[96];
         local_scan_ip_str(h, ip, sizeof(ip));
         if (!mac_is_zero(h->mac)) format_mac_address(h->mac, mac_str, sizeof(mac_str), true);
-        const char *vendor = mac_is_zero(h->mac) ? NULL : arp_scan_get_vendor(h->mac);
+        char vendor[64] = {0};
+        const char *vendor_p = NULL;
+        if (!mac_is_zero(h->mac) && arp_scan_get_vendor_buf(h->mac, vendor, sizeof(vendor))) {
+            vendor_p = vendor;
+        }
         local_scan_services_str(h->services, svc, sizeof(svc));
         const char *os = local_scan_os_hint(h->ttl);
 
-        glog("%2d. %s [%s]%s%s\n", i + 1, ip, mac_str, vendor ? " " : "", vendor ? vendor : "");
+        glog("%2d. %s [%s]%s%s\n", i + 1, ip, mac_str, vendor_p ? " " : "", vendor_p ? vendor_p : "");
         if (saving) {
-            scan_file_printf(&sf, "%2d. %s [%s]%s%s\n", i + 1, ip, mac_str, vendor ? " " : "",
-                             vendor ? vendor : "");
+            scan_file_printf(&sf, "%2d. %s [%s]%s%s\n", i + 1, ip, mac_str, vendor_p ? " " : "",
+                             vendor_p ? vendor_p : "");
         }
         if (h->name[0]) {
             glog("      name: %s\n", h->name);

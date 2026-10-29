@@ -63,11 +63,14 @@
 #include "scans/wifi/govee_scan.h"
 #include "scans/wifi/enum4linux_scan.h"
 #include "core/commands.h"
+#include "core/cert_check.h"
+#include "core/system_manager.h"
 #include "esp_timer.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include "core/dns_server.h"
+#include "core/sinkhole_https.h"
 #include "vendor/pcap.h"
 #include "esp_heap_caps.h"
 #include <dirent.h>
@@ -78,6 +81,11 @@
 
 static detail_view_t *sinkhole_detail_view = NULL;
 static void sinkhole_detail_back_cb(lv_event_t *e);
+static detail_view_t *cert_scan_detail_view = NULL;
+static void cert_scan_detail_back_cb(lv_event_t *e);
+static void cert_scan_host_cb(const char *host);
+static void cert_scan_cacert_cb(const char *url);
+static void cert_scan_key_cb(const char *number);
 static popup_confirm_t *settings_confirm_popup = NULL;
 
 static char selected_portal[FILE_BROWSER_PATH_MAX] = {0};
@@ -1436,6 +1444,9 @@ typedef enum {
     WIFI_MENU_DNS_SINKHOLE_DOWNLOAD,
     WIFI_MENU_DNS_SINKHOLE_FILE_PICK,
     WIFI_MENU_DNS_SINKHOLE_DETAILS,
+    WIFI_MENU_CERT_SCAN,
+    WIFI_MENU_CERT_SCAN_DETAILS,
+    WIFI_MENU_CERT_SCAN_SETUP,
     WIFI_MENU_CAPTURE_BROWSER,
     WIFI_MENU_ARP_LIST,
     WIFI_MENU_ARP_DETAILS,
@@ -1451,6 +1462,8 @@ typedef enum {
 static WifiMenuState current_wifi_menu_state = WIFI_MENU_MAIN;
 static WifiMenuState ap_detail_return_state = WIFI_MENU_AP_LIST;
 static WifiMenuState sta_detail_return_state = WIFI_MENU_STA_LIST;
+// Where the Cert Scan detail view goes back to: the results menu or Setup.
+static WifiMenuState cert_scan_detail_return_state = WIFI_MENU_CERT_SCAN;
 static bool suppress_wifi_state_reset_once = false;
 static int io_btn_being_edited = 0;
 
@@ -1546,6 +1559,20 @@ static const char * const wifi_dns_sinkhole_download_options[] = {
     NULL
 };
 
+// Cert Scan: point devices at the board and see which ones accept a
+// certificate from a CA their trust store should have dropped.
+static const char * const wifi_cert_scan_options[] = {
+    "Scan Devices", "Check Hosts", "Scan Results", "Add Hostname",
+    "Setup", "Clear Results", "Stop Cert Scan", NULL
+};
+
+// Everything needed to start a scan can be put in place from here: the CA
+// certificate is downloaded, the CA key is derived from a number, and the leaf
+// key is generated on the device.
+static const char * const wifi_cert_scan_setup_options[] = {
+    "CA Cert From URL", "CA Key Number", "Generate Leaf Key", "Setup Status", NULL
+};
+
 static const char * const wifi_connection_options[] = {"Connect to WiFi", "Connect to saved WiFi", "Reset AP Credentials", NULL};
 
 static const char * const wifi_misc_options[] = {
@@ -1555,7 +1582,8 @@ static const char * const wifi_misc_options[] = {
 static const char * const wifi_govee_options[] = {"Scan Govee Devices", "List Govee Devices", NULL};
 
 static const char * const wifi_main_options[] = {
-    "Attacks", "Recon", "Monitor", "Network", "Capture", "Evil Portal", "DNS Sinkhole", "Connection", "Gadgets", NULL
+    "Attacks", "Recon", "Monitor", "Network", "Capture", "Evil Portal", "DNS Sinkhole",
+    "Cert Scan", "Connection", "Gadgets", NULL
 };
 
 static const char * const gps_options[] = {"Start Wardriving", "Stop Wardriving", "GPS Info",
@@ -2823,6 +2851,510 @@ static bool start_arp_scan_flow(void) {
 }
 
 // ============================================================================
+// Cert Scan certificate check flow
+// ============================================================================
+//
+// Same shape as the ARP and local scan flows: a spinner, a poll timer and a
+// result view.  Discovery runs first when the host table is empty, then the
+// certificate checks run on a worker task so the spinner keeps animating.
+
+#define cert_scan_MAX_REPORT 12
+
+typedef struct {
+    char ip[16];
+    char name[24];
+    char label[40];
+} cert_scan_hit_t;
+
+static scan_status_t *cert_scan_status = NULL;
+static lv_timer_t *cert_scan_poll_timer = NULL;
+static lv_timer_t *cert_scan_start_timer = NULL;
+static lv_timer_t *cert_scan_refresh_timer = NULL;
+static uint32_t cert_scan_result_sig = 0;
+static int cert_scan_start_ticks = 0;
+static int cert_scan_discovery_ticks = 0;
+static bool cert_scan_cancel_stops_scan = false;
+static void cert_scan_cancel_cb(void);
+static bool cert_scan_cancel_requested = false;
+static bool cert_scan_discovery_phase = false;
+
+static cert_scan_hit_t cert_scan_hits[cert_scan_MAX_REPORT];
+static volatile int cert_scan_hit_count = 0;
+static volatile int cert_scan_scanned = 0;
+static volatile int cert_scan_scan_total = 0;
+static volatile int cert_scan_tls_count = 0;
+static volatile bool cert_scan_scan_done = false;
+static volatile bool cert_scan_abort = false;
+static volatile bool cert_scan_task_alive = false;
+
+static void cert_scan_show_check_results(void) {
+    if (cert_scan_detail_view) {
+        detail_view_destroy(cert_scan_detail_view);
+        cert_scan_detail_view = NULL;
+    }
+
+    display_manager_switch_view(&options_menu_view);
+    cert_scan_detail_view = detail_view_create(lv_scr_act(), "Certificate Check");
+    reserve_detail_touch_bar_space(cert_scan_detail_view);
+
+    int hits = cert_scan_hit_count;
+    detail_view_add_infof(cert_scan_detail_view, "Checked", "%d", cert_scan_scanned);
+    detail_view_add_infof(cert_scan_detail_view, "With TLS", "%d", cert_scan_tls_count);
+    detail_view_add_infof(cert_scan_detail_view, "Affected", "%d", hits);
+
+    if (cert_scan_scan_total == 0) {
+        detail_view_add_info(cert_scan_detail_view, "Result", "No hosts found");
+    } else if (hits == 0) {
+        detail_view_add_info(cert_scan_detail_view, "Result", "All clear");
+    } else {
+        for (int i = 0; i < hits && i < cert_scan_MAX_REPORT; i++) {
+            char ident[48];
+            // Fixed precisions: the destination is smaller than the worst case
+            // the compiler assumes for these fields.
+            if (cert_scan_hits[i].name[0]) {
+                snprintf(ident, sizeof(ident), "%.15s %.23s", cert_scan_hits[i].ip,
+                         cert_scan_hits[i].name);
+            } else {
+                snprintf(ident, sizeof(ident), "%.15s", cert_scan_hits[i].ip);
+            }
+            detail_view_add_info(cert_scan_detail_view, ident, cert_scan_hits[i].label);
+        }
+    }
+
+    detail_view_add_back(cert_scan_detail_view, cert_scan_detail_back_cb, NULL);
+    cert_scan_detail_return_state = WIFI_MENU_CERT_SCAN;
+    current_wifi_menu_state = WIFI_MENU_CERT_SCAN_DETAILS;
+#ifdef CONFIG_USE_TOUCHSCREEN
+    update_scroll_buttons_visibility();
+#endif
+}
+
+// Which of the three files are present.  Shown instead of a spinner when the
+// setup is incomplete: a missing file is known instantly, so waiting behind a
+// spinner only to fail is the wrong feedback.
+static void cert_scan_show_setup(WifiMenuState return_state) {
+    if (cert_scan_detail_view) {
+        detail_view_destroy(cert_scan_detail_view);
+        cert_scan_detail_view = NULL;
+    }
+
+    display_manager_switch_view(&options_menu_view);
+    cert_scan_detail_view = detail_view_create(lv_scr_act(), "Cert Scan Setup");
+    reserve_detail_touch_bar_space(cert_scan_detail_view);
+
+    bool has_cert = sd_card_exists(SINKHOLE_HTTPS_CA_CERT_PATH);
+    bool has_key = sd_card_exists(SINKHOLE_HTTPS_CA_KEY_PATH);
+    bool has_leaf = sd_card_exists(SINKHOLE_HTTPS_LEAF_KEY_PATH);
+
+    detail_view_add_info(cert_scan_detail_view, "ca.crt", has_cert ? "present" : "missing");
+    detail_view_add_info(cert_scan_detail_view, "ca.key", has_key ? "present" : "missing");
+    detail_view_add_info(cert_scan_detail_view, "server.key", has_leaf ? "present" : "missing");
+
+    if (!has_cert || !has_key) {
+        detail_view_add_info(cert_scan_detail_view, "Next", "Setup > CA Key Number");
+    } else if (!has_leaf) {
+        detail_view_add_info(cert_scan_detail_view, "Next", "Setup > Generate Leaf Key");
+    } else {
+        detail_view_add_info(cert_scan_detail_view, "Ready", "run Scan Devices");
+    }
+
+    detail_view_add_back(cert_scan_detail_view, cert_scan_detail_back_cb, NULL);
+    cert_scan_detail_return_state = return_state;
+    current_wifi_menu_state = WIFI_MENU_CERT_SCAN_DETAILS;
+#ifdef CONFIG_USE_TOUCHSCREEN
+    update_scroll_buttons_visibility();
+#endif
+}
+
+// One-line result screen, for operations whose outcome is a sentence rather
+// than a list.
+static void cert_scan_show_result(const char *title, const char *message,
+                                  WifiMenuState return_state) {
+    if (cert_scan_detail_view) {
+        detail_view_destroy(cert_scan_detail_view);
+        cert_scan_detail_view = NULL;
+    }
+
+    display_manager_switch_view(&options_menu_view);
+    cert_scan_detail_view = detail_view_create(lv_scr_act(), title);
+    reserve_detail_touch_bar_space(cert_scan_detail_view);
+    detail_view_add_info(cert_scan_detail_view, "Result", message);
+
+    detail_view_add_back(cert_scan_detail_view, cert_scan_detail_back_cb, NULL);
+    cert_scan_detail_return_state = return_state;
+    current_wifi_menu_state = WIFI_MENU_CERT_SCAN_DETAILS;
+#ifdef CONFIG_USE_TOUCHSCREEN
+    update_scroll_buttons_visibility();
+#endif
+}
+
+// Snapshot of the running device test.  Shared by "Scan Results" and by the
+// start flow once the server is up.  The view is rebuilt when the numbers
+// change, so it acts as a live readout while it is on screen.
+static void cert_scan_show_results(void);
+
+static uint32_t cert_scan_compute_sig(void) {
+    uint32_t presented = 0, requests = 0, minted = 0;
+    sinkhole_https_get_stats(&presented, &requests, &minted);
+    (void)minted;
+
+    char clients[SINKHOLE_HTTPS_ACCEPTED_MAX * (SINKHOLE_HTTPS_MAX_HOST + 20)];
+    size_t clients_len = sinkhole_https_accepted_clients(clients, sizeof(clients));
+
+    return presented * 2654435761u ^ requests * 40503u ^ (uint32_t)clients_len * 97u ^
+           (sinkhole_https_is_running() ? 0x9E37u : 0u) ^
+           (dns_sinkhole_get_intercept_all() ? 0x85EBu : 0u);
+}
+
+static void cert_scan_refresh_cb(lv_timer_t *timer) {
+    if (current_wifi_menu_state != WIFI_MENU_CERT_SCAN_DETAILS || !cert_scan_detail_view) {
+        lv_timer_del(timer);
+        cert_scan_refresh_timer = NULL;
+        return;
+    }
+    if (cert_scan_compute_sig() != cert_scan_result_sig) {
+        cert_scan_show_results();
+    }
+}
+
+static void cert_scan_show_results(void) {
+    if (cert_scan_detail_view) {
+        detail_view_destroy(cert_scan_detail_view);
+        cert_scan_detail_view = NULL;
+    }
+
+    display_manager_switch_view(&options_menu_view);
+    cert_scan_detail_view = detail_view_create(lv_scr_act(), "Cert Scan");
+    reserve_detail_touch_bar_space(cert_scan_detail_view);
+
+    uint32_t presented = 0, requests = 0, minted = 0;
+    sinkhole_https_get_stats(&presented, &requests, &minted);
+    (void)minted;
+
+    const char *ca = sinkhole_https_ca_label();
+    detail_view_add_info(cert_scan_detail_view, "Status",
+                         sinkhole_https_is_running() ? "Running" : "Stopped");
+    detail_view_add_info(cert_scan_detail_view, "CA",
+                         (ca && ca[0]) ? ca : "none");
+
+    // The one thing a display-only user cannot get from the terminal: the
+    // address to point the device's DNS at.
+    esp_netif_ip_info_t ip_info;
+    if (dns_sinkhole_find_netif(&ip_info)) {
+        char ipbuf[16];
+        snprintf(ipbuf, sizeof(ipbuf), IPSTR, IP2STR(&ip_info.ip));
+        detail_view_add_info(cert_scan_detail_view, "Device DNS", ipbuf);
+    } else {
+        detail_view_add_info(cert_scan_detail_view, "Device DNS", "no network");
+    }
+
+    detail_view_add_info(cert_scan_detail_view, "DNS",
+                         dns_sinkhole_get_intercept_all() ? "all names"
+                                                          : "listed names");
+    detail_view_add_infof(cert_scan_detail_view, "Certificates", "%lu",
+                          (unsigned long)presented);
+    detail_view_add_infof(cert_scan_detail_view, "Accepted", "%lu",
+                          (unsigned long)requests);
+
+    // One row per device that completed a handshake, i.e. trusted the
+    // certificate it was given.
+    char clients[SINKHOLE_HTTPS_ACCEPTED_MAX * (SINKHOLE_HTTPS_MAX_HOST + 20)];
+    size_t clients_len = sinkhole_https_accepted_clients(clients, sizeof(clients));
+    if (clients_len > 0) {
+        char *line = clients;
+        while (*line) {
+            char *nl = strchr(line, '\n');
+            if (nl) *nl = '\0';
+            if (*line) {
+                char *space = strchr(line, ' ');
+                if (space) {
+                    *space = '\0';
+                    detail_view_add_info(cert_scan_detail_view, line, "trusts the CA");
+                } else {
+                    detail_view_add_info(cert_scan_detail_view, line, "accepted");
+                }
+            }
+            if (!nl) break;
+            line = nl + 1;
+        }
+    } else {
+        detail_view_add_info(cert_scan_detail_view, "Devices", "none yet");
+    }
+
+    detail_view_add_back(cert_scan_detail_view, cert_scan_detail_back_cb, NULL);
+    cert_scan_detail_return_state = WIFI_MENU_CERT_SCAN;
+    current_wifi_menu_state = WIFI_MENU_CERT_SCAN_DETAILS;
+    cert_scan_result_sig = cert_scan_compute_sig();
+
+    // Keep the readout live while it is on screen.  The callback removes
+    // itself once the view is gone.
+    if (!cert_scan_refresh_timer) {
+        cert_scan_refresh_timer = lv_timer_create(cert_scan_refresh_cb, 1000, NULL);
+    }
+#ifdef CONFIG_USE_TOUCHSCREEN
+    update_scroll_buttons_visibility();
+#endif
+}
+
+// Waits for the sinkhole and TLS server to come up, then shows the results.
+static void cert_scan_start_poll_cb(lv_timer_t *timer) {
+    cert_scan_start_ticks++;
+
+    if (sinkhole_https_is_running()) {
+        lv_timer_del(timer);
+        cert_scan_start_timer = NULL;
+        if (cert_scan_status) {
+            scan_status_close(cert_scan_status);
+            cert_scan_status = NULL;
+        }
+        cert_scan_show_results();
+        return;
+    }
+
+    if (cert_scan_start_ticks > 40) { // ~8 s at 200 ms
+        lv_timer_del(timer);
+        cert_scan_start_timer = NULL;
+        if (cert_scan_status) {
+            scan_status_close(cert_scan_status);
+            cert_scan_status = NULL;
+        }
+        error_popup_create("Cert Scan failed to start");
+    }
+}
+
+static void start_cert_scan_devices_flow(void) {
+    // Fail before the spinner.  Missing files are known instantly, and there is
+    // nothing to wait for, so show what is missing instead of spinning.
+    if (!sd_card_exists(SINKHOLE_HTTPS_CA_CERT_PATH) ||
+        !sd_card_exists(SINKHOLE_HTTPS_CA_KEY_PATH) ||
+        !sd_card_exists(SINKHOLE_HTTPS_LEAF_KEY_PATH)) {
+        cert_scan_show_setup(WIFI_MENU_CERT_SCAN);
+        return;
+    }
+
+    cert_scan_status = scan_status_create("Cert Scan");
+    if (cert_scan_status) {
+        scan_status_set_subtext(cert_scan_status, "Starting");
+        scan_status_set_cancel_cb(cert_scan_status, cert_scan_cancel_cb);
+    }
+
+    cert_scan_cancel_stops_scan = true;
+    simulateCommand("certscan devices");
+
+    cert_scan_start_ticks = 0;
+    cert_scan_start_timer = lv_timer_create(cert_scan_start_poll_cb, 200, NULL);
+}
+
+static bool cert_scan_progress(int done, int total, const char *ip, bool answered,
+                                bool affected) {
+    (void)ip;
+    (void)answered;
+    (void)affected;
+    cert_scan_scanned = done;
+    cert_scan_scan_total = total;
+    return !cert_scan_abort;
+}
+
+static void cert_scan_check_task(void *arg) {
+    (void)arg;
+
+    cert_check_summary_t summary;
+    cert_check_sweep(CERT_CHECK_DEFAULT_PORT, &summary, cert_scan_progress);
+
+    cert_scan_scan_total = summary.hosts;
+    cert_scan_scanned = summary.hosts;
+    cert_scan_tls_count = summary.answered;
+    cert_scan_hit_count = summary.hit_count;
+    for (int i = 0; i < summary.hit_count && i < cert_scan_MAX_REPORT; i++) {
+        snprintf(cert_scan_hits[i].ip, sizeof(cert_scan_hits[i].ip), "%.15s",
+                 summary.hits[i].ip);
+        snprintf(cert_scan_hits[i].name, sizeof(cert_scan_hits[i].name), "%.23s",
+                 summary.hits[i].name);
+        snprintf(cert_scan_hits[i].label, sizeof(cert_scan_hits[i].label), "%.39s",
+                 summary.hits[i].ca);
+    }
+
+    cert_scan_scan_done = true;
+    cert_scan_task_alive = false;
+    vTaskDeleteWithCaps(NULL);
+}
+
+static void cert_scan_poll_timer_cb(lv_timer_t *timer) {
+    (void)timer;
+
+    if (cert_scan_cancel_requested) {
+        return; // cleanup runs from the async cancel path
+    }
+
+    if (cert_scan_discovery_phase) {
+        if (!local_scan_check_done()) {
+            // Never leave a spinner up forever if discovery stalls.
+            if (++cert_scan_discovery_ticks > 600) { // 60 s at 100 ms
+                lv_timer_del(timer);
+                cert_scan_poll_timer = NULL;
+                if (cert_scan_status) {
+                    scan_status_close(cert_scan_status);
+                    cert_scan_status = NULL;
+                }
+                error_popup_create("Host discovery timed out");
+                return;
+            }
+
+            const char *phase = NULL;
+            int found = 0;
+            local_scan_get_status(&phase, &found);
+            char buf[48];
+            snprintf(buf, sizeof(buf), "%s  %d found",
+                     (phase && phase[0]) ? phase : "Finding hosts", found);
+            if (cert_scan_status) scan_status_set_subtext(cert_scan_status, buf);
+            return;
+        }
+
+        local_scan_finish_async();
+        cert_scan_discovery_phase = false;
+
+        if (local_scan_get_count() == 0) {
+            cert_scan_scan_total = 0;
+            cert_scan_scan_done = true;
+            return;
+        }
+        cert_scan_scan_total = local_scan_get_count();
+        if (cert_scan_task_alive) {
+            // A previous sweep is still finishing; do not overlap it.
+            cert_scan_scan_done = true;
+            return;
+        }
+        cert_scan_task_alive = true;
+        if (xTaskCreate_psram(cert_scan_check_task, "certscan_chk", 8192, NULL, 4,
+                              NULL) != pdPASS) {
+            cert_scan_task_alive = false;
+            cert_scan_scan_done = true;
+            return;
+        }
+        return;
+    }
+
+    if (!cert_scan_scan_done) {
+        if (cert_scan_status) {
+            char buf[48];
+            snprintf(buf, sizeof(buf), "Checking %d/%d", cert_scan_scanned,
+                     cert_scan_scan_total);
+            scan_status_set_subtext(cert_scan_status, buf);
+            scan_status_set_progress(cert_scan_status, cert_scan_scanned,
+                                     cert_scan_scan_total);
+        }
+        return;
+    }
+
+    if (cert_scan_poll_timer) {
+        lv_timer_del(cert_scan_poll_timer);
+        cert_scan_poll_timer = NULL;
+    }
+    if (cert_scan_status) {
+        scan_status_close(cert_scan_status);
+        cert_scan_status = NULL;
+    }
+    cert_scan_show_check_results();
+}
+
+static void cert_scan_cancel_cleanup(void *arg) {
+    (void)arg;
+    cert_scan_abort = true;
+    if (cert_scan_poll_timer) {
+        lv_timer_del(cert_scan_poll_timer);
+        cert_scan_poll_timer = NULL;
+    }
+    if (cert_scan_start_timer) {
+        lv_timer_del(cert_scan_start_timer);
+        cert_scan_start_timer = NULL;
+    }
+    if (cert_scan_status) {
+        scan_status_close(cert_scan_status);
+        cert_scan_status = NULL;
+    }
+    if (local_scan_is_running()) {
+        local_scan_cancel();
+    }
+    if (cert_scan_cancel_stops_scan) {
+        // Cancelled while starting: shut the scan back down.
+        simulateCommand("certscan stop");
+        cert_scan_cancel_stops_scan = false;
+    }
+    cert_scan_cancel_requested = false;
+    cert_scan_discovery_phase = false;
+    opt_touch_started = false;
+    option_fired = false;
+    display_manager_add_status_bar(options_menu_type_to_string(SelectedMenuType));
+}
+
+static void cert_scan_cancel_cb(void) {
+    if (cert_scan_cancel_requested) return;
+    cert_scan_cancel_requested = true;
+    option_input_blocked_until_us = esp_timer_get_time() + 500000;
+    if (local_scan_is_running()) {
+        local_scan_cancel();
+    }
+    lv_async_call(cert_scan_cancel_cleanup, NULL);
+}
+
+static bool start_cert_scan_check_flow(void) {
+    // Do not overlap a sweep that is still winding down after a cancel.
+    if (cert_scan_task_alive) {
+        return false;
+    }
+
+    cert_scan_abort = false;
+    cert_scan_cancel_requested = false;
+    cert_scan_scan_done = false;
+    cert_scan_discovery_ticks = 0;
+    cert_scan_scanned = 0;
+    cert_scan_scan_total = 0;
+    cert_scan_tls_count = 0;
+    cert_scan_hit_count = 0;
+
+    cert_scan_status = scan_status_create("Cert Scan");
+    if (cert_scan_status) {
+        scan_status_set_subtext(cert_scan_status, "Tap to cancel");
+        scan_status_set_cancel_cb(cert_scan_status, cert_scan_cancel_cb);
+    }
+
+    if (local_scan_get_count() == 0) {
+        // Nothing discovered yet: find hosts first, then check them.
+        cert_scan_discovery_phase = true;
+        if (!local_scan_is_running() && local_scan_start_async() != ESP_OK) {
+            if (cert_scan_status) {
+                scan_status_close(cert_scan_status);
+                cert_scan_status = NULL;
+            }
+            return false;
+        }
+    } else {
+        cert_scan_discovery_phase = false;
+        if (cert_scan_task_alive) {
+            if (cert_scan_status) {
+                scan_status_close(cert_scan_status);
+                cert_scan_status = NULL;
+            }
+            return false;
+        }
+        cert_scan_scan_total = local_scan_get_count();
+        cert_scan_task_alive = true;
+        if (xTaskCreate_psram(cert_scan_check_task, "certscan_chk", 8192, NULL, 4,
+                              NULL) != pdPASS) {
+            cert_scan_task_alive = false;
+            if (cert_scan_status) {
+                scan_status_close(cert_scan_status);
+                cert_scan_status = NULL;
+            }
+            return false;
+        }
+    }
+
+    cert_scan_poll_timer = lv_timer_create(cert_scan_poll_timer_cb, 100, NULL);
+    return true;
+}
+
+// ============================================================================
 // Govee LAN Discovery Flow
 // ============================================================================
 
@@ -3520,6 +4052,88 @@ static void sinkhole_detail_back_cb(lv_event_t *e) {
 #endif
 }
 
+static void cert_scan_detail_back_cb(lv_event_t *e) {
+    (void)e;
+    if (cert_scan_refresh_timer) {
+        lv_timer_del(cert_scan_refresh_timer);
+        cert_scan_refresh_timer = NULL;
+    }
+    if (cert_scan_detail_view) {
+        detail_view_destroy(cert_scan_detail_view);
+        cert_scan_detail_view = NULL;
+    }
+    current_wifi_menu_state = cert_scan_detail_return_state;
+    SelectedMenuType = OT_Wifi;
+    suppress_wifi_state_reset_once = true;
+    rebuild_current_menu();
+    option_invoked = false;
+    display_manager_add_status_bar(options_menu_type_to_string(SelectedMenuType));
+#ifdef CONFIG_USE_TOUCHSCREEN
+    update_scroll_buttons_visibility();
+#endif
+}
+
+// Keyboard submit for "Add Hostname".  Queues it directly so the result is
+// visible on the display rather than only in the terminal.
+static void cert_scan_host_cb(const char *host) {
+    display_manager_switch_view(&options_menu_view);
+    current_wifi_menu_state = WIFI_MENU_CERT_SCAN;
+    rebuild_current_menu();
+
+    if (!host || !host[0]) return;
+
+    if (!dns_sinkhole_is_running()) {
+        error_popup_create("Start the scan first");
+        return;
+    }
+    if (dns_sinkhole_add_intercept(host)) {
+        status_display_show_status("Host queued");
+    } else {
+        error_popup_create("Could not queue hostname");
+    }
+}
+
+// Keyboard submit for "CA Cert From URL".
+static void cert_scan_cacert_cb(const char *url) {
+    if (url && url[0]) {
+        char cmd[448];
+        snprintf(cmd, sizeof(cmd), "certscan cacert %.400s", url);
+        simulateCommand(cmd);
+    }
+    display_manager_switch_view(&options_menu_view);
+    current_wifi_menu_state = WIFI_MENU_CERT_SCAN_SETUP;
+    rebuild_current_menu();
+}
+
+// Keyboard submit for "CA Key Number".  Runs the work on the spot so the
+// result reaches the display instead of only the terminal.
+static void cert_scan_key_cb(const char *number) {
+    if (!number || !number[0]) {
+        current_wifi_menu_state = WIFI_MENU_CERT_SCAN_SETUP;
+        rebuild_current_menu();
+        return;
+    }
+
+    char detail[160] = "";
+    bool ok = sinkhole_https_import_scalar(number, detail, sizeof(detail));
+
+    char msg[224];
+    if (ok && !sd_card_exists(SINKHOLE_HTTPS_LEAF_KEY_PATH)) {
+        // One command leaves everything ready to scan.
+        char leaf[160] = "";
+        if (sinkhole_https_generate_leaf_key(leaf, sizeof(leaf))) {
+            snprintf(msg, sizeof(msg), "%.150s; leaf key written", detail);
+        } else {
+            snprintf(msg, sizeof(msg), "%.150s", detail);
+        }
+    } else {
+        snprintf(msg, sizeof(msg), "%.200s", detail);
+    }
+
+    cert_scan_show_result(ok ? "CA Key" : "CA Key Failed", msg,
+                          WIFI_MENU_CERT_SCAN_SETUP);
+}
+
 static void update_settings_arrows_visibility(void) {
     if (!menu_container || !lv_obj_is_valid(menu_container)) return;
 
@@ -3659,6 +4273,9 @@ static void update_scroll_buttons_visibility(void) {
         force_show = true;
     } else if (sinkhole_detail_view && current_wifi_menu_state == WIFI_MENU_DNS_SINKHOLE_DETAILS) {
         target = detail_view_get_list(sinkhole_detail_view);
+        force_show = true;
+    } else if (cert_scan_detail_view && current_wifi_menu_state == WIFI_MENU_CERT_SCAN_DETAILS) {
+        target = detail_view_get_list(cert_scan_detail_view);
         force_show = true;
     } else if (arp_detail_view && current_wifi_menu_state == WIFI_MENU_ARP_DETAILS) {
         target = detail_view_get_list(arp_detail_view);
@@ -3831,6 +4448,10 @@ static void scroll_options_up(lv_event_t *e) {
         detail_view_step_up(sinkhole_detail_view);
         return;
     }
+    if (cert_scan_detail_view && current_wifi_menu_state == WIFI_MENU_CERT_SCAN_DETAILS) {
+        detail_view_step_up(cert_scan_detail_view);
+        return;
+    }
     if (gtk_abuse_detail_view) {
         detail_view_step_up(gtk_abuse_detail_view);
         return;
@@ -3876,6 +4497,10 @@ static void scroll_options_down(lv_event_t *e) {
     }
     if (sinkhole_detail_view && current_wifi_menu_state == WIFI_MENU_DNS_SINKHOLE_DETAILS) {
         detail_view_step_down(sinkhole_detail_view);
+        return;
+    }
+    if (cert_scan_detail_view && current_wifi_menu_state == WIFI_MENU_CERT_SCAN_DETAILS) {
+        detail_view_step_down(cert_scan_detail_view);
         return;
     }
     if (gtk_abuse_detail_view) {
@@ -3927,6 +4552,10 @@ static void touch_back_button_cb(lv_event_t *e) {
     }
     if (sinkhole_detail_view && current_wifi_menu_state == WIFI_MENU_DNS_SINKHOLE_DETAILS) {
         sinkhole_detail_back_cb(NULL);
+        return;
+    }
+    if (cert_scan_detail_view && current_wifi_menu_state == WIFI_MENU_CERT_SCAN_DETAILS) {
+        cert_scan_detail_back_cb(NULL);
         return;
     }
     if (sta_detail_view && current_wifi_menu_state == WIFI_MENU_STA_DETAILS) {
@@ -4049,6 +4678,9 @@ static void options_menu_freeze_pre_lock(void) {
         } else if (sinkhole_detail_view && current_wifi_menu_state == WIFI_MENU_DNS_SINKHOLE_DETAILS) {
             detail_view_destroy(sinkhole_detail_view);
             sinkhole_detail_view = NULL;
+        } else if (cert_scan_detail_view && current_wifi_menu_state == WIFI_MENU_CERT_SCAN_DETAILS) {
+            detail_view_destroy(cert_scan_detail_view);
+            cert_scan_detail_view = NULL;
         } else if (arp_detail_view && current_wifi_menu_state == WIFI_MENU_ARP_DETAILS) {
             detail_view_destroy(arp_detail_view);
             arp_detail_view = NULL;
@@ -4233,6 +4865,11 @@ void options_menu_create() {
                 options = blocklist_file_options;
                 break;
             case WIFI_MENU_DNS_SINKHOLE_DETAILS:
+                options = NULL;
+                break;
+            case WIFI_MENU_CERT_SCAN: options = wifi_cert_scan_options; break;
+            case WIFI_MENU_CERT_SCAN_SETUP: options = wifi_cert_scan_setup_options; break;
+            case WIFI_MENU_CERT_SCAN_DETAILS:
                 options = NULL;
                 break;
             case WIFI_MENU_CONNECTION: options = wifi_connection_options; break;
@@ -6223,6 +6860,8 @@ void handle_hardware_button_press_options(InputEvent *event) {
                         active_detail_view = ap_detail_view;
                     } else if (sinkhole_detail_view && opt_touch_wifi_state == WIFI_MENU_DNS_SINKHOLE_DETAILS) {
                         active_detail_view = sinkhole_detail_view;
+                    } else if (cert_scan_detail_view && opt_touch_wifi_state == WIFI_MENU_CERT_SCAN_DETAILS) {
+                        active_detail_view = cert_scan_detail_view;
                     } else if (gtk_abuse_detail_view) {
                         active_detail_view = gtk_abuse_detail_view;
                     } else if (sta_detail_view && opt_touch_wifi_state == WIFI_MENU_STA_DETAILS) {
@@ -6296,6 +6935,7 @@ void handle_hardware_button_press_options(InputEvent *event) {
             // Handle touch start for detail_view
             if ((ap_detail_view && current_wifi_menu_state == WIFI_MENU_AP_DETAILS) ||
                 (sinkhole_detail_view && current_wifi_menu_state == WIFI_MENU_DNS_SINKHOLE_DETAILS) ||
+                (cert_scan_detail_view && current_wifi_menu_state == WIFI_MENU_CERT_SCAN_DETAILS) ||
                 gtk_abuse_detail_view ||
                 (sta_detail_view && current_wifi_menu_state == WIFI_MENU_STA_DETAILS) ||
                 (arp_detail_view && current_wifi_menu_state == WIFI_MENU_ARP_DETAILS) ||
@@ -6344,6 +6984,8 @@ void handle_hardware_button_press_options(InputEvent *event) {
                 active_detail_view = ap_detail_view;
             } else if (sinkhole_detail_view && opt_touch_wifi_state == WIFI_MENU_DNS_SINKHOLE_DETAILS) {
                 active_detail_view = sinkhole_detail_view;
+            } else if (cert_scan_detail_view && opt_touch_wifi_state == WIFI_MENU_CERT_SCAN_DETAILS) {
+                active_detail_view = cert_scan_detail_view;
             } else if (gtk_abuse_detail_view) {
                 active_detail_view = gtk_abuse_detail_view;
             } else if (sta_detail_view && opt_touch_wifi_state == WIFI_MENU_STA_DETAILS) {
@@ -6507,6 +7149,13 @@ void handle_hardware_button_press_options(InputEvent *event) {
         int button = event->data.joystick_index;
         ESP_LOGI(TAG, "Joystick index = %d", button);
 
+        // A spinner is modal.  On a board without a touchscreen there is no tap
+        // to hit the "Tap to cancel" hint, so any input cancels it.
+        if (cert_scan_status) {
+            cert_scan_cancel_cb();
+            return;
+        }
+
         if (wigle_manual_popup && lv_obj_is_valid(wigle_manual_popup)) {
             if (button == 0 || button == 2 || button == 3 || button == 4) {
                 wigle_manual_popup_selected = (wigle_manual_popup_selected + 1) % 2;
@@ -6559,6 +7208,22 @@ void handle_hardware_button_press_options(InputEvent *event) {
                 }
             } else if (button == 0 || button == 3) {
                 sinkhole_detail_back_cb(NULL);
+            }
+            return;
+        }
+
+        if (cert_scan_detail_view && current_wifi_menu_state == WIFI_MENU_CERT_SCAN_DETAILS) {
+            if (button == 2) {
+                detail_view_step_up(cert_scan_detail_view);
+            } else if (button == 4) {
+                detail_view_step_down(cert_scan_detail_view);
+            } else if (button == 1) {
+                lv_obj_t *obj = detail_view_get_selected_obj(cert_scan_detail_view);
+                if (obj && lv_obj_is_valid(obj)) {
+                    lv_event_send(obj, LV_EVENT_CLICKED, NULL);
+                }
+            } else if (button == 0 || button == 3) {
+                cert_scan_detail_back_cb(NULL);
             }
             return;
         }
@@ -7134,6 +7799,11 @@ void handle_hardware_button_press_options(InputEvent *event) {
             back_event_cb(NULL);
         }
     } else if (event->type == INPUT_TYPE_ENCODER) {
+        // Same rule as the joystick: any encoder input cancels the spinner.
+        if (cert_scan_status) {
+            cert_scan_cancel_cb();
+            return;
+        }
         if (wigle_manual_popup && lv_obj_is_valid(wigle_manual_popup)) {
             if (event->data.encoder.button) {
                 if (wigle_manual_popup_selected == 0) wigle_manual_popup_upload_cb(NULL);
@@ -7175,6 +7845,17 @@ void handle_hardware_button_press_options(InputEvent *event) {
                 detail_view_step_up(sinkhole_detail_view);
             } else if (event->data.encoder.direction > 0) {
                 detail_view_step_down(sinkhole_detail_view);
+            }
+            return;
+        }
+        if (cert_scan_detail_view && current_wifi_menu_state == WIFI_MENU_CERT_SCAN_DETAILS) {
+            if (event->data.encoder.button) {
+                lv_obj_t *obj = detail_view_get_selected_obj(cert_scan_detail_view);
+                if (obj && lv_obj_is_valid(obj)) lv_event_send(obj, LV_EVENT_CLICKED, NULL);
+            } else if (event->data.encoder.direction < 0) {
+                detail_view_step_up(cert_scan_detail_view);
+            } else if (event->data.encoder.direction > 0) {
+                detail_view_step_down(cert_scan_detail_view);
             }
             return;
         }
@@ -8492,6 +9173,7 @@ void option_event_cb(lv_event_t *e) {
             else if (strcmp(Selected_Option, "Capture") == 0) current_wifi_menu_state = WIFI_MENU_CAPTURE;
             else if (strcmp(Selected_Option, "Evil Portal") == 0) current_wifi_menu_state = WIFI_MENU_EVIL_PORTAL;
             else if (strcmp(Selected_Option, "DNS Sinkhole") == 0) current_wifi_menu_state = WIFI_MENU_DNS_SINKHOLE;
+  else if (strcmp(Selected_Option, "Cert Scan") == 0) current_wifi_menu_state = WIFI_MENU_CERT_SCAN;
             else if (strcmp(Selected_Option, "Connection") == 0) current_wifi_menu_state = WIFI_MENU_CONNECTION;
             else if (strcmp(Selected_Option, "Gadgets") == 0) current_wifi_menu_state = WIFI_MENU_MISC;
             rebuild_current_menu();
@@ -9708,6 +10390,80 @@ void option_event_cb(lv_event_t *e) {
         view_switched = true;
     }
 
+    // --- Cert Scan ------------------------------------------------------
+    else if (strcmp(Selected_Option, "Scan Devices") == 0) {
+        start_cert_scan_devices_flow();
+        view_switched = true;
+    }
+
+    else if (strcmp(Selected_Option, "Stop Cert Scan") == 0) {
+        terminal_set_return_view(&options_menu_view);
+        display_manager_switch_view(&terminal_view);
+        simulateCommand("certscan stop");
+        view_switched = true;
+    }
+
+    else if (strcmp(Selected_Option, "Check Hosts") == 0) {
+        if (!start_cert_scan_check_flow()) {
+            error_popup_create("Check failed to start");
+        }
+        option_invoked = false;
+        return;
+    }
+
+    // --- Cert Scan setup ------------------------------------------------
+    else if (strcmp(Selected_Option, "Setup") == 0) {
+        current_wifi_menu_state = WIFI_MENU_CERT_SCAN_SETUP;
+        rebuild_current_menu();
+        option_invoked = false;
+        return;
+    }
+
+    else if (strcmp(Selected_Option, "CA Cert From URL") == 0) {
+        keyboard_view_set_submit_callback(cert_scan_cacert_cb);
+        display_manager_switch_view(&keyboard_view);
+        keyboard_view_set_placeholder("https://.../ca.crt");
+        return;
+    }
+
+    else if (strcmp(Selected_Option, "CA Key Number") == 0) {
+        keyboard_view_set_submit_callback(cert_scan_key_cb);
+        display_manager_switch_view(&keyboard_view);
+        keyboard_view_set_placeholder("private scalar, e.g. 4");
+        return;
+    }
+
+    else if (strcmp(Selected_Option, "Generate Leaf Key") == 0) {
+        char detail[160] = "";
+        sinkhole_https_generate_leaf_key(detail, sizeof(detail));
+        cert_scan_show_result("Leaf Key", detail, WIFI_MENU_CERT_SCAN_SETUP);
+        view_switched = true;
+    }
+
+    else if (strcmp(Selected_Option, "Setup Status") == 0) {
+        cert_scan_show_setup(WIFI_MENU_CERT_SCAN_SETUP);
+        view_switched = true;
+    }
+
+    else if (strcmp(Selected_Option, "Clear Results") == 0) {
+        terminal_set_return_view(&options_menu_view);
+        display_manager_switch_view(&terminal_view);
+        simulateCommand("certscan clear");
+        view_switched = true;
+    }
+
+    else if (strcmp(Selected_Option, "Add Hostname") == 0) {
+        keyboard_view_set_submit_callback(cert_scan_host_cb);
+        display_manager_switch_view(&keyboard_view);
+        keyboard_view_set_placeholder("Hostname");
+        return;
+    }
+
+    else if (strcmp(Selected_Option, "Scan Results") == 0) {
+        cert_scan_show_results();
+        view_switched = true;
+    }
+
     else if (strcmp(Selected_Option, "Peter Lowe (3.5K ads)") == 0) {
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
@@ -10362,6 +11118,14 @@ void options_menu_destroy() {
         detail_view_destroy(sinkhole_detail_view);
         sinkhole_detail_view = NULL;
     }
+    if (cert_scan_detail_view) {
+        detail_view_destroy(cert_scan_detail_view);
+        cert_scan_detail_view = NULL;
+    }
+    if (cert_scan_refresh_timer) {
+        lv_timer_del(cert_scan_refresh_timer);
+        cert_scan_refresh_timer = NULL;
+    }
     if (arp_detail_view) {
         detail_view_destroy(arp_detail_view);
         arp_detail_view = NULL;
@@ -10790,6 +11554,19 @@ static void back_event_cb(lv_event_t *e) {
     }
     // If in a Wi-Fi submenu (but not main), go back to main Wi-Fi menu
     if (SelectedMenuType == OT_Wifi && current_wifi_menu_state != WIFI_MENU_MAIN) {
+        if (current_wifi_menu_state == WIFI_MENU_CERT_SCAN) {
+            // Leaving the Cert Scan menu stops the scan, so backing out does
+            // not leave the sinkhole and TLS server running in the background.
+            simulateCommand("certscan stop");
+        }
+        if (current_wifi_menu_state == WIFI_MENU_CERT_SCAN_SETUP) {
+            if (options_menu_restore_previous_state()) {
+                return;
+            }
+            current_wifi_menu_state = WIFI_MENU_CERT_SCAN;
+            rebuild_current_menu();
+            return;
+        }
         if (current_wifi_menu_state == WIFI_MENU_DNS_SINKHOLE_DOWNLOAD) {
             if (options_menu_restore_previous_state()) {
                 return;
@@ -10809,6 +11586,10 @@ static void back_event_cb(lv_event_t *e) {
         }
         if (current_wifi_menu_state == WIFI_MENU_DNS_SINKHOLE_DETAILS) {
             sinkhole_detail_back_cb(NULL);
+            return;
+        }
+        if (current_wifi_menu_state == WIFI_MENU_CERT_SCAN_DETAILS) {
+            cert_scan_detail_back_cb(NULL);
             return;
         }
         if (options_menu_restore_previous_state()) {
@@ -14004,6 +14785,11 @@ static void rebuild_current_menu(void) {
                     options = blocklist_file_options;
                     break;
                 case WIFI_MENU_DNS_SINKHOLE_DETAILS:
+                    options = NULL;
+                    break;
+                case WIFI_MENU_CERT_SCAN: options = wifi_cert_scan_options; break;
+                case WIFI_MENU_CERT_SCAN_SETUP: options = wifi_cert_scan_setup_options; break;
+                case WIFI_MENU_CERT_SCAN_DETAILS:
                     options = NULL;
                     break;
                 case WIFI_MENU_CONNECTION: options = wifi_connection_options; break;

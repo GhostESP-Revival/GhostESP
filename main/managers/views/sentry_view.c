@@ -100,6 +100,7 @@ typedef struct {
     char tag[10];
     char name[32];
     char sub[20];
+    char vendor[48];
 } sentry_rec_t;
 
 typedef struct {
@@ -370,6 +371,16 @@ static void rec_upsert(const char *mac, bool ble, uint8_t kind, uint8_t flock_cl
     snprintf(s_rec[i].tag, sizeof(s_rec[i].tag), "%s", tag);
     if (name && name[0]) snprintf(s_rec[i].name, sizeof(s_rec[i].name), "%s", name);
     if (sub && sub[0]) snprintf(s_rec[i].sub, sizeof(s_rec[i].sub), "%s", sub);
+    if (!s_rec[i].vendor[0]) {
+        char v[64];
+        if (ouis_lookup_vendor(mac, v, sizeof(v))) {
+            // The vendor name can be longer than the field; truncate it.
+            snprintf(s_rec[i].vendor, sizeof(s_rec[i].vendor), "%.*s",
+                     (int)(sizeof(s_rec[i].vendor) - 1), v);
+        } else if (ouis_is_private_mac(mac)) {
+            snprintf(s_rec[i].vendor, sizeof(s_rec[i].vendor), "Private address");
+        }
+    }
 }
 
 // Pull both engines into the cache, age out what has gone, keep newest first.
@@ -454,8 +465,9 @@ static void format_rec(const sentry_rec_t *r, char *head, size_t hs, char *det, 
     snprintf(head, hs, "%s  %s", r->tag, name);
     char ago[16];
     format_ago(r->last_seen, ago, sizeof(ago));
-    if (r->ble) snprintf(det, ds, "%s  %ddBm  %s", mac, (int)r->rssi, ago);
-    else snprintf(det, ds, "%s  %ddBm ch%u  %s", mac, (int)r->rssi, (unsigned)r->channel, ago);
+    const char *ident = r->vendor[0] ? r->vendor : mac;
+    if (r->ble) snprintf(det, ds, "%s  %ddBm  %s", ident, (int)r->rssi, ago);
+    else snprintf(det, ds, "%s  %ddBm ch%u  %s", ident, (int)r->rssi, (unsigned)r->channel, ago);
 }
 
 // ---- radios ---------------------------------------------------------------
@@ -578,8 +590,9 @@ static void show_alert(const sentry_rec_t *r) {
     char mac[sizeof(r->mac)];
     snprintf(mac, sizeof(mac), "%s", r->mac);
     privacy_redact_mac(mac);
+    const char *ident = r->vendor[0] ? r->vendor : mac;
     lv_obj_t *sub = lv_label_create(alert_overlay);
-    lv_label_set_text_fmt(sub, "%s  %ddBm", mac, (int)r->rssi);
+    lv_label_set_text_fmt(sub, "%s  %ddBm", ident, (int)r->rssi);
     lv_obj_set_style_text_font(sub, accessibility_get_font_small(), 0);
     lv_obj_set_style_text_color(sub, lv_color_hex(c_dim), 0);
     lv_obj_set_width(sub, LV_PCT(100));
@@ -670,7 +683,9 @@ static void render_rows(void) {
             continue;
         }
         char head[52];
-        char det[52];
+        // Wider than the label: the identifier is now a vendor name, which can
+        // be longer than the MAC it replaced, and the label clips as before.
+        char det[84];
         format_rec(&s_rec[i], head, sizeof(head), det, sizeof(det));
         lv_obj_clear_flag(s_rows[i].card, LV_OBJ_FLAG_HIDDEN);
         lv_label_set_text(s_rows[i].head, head);
@@ -835,8 +850,8 @@ static void open_detail(void) {
     if (!detail) return;
     detail_view_set_bottom_reserved(detail, gui_touch_bar_height());
 
-    char vendor[64] = "Unknown";
-    (void)ouis_lookup_vendor(s_detail->mac, vendor, sizeof(vendor));
+    char vendor[64];
+    snprintf(vendor, sizeof(vendor), "%s", s_detail->vendor[0] ? s_detail->vendor : "Unknown");
 
     /* Display copies only: s_detail stays raw for parse/compare/track. */
     char name[sizeof(s_detail->name)];

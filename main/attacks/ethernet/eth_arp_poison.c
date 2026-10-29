@@ -17,6 +17,7 @@
 #include "attacks/ethernet/eth_arp_poison.h"
 #include "managers/ethernet_manager.h"
 #include "core/glog.h"
+#include "core/ouis.h"
 #include "core/esp_comm_manager.h"
 #include "core/system_manager.h"
 #include "esp_netif.h"
@@ -404,8 +405,11 @@ static bool add_host_if_new(const ip4_addr_t *ip, const uint8_t *mac)
 
     char ip_str[16];
     ip4addr_ntoa_r(ip, ip_str, sizeof(ip_str));
-    glog("[ARP Poison] New host discovered: %s [%02x:%02x:%02x:%02x:%02x:%02x]\n",
-         ip_str, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    char vendor[64] = {0};
+    bool has_vendor = ouis_lookup_vendor_bytes(mac, vendor, sizeof(vendor));
+    glog("[ARP Poison] New host discovered: %s [%02x:%02x:%02x:%02x:%02x:%02x]%s%s\n",
+         ip_str, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
+         has_vendor ? " " : "", has_vendor ? vendor : "");
 
     xSemaphoreGive(s_hosts_mutex);
     return true;

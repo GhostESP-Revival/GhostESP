@@ -138,8 +138,15 @@ typedef enum {
 
 static html_capture_state_t html_capture_state = HTML_STATE_IDLE;
 static char *html_capture_buffer = NULL;
-#define HTML_CAPTURE_BUF_SIZE 2048
+// Leave headroom for the close marker so it can always be detected and stripped
+// even when the app uploads the maximum accepted payload size.
+#define HTML_CAPTURE_BUF_SIZE 4096
 static size_t html_capture_pos = 0;
+
+#define HTML_INLINE_BEGIN_MARKER "[HTML/BEGIN]"
+#define HTML_INLINE_CLOSE_MARKER "[HTML/CLOSE]"
+// Tracks a partial close-marker match when the capture buffer is full.
+static size_t html_close_match = 0;
 
 // IR capture state
 #if CONFIG_HAS_INFRARED
@@ -645,6 +652,22 @@ static void ir_inline_finish(void) {
 }
 #endif
 
+// Finish an inline HTML upload: hand the captured bytes to the portal and
+// release the scratch buffer.
+static void html_inline_finish(void) {
+    if (html_capture_state == HTML_STATE_CAPTURING && html_capture_buffer) {
+        wifi_manager_store_html_chunk(html_capture_buffer, html_capture_pos, true);
+        glog("HTML capture completed (%zu bytes)\n", html_capture_pos);
+    }
+    html_capture_state = HTML_STATE_IDLE;
+    html_capture_pos = 0;
+    html_close_match = 0;
+    if (html_capture_buffer) {
+        free(html_capture_buffer);
+        html_capture_buffer = NULL;
+    }
+}
+
 // HTML marker processing and IR inline handling
 static void process_html_line(const char* line) {
 #if CONFIG_HAS_INFRARED
@@ -671,25 +694,37 @@ static void process_html_line(const char* line) {
     }
 #endif
 
-    if (strstr(line, "[HTML/BEGIN]") != NULL) {
+    const char* html_begin = strstr(line, HTML_INLINE_BEGIN_MARKER);
+    if (html_begin != NULL && html_capture_state != HTML_STATE_CAPTURING) {
         if (!html_capture_buffer) html_capture_buffer = (char *)calloc(1, HTML_CAPTURE_BUF_SIZE);
-        html_capture_state = html_capture_buffer ? HTML_STATE_CAPTURING : HTML_STATE_IDLE;
-        html_capture_pos = 0;
-        glog("HTML capture started\n");
-        return;
-    }
-    
-    if (strstr(line, "[HTML/CLOSE]") != NULL) {
-        if (html_capture_state == HTML_STATE_CAPTURING) {
-            html_capture_state = HTML_STATE_COMPLETE;
-            wifi_manager_store_html_chunk(html_capture_buffer, html_capture_pos, true);
-            glog("HTML capture completed (%zu bytes)\n", html_capture_pos);
+        if (html_capture_buffer) {
+            html_capture_state = HTML_STATE_CAPTURING;
+            html_capture_pos = 0;
+            html_close_match = 0;
+
+            // Older clients put the first HTML line on the same line as the
+            // begin marker.  Keep whatever follows the marker on that line.
+            const char* rest = html_begin + strlen(HTML_INLINE_BEGIN_MARKER);
+            size_t rest_len = strlen(rest);
+            if (rest_len > 0) {
+                if (rest_len > HTML_CAPTURE_BUF_SIZE - 1) {
+                    rest_len = HTML_CAPTURE_BUF_SIZE - 1;
+                }
+                memcpy(html_capture_buffer, rest, rest_len);
+                html_capture_pos = rest_len;
+                if (html_capture_pos < HTML_CAPTURE_BUF_SIZE) {
+                    html_capture_buffer[html_capture_pos++] = '\n';
+                }
+            }
+            glog("HTML capture started\n");
         }
-        if (html_capture_buffer) { free(html_capture_buffer); html_capture_buffer = NULL; }
         return;
     }
-    
+
     if (html_capture_state == HTML_STATE_CAPTURING) {
+        // Defensive fallback for callers that still deliver HTML line by line.
+        // The serial loop normally captures HTML byte-by-byte, which preserves
+        // long/minified lines and the close marker.
         size_t line_len = strlen(line);
         if (html_capture_buffer && html_capture_pos + line_len + 1 < HTML_CAPTURE_BUF_SIZE) {
             memcpy(html_capture_buffer + html_capture_pos, line, line_len);
@@ -698,7 +733,7 @@ static void process_html_line(const char* line) {
         }
         return;
     }
-    
+
     handle_serial_command(line);
 }
 
@@ -781,6 +816,35 @@ void serial_task(void *pvParameter) {
 
       for (int i = 0; i < length; i++) {
         char incoming_char = (char)data[i];
+
+        // While an [HTML/BEGIN]..[HTML/CLOSE] upload is in progress, capture
+        // every byte verbatim. Parsing this data line by line would truncate
+        // long or minified HTML and lose the close marker when it shares a
+        // line with the payload.
+        if (html_capture_state == HTML_STATE_CAPTURING) {
+          const size_t html_close_len = sizeof(HTML_INLINE_CLOSE_MARKER) - 1;
+          if (html_capture_buffer && html_capture_pos < HTML_CAPTURE_BUF_SIZE - 1) {
+            html_capture_buffer[html_capture_pos++] = incoming_char;
+            if (html_capture_pos >= html_close_len &&
+                memcmp(html_capture_buffer + html_capture_pos - html_close_len,
+                       HTML_INLINE_CLOSE_MARKER, html_close_len) == 0) {
+              html_capture_pos -= html_close_len; // strip the marker itself
+              html_inline_finish();
+            }
+          } else {
+            // Payload exceeded the capture buffer. Keep consuming bytes and
+            // scanning for the close marker so the rest of the HTML is not
+            // interpreted as shell commands.
+            if (incoming_char == HTML_INLINE_CLOSE_MARKER[html_close_match]) {
+              if (++html_close_match == html_close_len) {
+                html_inline_finish();
+              }
+            } else {
+              html_close_match = (incoming_char == HTML_INLINE_CLOSE_MARKER[0]) ? 1 : 0;
+            }
+          }
+          continue;
+        }
 
 #if CONFIG_HAS_INFRARED
         // While an [IR/BEGIN]..[IR/CLOSE] payload is streaming, buffer every byte

@@ -715,9 +715,10 @@ static void print_service_analysis(const port_scan_result_t *result) {
 }
 
 static void port_scan_report_host(const char *ip, const uint8_t *mac, size_t index) {
-    const char *vendor = mac ? arp_scan_get_vendor(mac) : NULL;
-    if (vendor) {
-        glog("\n[Host %zu] Found active host: %s (%s)\n", index, ip, vendor);
+    char vendor[64] = {0};
+    const char *vendor_p = (mac && arp_scan_get_vendor_buf(mac, vendor, sizeof(vendor))) ? vendor : NULL;
+    if (vendor_p) {
+        glog("\n[Host %zu] Found active host: %s (%s)\n", index, ip, vendor_p);
     } else {
         glog("\n[Host %zu] Found active host: %s\n", index, ip);
     }

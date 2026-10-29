@@ -58,13 +58,15 @@ static int g_beacon_list_count = 0;
 static TaskHandle_t beacon_task_handle = NULL;
 static volatile bool beacon_task_running = false;
 static char *beacon_task_ssid = NULL;
+// Channels the driver permanently refused during this run (e.g. DFS in AP
+// mode); skip them instead of retrying and flooding the log every hop.
+static bool g_tx_channel_unusable[256];
 
 // Forward declarations
 static void beacon_spam_task(void *param);
 static void beacon_spam_list_task(void *param);
 static void generate_random_ssid(char *ssid, size_t length);
 static void generate_random_mac(uint8_t *mac);
-static void configure_hidden_ap(void);
 
 // Helper function: Generate random SSID
 static void generate_random_ssid(char *ssid, size_t length) {
@@ -83,31 +85,6 @@ static void generate_random_mac(uint8_t *mac) {
     mac[0] |= 0x02; // Locally administered MAC address (set the second least significant bit)
 }
 
-// Helper function: Configure hidden AP for beacon transmission
-static void configure_hidden_ap(void) {
-    wifi_config_t wifi_config;
-
-    // Get the current AP configuration
-    esp_err_t err = esp_wifi_get_config(WIFI_IF_AP, &wifi_config);
-    if (err != ESP_OK) {
-        printf("Failed to get Wi-Fi config: %s\n", esp_err_to_name(err));
-        return;
-    }
-
-    // Set the SSID to hidden while keeping the other settings unchanged
-    wifi_config.ap.ssid_hidden = 1;
-    wifi_config.ap.beacon_interval = 10000;
-    wifi_config.ap.ssid_len = 0;
-
-    // Apply the updated configuration
-    err = esp_wifi_set_config(WIFI_IF_AP, &wifi_config);
-    if (err != ESP_OK) {
-        printf("Failed to set Wi-Fi config: %s\n", esp_err_to_name(err));
-    } else {
-        printf("Wi-Fi AP SSID hidden.\n");
-    }
-}
-
 // Broadcast a beacon frame for a specific SSID
 esp_err_t beacon_spam_broadcast(const char *ssid) {
     static const uint8_t beacon_template[] = {
@@ -122,9 +99,9 @@ esp_err_t beacon_spam_broadcast(const char *ssid) {
         0x00, 0x00,                                     // SSID IE tag, length (set later)
     };
     
-    // Use the active country plan for raw beacon transmission. DFS is
-    // intentionally excluded by the TX policy because ESP32-C5 has no active
-    // radar detection for transmit operations.
+    // Use the active country plan for raw beacon transmission. The TX policy
+    // drops DFS only while an AP interface is running (ESP-IDF rejects AP DFS);
+    // the STA-only attack profile can hop the full plan.
     uint8_t channels[WIFI_CHANNELS_MAX] = {0};
     uint8_t channel_count = 0;
     if (!ap_sta_has_ip) {
@@ -149,6 +126,7 @@ esp_err_t beacon_spam_broadcast(const char *ssid) {
          channel_index < channel_count && beacon_task_running;
          channel_index++) {
         uint8_t ch = channels[channel_index];
+        if (g_tx_channel_unusable[ch]) continue;
         if (!wifi_channels_is_tx_channel(ch)) continue;
         // Check if we should stop
         if (!beacon_task_running) {
@@ -158,6 +136,10 @@ esp_err_t beacon_spam_broadcast(const char *ssid) {
         if (!ap_sta_has_ip) {
             esp_err_t channel_err = esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE);
             if (channel_err != ESP_OK) {
+                if (channel_err == ESP_ERR_INVALID_ARG ||
+                    channel_err == ESP_ERR_NOT_SUPPORTED) {
+                    g_tx_channel_unusable[ch] = true;
+                }
                 ESP_LOGW(TAG, "Beacon channel %u unavailable: %s",
                          (unsigned)ch, esp_err_to_name(channel_err));
                 continue;
@@ -228,10 +210,10 @@ esp_err_t beacon_spam_broadcast(const char *ssid) {
 
             size_t packet_size = (38 + ssid_len + 10 + 3 + 13); // Adjust packet size
 
-            esp_err_t err = esp_wifi_80211_tx(WIFI_IF_AP, packet, packet_size, false);
+            esp_err_t err = esp_wifi_80211_tx(ap_manager_get_tx_iface(), packet, packet_size, false);
             if (err == ESP_ERR_NO_MEM) {
                 vTaskDelay(pdMS_TO_TICKS(2));
-                esp_wifi_80211_tx(WIFI_IF_AP, packet, packet_size, false);
+                esp_wifi_80211_tx(ap_manager_get_tx_iface(), packet, packet_size, false);
             }
         }
 
@@ -419,9 +401,19 @@ void beacon_spam_start(const char *ssid) {
         glog("Starting beacon transmission...\n");
         status_display_show_status("Beacon Starting");
         ghostchi_manager_add_xp(3);
-        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP)); // Set AP mode for 802.11 TX
-        configure_hidden_ap();
-        esp_wifi_start();
+
+        // Attack radio profile: STA-only. Raw beacon injection works from the
+        // unassociated STA interface, and unlike AP mode it is not barred from
+        // DFS channels ("Set channel to a DFS channel is not allowed in ap
+        // mode"). Starting an AP just to inject also added its own beacon.
+        esp_wifi_stop();
+        vTaskDelay(pdMS_TO_TICKS(50));
+        ESP_ERROR_CHECK(ap_manager_apply_attack_radio());
+
+        // The AP is torn down for the attack, so no station can still hold an
+        // address from it. Clear the stale flag before the hop loop reads it.
+        ap_sta_has_ip = false;
+        memset(g_tx_channel_unusable, 0, sizeof(g_tx_channel_unusable));
         beacon_task_running = true;
         char *ssid_copy = ssid ? strdup(ssid) : NULL;
         if (ssid && !ssid_copy) {
@@ -429,7 +421,7 @@ void beacon_spam_start(const char *ssid) {
             status_display_show_status("Beacon Start Failed");
             beacon_task_running = false;
             esp_wifi_stop();
-            ap_manager_init();
+            (void)ap_manager_restore_after_attack("beacon start failed");
             return;
         }
         BaseType_t rc = xTaskCreate_psram(beacon_spam_task, "beacon_task", 3072, (void *)ssid_copy, 5, &beacon_task_handle);
@@ -440,7 +432,7 @@ void beacon_spam_start(const char *ssid) {
             beacon_task_handle = NULL;
             free(ssid_copy);
             esp_wifi_stop();
-            ap_manager_init();
+            (void)ap_manager_restore_after_attack("beacon start failed");
             return;
         }
         beacon_task_ssid = ssid_copy;
@@ -487,14 +479,8 @@ void beacon_spam_stop(void) {
             glog("Beacon stop warning: failed to stop WiFi (%s)\n", esp_err_to_name(stop_err));
         }
 
-        // Reset WiFi mode
-        esp_err_t mode_err = esp_wifi_set_mode(WIFI_MODE_AP);
-        if (mode_err != ESP_OK) {
-            glog("Beacon stop warning: failed to reset WiFi mode (%s)\n", esp_err_to_name(mode_err));
-        }
-
-        // Now restart services
-        ap_manager_init();
+        // Restore the normal AP profile (STA-only attack radio is dropped)
+        (void)ap_manager_restore_after_attack("beacon stop");
         status_display_show_status("Beacon Stopped");
         ghostscript_emit_event("attack_stopped", "beacon");
     }
@@ -512,10 +498,15 @@ void beacon_spam_start_list(void) {
     glog("Starting beacon spam list (%d SSIDs)...\n", g_beacon_list_count);
     
     ap_manager_stop_services();
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-    configure_hidden_ap();
-    esp_wifi_start();
-    
+
+    // Attack radio profile: STA-only (see beacon_spam_start).
+    esp_wifi_stop();
+    vTaskDelay(pdMS_TO_TICKS(50));
+    ESP_ERROR_CHECK(ap_manager_apply_attack_radio());
+
+    ap_sta_has_ip = false;
+    memset(g_tx_channel_unusable, 0, sizeof(g_tx_channel_unusable));
+
     // Launch the beacon list task
     beacon_task_running = true;
     BaseType_t rc = xTaskCreate_psram(beacon_spam_list_task, "beacon_list", 3072, NULL, 5, &beacon_task_handle);
@@ -525,7 +516,7 @@ void beacon_spam_start_list(void) {
         beacon_task_running = false;
         beacon_task_handle = NULL;
         esp_wifi_stop();
-        ap_manager_init();
+        (void)ap_manager_restore_after_attack("beacon list start failed");
         return;
     }
     rgb_manager_set_color(&rgb_manager, 0, 255, 0, 0, false);

@@ -2,9 +2,11 @@
 // Evil portal / captive portal and DNS sinkhole commands.
 
 #include "core/commands.h"
+#include "core/cert_check.h"
 #include "core/dns_server.h"
 #include "core/glog.h"
 #include "core/serial_manager.h"
+#include "core/sinkhole_https.h"
 #include "managers/ap_manager.h"
 #include "managers/sd_card_manager.h"
 #include "managers/settings_manager.h"
@@ -19,12 +21,17 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lwip/ip4_addr.h"
+#include "scans/wifi/local_scan.h"
 #include "sdkconfig.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 extern dns_server_handle_t dns_handle;
+
+// Defined with the Cert Scan helpers further down.
+static bool sinkhole_https_start_auto(sinkhole_https_mode_t requested, uint16_t port);
+static void certscan_print_requirements(void);
 
 #define MAX_PORTAL_PATH_LEN 256
 
@@ -470,6 +477,196 @@ static void sinkhole_download_blocklist(const char *url, const char *filename) {
     }
 }
 
+// --- HTTPS interception ---
+
+// Picks the certificate source from what is on the card: a CA certificate and
+// key mean leaves are minted per hostname, a pre-generated server.crt is
+// served as-is.
+static bool sinkhole_https_start_auto(sinkhole_https_mode_t requested, uint16_t port) {
+    // prepare() reads the material and logs exactly what is wrong, so the
+    // generic message is only a summary on top of that.
+    sinkhole_https_mode_t mode = sinkhole_https_prepare();
+    if (mode == SINKHOLE_HTTPS_MODE_OFF) {
+        certscan_print_requirements();
+        return false;
+    }
+    if (requested != SINKHOLE_HTTPS_MODE_OFF && requested != mode) {
+        glog("Using the %s certificate material found on the card\n",
+             mode == SINKHOLE_HTTPS_MODE_CA ? "CA" : "static");
+    }
+
+    sinkhole_https_config_t cfg = {
+        .mode = mode,
+        .port = port,
+        .page_path = NULL,
+    };
+    if (!sinkhole_https_start(&cfg)) {
+        glog("Failed to start the HTTPS server\n");
+        return false;
+    }
+    return true;
+}
+
+static void sinkhole_https_print_status(void) {
+    uint32_t presented = 0, requests = 0, minted = 0;
+    sinkhole_https_get_stats(&presented, &requests, &minted);
+
+    glog("=== HTTPS Interception ===\n");
+    glog("  State:   %s\n", sinkhole_https_is_running() ? "RUNNING" : "STOPPED");
+    if (sinkhole_https_is_running()) {
+        glog("  Mode:    %s\n", sinkhole_https_mode_name(sinkhole_https_mode()));
+        glog("  Port:    %u\n", (unsigned)sinkhole_https_port());
+    }
+    if (dns_sinkhole_get_intercept_all()) {
+        glog("  DNS:     intercepting every name\n");
+    } else if (dns_sinkhole_get_intercept()) {
+        glog("  DNS:     intercepting the list\n");
+    } else {
+        glog("  DNS:     forwarding\n");
+    }
+    const char *ca = sinkhole_https_ca_label();
+    if (ca && ca[0]) {
+        glog("  CA:      %s (compromised)\n", ca);
+    }
+    glog("  Presented: %lu\n", (unsigned long)presented);
+    glog("  Accepted:  %lu\n", (unsigned long)requests);
+    if (minted) {
+        glog("  Minted:    %lu\n", (unsigned long)minted);
+    }
+    const char *last = sinkhole_https_last_host();
+    if (last && last[0]) {
+        glog("  Last host: %s\n", last);
+    }
+
+    char clients[SINKHOLE_HTTPS_ACCEPTED_MAX * (SINKHOLE_HTTPS_MAX_HOST + 20)];
+    size_t len = sinkhole_https_accepted_clients(clients, sizeof(clients));
+    if (len > 0) {
+        glog("  Accepted clients (trust store is NOT patched):\n");
+        char *line = clients;
+        while (*line) {
+            char *nl = strchr(line, '\n');
+            if (nl) *nl = '\0';
+            if (*line) glog("    %s\n", line);
+            if (!nl) break;
+            line = nl + 1;
+        }
+    }
+
+    char list[SINKHOLE_INTERCEPT_MAX * (SINKHOLE_MAX_DOMAIN + 1)];
+    len = dns_sinkhole_list_intercept(list, sizeof(list));
+    if (len > 0) {
+        glog("  Intercept list:\n");
+        char *line = list;
+        while (*line) {
+            char *nl = strchr(line, '\n');
+            if (nl) *nl = '\0';
+            if (*line) glog("    %s\n", line);
+            if (!nl) break;
+            line = nl + 1;
+        }
+    }
+}
+
+// Shared start path for 'sinkhole start' and 'certscan start'.  Returns true
+// when the DNS sinkhole is listening; the caller can check
+// sinkhole_https_is_running() to see whether the TLS side came up too.
+static bool sinkhole_start_common(bool enable_https, bool enable_logging,
+                                  uint32_t upstream, bool quiet) {
+    esp_netif_ip_info_t ip_info;
+    esp_netif_t *netif = dns_sinkhole_find_netif(&ip_info);
+    if (!netif) {
+        if (!quiet) {
+            glog("No connected network interface.\n");
+            glog("Use 'connect' to join WiFi or connect Ethernet first.\n");
+            status_display_show_status("No Network");
+        }
+        return false;
+    }
+
+    if (!quiet && !sd_card_exists(SINKHOLE_BLOCKLIST_PATH)) {
+        if (sd_card_manager.is_initialized) {
+            glog("No blocklist found on SD card.\n");
+            glog("Use 'sinkhole download' to get one, or start anyway for proxy mode.\n");
+        } else {
+            glog("No SD card mounted and no blocklist available.\n");
+            glog("Running in proxy-only mode (no blocking).\n");
+        }
+    }
+
+    {
+        dns_server_handle_t h = dns_handle_take();
+        if (h) stop_dns_server(h);
+    }
+
+    esp_netif_t *sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (sta) {
+        ap_manager_stop_services_keep_wifi();
+        esp_wifi_set_mode(WIFI_MODE_STA);
+        esp_wifi_start();
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+
+    dns_sinkhole_config_t cfg = {
+        .bind_ip = ip_info.ip.addr,
+        .upstream_dns = upstream,
+        .redirect_ip = enable_https ? ip_info.ip.addr : 0,
+        .enable_logging = enable_logging,
+        .auto_stats = true,
+        .intercept_enabled = enable_https,
+    };
+    dns_handle = start_dns_sinkhole(&cfg);
+    if (!dns_handle) {
+        (void)ap_manager_restore_after_attack("sinkhole fail");
+        glog("Failed to start DNS sinkhole\n");
+        status_display_show_status("Sinkhole Fail");
+        return false;
+    }
+
+    glog("DNS sinkhole started on " IPSTR ":53\n", IP2STR(&ip_info.ip));
+    TERMINAL_VIEW_ADD_TEXT("DNS sinkhole started on " IPSTR ":53\n", IP2STR(&ip_info.ip));
+    if (!sd_card_exists(SINKHOLE_BLOCKLIST_PATH)) {
+        glog("Running in proxy mode (no blocklist)\n");
+    }
+    glog("Query logging: %s%s\n",
+         enable_logging ? "ON" : "OFF",
+         enable_logging ? "" : " (use 'sinkhole log on' or 'sinkhole start log')");
+    glog("Set your device DNS to " IPSTR "\n", IP2STR(&ip_info.ip));
+    status_display_show_status("Sinkhole On");
+
+    if (enable_https) {
+        // The TLS server terminates the connections that the interception
+        // list points at this board.
+        if (sinkhole_https_start_auto(SINKHOLE_HTTPS_MODE_OFF, 0)) {
+            glog("TLS interception enabled\n");
+        } else {
+            glog("TLS interception requested but not started\n");
+            dns_sinkhole_set_intercept(false);
+        }
+    }
+    return true;
+}
+
+// Shared stop path for 'sinkhole stop' and 'certscan stop'.
+static bool sinkhole_stop_common(bool quiet) {
+    sinkhole_https_stop();
+
+    dns_server_handle_t h = dns_handle_take();
+    if (!h) {
+        if (!quiet) glog("Sinkhole not running\n");
+        return false;
+    }
+
+    dns_sinkhole_save_stats();
+    stop_dns_server(h);
+    (void)ap_manager_restore_after_attack("sinkhole stop");
+    if (!quiet) {
+        glog("DNS sinkhole stopped\n");
+        TERMINAL_VIEW_ADD_TEXT("DNS sinkhole stopped\n");
+        status_display_show_status("Sinkhole Off");
+    }
+    return true;
+}
+
 void handle_sinkhole_cmd(int argc, char **argv) {
     if (argc < 2) {
         glog("Usage: sinkhole <start|stop|status|stats|reload|add|remove|log|download|help>\n");
@@ -478,7 +675,8 @@ void handle_sinkhole_cmd(int argc, char **argv) {
 
     if (strcmp(argv[1], "help") == 0) {
         glog("DNS Sinkhole Commands:\n");
-        glog("  start [dns] [log]  - Start sinkhole; add log for query CSV\n");
+        glog("  start [dns] [log] [https]  - Start sinkhole; add log for query CSV,\n");
+        glog("                               add https to also intercept TLS\n");
         glog("  stop               - Stop sinkhole and restore AP\n");
         glog("  status             - Show running status\n");
         glog("  stats              - Show detailed stats\n");
@@ -487,92 +685,29 @@ void handle_sinkhole_cmd(int argc, char **argv) {
         glog("  add <domain>       - Add domain to blocklist\n");
         glog("  remove <domain>    - Remove domain from blocklist\n");
         glog("  reload             - Reload blocklist (stop & restart)\n");
+        glog("  https <on|off|status> - TLS server for intercepted hostnames\n");
+        glog("  https key <number> - Build ca.key from a raw EC private scalar,\n");
+        glog("                       verified against ca.crt\n");
+        glog("  intercept <add|remove|list> <domain> - Hostnames to intercept\n");
         return;
     }
 
     if (strcmp(argv[1], "start") == 0) {
-        esp_netif_ip_info_t ip_info;
-        esp_netif_t *netif = dns_sinkhole_find_netif(&ip_info);
-        if (!netif) {
-            glog("No connected network interface.\n");
-            glog("Use 'connect' to join WiFi or connect Ethernet first.\n");
-            status_display_show_status("No Network");
-            return;
-        }
-
-        if (!sd_card_exists(SINKHOLE_BLOCKLIST_PATH)) {
-            if (sd_card_manager.is_initialized) {
-                glog("No blocklist found on SD card.\n");
-                glog("Use 'sinkhole download' to get one, or start anyway for proxy mode.\n");
-            } else {
-                glog("No SD card mounted and no blocklist available.\n");
-                glog("Running in proxy-only mode (no blocking).\n");
-            }
-        }
-
-        {
-            dns_server_handle_t h = dns_handle_take();
-            if (h) stop_dns_server(h);
-        }
-
-        esp_netif_t *sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
-        if (sta) {
-            ap_manager_stop_services_keep_wifi();
-            esp_wifi_set_mode(WIFI_MODE_STA);
-            esp_wifi_start();
-            vTaskDelay(pdMS_TO_TICKS(500));
-        }
-
         uint32_t upstream = 0;
         bool enable_logging = false;
+        bool enable_https = false;
         for (int i = 2; i < argc; i++) {
             if (strcmp(argv[i], "log") == 0) {
                 enable_logging = true;
+            } else if (strcmp(argv[i], "https") == 0) {
+                enable_https = true;
             } else {
                 upstream = ipaddr_addr(argv[i]);
             }
         }
-
-        dns_sinkhole_config_t cfg = {
-            .bind_ip = ip_info.ip.addr,
-            .upstream_dns = upstream,
-            .redirect_ip = 0,
-            .enable_logging = enable_logging,
-            .auto_stats = true,
-        };
-        dns_handle = start_dns_sinkhole(&cfg);
-        if (dns_handle) {
-            glog("DNS sinkhole started on " IPSTR ":53\n",
-                 IP2STR(&ip_info.ip));
-            TERMINAL_VIEW_ADD_TEXT("DNS sinkhole started on " IPSTR ":53\n",
-                 IP2STR(&ip_info.ip));
-            if (!sd_card_exists(SINKHOLE_BLOCKLIST_PATH)) {
-                glog("Running in proxy mode (no blocklist)\n");
-            }
-            glog("Query logging: %s%s\n",
-                 enable_logging ? "ON" : "OFF",
-                 enable_logging ? "" : " (use 'sinkhole log on' or 'sinkhole start log')");
-            glog("Set your device DNS to " IPSTR "\n", IP2STR(&ip_info.ip));
-            status_display_show_status("Sinkhole On");
-        } else {
-            (void)ap_manager_restore_after_attack("sinkhole fail");
-            glog("Failed to start DNS sinkhole\n");
-            status_display_show_status("Sinkhole Fail");
-        }
+        sinkhole_start_common(enable_https, enable_logging, upstream, false);
     } else if (strcmp(argv[1], "stop") == 0) {
-        {
-            dns_server_handle_t h = dns_handle_take();
-            if (h) {
-                dns_sinkhole_save_stats();
-                stop_dns_server(h);
-                (void)ap_manager_restore_after_attack("sinkhole stop");
-                glog("DNS sinkhole stopped\n");
-                TERMINAL_VIEW_ADD_TEXT("DNS sinkhole stopped\n");
-                status_display_show_status("Sinkhole Off");
-            } else {
-                glog("Sinkhole not running\n");
-            }
-        }
+        sinkhole_stop_common(false);
     } else if (strcmp(argv[1], "status") == 0) {
         if (dns_sinkhole_is_running()) {
             uint32_t total = 0, blocked = 0;
@@ -590,10 +725,111 @@ void handle_sinkhole_cmd(int argc, char **argv) {
             }
             glog("  Logging:  %s\n", dns_sinkhole_get_logging() ? "ON" : "OFF");
             glog("  Blocklist: %s\n", sd_card_exists(SINKHOLE_BLOCKLIST_PATH) ? "present" : "none");
+            glog("  Intercept: %s\n", dns_sinkhole_get_intercept() ? "ON" : "OFF");
         } else {
             glog("=== DNS Sinkhole Status ===\n");
             glog("  State: STOPPED\n");
             glog("  Blocklist: %s\n", sd_card_exists(SINKHOLE_BLOCKLIST_PATH) ? "present" : "none");
+        }
+        sinkhole_https_print_status();
+    } else if (strcmp(argv[1], "https") == 0) {
+        if (argc < 3) {
+            glog("Usage: sinkhole https <on|off|status> [static|ca] [port]\n");
+            return;
+        }
+        if (strcmp(argv[2], "status") == 0) {
+            sinkhole_https_print_status();
+            return;
+        }
+        if (strcmp(argv[2], "off") == 0) {
+            sinkhole_https_stop();
+            dns_sinkhole_set_intercept(false);
+            glog("HTTPS interception stopped\n");
+            status_display_show_status("HTTPS Off");
+            return;
+        }
+        if (strcmp(argv[2], "key") == 0) {
+            if (argc < 4) {
+                glog("Usage: sinkhole https key <number>\n");
+                glog("Derives ca.key from a raw EC private scalar and checks it\n");
+                glog("against the certificate in ca.crt before accepting it.\n");
+                glog("Accepts decimal (4) or hex (0x4).\n");
+                return;
+            }
+            char detail[160] = "";
+            if (sinkhole_https_import_scalar(argv[3], detail, sizeof(detail))) {
+                glog("CA key ready: %s\n", detail);
+                glog("Start the scan with 'sinkhole https on ca'\n");
+            } else {
+                glog("Rejected: %s\n", detail);
+            }
+            return;
+        }
+        if (strcmp(argv[2], "on") != 0) {
+            glog("Usage: sinkhole https <on|off|status|key> [static|ca] [port]\n");
+            return;
+        }
+
+        sinkhole_https_mode_t mode = SINKHOLE_HTTPS_MODE_OFF;
+        uint16_t port = 0;
+        for (int i = 3; i < argc; i++) {
+            if (strcmp(argv[i], "static") == 0) {
+                mode = SINKHOLE_HTTPS_MODE_STATIC;
+            } else if (strcmp(argv[i], "ca") == 0) {
+                mode = SINKHOLE_HTTPS_MODE_CA;
+            } else {
+                int p = atoi(argv[i]);
+                if (p > 0 && p < 65536) port = (uint16_t)p;
+            }
+        }
+
+        if (sinkhole_https_start_auto(mode, port)) {
+            dns_sinkhole_set_intercept(true);
+            glog("HTTPS interception enabled on port %u\n",
+                 (unsigned)sinkhole_https_port());
+            glog("Add hostnames with 'sinkhole intercept add <domain>'\n");
+            status_display_show_status("HTTPS On");
+        }
+    } else if (strcmp(argv[1], "intercept") == 0) {
+        if (argc < 3) {
+            glog("Usage: sinkhole intercept <add|remove|list> [domain]\n");
+            return;
+        }
+        if (strcmp(argv[2], "list") == 0) {
+            char list[SINKHOLE_INTERCEPT_MAX * (SINKHOLE_MAX_DOMAIN + 1)];
+            size_t len = dns_sinkhole_list_intercept(list, sizeof(list));
+            if (len == 0) {
+                glog("No hostnames queued for interception\n");
+                return;
+            }
+            char *line = list;
+            while (*line) {
+                char *nl = strchr(line, '\n');
+                if (nl) *nl = '\0';
+                if (*line) glog("  %s\n", line);
+                if (!nl) break;
+                line = nl + 1;
+            }
+            return;
+        }
+        if (argc < 4) {
+            glog("Usage: sinkhole intercept <add|remove> <domain>\n");
+            return;
+        }
+        if (strcmp(argv[2], "add") == 0) {
+            if (dns_sinkhole_add_intercept(argv[3])) {
+                glog("Added %s to the intercept list\n", argv[3]);
+            } else {
+                glog("Could not add %s (already listed or list full)\n", argv[3]);
+            }
+        } else if (strcmp(argv[2], "remove") == 0) {
+            if (dns_sinkhole_remove_intercept(argv[3])) {
+                glog("Removed %s from the intercept list\n", argv[3]);
+            } else {
+                glog("%s was not in the intercept list\n", argv[3]);
+            }
+        } else {
+            glog("Usage: sinkhole intercept <add|remove|list> [domain]\n");
         }
     } else if (strcmp(argv[1], "stats") == 0) {
         if (sd_card_manager.is_initialized && sd_card_exists(SINKHOLE_STATS_PATH)) {
@@ -724,4 +960,306 @@ void handle_sinkhole_cmd(int argc, char **argv) {
     } else {
         glog("Unknown command. Use 'sinkhole help' for options.\n");
     }
+}
+
+// --- Cert Scan -----------------------------------------------------------
+//
+// A thin facade over the sinkhole and the HTTPS interception server so the
+// whole "which devices still trust a revoked CA" workflow is one word.
+
+// Discovers hosts when nothing is known yet, so 'certscan check' is a single
+// command rather than "run scanlocal, then come back".
+static bool certscan_ensure_hosts(void) {
+    if (local_scan_get_count() > 0) return true;
+
+    if (!local_scan_is_running()) {
+        glog("Discovering hosts first (scanlocal)...\n");
+        if (local_scan_start_async() != ESP_OK) {
+            glog("Could not start host discovery\n");
+            return false;
+        }
+    }
+
+    for (int i = 0; i < 90; i++) {
+        if (local_scan_check_done()) break;
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+    local_scan_finish_async();
+    return local_scan_get_count() > 0;
+}
+
+// Walks every host the last local scan found, connects to 443 and reports any
+// certificate that chains to a compromised intermediate.  No arguments, no
+// host list to type in.
+static void certscan_check_network(uint16_t port) {
+    if (!certscan_ensure_hosts()) {
+        glog("No hosts found to check. Join a network with 'connect' first.\n");
+        status_display_show_status("No Hosts");
+        return;
+    }
+
+    int count = local_scan_get_count();
+    glog("Checking %d host(s) on port %u...\n", count, (unsigned)port);
+    status_display_show_status("Checking...");
+
+    cert_check_summary_t summary;
+    cert_check_sweep(port, &summary, NULL);
+
+    glog("Checked %d host(s), %d answered on :%u, %d affected\n",
+         summary.hosts, summary.answered, (unsigned)port, summary.affected);
+
+    if (summary.answered == 0) {
+        // Nothing is listening, which is normal on a network with no web servers.
+        glog("No host is serving HTTPS on that port, so there is nothing to compare.\n");
+        status_display_show_status("No HTTPS");
+    } else if (summary.affected == 0) {
+        glog("No host presented a certificate from a revoked intermediate.\n");
+        status_display_show_status("All Clear");
+    } else {
+        glog("%d host(s) still serve a certificate issued by a revoked CA.\n",
+             summary.affected);
+        status_display_show_status("Cert Found");
+    }
+}
+
+static void certscan_print_requirements(void) {
+    glog("Cert Scan needs three files in %s:\n", SINKHOLE_HTTPS_DIR_PATH);
+    glog("  ca.crt      the CA certificate   (certscan cacert <url>)\n");
+    glog("  ca.key      its private key      (certscan key <number>)\n");
+    glog("  server.key  a leaf key           (certscan genleaf)\n");
+}
+
+// Downloads a PEM certificate to ca.crt.  Reuses the blocklist fetcher, which
+// already handles https, redirects and the certificate bundle.
+static void certscan_fetch_cacert(const char *url) {
+    if (!url || !url[0]) {
+        glog("Usage: certscan cacert <url>\n");
+        return;
+    }
+
+    sd_card_create_directory(SINKHOLE_DIR_PATH);
+    sd_card_create_directory(SINKHOLE_HTTPS_DIR_PATH);
+
+    FILE *f = fopen(SINKHOLE_HTTPS_CA_CERT_PATH, "w");
+    if (!f) {
+        glog("Cannot open %s\n", SINKHOLE_HTTPS_CA_CERT_PATH);
+        return;
+    }
+
+    int lines = 0;
+    int bytes = 0;
+    bool ok = sinkhole_tls_get(url, f, &lines, &bytes);
+    fclose(f);
+
+    if (!ok || bytes <= 0) {
+        remove(SINKHOLE_HTTPS_CA_CERT_PATH);
+        glog("Download failed\n");
+        status_display_show_status("Cert Fail");
+        return;
+    }
+
+    glog("Saved %d bytes to %s\n", bytes, SINKHOLE_HTTPS_CA_CERT_PATH);
+    glog("Next: 'certscan key <number>'\n");
+    status_display_show_status("Cert Saved");
+}
+
+void handle_certscan_cmd(int argc, char **argv) {
+    if (argc < 2 || strcmp(argv[1], "help") == 0) {
+        glog("Cert Scan: see which devices and hosts still accept revoked certificates\n");
+        glog("  certscan devices [domain ...] Test devices, optionally queueing names\n");
+        glog("  certscan hosts                Check every discovered host for a\n");
+        glog("                                certificate from a revoked CA\n");
+        glog("  certscan list                 Show devices and whether they accepted\n");
+        glog("  certscan stop                 Stop the scan and restore AP services\n");
+        glog("  certscan clear                Reset the counters\n");
+        glog("  certscan add <domain>         Queue a hostname to intercept\n");
+        glog("  certscan remove <domain>      Remove a queued hostname\n");
+        glog("  certscan key <number>         Build ca.key from a raw EC private scalar\n");
+        glog("  certscan cacert <url>         Download the CA certificate to ca.crt\n");
+        glog("  certscan genleaf              Generate server.key on the device\n");
+        glog("  certscan setup                Show what is missing and fix what it can\n");
+        glog("\n");
+        glog("A device that answered with a request accepted the certificate it was\n");
+        glog("given, which means its trust store is out of date.\n");
+        return;
+    }
+
+    if (strcmp(argv[1], "devices") == 0 || strcmp(argv[1], "start") == 0) {
+        if (!sd_card_exists(SINKHOLE_HTTPS_CA_CERT_PATH) ||
+            !sd_card_exists(SINKHOLE_HTTPS_CA_KEY_PATH) ||
+            !sd_card_exists(SINKHOLE_HTTPS_LEAF_KEY_PATH)) {
+            certscan_print_requirements();
+            return;
+        }
+
+        if (!sinkhole_start_common(true, false, 0, false)) {
+            return;
+        }
+        if (!sinkhole_https_is_running()) {
+            glog("Cert Scan could not start TLS, nothing is being intercepted\n");
+            return;
+        }
+
+        if (argc <= 2) {
+            // No hostname given: intercept everything, so the device's own
+            // traffic is what gets tested.  This is the zero-config path.
+            dns_sinkhole_set_intercept_all(true);
+            glog("No hostname given: answering every name with this board\n");
+            glog("Whatever the device resolves is tested. It will have no internet\n");
+            glog("until the scan stops, which is expected.\n");
+        } else {
+            int queued = 0;
+            for (int i = 2; i < argc; i++) {
+                if (dns_sinkhole_add_intercept(argv[i])) {
+                    glog("Queued %s\n", argv[i]);
+                    queued++;
+                } else {
+                    glog("Could not queue %s (already listed or list full)\n", argv[i]);
+                }
+            }
+            if (queued == 0) {
+                glog("Nothing queued: 'certscan add <domain>'\n");
+            }
+        }
+
+        glog("Cert Scan running\n");
+        glog("Results: 'certscan list'\n");
+        status_display_show_status("Cert Scan On");
+        return;
+    }
+
+    if (strcmp(argv[1], "stop") == 0) {
+        bool was_running = dns_sinkhole_is_running() || sinkhole_https_is_running();
+        sinkhole_stop_common(true);
+        if (was_running) {
+            glog("Cert Scan stopped\n");
+            status_display_show_status("Cert Scan Off");
+        } else {
+            glog("Cert Scan is not running\n");
+        }
+        return;
+    }
+
+    if (strcmp(argv[1], "list") == 0 || strcmp(argv[1], "status") == 0) {
+        sinkhole_https_print_status();
+        return;
+    }
+
+    if (strcmp(argv[1], "clear") == 0) {
+        sinkhole_https_reset_stats();
+        glog("Cert Scan results cleared\n");
+        return;
+    }
+
+    if (strcmp(argv[1], "hosts") == 0 || strcmp(argv[1], "check") == 0) {
+        uint16_t port = CERT_CHECK_DEFAULT_PORT;
+        if (argc > 2) {
+            int p = atoi(argv[2]);
+            if (p > 0 && p < 65536) port = (uint16_t)p;
+        }
+        certscan_check_network(port);
+        return;
+    }
+
+    if (strcmp(argv[1], "add") == 0) {
+        if (argc < 3) {
+            glog("Usage: certscan add <domain>\n");
+            return;
+        }
+        if (!dns_sinkhole_is_running()) {
+            glog("Start the scan first: certscan devices\n");
+            return;
+        }
+        if (dns_sinkhole_add_intercept(argv[2])) {
+            glog("Queued %s\n", argv[2]);
+        } else {
+            glog("Could not queue %s (already listed or list full)\n", argv[2]);
+        }
+        return;
+    }
+
+    if (strcmp(argv[1], "remove") == 0) {
+        if (argc < 3) {
+            glog("Usage: certscan remove <domain>\n");
+            return;
+        }
+        if (dns_sinkhole_remove_intercept(argv[2])) {
+            glog("Removed %s\n", argv[2]);
+        } else {
+            glog("%s was not in the list\n", argv[2]);
+        }
+        return;
+    }
+
+    if (strcmp(argv[1], "key") == 0) {
+        if (argc < 3) {
+            glog("Usage: certscan key <number>\n");
+            glog("Derives ca.key from a raw EC private scalar and checks it against\n");
+            glog("ca.crt before accepting it. Decimal (4) or hex (0x4).\n");
+            return;
+        }
+        char detail[160] = "";
+        if (sinkhole_https_import_scalar(argv[2], detail, sizeof(detail))) {
+            glog("CA key ready: %s\n", detail);
+
+            // Provision the leaf key too, so one command leaves everything
+            // needed to start a scan.
+            if (!sd_card_exists(SINKHOLE_HTTPS_LEAF_KEY_PATH)) {
+                char leaf_detail[160] = "";
+                if (sinkhole_https_generate_leaf_key(leaf_detail, sizeof(leaf_detail))) {
+                    glog("Leaf key: %s\n", leaf_detail);
+                } else {
+                    glog("Leaf key missing: %s\n", leaf_detail);
+                }
+            }
+            glog("Ready. Start with 'certscan devices <domain>'\n");
+        } else {
+            glog("Rejected: %s\n", detail);
+        }
+        return;
+    }
+
+    if (strcmp(argv[1], "genleaf") == 0) {
+        char detail[160] = "";
+        if (sinkhole_https_generate_leaf_key(detail, sizeof(detail))) {
+            glog("Leaf key: %s\n", detail);
+        } else {
+            glog("Failed: %s\n", detail);
+        }
+        return;
+    }
+
+    if (strcmp(argv[1], "cacert") == 0) {
+        if (argc < 3) {
+            glog("Usage: certscan cacert <url>\n");
+            glog("Downloads a PEM certificate and saves it as ca.crt.\n");
+            return;
+        }
+        certscan_fetch_cacert(argv[2]);
+        return;
+    }
+
+    if (strcmp(argv[1], "setup") == 0) {
+        // One command to get everything in place that can be done on-device.
+        glog("Setup status:\n");
+        glog("  ca.crt      %s\n", sd_card_exists(SINKHOLE_HTTPS_CA_CERT_PATH) ? "present" : "missing");
+        glog("  ca.key      %s\n", sd_card_exists(SINKHOLE_HTTPS_CA_KEY_PATH) ? "present" : "missing");
+        glog("  server.key  %s\n", sd_card_exists(SINKHOLE_HTTPS_LEAF_KEY_PATH) ? "present" : "missing");
+        if (!sd_card_exists(SINKHOLE_HTTPS_LEAF_KEY_PATH)) {
+            glog("\nGenerating the leaf key...\n");
+            char detail[160] = "";
+            if (sinkhole_https_generate_leaf_key(detail, sizeof(detail))) {
+                glog("Leaf key: %s\n", detail);
+            }
+        }
+        if (!sd_card_exists(SINKHOLE_HTTPS_CA_CERT_PATH)) {
+            glog("\nAdd the CA certificate with 'certscan cacert <url>'\n");
+        }
+        if (!sd_card_exists(SINKHOLE_HTTPS_CA_KEY_PATH)) {
+            glog("Add the CA key with 'certscan key <number>'\n");
+        }
+        return;
+    }
+
+    glog("Unknown command. Use 'certscan help' for options.\n");
 }

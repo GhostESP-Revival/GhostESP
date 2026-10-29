@@ -198,15 +198,32 @@ bool wifi_channels_is_monitor_channel(uint8_t channel) {
     return wifi_channels_is_country_channel(channel);
 }
 
+#if defined(CONFIG_SOC_WIFI_SUPPORT_5G)
+// ESP-IDF refuses to move an AP interface onto a DFS channel ("Set channel to
+// a DFS channel is not allowed in ap mode"). Attacks that transmit through
+// WIFI_IF_AP (beacon spam, deauth, karma, ...) must therefore keep DFS out of
+// their hop plan; otherwise every DFS slot is wasted and logs an error.
+// STA-only operation can follow a DFS AP, so DFS stays usable there.
+static bool tx_mode_rejects_dfs(void) {
+    wifi_mode_t mode = WIFI_MODE_NULL;
+    if (esp_wifi_get_mode(&mode) != ESP_OK) {
+        // Driver not initialized yet: the AP is normally started before the
+        // first channel hop, so assume the restrictive case.
+        return true;
+    }
+    return (mode & WIFI_MODE_AP) != 0;
+}
+#endif
+
 bool wifi_channels_is_tx_channel(uint8_t channel) {
-    // DFS channels (52-144) are allowed for TX. The active country already gates
-    // which 5 GHz channels are usable via wifi_channels_is_monitor_channel(), and
-    // esp_wifi_set_channel() remains the final authority. Blocking DFS here
-    // silently disabled every attack on a DFS target.
     if (!wifi_channels_is_monitor_channel(channel)) {
         return false;
     }
 #if defined(CONFIG_SOC_WIFI_SUPPORT_5G)
+    // DFS channels are only TX-capable without an active AP interface.
+    if (wifi_channels_is_dfs(channel) && tx_mode_rejects_dfs()) {
+        return false;
+    }
     // Channels >= 149 are only usable in domains that also permit non-DFS
     // upper band use, so keep gating them on the country.
     if (channel >= 149) {
