@@ -397,6 +397,11 @@ static void beacon_spam_list_task(void *param) {
 // Start beacon spam with a specific SSID
 void beacon_spam_start(const char *ssid) {
     if (!beacon_task_running) {
+        // The STA-only attack radio starts the STA driver without associating.
+        // Keep the auto-reconnect worker from trying to join the saved network
+        // (and locking the radio to that AP's channel) while the attack runs.
+        wifi_manager_set_reconnect_hold(true);
+
         ap_manager_stop_services();
         glog("Starting beacon transmission...\n");
         status_display_show_status("Beacon Starting");
@@ -422,6 +427,7 @@ void beacon_spam_start(const char *ssid) {
             beacon_task_running = false;
             esp_wifi_stop();
             (void)ap_manager_restore_after_attack("beacon start failed");
+            wifi_manager_set_reconnect_hold(false);
             return;
         }
         BaseType_t rc = xTaskCreate_psram(beacon_spam_task, "beacon_task", 3072, (void *)ssid_copy, 5, &beacon_task_handle);
@@ -433,6 +439,7 @@ void beacon_spam_start(const char *ssid) {
             free(ssid_copy);
             esp_wifi_stop();
             (void)ap_manager_restore_after_attack("beacon start failed");
+            wifi_manager_set_reconnect_hold(false);
             return;
         }
         beacon_task_ssid = ssid_copy;
@@ -481,6 +488,7 @@ void beacon_spam_stop(void) {
 
         // Restore the normal AP profile (STA-only attack radio is dropped)
         (void)ap_manager_restore_after_attack("beacon stop");
+        wifi_manager_set_reconnect_hold(false);
         status_display_show_status("Beacon Stopped");
         ghostscript_emit_event("attack_stopped", "beacon");
     }
@@ -496,7 +504,11 @@ void beacon_spam_start_list(void) {
     beacon_spam_stop();
     // Notify user that list-based beacon spam is starting
     glog("Starting beacon spam list (%d SSIDs)...\n", g_beacon_list_count);
-    
+
+    // See beacon_spam_start(): do not let the saved network reconnect while
+    // the STA-only attack radio is hopping channels.
+    wifi_manager_set_reconnect_hold(true);
+
     ap_manager_stop_services();
 
     // Attack radio profile: STA-only (see beacon_spam_start).
@@ -517,6 +529,7 @@ void beacon_spam_start_list(void) {
         beacon_task_handle = NULL;
         esp_wifi_stop();
         (void)ap_manager_restore_after_attack("beacon list start failed");
+        wifi_manager_set_reconnect_hold(false);
         return;
     }
     rgb_manager_set_color(&rgb_manager, 0, 255, 0, 0, false);

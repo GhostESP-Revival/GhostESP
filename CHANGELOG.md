@@ -10,6 +10,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 
 - Reworked `scanlocal` into a full local host scan: it finds hosts with ARP, then identifies each one by NetBIOS name, mDNS hostname, ICMP TTL and mDNS/SSDP services
 - Local scan results now show MAC, vendor, hostname, OS hint and services for each host
+- Vendor names now appear in AP/station scans, attack target lists, Ethernet ARP results, port/SNMP scans, GATT scans and Sentry rows; randomized MACs are labelled "Private address"
 - Added `scanarp stop` and `scanlocal stop`
 - Added `forgetwifi` command to clear the saved WiFi network and disconnect from it
 - Cloud Store now shows a clear "No internet. Connect GhostESP to WiFi" message when opened, refreshed or installing without a connection
@@ -24,6 +25,8 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 ### Changed
 - Sentry now detects Google Nest cameras and doorbells over BLE and over WiFi - pre2
 - Sentry rows now show how long ago each device was last seen - pre2
+- Beacon spam now uses a STA-only attack radio profile, so it can hop DFS channels and no longer broadcasts the device's own AP
+- Updated the WebUI logo
 
 ### Fixed
 - Fixed `scanarp` over the CLI immediately printing "ARP scan cancelled" and scanning nothing
@@ -34,7 +37,11 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Fixed touch drag scrolling in the Sentry list and detail views
 - Fixed touch scrolling and the Back row not working in the Local Scan host detail view
 - Fixed CrowPanel Advance 4.3" V1.1 backlight initialization - @patlaluci-prog (#432)
-- Fixed HTML uploaded from the Flipper app being truncated or discarded when it contained long/minified lines, which made the uploaded Evil Portal page impossible to start
+- Fixed `evilportal -c sethtmlstr` dropping long or minified HTML, which made Evil Portal pages uploaded from the Flipper app impossible to start
+- Fixed 5 GHz DFS channel handling for TX attacks: DFS is usable in STA-only attacks and skipped cleanly while an AP interface is active
+- Fixed Cert Scan reliability: concurrent sweeps no longer share TLS contexts, stalled hosts time out, and the CA chain is completed to the trusted emSign root
+- Fixed HTTPS sinkhole and Cert Scan state across restarts, including intercept-list persistence and stale certificate state
+- Fixed beacon spam trying to reconnect to the saved WiFi network while the attack was running
 
 ## v2.2.2
 
