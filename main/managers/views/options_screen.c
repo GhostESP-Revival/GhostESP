@@ -2878,8 +2878,21 @@ static void cert_scan_cancel_cb(void);
 static bool cert_scan_cancel_requested = false;
 static bool cert_scan_discovery_phase = false;
 
-static cert_scan_hit_t cert_scan_hits[cert_scan_MAX_REPORT];
+// Allocated on the first certificate scan so the report list does not sit in
+// .bss for boards that never use it.
+static cert_scan_hit_t *cert_scan_hits = NULL;
 static volatile int cert_scan_hit_count = 0;
+
+static bool cert_scan_hits_ensure(void) {
+    if (cert_scan_hits) return true;
+    cert_scan_hits = heap_caps_calloc(cert_scan_MAX_REPORT,
+                                      sizeof(*cert_scan_hits),
+                                      MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!cert_scan_hits) {
+        cert_scan_hits = calloc(cert_scan_MAX_REPORT, sizeof(*cert_scan_hits));
+    }
+    return cert_scan_hits != NULL;
+}
 static volatile int cert_scan_scanned = 0;
 static volatile int cert_scan_scan_total = 0;
 static volatile int cert_scan_tls_count = 0;
@@ -2907,7 +2920,7 @@ static void cert_scan_show_check_results(void) {
     } else if (hits == 0) {
         detail_view_add_info(cert_scan_detail_view, "Result", "All clear");
     } else {
-        for (int i = 0; i < hits && i < cert_scan_MAX_REPORT; i++) {
+        for (int i = 0; cert_scan_hits && i < hits && i < cert_scan_MAX_REPORT; i++) {
             char ident[48];
             // Fixed precisions: the destination is smaller than the worst case
             // the compiler assumes for these fields.
@@ -3165,7 +3178,8 @@ static void cert_scan_check_task(void *arg) {
     cert_scan_scanned = summary.hosts;
     cert_scan_tls_count = summary.answered;
     cert_scan_hit_count = summary.hit_count;
-    for (int i = 0; i < summary.hit_count && i < cert_scan_MAX_REPORT; i++) {
+    bool have_hits = cert_scan_hits_ensure();
+    for (int i = 0; have_hits && i < summary.hit_count && i < cert_scan_MAX_REPORT; i++) {
         snprintf(cert_scan_hits[i].ip, sizeof(cert_scan_hits[i].ip), "%.15s",
                  summary.hits[i].ip);
         snprintf(cert_scan_hits[i].name, sizeof(cert_scan_hits[i].name), "%.23s",
