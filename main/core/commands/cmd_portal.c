@@ -533,8 +533,8 @@ static void sinkhole_https_print_status(void) {
     if (minted) {
         glog("  Minted:    %lu\n", (unsigned long)minted);
     }
-    const char *last = sinkhole_https_last_host();
-    if (last && last[0]) {
+    char last[SINKHOLE_HTTPS_MAX_HOST];
+    if (sinkhole_https_last_host(last, sizeof(last)) > 0) {
         glog("  Last host: %s\n", last);
     }
 

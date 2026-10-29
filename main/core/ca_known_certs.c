@@ -57,3 +57,39 @@ const ca_known_cert_t *ca_known_certs(size_t *count) {
     if (count) *count = sizeof(s_certs) / sizeof(s_certs[0]);
     return s_certs;
 }
+
+// Parent of the eight TLS intermediates.  Public certificate only.
+//
+// SHA-256: 3094025792039a68af6e553686410bdab7c0d4a36b9084cba64202e35d6ebbdd
+// Subject: CN=emSign Root TLS CA - G3,O=eMudhra Technologies Limited,C=IN
+// Issuer:  CN=emSign ECC Root CA - G3,OU=emSign PKI,O=eMudhra Technologies Limited,C=IN
+//
+// Checked when it was added: the certificate signs all six TLS intermediates
+// in the table above, and is itself signed by the "emSign ECC Root CA - G3"
+// root that is present in the public trust stores.
+static const char s_tls_parent_pem[] =
+    "-----BEGIN CERTIFICATE-----\n"
+    "MIIDdDCCAvmgAwIBAgIQAJYaPvsTWVdu0EAFtGhKWzAKBggqhkjOPQQDAzBrMQsw\n"
+    "CQYDVQQGEwJJTjETMBEGA1UECxMKZW1TaWduIFBLSTElMCMGA1UEChMcZU11ZGhy\n"
+    "YSBUZWNobm9sb2dpZXMgTGltaXRlZDEgMB4GA1UEAxMXZW1TaWduIEVDQyBSb290\n"
+    "IENBIC0gRzMwHhcNMjQwNzExMTU0MzM2WhcNMzkwNzA5MTgzMDAwWjBWMQswCQYD\n"
+    "VQQGEwJJTjElMCMGA1UECgwcZU11ZGhyYSBUZWNobm9sb2dpZXMgTGltaXRlZDEg\n"
+    "MB4GA1UEAwwXZW1TaWduIFJvb3QgVExTIENBIC0gRzMwdjAQBgcqhkjOPQIBBgUr\n"
+    "gQQAIgNiAARfD9w/q1cWxL6D9bMGH6CQ4u+gAV6GN9s+PwQx9Bl4hC+0iU8QOk8m\n"
+    "WO/RwXQy10DCSxT8vSIJClHKp+Ao4qJKdYeV0SwZ7LMQziyLfxIUOY6Grja/sQFw\n"
+    "LKYf8EdDXAyjggF1MIIBcTAfBgNVHSMEGDAWgBR8XQKEE9TMipuBzhccLikenEhj\n"
+    "QjAdBgNVHQ4EFgQU4TqrIXzx401UrtRyt/2LWUIgkFQwHQYDVR0lBBYwFAYIKwYB\n"
+    "BQUHAwEGCCsGAQUFBwMCMD0GA1UdIAQ2MDQwMgYEVR0gADAqMCgGCCsGAQUFBwIB\n"
+    "FhxodHRwOi8vcmVwb3NpdG9yeS5lbXNpZ24uY29tMHgGCCsGAQUFBwEBBGwwajAi\n"
+    "BggrBgEFBQcwAYYWaHR0cDovL29jc3AuZW1zaWduLmNvbTBEBggrBgEFBQcwAoY4\n"
+    "aHR0cDovL3JlcG9zaXRvcnkuZW1zaWduLmNvbS9jZXJ0cy9lbVNpZ25FQ0NSb290\n"
+    "Q0FHMy5jcnQwMwYDVR0fBCwwKjAooCagJIYiaHR0cDovL2NybC5lbXNpZ24uY29t\n"
+    "P1Jvb3RDQUczLmNybDAOBgNVHQ8BAf8EBAMCAQYwEgYDVR0TAQH/BAgwBgEB/wIB\n"
+    "ATAKBggqhkjOPQQDAwNpADBmAjEAt9CIpRGp46QHQYDUBnLKw+vvK0/h9vmilEAg\n"
+    "TroUl/anH4x2rXHqiCtBTBfgKDegAjEA8WpG1LTZdAIL0FSYqxXeREaeTSxEofM0\n"
+    "1jJH3jGvCXC79LU9UPJ2o3TU+UIj2gMV\n"
+    "-----END CERTIFICATE-----\n";
+
+const char *ca_known_tls_parent_pem(void) {
+    return s_tls_parent_pem;
+}

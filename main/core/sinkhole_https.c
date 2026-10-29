@@ -56,9 +56,9 @@ static const char *TAG = "sinkhole_https";
 #define SINKHOLE_HTTPS_PAGE_MAX   (16 * 1024)
 #define SINKHOLE_HTTPS_CTRL_PORT  32770
 
-// A minted leaf stays referenced by the handshake that asked for it, so a slot
-// is only recycled once it has been idle for a while.
-#define SINKHOLE_HTTPS_SLOT_IDLE_US (5 * 1000 * 1000LL)
+// A minted leaf stays referenced by the handshake that asked for it.  Slots
+// are never recycled (httpd gives no handshake-complete callback); a restart
+// clears them.
 
 static httpd_handle_t s_httpd = NULL;
 static sinkhole_https_mode_t s_mode = SINKHOLE_HTTPS_MODE_OFF;
@@ -109,7 +109,6 @@ typedef struct {
     bool used;
     char host[SINKHOLE_HTTPS_MAX_HOST];
     mbedtls_x509_crt cert;
-    int64_t last_used_us;
 } mint_slot_t;
 
 static mint_slot_t s_slots[SINKHOLE_HTTPS_MINT_SLOTS];
@@ -224,6 +223,49 @@ static void release_ca_material(void) {
         mbedtls_x509_crt_free(&s_ca);
         s_ca_loaded = false;
     }
+}
+
+// The TLS intermediates were issued by "emSign Root TLS CA - G3", which is
+// itself cross-signed by a root that clients trust.  If ca.crt only holds the
+// intermediate, append that public parent so a client can build the chain;
+// without it the handshake is rejected no matter how old the trust store is.
+static bool add_parent_to_chain(const char *ca_pem, size_t ca_len) {
+    if (!s_ca_entry || !s_ca_entry->tls || s_ca.next != NULL) {
+        return true;
+    }
+
+    const char *parent = ca_known_tls_parent_pem();
+    size_t parent_len = parent ? strlen(parent) : 0;
+    if (parent_len == 0) {
+        return true;
+    }
+
+    size_t chain_len = ca_len + parent_len;
+    char *chain = malloc(chain_len + 1);
+    if (!chain) {
+        glog("Not enough memory to complete the CA chain\n");
+        return false;
+    }
+    memcpy(chain, ca_pem, ca_len);
+    memcpy(chain + ca_len, parent, parent_len);
+    chain[chain_len] = '\0';
+
+    mbedtls_x509_crt_free(&s_ca);
+    mbedtls_x509_crt_init(&s_ca);
+    int ret = mbedtls_x509_crt_parse(&s_ca, (const unsigned char *)chain,
+                                     chain_len + 1);
+    free(chain);
+    if (ret != 0) {
+        glog("Cannot add the parent certificate to the CA chain: -0x%04x\n",
+             (unsigned)(-ret));
+        mbedtls_x509_crt_free(&s_ca);
+        s_ca_entry = NULL;
+        return false;
+    }
+
+    s_ca_entry = ca_compromised_match(&s_ca);
+    glog("CA chain completed with emSign Root TLS CA - G3\n");
+    return true;
 }
 
 // Builds the "CN=host" subject and the issuer DN taken from the CA
@@ -348,13 +390,15 @@ cleanup:
 static mbedtls_x509_crt *get_leaf_for(const char *host) {
     for (int i = 0; i < SINKHOLE_HTTPS_MINT_SLOTS; i++) {
         if (s_slots[i].used && strcmp(s_slots[i].host, host) == 0) {
-            s_slots[i].last_used_us = esp_timer_get_time();
             return &s_slots[i].cert;
         }
     }
 
-    // Prefer a free slot, then the least recently used one that has been idle
-    // long enough to be safe to recycle.
+    // Only unused slots are taken.  A slot that has been used may still be
+    // referenced by a handshake that has not finished, and httpd gives no
+    // completion callback, so recycling it on a timer would be a
+    // use-after-free.  When the cache is full new names are refused; stopping
+    // the server clears the cache.
     int slot = -1;
     for (int i = 0; i < SINKHOLE_HTTPS_MINT_SLOTS; i++) {
         if (!s_slots[i].used) {
@@ -363,24 +407,8 @@ static mbedtls_x509_crt *get_leaf_for(const char *host) {
         }
     }
     if (slot < 0) {
-        int64_t oldest = INT64_MAX;
-        for (int i = 0; i < SINKHOLE_HTTPS_MINT_SLOTS; i++) {
-            if (s_slots[i].last_used_us < oldest) {
-                oldest = s_slots[i].last_used_us;
-                slot = i;
-            }
-        }
-        if (slot < 0) return NULL;
-
-        // A slot may still be referenced by a handshake that has not finished.
-        // Freeing it then would be a use-after-free, so refuse the new name
-        // instead of recycling a slot that is too recent.
-        if ((esp_timer_get_time() - s_slots[slot].last_used_us) <
-            SINKHOLE_HTTPS_SLOT_IDLE_US) {
-            ESP_LOGW(TAG, "certificate cache busy, skipping %s", host);
-            return NULL;
-        }
-        release_minted_slot(&s_slots[slot]);
+        ESP_LOGW(TAG, "certificate cache full, not minting for %s", host);
+        return NULL;
     }
 
     // Minting happens during the TLS handshake, so nothing here may be a large
@@ -404,13 +432,25 @@ static mbedtls_x509_crt *get_leaf_for(const char *host) {
     // Hand the client the leaf plus the CA chain that signed it.
     s->cert.next = &s_ca;
     snprintf(s->host, sizeof(s->host), "%s", host);
-    s->last_used_us = esp_timer_get_time();
     s->used = true;
+    // The caller (certificate selection) holds the lock.
     s_minted++;
     ESP_LOGI(TAG, "minted certificate for %s", host);
     return &s->cert;
 }
 #endif // CONFIG_MBEDTLS_X509_CRT_WRITE_C
+
+// Drops everything read from the card.  The "loaded" flags have to go with it:
+// the HTTPS server can be started again after a stop, and reusing freed
+// contexts (or a freed key) is a use-after-free.
+static void forget_material(void) {
+    release_static_material();
+#if CONFIG_MBEDTLS_X509_CRT_WRITE_C
+    release_ca_material();
+#endif
+    s_material_loaded = false;
+    s_loaded_mode = SINKHOLE_HTTPS_MODE_OFF;
+}
 
 // --- CA key import from a raw scalar --------------------------------------
 
@@ -721,8 +761,20 @@ static void note_accepted_client(const char *host) {
     unlock();
 }
 
+// Copies the most recent intercepted hostname under the lock.  Writers are the
+// TLS handshake task and the HTTP handler.
+static size_t last_host_copy(char *out, size_t out_len) {
+    if (!out || out_len == 0) return 0;
+    lock();
+    snprintf(out, out_len, "%s", s_last_host);
+    unlock();
+    return strlen(out);
+}
+
 static esp_err_t https_page_handler(httpd_req_t *req) {
+    lock();
     s_requests++;
+    unlock();
 
     char host[SINKHOLE_HTTPS_MAX_HOST] = "";
     if (req->method == HTTP_GET) {
@@ -734,10 +786,12 @@ static esp_err_t https_page_handler(httpd_req_t *req) {
         }
     }
     if (host[0] == '\0') {
-        snprintf(host, sizeof(host), "%s", s_last_host);
+        last_host_copy(host, sizeof(host));
     }
     if (host[0]) {
+        lock();
         snprintf(s_last_host, sizeof(s_last_host), "%s", host);
+        unlock();
     }
 
     // Reaching this point means the handshake completed, so the client
@@ -761,7 +815,9 @@ static esp_err_t https_page_handler(httpd_req_t *req) {
 #if defined(CONFIG_ESP_HTTPS_SERVER_CERT_SELECT_HOOK) && \
     defined(CONFIG_MBEDTLS_SSL_SERVER_NAME_INDICATION)
 static int sinkhole_cert_select_cb(mbedtls_ssl_context *ssl) {
+    lock();
     s_presented++;
+    unlock();
 
     size_t name_len = 0;
     const unsigned char *sni = mbedtls_ssl_get_hs_sni(ssl, &name_len);
@@ -784,7 +840,9 @@ static int sinkhole_cert_select_cb(mbedtls_ssl_context *ssl) {
     if (host[0] == '\0') {
         return -1;
     }
+    lock();
     snprintf(s_last_host, sizeof(s_last_host), "%s", host);
+    unlock();
 
 #if CONFIG_MBEDTLS_X509_CRT_WRITE_C
     if (s_mode == SINKHOLE_HTTPS_MODE_CA) {
@@ -829,9 +887,11 @@ uint16_t sinkhole_https_port(void) {
 }
 
 void sinkhole_https_get_stats(uint32_t *presented, uint32_t *requests, uint32_t *minted) {
+    lock();
     if (presented) *presented = s_presented;
     if (requests) *requests = s_requests;
     if (minted) *minted = s_minted;
+    unlock();
 }
 
 size_t sinkhole_https_accepted_clients(char *out, size_t out_len) {
@@ -854,8 +914,8 @@ size_t sinkhole_https_accepted_clients(char *out, size_t out_len) {
     return used;
 }
 
-const char *sinkhole_https_last_host(void) {
-    return s_last_host;
+size_t sinkhole_https_last_host(char *out, size_t out_len) {
+    return last_host_copy(out, out_len);
 }
 
 const char *sinkhole_https_ca_label(void) {
@@ -867,10 +927,10 @@ const char *sinkhole_https_ca_label(void) {
 }
 
 void sinkhole_https_reset_stats(void) {
+    lock();
     s_presented = 0;
     s_requests = 0;
     s_minted = 0;
-    lock();
     memset(s_accepted, 0, sizeof(s_accepted));
     s_accepted_count = 0;
     unlock();
@@ -885,7 +945,12 @@ void sinkhole_https_reset_stats(void) {
 // even though it is sitting on the card.
 static bool sinkhole_https_load(sinkhole_https_mode_t want) {
     if (s_material_loaded) {
-        return s_loaded_mode != SINKHOLE_HTTPS_MODE_OFF;
+        if (want == SINKHOLE_HTTPS_MODE_OFF || want == s_loaded_mode) {
+            return s_loaded_mode != SINKHOLE_HTTPS_MODE_OFF;
+        }
+        // A different mode was requested; drop the old material instead of
+        // handing its freed contexts to the new server.
+        forget_material();
     }
 
     bool have_ca_cert = sd_card_exists(SINKHOLE_HTTPS_CA_CERT_PATH);
@@ -953,17 +1018,27 @@ static bool sinkhole_https_load(sinkhole_https_mode_t want) {
 
         mbedtls_x509_crt_init(&s_ca);
         int ret = mbedtls_x509_crt_parse(&s_ca, (const unsigned char *)ca_pem, ca_len + 1);
-        free(ca_pem);
         if (ret != 0) {
             glog("Cannot parse CA certificate: -0x%04x\n", (unsigned)(-ret));
             mbedtls_x509_crt_free(&s_ca);
+            free(ca_pem);
             free(leaf_key_pem);
             return false;
         }
-        s_ca_loaded = true;
 
         // Name the CA automatically when it is one we have fingerprints for.
         s_ca_entry = ca_compromised_match(&s_ca);
+
+        // ca.crt usually holds only the intermediate.  Complete the chain
+        // before it is used, so clients can reach a trusted root.
+        if (!add_parent_to_chain(ca_pem, ca_len)) {
+            free(ca_pem);
+            free(leaf_key_pem);
+            return false;
+        }
+        free(ca_pem);
+        s_ca_loaded = true;
+
         if (s_ca_entry) {
             glog("CA: %s (known compromised intermediate)\n", s_ca_entry->label);
         }
@@ -1044,8 +1119,12 @@ bool sinkhole_https_start(const sinkhole_https_config_t *cfg) {
     }
 
     if (!sinkhole_https_load(cfg->mode)) {
+        // A failed load can leave nothing usable behind; make sure the next
+        // attempt starts from a clean state too.
+        forget_material();
         return false;
     }
+    sinkhole_https_mode_t active = s_loaded_mode;
 
     // Optional body served for every request.
     const char *page_path = cfg->page_path ? cfg->page_path : SINKHOLE_HTTPS_PAGE_PATH;
@@ -1083,7 +1162,7 @@ bool sinkhole_https_start(const sinkhole_https_config_t *cfg) {
     ssl_cfg.httpd.send_wait_timeout = 5;
     ssl_cfg.httpd.keep_alive_enable = false;
 
-    if (cfg->mode == SINKHOLE_HTTPS_MODE_STATIC) {
+    if (active == SINKHOLE_HTTPS_MODE_STATIC) {
         ssl_cfg.servercert = s_static_cert;
         ssl_cfg.servercert_len = s_static_cert_len;
         ssl_cfg.prvtkey_pem = s_static_key;
@@ -1094,8 +1173,23 @@ bool sinkhole_https_start(const sinkhole_https_config_t *cfg) {
     ssl_cfg.cert_select_cb = sinkhole_cert_select_cb;
 #endif
 
+    // The listener is live as soon as httpd_ssl_start() returns, so the mode
+    // must be visible to the certificate selector before that.  Reset the
+    // counters first, otherwise a handshake that wins the race is erased.
+    s_mode = active;
+    s_port = port;
+    lock();
+    s_presented = 0;
+    s_requests = 0;
+    s_minted = 0;
+    memset(s_accepted, 0, sizeof(s_accepted));
+    s_accepted_count = 0;
+    unlock();
+
     esp_err_t ret = httpd_ssl_start(&s_httpd, &ssl_cfg);
     if (ret != ESP_OK) {
+        s_mode = SINKHOLE_HTTPS_MODE_OFF;
+        s_port = 0;
         if (ret == ESP_ERR_HTTPD_TASK) {
             // Not a certificate problem: the task stack could not be allocated.
             size_t free_int = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
@@ -1107,10 +1201,7 @@ bool sinkhole_https_start(const sinkhole_https_config_t *cfg) {
             glog("Failed to start HTTPS server: %s\n", esp_err_to_name(ret));
         }
         s_httpd = NULL;
-        release_static_material();
-#if CONFIG_MBEDTLS_X509_CRT_WRITE_C
-        release_ca_material();
-#endif
+        forget_material();
         if (s_page) {
             free(s_page);
             s_page = NULL;
@@ -1127,18 +1218,8 @@ bool sinkhole_https_start(const sinkhole_https_config_t *cfg) {
     };
     httpd_register_uri_handler(s_httpd, &page_uri);
 
-    s_mode = s_loaded_mode;
-    s_port = port;
-    s_presented = 0;
-    s_requests = 0;
-    s_minted = 0;
-    lock();
-    memset(s_accepted, 0, sizeof(s_accepted));
-    s_accepted_count = 0;
-    unlock();
-
     glog("HTTPS server on port %u (%s mode)\n", (unsigned)port,
-         sinkhole_https_mode_name(cfg->mode));
+         sinkhole_https_mode_name(active));
     return true;
 }
 
@@ -1151,10 +1232,7 @@ void sinkhole_https_stop(void) {
     s_port = 0;
 
     lock();
-    release_static_material();
-#if CONFIG_MBEDTLS_X509_CRT_WRITE_C
-    release_ca_material();
-#endif
+    forget_material();
     if (s_page) {
         free(s_page);
         s_page = NULL;
@@ -1196,7 +1274,10 @@ bool sinkhole_https_generate_leaf_key(char *detail, size_t detail_len) {
     }
     return false;
 }
-const char *sinkhole_https_last_host(void) { return ""; }
+size_t sinkhole_https_last_host(char *out, size_t out_len) {
+    if (out && out_len) out[0] = '\0';
+    return 0;
+}
 const char *sinkhole_https_ca_label(void) { return ""; }
 void sinkhole_https_reset_stats(void) {}
 const char *sinkhole_https_mode_name(sinkhole_https_mode_t mode) {

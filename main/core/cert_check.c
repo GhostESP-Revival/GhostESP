@@ -5,6 +5,7 @@
 #include "core/cert_check.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -38,14 +39,21 @@ bool cert_check_host(const char *ip, uint16_t port, uint16_t timeout_s,
     snprintf(out->ip, sizeof(out->ip), "%.15s", ip);
     out->port = port;
 
-    // mbedTLS contexts are large, and this runs from a command handler, so keep
-    // them out of the stack.  They are released at the end of each check.
-    static mbedtls_ssl_context ssl;
-    static mbedtls_ssl_config conf;
-    static mbedtls_net_context net;
+    // mbedTLS contexts are too large for the command task stack, but a static
+    // copy would make this function non-reentrant: the GUI worker and the
+    // serial command can sweep at the same time.  Allocate one pair per call
+    // instead; they are freed on every exit path.
+    mbedtls_ssl_context *ssl = calloc(1, sizeof(*ssl));
+    mbedtls_ssl_config *conf = calloc(1, sizeof(*conf));
+    mbedtls_net_context net;
+    if (!ssl || !conf) {
+        free(ssl);
+        free(conf);
+        return false;
+    }
 
-    mbedtls_ssl_init(&ssl);
-    mbedtls_ssl_config_init(&conf);
+    mbedtls_ssl_init(ssl);
+    mbedtls_ssl_config_init(conf);
     mbedtls_net_init(&net);
 
     psa_crypto_init();
@@ -53,34 +61,38 @@ bool cert_check_host(const char *ip, uint16_t port, uint16_t timeout_s,
     int fd = -1;
     bool handshook = false;
 
-    int ret = mbedtls_ssl_config_defaults(&conf, MBEDTLS_SSL_IS_CLIENT,
+    int ret = mbedtls_ssl_config_defaults(conf, MBEDTLS_SSL_IS_CLIENT,
                                           MBEDTLS_SSL_TRANSPORT_STREAM,
                                           MBEDTLS_SSL_PRESET_DEFAULT);
     if (ret != 0) goto exit;
 
     // We are inspecting the chain, not refusing it.
-    mbedtls_ssl_conf_authmode(&conf, MBEDTLS_SSL_VERIFY_NONE);
-    mbedtls_ssl_conf_read_timeout(&conf, (uint32_t)timeout_s * 1000);
+    mbedtls_ssl_conf_authmode(conf, MBEDTLS_SSL_VERIFY_NONE);
+    mbedtls_ssl_conf_read_timeout(conf, (uint32_t)timeout_s * 1000);
 
-    ret = mbedtls_ssl_setup(&ssl, &conf);
+    ret = mbedtls_ssl_setup(ssl, conf);
     if (ret != 0) goto exit;
 
     // Many appliances do not have a name; an address as SNI is harmless.
-    mbedtls_ssl_set_hostname(&ssl, ip);
+    mbedtls_ssl_set_hostname(ssl, ip);
 
     fd = tcp_connect_with_timeout(ip, port, timeout_s);
     if (fd < 0) goto exit;
 
     net.fd = fd;
-    mbedtls_ssl_set_bio(&ssl, &net, mbedtls_net_send, mbedtls_net_recv, NULL);
+    // The timeout callback is what makes mbedtls_ssl_conf_read_timeout()
+    // effective; with the plain blocking recv a stalled peer would hang the
+    // sweep forever.
+    mbedtls_ssl_set_bio(ssl, &net, mbedtls_net_send, mbedtls_net_recv,
+                        mbedtls_net_recv_timeout);
 
-    ret = mbedtls_ssl_handshake(&ssl);
+    ret = mbedtls_ssl_handshake(ssl);
     if (ret != 0) goto exit;
     handshook = true;
     out->reachable = true;
 
     {
-        const mbedtls_x509_crt *peer = mbedtls_ssl_get_peer_cert(&ssl);
+        const mbedtls_x509_crt *peer = mbedtls_ssl_get_peer_cert(ssl);
         if (peer) {
             out->has_cert = true;
             dn_to_str(peer, false, out->subject, sizeof(out->subject));
@@ -100,14 +112,15 @@ bool cert_check_host(const char *ip, uint16_t port, uint16_t timeout_s,
     }
 
 exit:
-    if (handshook) {
-        mbedtls_ssl_close_notify(&ssl);
-    }
+    // Do not send close_notify: a peer with a full receive window would block
+    // the sweep, and the connection is closed right below anyway.
     if (fd >= 0) {
         close(fd);
     }
-    mbedtls_ssl_free(&ssl);
-    mbedtls_ssl_config_free(&conf);
+    mbedtls_ssl_free(ssl);
+    mbedtls_ssl_config_free(conf);
+    free(ssl);
+    free(conf);
     return handshook;
 }
 

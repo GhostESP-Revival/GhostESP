@@ -20,7 +20,9 @@
  * The card layout under /mnt/ghostesp/dns_sinkhole/https is:
  *
  *   ca.crt       CA / intermediate certificate, optionally followed by the
- *                rest of the chain.   (CA mode)
+ *                rest of the chain.   (CA mode)  When the file holds just one
+ *                of the known TLS intermediates, its public parent is appended
+ *                automatically so clients can build a chain to a root.
  *   ca.key       CA private key.       (CA mode)
  *   server.crt   Pre-generated leaf plus chain.  (STATIC mode)
  *   server.key   Private key for the leaf that is served or minted.
@@ -112,8 +114,9 @@ void sinkhole_https_get_stats(uint32_t *presented, uint32_t *requests, uint32_t 
  */
 size_t sinkhole_https_accepted_clients(char *out, size_t out_len);
 
-/** @brief Hostname of the most recent intercepted request, never NULL. */
-const char *sinkhole_https_last_host(void);
+/** @brief Copy the most recent intercepted hostname into @p out.
+ *  @return Number of bytes written, 0 when nothing has been seen yet. */
+size_t sinkhole_https_last_host(char *out, size_t out_len);
 
 /** @brief Name of the CA in use when it matches a known compromised
  *         intermediate, otherwise an empty string. */

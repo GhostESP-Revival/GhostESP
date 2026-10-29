@@ -1,5 +1,6 @@
 /*
- * Public certificates for the eight compromised eMudhra intermediates.
+ * Public certificates for the eight compromised eMudhra intermediates, plus
+ * the public parent needed to chain the TLS ones to a trusted root.
  *
  * A certificate cannot be computed from a private key: it is public data that
  * carries its issuer's signature.  Shipping these certificates lets an
@@ -31,6 +32,20 @@ typedef struct {
  * @return Pointer to the table, never NULL.
  */
 const ca_known_cert_t *ca_known_certs(size_t *count);
+
+/**
+ * @brief Public parent certificate of the TLS intermediates, for chain
+ *        completion.
+ *
+ * The eight compromised TLS intermediates were issued by
+ * "emSign Root TLS CA - G3", which is itself cross-signed by the trusted
+ * "emSign ECC Root CA - G3" root.  A client needs that parent to build a
+ * chain to a trust anchor.  It is public data; the fingerprint of the exact
+ * certificate is recorded next to the PEM in the source.
+ *
+ * @return NUL terminated PEM, never NULL (empty when not available).
+ */
+const char *ca_known_tls_parent_pem(void);
 
 #ifdef __cplusplus
 }

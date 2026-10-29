@@ -23,6 +23,7 @@
 #include "core/dns_server.h"
 #include "managers/ghostscript_runtime.h"
 #include "managers/sd_card_manager.h"
+#include "freertos/semphr.h"
 #include "lwip/err.h"
 #include "lwip/netdb.h"
 #include "lwip/sockets.h"
@@ -190,9 +191,9 @@ struct dns_server_handle {
     bool sinkhole_display_suspended;
     bool auto_stats;
 
-    // Interception: hostnames listed here (and, when interception is on, the
-    // blocked hostnames) are answered with intercept_ip so that the HTTPS
-    // server on the board terminates TLS for them.
+    // Interception: hostnames listed in the interception file are answered
+    // with intercept_ip so that the HTTPS server on the board terminates TLS
+    // for them.  The blocklist itself is not intercepted.
     bool intercept_enabled;
     uint32_t intercept_ip;
     bool intercept_all;
@@ -573,71 +574,20 @@ static bool blocklist_check(dns_server_handle_t h, const char *domain,
 static char s_intercept[SINKHOLE_INTERCEPT_MAX][SINKHOLE_MAX_DOMAIN];
 static int s_intercept_count = 0;
 
-// Matches a queried name against the interception list.  An entry matches the
-// name itself, and an entry starting with "*." matches every subdomain of
-// the name that follows it.
-static bool intercept_list_check(dns_server_handle_t h, const char *domain) {
-    if (!h || !domain || !s_intercept_count) return false;
-    size_t dlen = strlen(domain);
+// Serializes the list and the client notes between the DNS task, the TLS
+// server task and the command handlers (which also run in their own tasks).
+static SemaphoreHandle_t s_intercept_mutex = NULL;
 
-    for (int i = 0; i < s_intercept_count; i++) {
-        const char *entry = s_intercept[i];
-        if (entry[0] == '*' && entry[1] == '.') {
-            const char *base = entry + 2;
-            size_t blen = strlen(base);
-            if (dlen > blen && domain[dlen - blen - 1] == '.' &&
-                strcmp(domain + dlen - blen, base) == 0) {
-                return true;
-            }
-        } else if (strcmp(entry, domain) == 0) {
-            return true;
-        }
-    }
-    return false;
+static void intercept_lock(void) {
+    if (s_intercept_mutex) xSemaphoreTake(s_intercept_mutex, portMAX_DELAY);
 }
 
-static void load_intercept_list(dns_server_handle_t h) {
-    s_intercept_count = 0;
-    if (!sd_card_exists(SINKHOLE_INTERCEPT_PATH)) return;
-
-    FILE *f = fopen(SINKHOLE_INTERCEPT_PATH, "r");
-    if (!f) return;
-
-    char line[SINKHOLE_MAX_DOMAIN];
-    while (fgets(line, sizeof(line), f) && s_intercept_count < SINKHOLE_INTERCEPT_MAX) {
-        char *entry = normalize_blocklist_line(line);
-        if (!entry) continue;
-        snprintf(s_intercept[s_intercept_count], SINKHOLE_MAX_DOMAIN, "%s", entry);
-        s_intercept_count++;
-    }
-    fclose(f);
-    if (s_intercept_count > 0) {
-        glog("DNS sinkhole: %d hostname(s) queued for interception\n",
-             s_intercept_count);
-    }
+static void intercept_unlock(void) {
+    if (s_intercept_mutex) xSemaphoreGive(s_intercept_mutex);
 }
 
-static void save_intercept_list(dns_server_handle_t h) {
-    if (!h) return;
-    char buf[SINKHOLE_INTERCEPT_MAX * (SINKHOLE_MAX_DOMAIN + 1)];
-    size_t used = 0;
-    for (int i = 0; i < s_intercept_count; i++) {
-        size_t need = strlen(s_intercept[i]) + 1;
-        if (used + need >= sizeof(buf)) break;
-        memcpy(buf + used, s_intercept[i], need);
-        used += need;
-    }
-    if (used > 0) {
-        sd_card_write_file(SINKHOLE_INTERCEPT_PATH, buf, used);
-    }
-}
-
-// --- Client attribution ---------------------------------------------------
-
-// Remembers which device asked for an intercepted name, so the TLS server can
-// name the device that connected a moment later.  httpd does not expose the
-// peer address to a URI handler, and this is the only place the address is
-// known.
+// Client attribution is guarded by the same lock: the DNS task writes a note
+// and the HTTPS server task reads it.
 #define SINKHOLE_CLIENT_RING 8
 #define SINKHOLE_CLIENT_TTL_US (5LL * 60 * 1000000)
 
@@ -651,13 +601,94 @@ typedef struct {
 static sinkhole_client_note_t s_client_notes[SINKHOLE_CLIENT_RING];
 static int s_client_note_next = 0;
 
+// Matches a queried name against the interception list.  An entry matches the
+// name itself, and an entry starting with "*." matches every subdomain of
+// the name that follows it.
+static bool intercept_list_check(dns_server_handle_t h, const char *domain) {
+    if (!h || !domain) return false;
+
+    bool matched = false;
+    intercept_lock();
+    size_t dlen = strlen(domain);
+
+    for (int i = 0; i < s_intercept_count; i++) {
+        const char *entry = s_intercept[i];
+        if (entry[0] == '*' && entry[1] == '.') {
+            const char *base = entry + 2;
+            size_t blen = strlen(base);
+            if (dlen > blen && domain[dlen - blen - 1] == '.' &&
+                strcmp(domain + dlen - blen, base) == 0) {
+                matched = true;
+                break;
+            }
+        } else if (strcmp(entry, domain) == 0) {
+            matched = true;
+            break;
+        }
+    }
+    intercept_unlock();
+    return matched;
+}
+
+static void load_intercept_list(dns_server_handle_t h) {
+    (void)h;
+    intercept_lock();
+    s_intercept_count = 0;
+    memset(s_client_notes, 0, sizeof(s_client_notes));
+    s_client_note_next = 0;
+
+    if (sd_card_exists(SINKHOLE_INTERCEPT_PATH)) {
+        FILE *f = fopen(SINKHOLE_INTERCEPT_PATH, "r");
+        if (f) {
+            char line[SINKHOLE_MAX_DOMAIN];
+            while (fgets(line, sizeof(line), f) &&
+                   s_intercept_count < SINKHOLE_INTERCEPT_MAX) {
+                char *entry = normalize_blocklist_line(line);
+                if (!entry) continue;
+                snprintf(s_intercept[s_intercept_count], SINKHOLE_MAX_DOMAIN, "%s", entry);
+                s_intercept_count++;
+            }
+            fclose(f);
+        }
+    }
+    int count = s_intercept_count;
+    intercept_unlock();
+
+    if (count > 0) {
+        glog("DNS sinkhole: %d hostname(s) queued for interception\n", count);
+    }
+}
+
+// Writes the list to the card.  Must be called with the lock held.  An empty
+// list truncates the file, otherwise a removed entry would come back on the
+// next start.
+static void save_intercept_list_locked(void) {
+    static char buf[SINKHOLE_INTERCEPT_MAX * (SINKHOLE_MAX_DOMAIN + 1)];
+    size_t used = 0;
+    for (int i = 0; i < s_intercept_count; i++) {
+        size_t need = strlen(s_intercept[i]) + 1;
+        if (used + need > sizeof(buf)) break;
+        memcpy(buf + used, s_intercept[i], need);
+        used += need;
+    }
+    sd_card_write_file(SINKHOLE_INTERCEPT_PATH, buf, used);
+}
+
+// --- Client attribution ---------------------------------------------------
+
+// Remembers which device asked for an intercepted name, so the TLS server can
+// name the device that connected a moment later.  httpd does not expose the
+// peer address to a URI handler, and this is the only place the address is
+// known.
 static void note_intercepted_client(const char *host, uint32_t ip) {
     if (!host || !ip) return;
 
+    intercept_lock();
     for (int i = 0; i < SINKHOLE_CLIENT_RING; i++) {
         if (s_client_notes[i].used && strcmp(s_client_notes[i].host, host) == 0) {
             s_client_notes[i].ip = ip;
             s_client_notes[i].when_us = esp_timer_get_time();
+            intercept_unlock();
             return;
         }
     }
@@ -668,20 +699,26 @@ static void note_intercepted_client(const char *host, uint32_t ip) {
     n->ip = ip;
     n->when_us = esp_timer_get_time();
     n->used = true;
+    intercept_unlock();
 }
 
 bool dns_sinkhole_lookup_client(const char *hostname, uint32_t *out_ip) {
     if (!hostname || !out_ip) return false;
 
+    bool found = false;
     int64_t now = esp_timer_get_time();
+
+    intercept_lock();
     for (int i = 0; i < SINKHOLE_CLIENT_RING; i++) {
         if (!s_client_notes[i].used) continue;
         if (strcmp(s_client_notes[i].host, hostname) != 0) continue;
-        if (now - s_client_notes[i].when_us > SINKHOLE_CLIENT_TTL_US) return false;
+        if (now - s_client_notes[i].when_us > SINKHOLE_CLIENT_TTL_US) break;
         *out_ip = s_client_notes[i].ip;
-        return true;
+        found = true;
+        break;
     }
-    return false;
+    intercept_unlock();
+    return found;
 }
 
 static char *skip_dns_name(char *ptr, char *packet_end) {
@@ -903,6 +940,9 @@ static void send_a_response(int sock, char *rx, int rx_len,
                             struct sockaddr_in *dest, uint32_t addr) {
     int qd_len = dns_query_len(rx, rx_len);
     if (qd_len < (int)sizeof(dns_header_t)) return;
+    // A multi-question query can fill the whole packet; the answer has to fit
+    // in the same fixed-size buffer.
+    if (qd_len + (int)sizeof(dns_answer_t) > DNS_MAX_LEN) return;
 
     char reply[DNS_MAX_LEN];
     memset(reply, 0, sizeof(reply));
@@ -1570,6 +1610,22 @@ dns_server_handle_t start_dns_sinkhole(dns_sinkhole_config_t *config) {
         return NULL;
     }
 
+    // One lock for the process lifetime: it is reused when the sinkhole is
+    // restarted, so there is no race with a TLS task that still holds it.
+    if (!s_intercept_mutex) {
+        s_intercept_mutex = xSemaphoreCreateMutex();
+        if (!s_intercept_mutex) {
+            ESP_LOGE(TAG, "Failed to create interception lock");
+            heap_caps_free(h->task_stack);
+            if (h->cache) heap_caps_free(h->cache);
+            free(h);
+            return NULL;
+        }
+    }
+
+    // Before the task runs, so it cannot read a half-loaded list.
+    load_intercept_list(h);
+
     h->task = xTaskCreateStatic(dns_server_task, "dns_sinkhole", stack_words,
                                  h, 5, h->task_stack, &h->task_tcb);
     if (!h->task) {
@@ -1579,7 +1635,6 @@ dns_server_handle_t start_dns_sinkhole(dns_sinkhole_config_t *config) {
         free(h);
         return NULL;
     }
-    load_intercept_list(h);
     s_sinkhole_handle = h;
     return h;
 }
@@ -1742,20 +1797,23 @@ bool dns_sinkhole_add_intercept(const char *domain) {
     char entry[SINKHOLE_MAX_DOMAIN];
     if (!normalize_domain_arg(domain, entry, sizeof(entry))) return false;
 
+    bool added = false;
+    intercept_lock();
     for (int i = 0; i < s_intercept_count; i++) {
         if (strcmp(s_intercept[i], entry) == 0) {
+            intercept_unlock();
             return false;
         }
     }
-    if (s_intercept_count >= SINKHOLE_INTERCEPT_MAX) {
-        return false;
+    if (s_intercept_count < SINKHOLE_INTERCEPT_MAX) {
+        snprintf(s_intercept[s_intercept_count],
+                 SINKHOLE_MAX_DOMAIN, "%s", entry);
+        s_intercept_count++;
+        save_intercept_list_locked();
+        added = true;
     }
-
-    snprintf(s_intercept[s_intercept_count],
-             SINKHOLE_MAX_DOMAIN, "%s", entry);
-    s_intercept_count++;
-    save_intercept_list(s_sinkhole_handle);
-    return true;
+    intercept_unlock();
+    return added;
 }
 
 bool dns_sinkhole_remove_intercept(const char *domain) {
@@ -1764,6 +1822,8 @@ bool dns_sinkhole_remove_intercept(const char *domain) {
     char entry[SINKHOLE_MAX_DOMAIN];
     if (!normalize_domain_arg(domain, entry, sizeof(entry))) return false;
 
+    bool removed = false;
+    intercept_lock();
     for (int i = 0; i < s_intercept_count; i++) {
         if (strcmp(s_intercept[i], entry) != 0) continue;
         for (int j = i; j < s_intercept_count - 1; j++) {
@@ -1772,10 +1832,12 @@ bool dns_sinkhole_remove_intercept(const char *domain) {
         }
         s_intercept_count--;
         s_intercept[s_intercept_count][0] = '\0';
-        save_intercept_list(s_sinkhole_handle);
-        return true;
+        save_intercept_list_locked();
+        removed = true;
+        break;
     }
-    return false;
+    intercept_unlock();
+    return removed;
 }
 
 size_t dns_sinkhole_list_intercept(char *out, size_t out_len) {
@@ -1784,11 +1846,13 @@ size_t dns_sinkhole_list_intercept(char *out, size_t out_len) {
     if (!s_sinkhole_handle) return 0;
 
     size_t used = 0;
+    intercept_lock();
     for (int i = 0; i < s_intercept_count; i++) {
         int n = snprintf(out + used, out_len - used, "%s\n",
                          s_intercept[i]);
         if (n < 0 || (size_t)n >= out_len - used) break;
         used += (size_t)n;
     }
+    intercept_unlock();
     return used;
 }
