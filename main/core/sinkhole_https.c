@@ -77,7 +77,7 @@ typedef struct {
     char host[SINKHOLE_HTTPS_MAX_HOST];
 } accepted_client_t;
 
-static accepted_client_t s_accepted[SINKHOLE_HTTPS_ACCEPTED_MAX];
+static accepted_client_t *s_accepted = NULL;
 static int s_accepted_count = 0;
 
 // Cached material state.  Set by sinkhole_https_load() so the SD card is only
@@ -111,7 +111,10 @@ typedef struct {
     mbedtls_x509_crt cert;
 } mint_slot_t;
 
-static mint_slot_t s_slots[SINKHOLE_HTTPS_MINT_SLOTS];
+static mint_slot_t *s_slots = NULL;
+// Shared PEM scratch for minting, allocated with the slots.  Minting is
+// serialized by the lock, so one buffer is enough.
+static unsigned char *s_mint_pem = NULL;
 #endif // CONFIG_MBEDTLS_X509_CRT_WRITE_C
 
 static const char *s_default_page =
@@ -167,6 +170,16 @@ static void unlock(void) {
     if (s_lock) xSemaphoreGive(s_lock);
 }
 
+// The interception buffers are only useful while the server is running, so
+// they are taken from the heap on demand rather than living in .bss for the
+// whole session.  PSRAM is preferred where it exists; boards without it fall
+// back to internal RAM and simply fail the feature if the block is too large.
+static void *sinkhole_https_calloc(size_t count, size_t size) {
+    void *p = heap_caps_calloc(count, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!p) p = heap_caps_calloc(count, size, MALLOC_CAP_8BIT);
+    return p;
+}
+
 static void normalise_host(const char *in, size_t len, char *out, size_t out_len) {
     size_t n = 0;
     for (size_t i = 0; i < len && n + 1 < out_len; i++) {
@@ -208,8 +221,16 @@ static void release_minted_slot(mint_slot_t *slot) {
 
 static void release_ca_material(void) {
     s_ca_entry = NULL;
-    for (int i = 0; i < SINKHOLE_HTTPS_MINT_SLOTS; i++) {
-        release_minted_slot(&s_slots[i]);
+    if (s_slots) {
+        for (int i = 0; i < SINKHOLE_HTTPS_MINT_SLOTS; i++) {
+            release_minted_slot(&s_slots[i]);
+        }
+        heap_caps_free(s_slots);
+        s_slots = NULL;
+    }
+    if (s_mint_pem) {
+        heap_caps_free(s_mint_pem);
+        s_mint_pem = NULL;
     }
     if (s_leaf_key_loaded) {
         mbedtls_pk_free(&s_leaf_key);
@@ -388,6 +409,7 @@ cleanup:
 
 // Returns a parsed certificate for the requested host, minting one if needed.
 static mbedtls_x509_crt *get_leaf_for(const char *host) {
+    if (!s_slots || !s_mint_pem) return NULL;
     for (int i = 0; i < SINKHOLE_HTTPS_MINT_SLOTS; i++) {
         if (s_slots[i].used && strcmp(s_slots[i].host, host) == 0) {
             return &s_slots[i].cert;
@@ -414,9 +436,8 @@ static mbedtls_x509_crt *get_leaf_for(const char *host) {
     // Minting happens during the TLS handshake, so nothing here may be a large
     // stack buffer - the handshake itself already uses most of the task stack.
     // Minting is serialized by the lock, so one shared buffer is safe.
-    static unsigned char s_mint_pem[SINKHOLE_HTTPS_PEM_MAX];
     size_t pem_len = 0;
-    if (build_leaf(host, s_mint_pem, sizeof(s_mint_pem), &pem_len) != 0) {
+    if (build_leaf(host, s_mint_pem, SINKHOLE_HTTPS_PEM_MAX, &pem_len) != 0) {
         return NULL;
     }
 
@@ -448,6 +469,11 @@ static void forget_material(void) {
 #if CONFIG_MBEDTLS_X509_CRT_WRITE_C
     release_ca_material();
 #endif
+    if (s_accepted) {
+        heap_caps_free(s_accepted);
+        s_accepted = NULL;
+    }
+    s_accepted_count = 0;
     s_material_loaded = false;
     s_loaded_mode = SINKHOLE_HTTPS_MODE_OFF;
 }
@@ -744,6 +770,10 @@ static void note_accepted_client(const char *host) {
     }
 
     lock();
+    if (!s_accepted) {
+        unlock();
+        return;
+    }
     for (int i = 0; i < s_accepted_count; i++) {
         if (s_accepted[i].ip == ip && strcmp(s_accepted[i].host, host) == 0) {
             unlock();
@@ -931,7 +961,10 @@ void sinkhole_https_reset_stats(void) {
     s_presented = 0;
     s_requests = 0;
     s_minted = 0;
-    memset(s_accepted, 0, sizeof(s_accepted));
+    if (s_accepted) {
+        memset(s_accepted, 0,
+               SINKHOLE_HTTPS_ACCEPTED_MAX * sizeof(*s_accepted));
+    }
     s_accepted_count = 0;
     unlock();
 }
@@ -974,6 +1007,16 @@ static bool sinkhole_https_load(sinkhole_https_mode_t want) {
         return false;
     }
 
+    if (!s_accepted) {
+        s_accepted = sinkhole_https_calloc(SINKHOLE_HTTPS_ACCEPTED_MAX,
+                                           sizeof(*s_accepted));
+        if (!s_accepted) {
+            glog("Not enough memory for the HTTPS client list\n");
+            return false;
+        }
+        s_accepted_count = 0;
+    }
+
     // The leaf key is needed in both modes.
     size_t key_len = 0;
     char *leaf_key_pem = read_whole_file(SINKHOLE_HTTPS_LEAF_KEY_PATH,
@@ -1006,12 +1049,24 @@ static bool sinkhole_https_load(sinkhole_https_mode_t want) {
             free(leaf_key_pem);
             return false;
         }
+        if (!s_slots) {
+            s_slots = sinkhole_https_calloc(SINKHOLE_HTTPS_MINT_SLOTS,
+                                            sizeof(*s_slots));
+            s_mint_pem = sinkhole_https_calloc(SINKHOLE_HTTPS_PEM_MAX, 1);
+            if (!s_slots || !s_mint_pem) {
+                glog("Not enough memory for the certificate cache\n");
+                free(leaf_key_pem);
+                release_ca_material();
+                return false;
+            }
+        }
         size_t ca_len = 0;
         char *ca_pem = read_whole_file(SINKHOLE_HTTPS_CA_CERT_PATH,
                                        SINKHOLE_HTTPS_PEM_MAX, &ca_len);
         if (!ca_pem) {
             glog("Cannot read %s - is the SD card responding?\n",
                  SINKHOLE_HTTPS_CA_CERT_PATH);
+            release_ca_material();
             free(leaf_key_pem);
             return false;
         }
@@ -1021,6 +1076,7 @@ static bool sinkhole_https_load(sinkhole_https_mode_t want) {
         if (ret != 0) {
             glog("Cannot parse CA certificate: -0x%04x\n", (unsigned)(-ret));
             mbedtls_x509_crt_free(&s_ca);
+            release_ca_material();
             free(ca_pem);
             free(leaf_key_pem);
             return false;
@@ -1032,6 +1088,7 @@ static bool sinkhole_https_load(sinkhole_https_mode_t want) {
         // ca.crt usually holds only the intermediate.  Complete the chain
         // before it is used, so clients can reach a trusted root.
         if (!add_parent_to_chain(ca_pem, ca_len)) {
+            release_ca_material();
             free(ca_pem);
             free(leaf_key_pem);
             return false;
@@ -1182,7 +1239,10 @@ bool sinkhole_https_start(const sinkhole_https_config_t *cfg) {
     s_presented = 0;
     s_requests = 0;
     s_minted = 0;
-    memset(s_accepted, 0, sizeof(s_accepted));
+    if (s_accepted) {
+        memset(s_accepted, 0,
+               SINKHOLE_HTTPS_ACCEPTED_MAX * sizeof(*s_accepted));
+    }
     s_accepted_count = 0;
     unlock();
 

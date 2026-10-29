@@ -571,8 +571,18 @@ static bool blocklist_check(dns_server_handle_t h, const char *domain,
 // sinkhole task, and FreeRTOS requires that to live in internal RAM.  A large
 // array inside the handle pushed the whole allocation into PSRAM and tripped
 // xTaskCreateStatic's TCB check.
-static char s_intercept[SINKHOLE_INTERCEPT_MAX][SINKHOLE_MAX_DOMAIN];
+//
+// The arrays are allocated when the sinkhole starts rather than living in .bss,
+// so boards that never use the sinkhole pay nothing and boards with PSRAM can
+// keep the list off the internal heap.
+static char (*s_intercept)[SINKHOLE_MAX_DOMAIN] = NULL;
 static int s_intercept_count = 0;
+
+static void *sinkhole_calloc(size_t count, size_t size) {
+    void *p = heap_caps_calloc(count, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!p) p = heap_caps_calloc(count, size, MALLOC_CAP_8BIT);
+    return p;
+}
 
 // Serializes the list and the client notes between the DNS task, the TLS
 // server task and the command handlers (which also run in their own tasks).
@@ -598,14 +608,14 @@ typedef struct {
     int64_t when_us;
 } sinkhole_client_note_t;
 
-static sinkhole_client_note_t s_client_notes[SINKHOLE_CLIENT_RING];
+static sinkhole_client_note_t *s_client_notes = NULL;
 static int s_client_note_next = 0;
 
 // Matches a queried name against the interception list.  An entry matches the
 // name itself, and an entry starting with "*." matches every subdomain of
 // the name that follows it.
 static bool intercept_list_check(dns_server_handle_t h, const char *domain) {
-    if (!h || !domain) return false;
+    if (!h || !domain || !s_intercept) return false;
 
     bool matched = false;
     intercept_lock();
@@ -634,7 +644,22 @@ static void load_intercept_list(dns_server_handle_t h) {
     (void)h;
     intercept_lock();
     s_intercept_count = 0;
-    memset(s_client_notes, 0, sizeof(s_client_notes));
+    if (!s_intercept) {
+        s_intercept = sinkhole_calloc(SINKHOLE_INTERCEPT_MAX, SINKHOLE_MAX_DOMAIN);
+        if (!s_intercept) {
+            glog("DNS sinkhole: no memory for the interception list\n");
+            intercept_unlock();
+            return;
+        }
+    }
+    if (!s_client_notes) {
+        s_client_notes = sinkhole_calloc(SINKHOLE_CLIENT_RING,
+                                         sizeof(*s_client_notes));
+    }
+    if (s_client_notes) {
+        memset(s_client_notes, 0,
+               SINKHOLE_CLIENT_RING * sizeof(*s_client_notes));
+    }
     s_client_note_next = 0;
 
     if (sd_card_exists(SINKHOLE_INTERCEPT_PATH)) {
@@ -663,15 +688,22 @@ static void load_intercept_list(dns_server_handle_t h) {
 // list truncates the file, otherwise a removed entry would come back on the
 // next start.
 static void save_intercept_list_locked(void) {
-    static char buf[SINKHOLE_INTERCEPT_MAX * (SINKHOLE_MAX_DOMAIN + 1)];
+    if (!s_intercept) return;
+    size_t cap = SINKHOLE_INTERCEPT_MAX * (SINKHOLE_MAX_DOMAIN + 1);
+    char *buf = sinkhole_calloc(1, cap);
+    if (!buf) {
+        glog("DNS sinkhole: no memory to save the interception list\n");
+        return;
+    }
     size_t used = 0;
     for (int i = 0; i < s_intercept_count; i++) {
         size_t need = strlen(s_intercept[i]) + 1;
-        if (used + need > sizeof(buf)) break;
+        if (used + need > cap) break;
         memcpy(buf + used, s_intercept[i], need);
         used += need;
     }
     sd_card_write_file(SINKHOLE_INTERCEPT_PATH, buf, used);
+    heap_caps_free(buf);
 }
 
 // --- Client attribution ---------------------------------------------------
@@ -684,6 +716,10 @@ static void note_intercepted_client(const char *host, uint32_t ip) {
     if (!host || !ip) return;
 
     intercept_lock();
+    if (!s_client_notes) {
+        intercept_unlock();
+        return;
+    }
     for (int i = 0; i < SINKHOLE_CLIENT_RING; i++) {
         if (s_client_notes[i].used && strcmp(s_client_notes[i].host, host) == 0) {
             s_client_notes[i].ip = ip;
@@ -709,6 +745,10 @@ bool dns_sinkhole_lookup_client(const char *hostname, uint32_t *out_ip) {
     int64_t now = esp_timer_get_time();
 
     intercept_lock();
+    if (!s_client_notes) {
+        intercept_unlock();
+        return false;
+    }
     for (int i = 0; i < SINKHOLE_CLIENT_RING; i++) {
         if (!s_client_notes[i].used) continue;
         if (strcmp(s_client_notes[i].host, hostname) != 0) continue;
@@ -1799,6 +1839,10 @@ bool dns_sinkhole_add_intercept(const char *domain) {
 
     bool added = false;
     intercept_lock();
+    if (!s_intercept) {
+        intercept_unlock();
+        return false;
+    }
     for (int i = 0; i < s_intercept_count; i++) {
         if (strcmp(s_intercept[i], entry) == 0) {
             intercept_unlock();
