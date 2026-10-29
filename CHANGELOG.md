@@ -10,11 +10,16 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 
 - Reworked `scanlocal` into a full local host scan: it finds hosts with ARP, then identifies each one by NetBIOS name, mDNS hostname, ICMP TTL and mDNS/SSDP services
 - Local scan results now show MAC, vendor, hostname, OS hint and services for each host
+- Vendor names now appear in AP/station scans, attack target lists, Ethernet ARP results, port/SNMP scans, GATT scans and Sentry rows; randomized MACs are labelled "Private address"
 - Added `scanarp stop` and `scanlocal stop`
 - Added `forgetwifi` command to clear the saved WiFi network and disconnect from it
 - Cloud Store now shows a clear "No internet. Connect GhostESP to WiFi" message when opened, refreshed or installing without a connection
 - BadBLE's Run Script list and `badble run`/`badble list` now also find scripts in `/mnt/ghostesp/badusb/`, not just `/mnt/ghostesp/badble/`
 - Renamed the "mDNS Discovery" menu entry to "Local Scan" and added "List Local Scan" to reopen the last results without rescanning
+- Added Cert Scan (`certscan` / Wi-Fi → Cert Scan) to see which hosts still accept a certificate from one of the eight compromised eMudhra intermediates
+  - `certscan hosts` discovers hosts and checks them automatically
+  - Setup works on-device: `certscan cacert <url>` fetches the CA certificate, `certscan key <number>` derives `ca.crt`/`ca.key` from a raw EC scalar, and `certscan genleaf` generates the leaf key; the matching CA is labelled automatically
+- Added optional HTTPS to the DNS sinkhole, signing a certificate per hostname from the SD-card CA and showing results per client
 - Add support for [XIAO ESP32S3 & Wio-SX1262 Kit](https://wiki.seeedstudio.com/wio_sx1262_with_xiao_esp32s3_kit/) - @antonionardella (#428)
 - Added support for the Attaky Cyber Deck Plus 1.0 (ESP32-S3, 16 MB flash, 8 MB octal PSRAM, ST7789 240x320 panel with FT6636 touch, QMI8658A IMU, ICS-43434 mic, NS4168 speaker, microSD, two TCA9555 gamepad halves and two AW9523B keyboard halves) - @WRLS6H05T
 - Added AW9523B support to io_manager behind `CONFIG_IO_EXPANDER_CHIP_AW9523`, with 8-bit per-channel RGB dimming and an optional interrupt pin - @WRLS6H05T
@@ -22,6 +27,8 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 ### Changed
 - Sentry now detects Google Nest cameras and doorbells over BLE and over WiFi - pre2
 - Sentry rows now show how long ago each device was last seen - pre2
+- Beacon spam now uses a STA-only attack radio profile, so it can hop DFS channels and no longer broadcasts the device's own AP
+- Updated the WebUI logo
 
 ### Fixed
 - Fixed `scanarp` over the CLI immediately printing "ARP scan cancelled" and scanning nothing
@@ -32,12 +39,11 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Fixed touch drag scrolling in the Sentry list and detail views
 - Fixed touch scrolling and the Back row not working in the Local Scan host detail view
 - Fixed CrowPanel Advance 4.3" V1.1 backlight initialization - @patlaluci-prog (#432)
-## Unreleased
-
-### Added
-
-- Added support for the Attaky Cyber Deck Plus 1.0 (ESP32-S3, 16 MB flash, 8 MB octal PSRAM, ST7789 240x320 panel with FT6636 touch, QMI8658A IMU, ICS-43434 mic, NS4168 speaker, microSD, two TCA9555 gamepad halves and two AW9523B keyboard halves) - @WRLS6H05T
-- Added AW9523B support to io_manager behind `CONFIG_IO_EXPANDER_CHIP_AW9523`, with 8-bit per-channel RGB dimming and an optional interrupt pin - @WRLS6H05T
+- Fixed `evilportal -c sethtmlstr` dropping long or minified HTML, which made Evil Portal pages uploaded from the Flipper app impossible to start
+- Fixed 5 GHz DFS channel handling for TX attacks: DFS is usable in STA-only attacks and skipped cleanly while an AP interface is active
+- Fixed Cert Scan reliability: concurrent sweeps no longer share TLS contexts, stalled hosts time out, and the CA chain is completed to the trusted emSign root
+- Fixed HTTPS sinkhole and Cert Scan state across restarts, including intercept-list persistence and stale certificate state
+- Fixed beacon spam trying to reconnect to the saved WiFi network while the attack was running
 
 ## v2.2.2
 

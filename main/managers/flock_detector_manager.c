@@ -137,11 +137,12 @@ typedef struct {
 } FlockStreamDiag;
 
 #define FLOCK_DIAG_QUEUE_SIZE 8
-static FlockStreamDiag s_diag_queue[FLOCK_DIAG_QUEUE_SIZE];
+static FlockStreamDiag *s_diag_queue = NULL;
 static volatile size_t s_diag_head = 0;
 static volatile size_t s_diag_tail = 0;
 
 static void IRAM_ATTR enqueue_diag(const FlockStreamDiag *d) {
+    if (!s_diag_queue) return;
     portENTER_CRITICAL_ISR(&s_alert_mux);
     size_t next = (s_diag_head + 1) % FLOCK_DIAG_QUEUE_SIZE;
     if (next != s_diag_tail) {
@@ -429,7 +430,7 @@ typedef struct {
     uint32_t bytes;
 } stream_trk_t;
 
-static stream_trk_t s_trk[STREAM_SLOTS];
+static stream_trk_t *s_trk = NULL;
 
 static inline bool IRAM_ATTR google_oui(const uint8_t *mac) {
     uint32_t oui = ((uint32_t)mac[0] << 16) | ((uint32_t)mac[1] << 8) | mac[2];
@@ -440,6 +441,7 @@ static inline bool IRAM_ATTR google_oui(const uint8_t *mac) {
 }
 
 static void IRAM_ATTR stream_account(const uint8_t *sta, int len, int8_t rssi, uint8_t ch) {
+    if (!s_trk) return;
     int64_t now_us = esp_timer_get_time();
     uint32_t now = (uint32_t)(now_us / 1000);
 
@@ -580,11 +582,16 @@ esp_err_t flock_detector_start(void) {
 
     s_dets = calloc(FLOCK_MAX_DETECTIONS, sizeof(FlockDetection));
     s_alert_queue = calloc(FLOCK_ALERT_QUEUE_SIZE, sizeof(FlockAlertEntry));
+    s_trk = calloc(STREAM_SLOTS, sizeof(*s_trk));
+    s_diag_queue = calloc(FLOCK_DIAG_QUEUE_SIZE, sizeof(*s_diag_queue));
     det_chain_alloc();
-    if (!s_dets || !s_alert_queue || !s_det_bucket || !s_det_next) {
+    if (!s_dets || !s_alert_queue || !s_det_bucket || !s_det_next ||
+        !s_trk || !s_diag_queue) {
         ESP_LOGE(TAG, "failed to allocate detection buffers");
         free(s_dets); s_dets = NULL;
         free(s_alert_queue); s_alert_queue = NULL;
+        free(s_trk); s_trk = NULL;
+        free(s_diag_queue); s_diag_queue = NULL;
         det_chain_free();
         return ESP_ERR_NO_MEM;
     }
@@ -609,7 +616,7 @@ esp_err_t flock_detector_start(void) {
     s_diag_head = 0;
     s_diag_tail = 0;
     s_hold_until_us = 0;
-    memset(s_trk, 0, sizeof(s_trk));
+    memset(s_trk, 0, STREAM_SLOTS * sizeof(*s_trk));
     s_running = true;
 
     wifi_manager_start_monitor_mode(flock_sniffer_cb);
@@ -641,6 +648,8 @@ esp_err_t flock_detector_stop(void) {
     int found = s_count;
     free(s_dets); s_dets = NULL;
     free(s_alert_queue); s_alert_queue = NULL;
+    free(s_trk); s_trk = NULL;
+    free(s_diag_queue); s_diag_queue = NULL;
     det_chain_free();
     s_count = 0;
 

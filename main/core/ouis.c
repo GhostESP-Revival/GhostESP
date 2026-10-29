@@ -126,6 +126,14 @@ bool ouis_lookup_vendor(const char *mac, char *out_vendor, size_t out_sz) {
     return lookup_vendor(p3, out_vendor, out_sz);
 }
 
+bool ouis_is_private_mac(const char *mac) {
+    uint8_t p3[3] = {0};
+    int nibbles = 0;
+    parse_prefix(mac, p3, &nibbles);
+    if (nibbles < 6) return false;
+    return is_locally_administered(p3);
+}
+
 bool ouis_parse_prefix(const char *prefix, uint8_t out_oui[3]) {
     if (prefix == NULL || out_oui == NULL) return false;
 

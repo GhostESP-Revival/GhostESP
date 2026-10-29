@@ -3,6 +3,7 @@
 
 #include "core/commands.h"
 #include "core/glog.h"
+#include "core/ouis.h"
 #include "core/esp_comm_manager.h"
 #include "managers/status_display_manager.h"
 #include "sdkconfig.h"
@@ -360,10 +361,13 @@ void handle_eth_arp_cmd(int argc, char **argv) {
                 num_found++;
                 char current_ip[16];
                 ip4addr_ntoa_r(&target_addr, current_ip, sizeof(current_ip));
-                glog("  %-15s %02x:%02x:%02x:%02x:%02x:%02x\n",
+                char vendor[64] = {0};
+                bool has_vendor = ouis_lookup_vendor_bytes(eth_ret->addr, vendor, sizeof(vendor));
+                glog("  %-15s %02x:%02x:%02x:%02x:%02x:%02x%s%s\n",
                      current_ip,
                      eth_ret->addr[0], eth_ret->addr[1], eth_ret->addr[2],
-                     eth_ret->addr[3], eth_ret->addr[4], eth_ret->addr[5]);
+                     eth_ret->addr[3], eth_ret->addr[4], eth_ret->addr[5],
+                     has_vendor ? " " : "", has_vendor ? vendor : "");
             }
         }
 

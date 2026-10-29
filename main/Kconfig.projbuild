@@ -2240,103 +2240,40 @@ menu "Ghost ESP Options"
 
     endmenu
 
-    menu "Attaky Options"
+    menu "Sinkhole Options"
 
-    config ATTAKY_TARGET
-        bool "Build for Attaky modular handhelds"
-        default n
-        help
-            Enable the Attaky board additions: the Core's AW9523
-            expander button map, the Control: Keyboard and Control:
-            Gamepad module drivers, the capacitive-touch reset release
-            on expander 0x59, and module presence probing. Set by the
-            Attaky board profile (configs/sdkconfig.attaky).
+        config GHOSTESP_SINKHOLE_HTTPS
+            bool "Enable HTTPS interception for the DNS sinkhole"
+            default y
+            # The TLS server and its certificate cache need PSRAM-class memory.
+            # ESP32-S2 has only 320 KB of internal DRAM and no room for it
+            # without PSRAM, so keep the option off on those builds.
+            depends on !IDF_TARGET_ESP32S2 || SPIRAM
+            select ESP_HTTPS_SERVER_ENABLE
+            select ESP_HTTPS_SERVER_CERT_SELECT_HOOK
+            help
+                Compile the TLS server that the DNS sinkhole can point
+                intercepted hostnames at.  The server picks the certificate
+                for each connection from the SNI extension, so a single
+                listener can answer for any number of hostnames.
 
-    config ATTAKY_MILESTONE
-        int "Port milestone marker (1-8)"
-        range 1 8
-        default 8
-        depends on ATTAKY_TARGET
-        help
-            The milestone identity emitted on serial as
-            "[INFO] [APP] milestone: M<N> (<name>)". Advanced as the
-            port's bring-up ladder is walked.
+                The certificate material is read from the SD card at runtime;
+                see 'sinkhole https' on the device for the file layout.
 
-    config ATTAKY_HAS_MEDIA_IO
-        bool "Support the Media I/O module (microSD, speaker, mic)"
-        default y
-        depends on ATTAKY_TARGET
-        help
-            Probe for the Expand: Media I/O module and enable its
-            microSD slot, NS4168 speaker path and ICS-43434 microphone
-            capture when it is present. When the module is absent the
-            firmware keeps running without storage or audio.
+        config GHOSTESP_SINKHOLE_HTTPS_MINT
+            bool "Mint certificates on device from a CA key"
+            default y
+            depends on GHOSTESP_SINKHOLE_HTTPS
+            select MBEDTLS_X509_CREATE_C
+            select MBEDTLS_X509_CRT_WRITE_C
+            help
+                Allow the HTTPS server to sign a certificate for the hostname a
+                client asked for, using a CA certificate and key stored on
+                the SD card.  This needs mbedTLS' X.509 writer, which costs
+                some flash.
 
-    config ATTAKY_HAS_KEYBOARD
-        bool "Support the Keyboard (Bottom) module"
-        default y
-        depends on ATTAKY_TARGET
-        help
-            Probe for the Control: Keyboard module's two AW9523
-            expanders (0x5A / 0x5B) and scan their 5x5 key matrices.
-
-    config ATTAKY_HAS_GAMEPAD
-        bool "Support the Gamepad (Bottom) module"
-        default y
-        depends on ATTAKY_TARGET
-        help
-            Probe for the Control: Gamepad module's two TCA9555
-            expanders (0x22 / 0x26) and read its buttons.
-
-    config ATTAKY_HAS_POWER
-        bool "Support the Power: Standard Cell module"
-        default y
-        depends on ATTAKY_TARGET
-        help
-            Treat a silent MAX17048 at 0x36 as "no battery module"
-            rather than an error, and report battery state when it is
-            present.
-
-    config ATTAKY_KEYBOARD_SCAN_MS
-        int "Keyboard matrix scan period (ms)"
-        range 5 100
-        default 15
-        depends on ATTAKY_TARGET && ATTAKY_HAS_KEYBOARD
-        help
-            Period of the polled 5x5 matrix scan. 15 ms is ~66 Hz,
-            comfortably faster than typing while keeping I2C traffic
-            low; the scan is skipped once the bus is idle.
-
-    config HAS_ATTAKY_SPEAKER
-        bool "Enable Attaky Media I/O NS4168 I2S speaker"
-        default n
-        depends on IDF_TARGET_ESP32S3 && ATTAKY_TARGET && ATTAKY_HAS_MEDIA_IO
-        help
-            Enable I2S master TX to the Media I/O module's NS4168 mono
-            class-D speaker amplifier. The amp is fixed-wired (no enable
-            line, no I2C control), so it plays as soon as the three I2S
-            lines are driven; volume stays software-scaled.
-
-    config ATTAKY_SPK_BCLK_PIN
-        int "Speaker I2S BCLK pin"
-        default 17
-        depends on HAS_ATTAKY_SPEAKER
-        help
-            NS4168 bit clock. Media I/O M-BTB31 / host IO17.
-
-    config ATTAKY_SPK_WS_PIN
-        int "Speaker I2S LRCLK/WS pin"
-        default 21
-        depends on HAS_ATTAKY_SPEAKER
-        help
-            NS4168 left-right clock. Media I/O M-BTB39 / host IO21.
-
-    config ATTAKY_SPK_DIN_PIN
-        int "Speaker I2S SDATA pin"
-        default 18
-        depends on HAS_ATTAKY_SPEAKER
-        help
-            NS4168 serial data in. Media I/O M-BTB32 / host IO18.
+                Without this the server can only serve a certificate that was
+                made elsewhere.
 
     endmenu
 

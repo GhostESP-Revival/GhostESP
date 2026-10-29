@@ -70,8 +70,8 @@ bool wifi_channels_is_5ghz(uint8_t channel);
  * @brief Check if a channel is in a DFS range.
  *
  * DFS receive is supported by the C5 sniffer. Transmit-capable features are gated
- * by wifi_channels_is_tx_channel(), which permits DFS channels when the active
- * country allows them; this predicate still drives passive scan decisions.
+ * by wifi_channels_is_tx_channel(); this predicate still drives passive scan
+ * decisions.
  *
  * @param channel Channel number to check
  * @return true if the channel is DFS, false otherwise
@@ -111,9 +111,10 @@ bool wifi_channels_is_monitor_channel(uint8_t channel);
 /**
  * @brief Check if a channel can be used by transmit-capable features.
  *
- * DFS channels are permitted when the active country allows them, so attacks
- * work on DFS targets. The driver remains the final authority when setting
- * the channel.
+ * DFS channels are permitted for STA-only operation, so attacks on DFS targets
+ * still work when no AP interface is active. When an AP interface is running,
+ * DFS channels are excluded because ESP-IDF rejects moving the AP onto a DFS
+ * channel. The driver remains the final authority when setting the channel.
  */
 bool wifi_channels_is_tx_channel(uint8_t channel);
 

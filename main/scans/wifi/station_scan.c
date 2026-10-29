@@ -179,7 +179,8 @@ static void lookup_vendor_with_default(const uint8_t *mac, char *vendor_buf, siz
     format_mac_upper(mac, mac_str, sizeof(mac_str));
     
     if (!ouis_lookup_vendor(mac_str, vendor_buf, buf_size)) {
-        strncpy(vendor_buf, "Unknown", buf_size - 1);
+        strncpy(vendor_buf, ouis_is_private_mac(mac_str) ? "Private address" : "Unknown",
+                buf_size - 1);
         vendor_buf[buf_size - 1] = '\0';
     }
 }
