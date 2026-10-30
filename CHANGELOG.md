@@ -35,6 +35,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Fixed slide-to-unlock not responding when the lockscreen appeared over a view like Sentry
 - Fixed Sentry detection popups showing above the lockscreen
 - Fixed touch drag scrolling in the Sentry list and detail views
+- Fixed Sentry rows constantly changing order during busy scans; devices now stay in the order they were first seen
 - Fixed touch scrolling and the Back row not working in the Local Scan host detail view
 - Fixed CrowPanel Advance 4.3" V1.1 backlight initialization - @patlaluci-prog (#432)
 - Fixed `evilportal -c sethtmlstr` dropping long or minified HTML, which made Evil Portal pages uploaded from the Flipper app impossible to start

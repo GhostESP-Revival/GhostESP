@@ -383,7 +383,9 @@ static void rec_upsert(const char *mac, bool ble, uint8_t kind, uint8_t flock_cl
     }
 }
 
-// Pull both engines into the cache, age out what has gone, keep newest first.
+// Pull both engines into the cache and age out what has gone. Rows keep the
+// order they were first discovered in (oldest first, new devices appended at
+// the bottom) so a busy scan doesn't shuffle the list under the user.
 static void sentry_merge(void) {
     if (!s_rec) return;
 
@@ -432,10 +434,14 @@ static void sentry_merge(void) {
         s_rec[i].mac[0] = '\0';
     }
 
+    // Order by first_seen (discovery order) instead of last_seen: sorting by
+    // last_seen every 400ms made rows hop around while several devices were
+    // active. Discovery order keeps each device in a fixed position and only
+    // appends newly seen ones at the end.
     for (int i = 1; i < w; i++) {
         sentry_rec_t key = s_rec[i];
         int j = i - 1;
-        while (j >= 0 && s_rec[j].last_seen < key.last_seen) {
+        while (j >= 0 && s_rec[j].first_seen > key.first_seen) {
             s_rec[j + 1] = s_rec[j];
             j--;
         }
