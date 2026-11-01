@@ -1222,6 +1222,12 @@ static SettingsCategory settings_categories[] = {
 static int current_settings_root = -1;
 static int current_settings_category = -1;
 static int settings_submenu_depth = 0;
+#define TIMEZONE_PAGE_SIZE 8
+#define TIMEZONE_PAGE_PREV (-1)
+#define TIMEZONE_PAGE_NEXT (-2)
+static bool timezone_menu_active = false;
+static int timezone_page_offset = 0;
+static int timezone_setting_index = -1;
 
 // Cached chip-info cards for the read-only custom Info page.
 #define OPTIONS_INFO_CARDS_MAX 3
@@ -6517,6 +6523,21 @@ static void settings_confirm_factory_reset_cb(void *user_data) {
     esp_restart();
 }
 
+static void timezone_menu_activate(int row_data) {
+    if (row_data == TIMEZONE_PAGE_PREV) {
+        timezone_page_offset -= TIMEZONE_PAGE_SIZE;
+    } else if (row_data == TIMEZONE_PAGE_NEXT) {
+        timezone_page_offset += TIMEZONE_PAGE_SIZE;
+    } else {
+        int index = row_data - 1;
+        if (index < 0 || index >= timezone_count || timezone_setting_index < 0 ||
+            timezone_setting_index >= settings_items_count) return;
+        apply_setting_change(timezone_setting_index, index);
+        timezone_menu_active = false;
+    }
+    rebuild_current_menu();
+}
+
 static void change_current_row(bool increment)
 {
     if (!menu_container) return;
@@ -6531,6 +6552,10 @@ static void change_current_row(bool increment)
         return;
     }
     int setting_idx = (int)(intptr_t)udata;
+    if (timezone_menu_active) {
+        timezone_menu_activate(setting_idx);
+        return;
+    }
 #ifdef CONFIG_USE_IO_EXPANDER
     if (setting_idx == IO_BTN_EDIT_P10 || setting_idx == IO_BTN_EDIT_P11 || setting_idx == IO_BTN_EDIT_P12) {
         io_btn_being_edited = (setting_idx == IO_BTN_EDIT_P10) ? 0 : (setting_idx == IO_BTN_EDIT_P11) ? 1 : 2;
@@ -6555,6 +6580,14 @@ static void change_setting_value(int setting_index, bool increment) {
 #endif
     SettingsItem *item = &settings_items[setting_index];
     if (item->value_count <= 0) return;
+
+    if (item->setting_type == SETTING_TIMEZONE) {
+        timezone_setting_index = setting_index;
+        timezone_page_offset = (item->current_value / TIMEZONE_PAGE_SIZE) * TIMEZONE_PAGE_SIZE;
+        timezone_menu_active = true;
+        rebuild_current_menu();
+        return;
+    }
 
     int new_value = item->current_value;
 
@@ -6612,7 +6645,11 @@ static void settings_activate_row(int row_index, bool increment) {
     }
 
     int setting_idx = (int)(intptr_t)udata;
-    change_setting_value(setting_idx, increment);
+    if (timezone_menu_active) {
+        timezone_menu_activate(setting_idx);
+    } else {
+        change_setting_value(setting_idx, increment);
+    }
 }
 
 static void select_option_item(int index) {
@@ -8294,6 +8331,11 @@ void option_event_cb(lv_event_t *e) {
         }
 
         int setting_index = (int)(intptr_t)raw_udata;
+        if (timezone_menu_active) {
+            timezone_menu_activate(setting_index);
+            option_invoked = false;
+            return;
+        }
 #ifdef CONFIG_USE_IO_EXPANDER
         if (setting_index == IO_BTN_EDIT_P10 || setting_index == IO_BTN_EDIT_P11 || setting_index == IO_BTN_EDIT_P12) {
             io_btn_being_edited = (setting_index == IO_BTN_EDIT_P10) ? 0 : (setting_index == IO_BTN_EDIT_P11) ? 1 : 2;
@@ -11054,6 +11096,8 @@ void handle_option_directly(const char *Selected_Option) {
             switch_to_settings_root(row_data);
         } else if (current_settings_category < 0) {
             switch_to_settings_category(row_data);
+        } else if (timezone_menu_active) {
+            timezone_menu_activate(row_data);
         } else {
             change_setting_value(row_data, true);
         }
@@ -11180,6 +11224,9 @@ void options_menu_destroy() {
     current_settings_root = -1;
     current_settings_category = -1;
     settings_submenu_depth = 0;
+    timezone_menu_active = false;
+    timezone_page_offset = 0;
+    timezone_setting_index = -1;
     s_info_detail_active = false;
     // note: wifi/bluetooth/dualcomm submenu states are intentionally NOT reset here
     // so when returning from terminal view, we resume at the correct submenu
@@ -11322,6 +11369,12 @@ static void back_event_cb(lv_event_t *e) {
     // Save settings when exiting options menu
     if (is_settings_mode) {
         settings_save(&G_Settings);
+    }
+
+    if (is_settings_mode && timezone_menu_active) {
+        timezone_menu_active = false;
+        rebuild_current_menu();
+        return;
     }
 
     if (s_info_detail_active) {
@@ -15764,6 +15817,39 @@ static void menu_builder_cb(lv_timer_t *t)
                 if (build_item_index >= category_count) {
                     all_current_options_processed = true;
                 }
+            } else if (timezone_menu_active) {
+                int count = timezone_count - timezone_page_offset;
+                if (count > TIMEZONE_PAGE_SIZE) count = TIMEZONE_PAGE_SIZE;
+                bool has_prev = timezone_page_offset > 0;
+                bool has_next = timezone_page_offset + count < timezone_count;
+                int rows = count + (has_prev ? 1 : 0) + (has_next ? 1 : 0);
+                while (build_item_index < rows && built_this_tick < BATCH) {
+                    int pos = build_item_index - (has_prev ? 1 : 0);
+                    int row_data;
+                    char label[128];
+                    if (has_prev && build_item_index == 0) {
+                        row_data = TIMEZONE_PAGE_PREV;
+                        snprintf(label, sizeof(label), "< Previous");
+                    } else if (pos >= count) {
+                        row_data = TIMEZONE_PAGE_NEXT;
+                        snprintf(label, sizeof(label), "Next >");
+                    } else {
+                        int index = timezone_page_offset + pos;
+                        row_data = index + 1;
+                        snprintf(label, sizeof(label), "%s%s", timezone_options[index],
+                                 index == settings_items[timezone_setting_index].current_value ? " (current)" : "");
+                    }
+                    lv_obj_t *btn = options_view_add_item(g_options_view, label, option_event_cb, (void *)(intptr_t)row_data);
+                    if (!btn) break;
+                    lv_obj_set_user_data(btn, (void *)(intptr_t)row_data);
+                    lv_obj_set_height(btn, button_height_global);
+                    options_view_relayout_item(g_options_view, btn);
+                    num_items++;
+                    built_this_tick++;
+                    build_item_index++;
+                    if (num_items == 1) select_option_item(0);
+                }
+                if (build_item_index >= rows) all_current_options_processed = true;
             } else {
                 SettingsCategoryId category_id = current_settings_category_id();
                 if (category_id == SETTINGS_CAT_COUNT) {

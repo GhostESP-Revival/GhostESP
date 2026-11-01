@@ -29,6 +29,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Updated the WebUI logo
 
 ### Fixed
+- Fixed the timezone picker freezing on CYD boards by paginating the settings list
 - Fixed `scanarp` over the CLI immediately printing "ARP scan cancelled" and scanning nothing
 - Fixed `scanlocal` finding nothing when the web/AP services weren't running
 - Fixed cancelling the local scan from the UI not actually stopping it
