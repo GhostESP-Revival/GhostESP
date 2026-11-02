@@ -2256,3 +2256,39 @@ menu "Ghost ESP Options"
     endmenu
 
 endmenu
+
+
+
+# ==================== Jammer Options ====================
+
+config JAMMER_ENABLE
+    bool "Enable RF jammer module (T-Embed CC1101 Plus only)"
+    default n
+    depends on BOARD_TEMBED_C1101
+    help
+        Enables the dual-radio jammer using nRF24 (2.4 GHz) and
+        CC1101 (sub-GHz). Only available on T-Embed CC1101 Plus.
+
+config JAMMER_HOP_MS
+    int "Jammer channel hop interval (ms)"
+    range 10 500
+    default 50
+    depends on JAMMER_ENABLE
+    help
+        Time between channel/frequency hops in milliseconds.
+
+config JAMMER_NRF24_DRIFT
+    int "nRF24 channel drift per hop"
+    range 1 20
+    default 4
+    depends on JAMMER_ENABLE
+    help
+        How many channels to skip per hop (1-20).
+
+config JAMMER_CC1101_SWEEP_KHZ
+    int "CC1101 sweep step (kHz)"
+    range 100 2000
+    default 1000
+    depends on JAMMER_ENABLE
+    help
+        Frequency step per hop for sub-GHz sweep.
