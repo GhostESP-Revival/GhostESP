@@ -28,19 +28,20 @@ Client -> GhostESP : submits the form | Credentials and keystrokes are saved to 
 
 ### From the Flipper app
 1. On the Flipper app, open **Wi-Fi → Evil Portal & Network → Set Evil Portal HTML**.
-2. Pick your HTML file (up to 2048 bytes) from the file browser; it is sent and stored for the next start.
-3. Back in **Evil Portal**, choose **Evil Portal** to run the command. The UI appends `startportal` and prompts for arguments.
-   - Command format: `startportal <path|default> <SSID> [PSK]`.
-   - If using a custom HTML file, replace `<path>` with the filename. Use `default` for the built-in portal.
+2. Pick your HTML file (up to 2048 bytes) from the file browser. It is sent to the ESP and kept in memory for the next portal start.
+3. Back in **Evil Portal**, choose **Evil Portal** and enter `default <SSID> [PSK]`.
+   - `default` serves the HTML you just uploaded from the Flipper. If no HTML was uploaded, it serves the built-in portal.
+   - Only use a filename as the first argument when the page is stored on the ESP's SD card in `/mnt/ghostesp/evil_portal/portals/`.
 4. Clients connecting to the network will see your uploaded portal.
 
 ### CLI
 1. Run `listportals` to see available portal pages.
-2. Run `startportal default MyNetworkName` to start with the built-in portal.
+2. Run `startportal default MyNetworkName` to start with the built-in portal, or with the HTML uploaded over UART when one is buffered.
    Or use `startportal mypage.html MyNetworkName` for a custom page.
 3. (Optional) Add a password: `startportal mypage.html MyNetworkName MyPassword`.
 4. Push HTML over UART and load it into the portal instead of reading a file:
    - `evilportal -c sethtmlstr` enables HTML buffer mode; then send `[HTML/BEGIN]`, your HTML, and `[HTML/CLOSE]` markers over UART.
+   - Start the portal with `startportal default MyNetworkName` to serve the uploaded HTML (the built-in portal is used only when no HTML was uploaded).
    - `evilportal -c clear` clears the buffer and reverts to the default portal.
 5. Run `stopportal` to shut it down.
 

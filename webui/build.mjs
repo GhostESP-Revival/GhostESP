@@ -9,11 +9,13 @@ const indexPath = path.join(sourceDir, 'index.html');
 const outputDir = path.join(root, 'dist');
 const outputPath = path.join(outputDir, 'ghost_site.html');
 
+// The inlined logo ends up in the gzip bundle that is embedded in the
+// firmware.  Keep a pre-scaled copy (512px wide, plenty for the 220px slot at
+// 2x DPR) instead of the 4000x990 brand master: the PNG is incompressible, so
+// the full-size one costs ~80 KB of flash on its own.
 const DEFAULT_LOGO_REL = path.join(
-  'GhostESP_Brand_Assets',
-  '01_logo',
-  'png',
-  'ghostesp_logo_white_transparent.png'
+  'assets',
+  'ghostesp_logo_web.png'
 );
 
 function parseArgs(argv) {

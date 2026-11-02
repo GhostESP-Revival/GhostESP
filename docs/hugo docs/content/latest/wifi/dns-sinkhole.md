@@ -138,6 +138,7 @@ The internal access point (GhostNet) is automatically stopped while the sinkhole
 - `sinkhole remove <domain>` is a placeholder; stop and edit/reload the list manually for now.
 - `sinkhole reload` restarts the sinkhole to apply blocklist changes.
 - `sinkhole log <on|off>` toggles query logging.
+- `certscan <devices|hosts|list|stop>` uses this sinkhole to test certificates, see [Cert Scan](cert-scan/)
 
 ## Query logging
 

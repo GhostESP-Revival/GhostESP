@@ -16,3 +16,4 @@ GhostESP's Wi-Fi tools scan, monitor, connect, capture, and attack from the devi
 - [Connect to a Wi-Fi Network]({{< relref "connect.md" >}}) - join a network you own
 - [Capturing packets]({{< relref "capture.md" >}}) and [handshakes]({{< relref "handshakes.md" >}})
 - [Attacks]({{< relref "deauth.md" >}}) - deauth, Karma, Evil Portal, DNS Sinkhole, and more
+- [Cert Scan]({{< relref "cert-scan.md" >}}) - see which devices and hosts still accept revoked certificates

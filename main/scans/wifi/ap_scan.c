@@ -1108,17 +1108,21 @@ esp_err_t ap_scan_select_multiple(int *indices, int count) {
     for (int i = 0; i < count; i++) {
         char sanitized_ssid[33];
         sanitize_ssid_and_check_hidden(selected_aps[i].ssid, sanitized_ssid, sizeof(sanitized_ssid));
+        char vendor[64] = {0};
+        bool has_vendor = ouis_lookup_vendor_bytes(selected_aps[i].bssid, vendor, sizeof(vendor));
 
-        printf("[%d] SSID: %s, BSSID: %02X:%02X:%02X:%02X:%02X:%02X%s\n",
+        printf("[%d] SSID: %s, BSSID: %02X:%02X:%02X:%02X:%02X:%02X%s%s%s\n",
                i, sanitized_ssid,
                selected_aps[i].bssid[0], selected_aps[i].bssid[1], selected_aps[i].bssid[2],
                selected_aps[i].bssid[3], selected_aps[i].bssid[4], selected_aps[i].bssid[5],
+               has_vendor ? " " : "", has_vendor ? vendor : "",
                (i == 0) ? " (Primary)" : "");
 
-        TERMINAL_VIEW_ADD_TEXT("[%d] SSID: %s, BSSID: %02X:%02X:%02X:%02X:%02X:%02X%s\n",
+        TERMINAL_VIEW_ADD_TEXT("[%d] SSID: %s, BSSID: %02X:%02X:%02X:%02X:%02X:%02X%s%s%s\n",
                i, sanitized_ssid,
                selected_aps[i].bssid[0], selected_aps[i].bssid[1], selected_aps[i].bssid[2],
                selected_aps[i].bssid[3], selected_aps[i].bssid[4], selected_aps[i].bssid[5],
+               has_vendor ? " " : "", has_vendor ? vendor : "",
                (i == 0) ? " (Primary)" : "");
     }
 

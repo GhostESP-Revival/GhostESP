@@ -65,7 +65,10 @@ const arp_host_t* arp_scan_get_host(int index);
 void arp_scan_clear_results(void);
 void arp_scan_get_progress(int *pass, int *total_passes, int *scanned, int *total_hosts, int *found);
 
+/** Legacy pointer getter (not reentrant); prefer arp_scan_get_vendor_buf(). */
 const char *arp_scan_get_vendor(const uint8_t *mac);
+/** Buffer-based vendor lookup; returns false when the OUI is unknown or private. */
+bool arp_scan_get_vendor_buf(const uint8_t *mac, char *out_vendor, size_t out_sz);
 
 // Compact Wi-Fi packet monitor (legacy API names retained for CLI compatibility)
 void arp_scan_start_passive(int duration_sec);

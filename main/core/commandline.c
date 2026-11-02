@@ -431,6 +431,8 @@ void register_commands() {
     register_command("autoreconnect", handle_wifi_autoreconnect_cmd);
     register_command("stopportal", stop_portal);
     register_command("sinkhole", handle_sinkhole_cmd);
+  register_command("certscan", handle_certscan_cmd);
+  register_command("trustscan", handle_certscan_cmd); // old name, kept as an alias
     register_command("connect", handle_wifi_connection);
     register_command("dialconnect", handle_dial_command);
     register_command("powerprinter", handle_printer_command);

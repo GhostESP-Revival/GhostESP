@@ -443,11 +443,12 @@ static bool probe_snmp(const char *target_ip, const char *community,
 }
 
 static bool snmp_probe_ip(const char *target_ip, const uint8_t *mac, scan_file_t *sf) {
-    const char *vendor = mac ? arp_scan_get_vendor(mac) : NULL;
+    char vendor[64] = {0};
+    const char *vendor_p = (mac && arp_scan_get_vendor_buf(mac, vendor, sizeof(vendor))) ? vendor : NULL;
     char sysdescr[256];
     for (int i = 0; i < g_snmp_community_count && !g_network_scan_cancel; i++) {
         if (probe_snmp(target_ip, g_snmp_communities[i], sysdescr, sizeof(sysdescr),
-                       vendor, sf)) {
+                       vendor_p, sf)) {
             return true;
         }
         vTaskDelay(pdMS_TO_TICKS(50));
