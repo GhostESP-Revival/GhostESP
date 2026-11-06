@@ -10,6 +10,14 @@ static const lv_font_t *get_base_font(uint8_t size) {
         case 2: return &lv_font_montserrat_18;
         default: return &lv_font_montserrat_16;
     }
+#elif defined(CONFIG_WAVESHARE_C5_35_LCD)
+    /* 320x480 on a 3.5" panel: the standard tier runs small, so bump one step. */
+    switch (size) {
+        case 0: return &lv_font_montserrat_12;
+        case 1: return &lv_font_montserrat_14;
+        case 2: return &lv_font_montserrat_16;
+        default: return &lv_font_montserrat_14;
+    }
 #else
     switch (size) {
         case 0: return &lv_font_montserrat_8;
@@ -27,6 +35,13 @@ static const lv_font_t *get_body_font_for_size(uint8_t size) {
         case 1: return &lv_font_montserrat_18;
         case 2: return &lv_font_montserrat_24;
         default: return &lv_font_montserrat_18;
+    }
+#elif defined(CONFIG_WAVESHARE_C5_35_LCD)
+    switch (size) {
+        case 0: return &lv_font_montserrat_14;
+        case 1: return &lv_font_montserrat_16;
+        case 2: return &lv_font_montserrat_18;
+        default: return &lv_font_montserrat_16;
     }
 #else
     switch (size) {
@@ -54,6 +69,14 @@ static const lv_font_t *get_title_font_for_size(uint8_t size) {
         case 1: return &lv_font_montserrat_12;
         case 2: return &lv_font_montserrat_14;
         default: return &lv_font_montserrat_12;
+    }
+#elif defined(CONFIG_WAVESHARE_C5_35_LCD)
+    /* "Main Menu" and other view titles: bump one step for the 3.5" panel. */
+    switch (size) {
+        case 0: return &lv_font_montserrat_14;
+        case 1: return &lv_font_montserrat_16;
+        case 2: return &lv_font_montserrat_18;
+        default: return &lv_font_montserrat_16;
     }
 #else
     switch (size) {
@@ -102,6 +125,11 @@ const lv_font_t *accessibility_get_font_icon(void) {
     if (size >= 2) return &lv_font_montserrat_24;
     if (size >= 1) return &lv_font_montserrat_18;
     return &lv_font_montserrat_16;
+#elif defined(CONFIG_WAVESHARE_C5_35_LCD)
+    /* Menu/status glyphs were only 8px on the 3.5" panel; bump them up. */
+    if (size >= 2) return &lv_font_montserrat_18;
+    if (size >= 1) return &lv_font_montserrat_16;
+    return &lv_font_montserrat_14;
 #else
     if (size >= 2) return &lv_font_montserrat_10;
     if (size >= 1) return &lv_font_montserrat_8;

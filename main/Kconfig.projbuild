@@ -210,6 +210,15 @@ menu "Ghost ESP Options"
         help
             Enable support for JC3248W535EN LCD.
 
+    config WAVESHARE_C5_35_LCD
+        bool "Enable Waveshare ESP32-C5-Touch-LCD-3.5"
+        default n
+        depends on IDF_TARGET_ESP32C5
+        help
+            Waveshare ESP32-C5-Touch-LCD-3.5 (ST7796 320x480 SPI, FT6336 touch).
+            LCD reset, touch reset and backlight are on the 0x24 I/O expander
+            on I2C 27/26, so the expander is brought up once before the panel.
+
     config CROWPANEL_ADVANCED_P4
         bool "Enable Elecrow CrowPanel Advanced P4 HMI"
         default n

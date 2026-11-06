@@ -29,8 +29,17 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lvgl_i2c/i2c_manager.h"
+#ifdef CONFIG_WAVESHARE_C5_35_LCD
+#include "esp_timer.h"
+#endif
 
 #define TAG "FT6X36"
+
+#ifdef CONFIG_WAVESHARE_C5_35_LCD
+/* FT6336 TP_INT on the Waveshare C5 3.5 (external 10K pull-up): idle HIGH,
+ * LOW while a finger is down. See the gate in ft6x06_init / ft6x36_read. */
+#define WS_C5_TP_INT_GPIO 3
+#endif
 #define FT6X36_TOUCH_QUEUE_ELEMENTS 1
 
 
@@ -120,6 +129,33 @@ void ft6x06_init(uint16_t dev_addr) {
 
     ft6x06_i2c_read8(dev_addr, FT6X36_RELEASECODE_REG, &data_buf);
     ESP_LOGI(TAG, "\tRelease code: 0x%02x", data_buf);
+
+#ifdef CONFIG_WAVESHARE_C5_35_LCD
+    /* IDTHRESHOLD (lower = more sensitive). The factory value needs firm
+     * presses on this bare panel; 16 gives a light-tap feel. */
+    uint8_t threshold = 16;
+    if (lvgl_i2c_write(CONFIG_LV_I2C_TOUCH_PORT, dev_addr, 0x80, &threshold, 1) != ESP_OK)
+        ESP_LOGW(TAG, "Could not set touch threshold");
+
+    /* Phantom-touch gate. The FT6336 TP_INT is on GPIO3 (external 10K pull-up),
+     * so the line idles HIGH with no finger and goes LOW while touched. Set
+     * G_MODE (0xA4) = 0 so INT is a sustained LEVEL (not a per-touch pulse),
+     * and configure GPIO3 as a plain input (no internal pull — the 10K handles
+     * it). ft6x36_read() then skips the blind I2C read whenever GPIO3 is HIGH,
+     * which is what kills the boot phantom / offset taps on this bare panel. */
+    uint8_t g_mode = 0;   /* FT6X36 0xA4 G_MODE: 0 = interrupt polling (level) */
+    if (lvgl_i2c_write(CONFIG_LV_I2C_TOUCH_PORT, dev_addr, 0xA4, &g_mode, 1) != ESP_OK)
+        ESP_LOGW(TAG, "Could not set touch INT mode (G_MODE 0xA4)");
+    const gpio_config_t ws_c5_tp_int = {
+        .pin_bit_mask = 1ULL << WS_C5_TP_INT_GPIO,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    if (gpio_config(&ws_c5_tp_int) != ESP_OK)
+        ESP_LOGW(TAG, "Could not configure touch INT GPIO%d", WS_C5_TP_INT_GPIO);
+#endif
     
 #if CONFIG_LV_FT6X36_COORDINATES_QUEUE
     ft6x36_touch_queue_handle = xQueueCreate( FT6X36_TOUCH_QUEUE_ELEMENTS, sizeof( ft6x36_touch_t ) );
@@ -145,11 +181,58 @@ bool ft6x36_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
     }
     uint8_t data_buf[5];        // 1 byte status, 2 bytes X, 2 bytes Y
 
+#ifdef CONFIG_WAVESHARE_C5_35_LCD
+    /* Phantom-touch gate: with G_MODE 0xA4=0, TP_INT (GPIO3) holds LOW only
+     * while a finger is down. If it is HIGH there is no finger, so report a
+     * release and skip the I2C read entirely — a blind read on this C5 panel
+     * can return a stale/garbage status that looks like a valid point and
+     * self-selects a menu row with no finger. */
+    if (gpio_get_level(WS_C5_TP_INT_GPIO) != 0) {
+        touch_inputs.current_state = LV_INDEV_STATE_REL;
+        data->point.x = touch_inputs.last_x;
+        data->point.y = touch_inputs.last_y;
+        data->state = LV_INDEV_STATE_REL;
+#if CONFIG_LV_FT6X36_COORDINATES_QUEUE
+        xQueueOverwrite(ft6x36_touch_queue_handle, &touch_inputs);
+#endif
+        return false;
+    }
+    /* On the ESP32-C5 the FT6336 read intermittently drops out (a failed
+     * transaction or zero points with a finger held down). Retry within this
+     * poll, accept only 1-2 points on the panel, and hold the last good
+     * contact for a short grace window so a dropout that slips through does
+     * not read as a finger lift. A real release still fails every try. */
+    static int64_t last_ok_us;
+    esp_err_t ret = ESP_FAIL;
+    uint8_t touch_pnt_cnt = 0;
+    for (int attempt = 0; attempt < 3; attempt++) {
+        ret = lvgl_i2c_read(CONFIG_LV_I2C_TOUCH_PORT, current_dev_addr, FT6X36_TD_STAT_REG, &data_buf[0], 5);
+        if (ret != ESP_OK) continue;
+        uint8_t points = data_buf[0] & 0x0F;
+        uint16_t rx = ((data_buf[1] & FT6X36_MSB_MASK) << 8) | (data_buf[2] & FT6X36_LSB_MASK);
+        uint16_t ry = ((data_buf[3] & FT6X36_MSB_MASK) << 8) | (data_buf[4] & FT6X36_LSB_MASK);
+        if (points >= 1 && points <= 2 && rx < CONFIG_LV_HOR_RES_MAX && ry < CONFIG_LV_VER_RES_MAX) {
+            touch_pnt_cnt = 1;
+            break;
+        }
+        ret = ESP_ERR_INVALID_RESPONSE;
+    }
+    if (ret == ESP_OK) {
+        last_ok_us = esp_timer_get_time();
+    } else if (last_ok_us && touch_inputs.current_state == LV_INDEV_STATE_PR &&
+               (esp_timer_get_time() - last_ok_us) < 90000) {
+        data->point.x = touch_inputs.last_x;
+        data->point.y = touch_inputs.last_y;
+        data->state = LV_INDEV_STATE_PR;
+        return false;
+    }
+#else
     esp_err_t ret = lvgl_i2c_read(CONFIG_LV_I2C_TOUCH_PORT, current_dev_addr, FT6X36_TD_STAT_REG, &data_buf[0], 5);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Error talking to touch IC: %s", esp_err_to_name(ret));
     }
     uint8_t touch_pnt_cnt = data_buf[0];  // Number of detected touch points
+#endif
 
     if (ret != ESP_OK || touch_pnt_cnt != 1) {    // ignore no touch & multi touch
         if ( touch_inputs.current_state != LV_INDEV_STATE_REL)
