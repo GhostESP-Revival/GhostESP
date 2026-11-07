@@ -1054,7 +1054,7 @@ static bool wardrive_send_peer_gps_stream(void) {
     payload[pos++] = gps_local.tim.minute;
     payload[pos++] = gps_local.tim.second;
 
-    return esp_comm_manager_send_stream(COMM_STREAM_CHANNEL_GPS, payload, pos);
+    return esp_comm_manager_send_stream_wait(COMM_STREAM_CHANNEL_GPS, payload, pos, 5);
 }
 
 static void peer_gps_stream_task(void *arg) {
@@ -1130,8 +1130,8 @@ static bool wardrive_send_helper_status(void) {
             payload[8 + count++] = wardrive_channels[i];
     portEXIT_CRITICAL(&wardrive_ch_mux);
     payload[3] = count;
-    return esp_comm_manager_send_stream(COMM_STREAM_CHANNEL_WARDRIVE, payload,
-                                       wardrive_primary_channel_count ? 8 + count : 7);
+    return esp_comm_manager_send_stream_wait(COMM_STREAM_CHANNEL_WARDRIVE, payload,
+                                            wardrive_primary_channel_count ? 8 + count : 7, 5);
 }
 
 static void wardrive_apply_hop_interval(void) {
@@ -2162,15 +2162,20 @@ static void wardrive_hop_timer_callback(void *arg) {
         wardrive_peer_assist_active = false;
         wardrive_peer_assist_pending = false;
         wardrive_peer_status_ms = 0;
+#ifndef CONFIG_BANSHEE_LITE_C5
         gps_manager_set_peer_gps_preferred(false);
         gps_manager_clear_peer_fix();
+#else
+        if (!esp_comm_manager_is_connected()) gps_manager_clear_peer_fix();
+#endif
         wardrive_build_channel_list();
         wardrive_channel_idx = 0;
         if (wardrive_channel_count > 0) {
             wardrive_channel = wardrive_channels[0];
             (void)esp_wifi_set_channel(wardrive_channel, WIFI_SECOND_CHAN_NONE);
         }
-        glog("Wardrive: peer helper unavailable, continuing local scan only\n");
+        glog("Wardrive: peer helper unavailable (%s), continuing local scan only\n",
+             esp_comm_manager_is_connected() ? "helper status timed out" : "GhostLink disconnected");
         wardrive_apply_hop_interval();
     }
 
@@ -2269,8 +2274,13 @@ static void wardrive_heartbeat_cb(void *arg) {
         wardrive_peer_channel_count = 0;
         wardrive_peer_status_ms = 0;
         wardriving_set_peer_assist(false);
+#ifndef CONFIG_BANSHEE_LITE_C5
         gps_manager_clear_peer_fix();
-        glog("Wardrive: peer unavailable; restored all locally supported channels\n");
+#else
+        if (!esp_comm_manager_is_connected()) gps_manager_clear_peer_fix();
+#endif
+        glog("Wardrive: peer unavailable (%s); restored all locally supported channels\n",
+             esp_comm_manager_is_connected() ? "helper status timed out" : "GhostLink disconnected");
     }
 
     wardrive_scan_stats_t scan = {0};
@@ -2611,10 +2621,16 @@ static void wardrive_stream_rx_cb(uint8_t channel, const uint8_t *data, size_t l
     }
     if (length >= 7 && data[0] == WARDRIVE_CONTROL_MARKER) {
         bool modern = data[1] == WARDRIVE_CONTROL_VERSION_PLAN;
+        bool accept_helper_status = wardrive_peer_assist_pending || wardrive_peer_assist_active;
+#ifdef CONFIG_BANSHEE_LITE_C5
+        /* A late status must be able to restore the GPS-dependent primary
+         * after a helper timeout. The active-session/role checks still apply. */
+        accept_helper_status = true;
+#endif
         if ((!modern && data[1] != WARDRIVE_CONTROL_VERSION) ||
             data[2] != WARDRIVE_CONTROL_HELPER_READY || !wardriving_hopping_active ||
             wardrive_role != WARDRIVE_ROLE_PRIMARY ||
-            (!wardrive_peer_assist_pending && !wardrive_peer_assist_active)) return;
+            !accept_helper_status) return;
         if (modern) {
             uint8_t count = data[3];
             if (count > WIFI_CHANNELS_MAX || length != (size_t)8 + count) return;
@@ -2627,7 +2643,7 @@ static void wardrive_stream_rx_cb(uint8_t channel, const uint8_t *data, size_t l
             if (changed && wardrive_peer_assist_active) wardrive_build_channel_list();
         }
         wardrive_peer_status_ms = now_ms_u32();
-        if (data[3] > 0 && wardrive_peer_assist_pending) {
+        if (data[3] > 0 && !wardrive_peer_assist_active) {
             wardrive_peer_assist_pending = false;
             wardriving_set_peer_assist(true);
             glog("Wardrive helper ready: channels=%u plan=%s GPS=%s (independent of scanning)\n",
