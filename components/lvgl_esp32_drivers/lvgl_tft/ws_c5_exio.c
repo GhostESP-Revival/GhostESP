@@ -83,7 +83,9 @@ esp_err_t ws_c5_exio_init(void)
     EXIO_STEP(exio_set(EXIO_LCD_RST, true), 120);
     EXIO_STEP(exio_set(EXIO_TP_RST, false), 20);
     EXIO_STEP(exio_set(EXIO_TP_RST, true), 300);  /* FT6336 boot */
-    EXIO_STEP(exio_write(EXIO_PWM_REG, 0xFF), 0);
+    /* The backlight stays off here (PWM was zeroed above). Lighting it before
+     * the first frame shows the panel's own memory: static after power-on, the
+     * previous picture after reset. app_main lights it after the first refresh. */
 
     s_result = ret;
     if (ret == ESP_OK) {
