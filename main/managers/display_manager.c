@@ -3887,6 +3887,7 @@ static bool touch_move_events_enabled_for_view_name(const char *view_name) {
           strcmp(view_name, "Ethernet") == 0 ||
           strcmp(view_name, "AirspaceMonitorView") == 0 ||
           strcmp(view_name, "SentryView") == 0 ||
+          strcmp(view_name, "SentryOptionsView") == 0 ||
           strcmp(view_name, "Audio Player") == 0 ||
           strcmp(view_name, "Camera") == 0 ||
           strcmp(view_name, "Main Menu") == 0 ||

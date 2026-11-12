@@ -110,6 +110,9 @@ static void *mon_tbl_calloc(size_t n, size_t size) {
 #define WARDRIVE_OBS_TASK_STACK_BYTES 8192
 #define PEER_GPS_STREAM_INTERVAL_MS 1000
 #define PEER_GPS_INIT_RETRY_MS 5000
+// This worker can initialize GPS on the S3 peer, including UART/NMEA setup
+// and libc logging. Its former 3 KB stack overflowed on that startup path.
+#define PEER_GPS_STREAM_STACK_BYTES 6144
 #define RECENT_SSID_COUNT 5
 #define LOG_DELAY_MS 5000
 #define PROBE_DEDUPE_TIMEOUT_MS 1000
@@ -317,7 +320,7 @@ static inline int16_t wardrive_get_i16le(const uint8_t *src);
 static bool wardrive_is_valid_date(const gps_date_t *date);
 static bool wardrive_is_valid_time(const gps_time_t *tim);
 static inline uint32_t now_ms_u32(void);
-static bool wardrive_send_peer_gps_stream(void);
+static bool wardrive_send_peer_gps_stream(const gps_t *gps_local);
 static bool wardrive_send_helper_status(void);
 static void peer_gps_stream_task(void *arg);
 static uint32_t wardrive_get_hop_interval_ms(void);
@@ -953,7 +956,7 @@ static bool wardrive_send_helper_observation(const uint8_t *bssid,
     return false;
 }
 
-static bool wardrive_send_peer_gps_stream(void) {
+static bool wardrive_send_peer_gps_stream(const gps_t *gps_local) {
     if (!esp_comm_manager_is_connected()) {
         return false;
     }
@@ -961,8 +964,7 @@ static bool wardrive_send_peer_gps_stream(void) {
         return false;
     }
 
-    gps_t gps_local = {0};
-    if (!gps_manager_get_local_gps_snapshot(&gps_local)) {
+    if (!gps_local) {
         return false;
     }
 
@@ -971,25 +973,25 @@ static bool wardrive_send_peer_gps_stream(void) {
     payload[pos++] = GPS_STREAM_VERSION;
 
     uint8_t flags = GPS_STREAM_FLAG_PRESENT;
-    bool has_fix = gps_local.valid &&
-                   gps_local.fix >= GPS_FIX_GPS &&
-                   gps_local.fix_mode >= GPS_MODE_2D &&
-                   gps_local.latitude >= -90.0f && gps_local.latitude <= 90.0f &&
-                   gps_local.longitude >= -180.0f && gps_local.longitude <= 180.0f;
+    bool has_fix = gps_local->valid &&
+                   gps_local->fix >= GPS_FIX_GPS &&
+                   gps_local->fix_mode >= GPS_MODE_2D &&
+                   gps_local->latitude >= -90.0f && gps_local->latitude <= 90.0f &&
+                   gps_local->longitude >= -180.0f && gps_local->longitude <= 180.0f;
     if (has_fix) {
         flags |= GPS_STREAM_FLAG_FIX;
     }
-    if (wardrive_is_valid_date(&gps_local.date)) {
+    if (wardrive_is_valid_date(&gps_local->date)) {
         flags |= GPS_STREAM_FLAG_DATE_VALID;
     }
-    if (wardrive_is_valid_time(&gps_local.tim)) {
+    if (wardrive_is_valid_time(&gps_local->tim)) {
         flags |= GPS_STREAM_FLAG_TIME_VALID;
     }
     payload[pos++] = flags;
 
-    int32_t lat_e7 = has_fix ? (int32_t)(gps_local.latitude * 10000000.0f) : 0;
-    int32_t lon_e7 = has_fix ? (int32_t)(gps_local.longitude * 10000000.0f) : 0;
-    float alt_dm_f = gps_local.altitude * 10.0f;
+    int32_t lat_e7 = has_fix ? (int32_t)(gps_local->latitude * 10000000.0f) : 0;
+    int32_t lon_e7 = has_fix ? (int32_t)(gps_local->longitude * 10000000.0f) : 0;
+    float alt_dm_f = gps_local->altitude * 10.0f;
     if (alt_dm_f > 32767.0f) {
         alt_dm_f = 32767.0f;
     }
@@ -999,11 +1001,11 @@ static bool wardrive_send_peer_gps_stream(void) {
     int16_t alt_dm = (int16_t)alt_dm_f;
 
     uint16_t hdop_x10 = 0;
-    if (isfinite(gps_local.dop_h) && gps_local.dop_h >= 0.0f && gps_local.dop_h <= 6553.5f) {
-        hdop_x10 = (uint16_t)(gps_local.dop_h * 10.0f);
+    if (isfinite(gps_local->dop_h) && gps_local->dop_h >= 0.0f && gps_local->dop_h <= 6553.5f) {
+        hdop_x10 = (uint16_t)(gps_local->dop_h * 10.0f);
     }
 
-    float speed_x100_f = gps_local.speed * 100.0f;
+    float speed_x100_f = gps_local->speed * 100.0f;
     if (!isfinite(speed_x100_f)) {
         speed_x100_f = 0.0f;
     }
@@ -1015,7 +1017,7 @@ static bool wardrive_send_peer_gps_stream(void) {
     }
     int16_t speed_x100 = (int16_t)speed_x100_f;
 
-    float course_x100_f = gps_local.cog * 100.0f;
+    float course_x100_f = gps_local->cog * 100.0f;
     if (!isfinite(course_x100_f)) {
         course_x100_f = 0.0f;
     }
@@ -1033,23 +1035,23 @@ static bool wardrive_send_peer_gps_stream(void) {
     pos += 4;
     wardrive_put_i16le(payload + pos, alt_dm);
     pos += 2;
-    payload[pos++] = gps_local.sats_in_use;
-    payload[pos++] = gps_local.sats_in_view;
-    payload[pos++] = (uint8_t)gps_local.fix;
-    payload[pos++] = (uint8_t)gps_local.fix_mode;
+    payload[pos++] = gps_local->sats_in_use;
+    payload[pos++] = gps_local->sats_in_view;
+    payload[pos++] = (uint8_t)gps_local->fix;
+    payload[pos++] = (uint8_t)gps_local->fix_mode;
     wardrive_put_i16le(payload + pos, (int16_t)hdop_x10);
     pos += 2;
     wardrive_put_i16le(payload + pos, speed_x100);
     pos += 2;
     wardrive_put_i16le(payload + pos, course_x100);
     pos += 2;
-    payload[pos++] = gps_local.date.day;
-    payload[pos++] = gps_local.date.month;
-    wardrive_put_i16le(payload + pos, (int16_t)gps_local.date.year);
+    payload[pos++] = gps_local->date.day;
+    payload[pos++] = gps_local->date.month;
+    wardrive_put_i16le(payload + pos, (int16_t)gps_local->date.year);
     pos += 2;
-    payload[pos++] = gps_local.tim.hour;
-    payload[pos++] = gps_local.tim.minute;
-    payload[pos++] = gps_local.tim.second;
+    payload[pos++] = gps_local->tim.hour;
+    payload[pos++] = gps_local->tim.minute;
+    payload[pos++] = gps_local->tim.second;
 
     return esp_comm_manager_send_stream(COMM_STREAM_CHANNEL_GPS, payload, pos);
 }
@@ -1064,7 +1066,7 @@ static void peer_gps_stream_task(void *arg) {
         if (!esp_comm_manager_is_connected()) {
             peer_gps_stream_task_handle = NULL;
             xSemaphoreGive(peer_gps_stream_mutex);
-            vTaskDelete(NULL);
+            vTaskDeleteWithCaps(NULL);
             return;
         }
         xSemaphoreGive(peer_gps_stream_mutex);
@@ -1081,7 +1083,7 @@ static void peer_gps_stream_task(void *arg) {
 #endif
 
             if (gps_manager_has_recent_update() && gps_manager_get_local_gps_snapshot(&gps_local)) {
-                if (wardrive_send_peer_gps_stream()) {
+                if (wardrive_send_peer_gps_stream(&gps_local)) {
                     peer_gps_stream_tx_ok++;
                 } else {
                     peer_gps_stream_tx_fail++;
@@ -1500,6 +1502,7 @@ typedef struct {
 #define PCAP_POOL_SLOTS_MIN 3
 static QueueHandle_t s_pcap_q = NULL;
 static TaskHandle_t s_pcap_writer_task = NULL;
+static SemaphoreHandle_t s_pcap_drain_sem = NULL;
 static pcap_pool_t *s_pcap_pool = NULL;
 static size_t s_pcap_pool_slots = 0;
 static portMUX_TYPE s_pcap_pool_lock = portMUX_INITIALIZER_UNLOCKED;
@@ -1556,6 +1559,10 @@ static void pcap_writer_task(void *arg) {
     uint32_t processed = 0;
     for (;;) {
         if (xQueueReceive(s_pcap_q, &item, pdMS_TO_TICKS(500)) == pdTRUE) {
+            if (item.slot_idx == UINT8_MAX) {
+                if (s_pcap_drain_sem) xSemaphoreGive(s_pcap_drain_sem);
+                continue;
+            }
             if (s_pcap_pool != NULL && item.slot_idx < s_pcap_pool_slots) {
                 pcap_pool_slot_t *slot = &s_pcap_pool->slots[item.slot_idx];
                 if (slot->length > 0) {
@@ -1708,6 +1715,21 @@ void wifi_raw_set_observer(wifi_raw_observer_t observer) {
 }
 
 // cleanup function to free pcap queue and task when not capturing
+bool pcap_drain_queue(void) {
+    if (!s_pcap_q) return true;
+    if (!s_pcap_writer_task || s_pcap_drain_sem) return false;
+    SemaphoreHandle_t sem = xSemaphoreCreateBinary();
+    if (!sem) return false;
+    s_pcap_drain_sem = sem;
+    pcap_q_item_t marker = {0};
+    marker.slot_idx = UINT8_MAX;
+    bool ok = xQueueSend(s_pcap_q, &marker, portMAX_DELAY) == pdTRUE &&
+              xSemaphoreTake(sem, portMAX_DELAY) == pdTRUE;
+    s_pcap_drain_sem = NULL;
+    vSemaphoreDelete(sem);
+    return ok;
+}
+
 void cleanup_pcap_queue(void) {
     if (s_pcap_writer_task != NULL) {
         vTaskDeleteWithCaps(s_pcap_writer_task);
@@ -2850,8 +2872,9 @@ void wardriving_peer_connected(void) {
     if (!peer_gps_stream_mutex) return;
     xSemaphoreTake(peer_gps_stream_mutex, portMAX_DELAY);
     if (esp_comm_manager_is_connected() && !peer_gps_stream_task_handle) {
-        BaseType_t rc = xTaskCreate(peer_gps_stream_task, "peer_gps_stream",
-                                    3072, NULL, 3, &peer_gps_stream_task_handle);
+        BaseType_t rc = xTaskCreate_psram(peer_gps_stream_task, "peer_gps_stream",
+                                         PEER_GPS_STREAM_STACK_BYTES, NULL, 3,
+                                         &peer_gps_stream_task_handle);
         if (rc != pdPASS) ESP_LOGW(TAG, "Peer GPS stream task create failed");
     }
     xSemaphoreGive(peer_gps_stream_mutex);

@@ -112,6 +112,8 @@ extern bool g_listen_probes_save_to_sd;
 
 // cleanup function to free pcap queue when not capturing
 void cleanup_pcap_queue(void);
+/* Call after stopping capture producers, before closing the PCAP sink. */
+bool pcap_drain_queue(void);
 
 // Handshake tracking helpers used by adaptive capture UIs.
 uint32_t wifi_callbacks_get_handshake_count(void);
