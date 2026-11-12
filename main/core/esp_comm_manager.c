@@ -4,6 +4,7 @@
  */
 
 #include "core/esp_comm_manager.h"
+#include "core/callbacks.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -1000,6 +1001,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                         comm->protocol_task_handle = t;
                     }
                     unlock_state(comm);
+                    wardriving_peer_connected();
                     printf("Handshake completed!\n");
                     terminal_view_add_text("Handshake completed!\n");
 #ifdef CONFIG_HAS_MIC
@@ -1073,6 +1075,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                     comm->protocol_task_handle = t;
                 }
                 unlock_state(comm);
+                wardriving_peer_connected();
                 printf("Handshake completed!\n");
                 terminal_view_add_text("Handshake completed!\n");
 #ifdef CONFIG_HAS_MIC
@@ -2075,6 +2078,7 @@ void esp_comm_manager_disconnect(void) {
             s_comm_manager->ping_timer = NULL;
         }
         unlock_state(s_comm_manager);
+        wardriving_peer_disconnected();
         if (previous_state == COMM_STATE_SCANNING) {
             printf("Stopped discovery\n");
         } else if (previous_state == COMM_STATE_CONNECTED || previous_state == COMM_STATE_HANDSHAKE) {
@@ -2115,6 +2119,7 @@ void esp_comm_manager_deinit(void) {
     } else {
         s_comm_manager->state = COMM_STATE_IDLE;
     }
+    wardriving_peer_disconnected();
 
     if (s_comm_manager->rx_task_handle) {
         vTaskDelete(s_comm_manager->rx_task_handle);
@@ -2247,4 +2252,5 @@ static void handle_connection_loss(esp_comm_manager_t* comm, const char* reason)
         xTimerStart(comm->discovery_timer, 0);
     }
     unlock_state(comm);
+    wardriving_peer_disconnected();
 }

@@ -23,12 +23,19 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Add support for [XIAO ESP32S3 & Wio-SX1262 Kit](https://wiki.seeedstudio.com/wio_sx1262_with_xiao_esp32s3_kit/) - @antonionardella (#428)
 
 ### Changed
+- Restored compact wardrive status updates
+- Increased capture frames to 4 KB without increasing packet-pool RAM
 - Sentry now detects Google Nest cameras and doorbells over BLE and over WiFi - pre2
 - Sentry rows now show how long ago each device was last seen - pre2
 - Beacon spam now uses a STA-only attack radio profile, so it can hop DFS channels and no longer broadcasts the device's own AP
 - Updated the WebUI logo
 
 ### Fixed
+- Fixed ANSI color codes in the UART shell prompt
+- Fixed console logs corrupting UART CSV/PCAP frames
+- Fixed wardrive discovery with unset HE packet lengths
+- Fixed zero-filled hidden SSIDs appearing as question marks
+- Fixed raw capture missing control frames, including ACK/CTS
 - Fixed the timezone picker freezing on CYD boards by paginating the settings list
 - Fixed `scanarp` over the CLI immediately printing "ARP scan cancelled" and scanning nothing
 - Fixed `scanlocal` finding nothing when the web/AP services weren't running

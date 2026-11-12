@@ -1,4 +1,5 @@
 #include "core/callbacks.h"
+#include "core/pcap_pool.h"
 #include "scans/wifi/wardrive_observation.h"
 #include "core/system_manager.h"
 #include "esp_wifi.h"
@@ -116,12 +117,8 @@ static void *mon_tbl_calloc(size_t n, size_t size) {
 #define MIN_PACKET_LENGTH 24    // Minimum 802.11 header size for mgmt/data
 #define MAX_IE_LEN 255
 
-/* Length of the Frame Control field plus Duration/ID: everything a control
- * frame header can be. ACK and CTS are 10 bytes (802.11-2020 9.2, no duration
- * field) and Block Ack Request is 14, so the 24-byte minimum above threw away
- * every one of them. Raw capture uses this instead, otherwise the control
- * frames it is supposed to collect are filtered out before they are ever seen. */
-#define MIN_CONTROL_PACKET_LENGTH 4
+/* ACK and CTS are the shortest control frames: FC + Duration + RA, without FCS. */
+#define MIN_CONTROL_PACKET_LENGTH 10
 static const uint8_t pineapple_ouis[][3] = {
     {0x00, 0x13, 0x37},
 };
@@ -155,8 +152,8 @@ static uint32_t peer_gps_stream_tx_fail = 0;
 static uint32_t peer_gps_stream_rx_packets = 0;
 static uint32_t peer_gps_stream_rx_fix_packets = 0;
 static TaskHandle_t peer_gps_stream_task_handle = NULL;
-static StackType_t *peer_gps_stream_stack = NULL;
-static StaticTask_t *peer_gps_stream_tcb = NULL;
+static StaticSemaphore_t peer_gps_stream_mutex_storage;
+static SemaphoreHandle_t peer_gps_stream_mutex;
 
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 #define BLE_WD_SEEN_SIZE 64
@@ -1063,6 +1060,14 @@ static void peer_gps_stream_task(void *arg) {
     gps_t gps_local = {0};
 
     while (1) {
+        xSemaphoreTake(peer_gps_stream_mutex, portMAX_DELAY);
+        if (!esp_comm_manager_is_connected()) {
+            peer_gps_stream_task_handle = NULL;
+            xSemaphoreGive(peer_gps_stream_mutex);
+            vTaskDelete(NULL);
+            return;
+        }
+        xSemaphoreGive(peer_gps_stream_mutex);
         if (esp_comm_manager_is_connected()) {
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
             if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething2") == 0 &&
@@ -1087,7 +1092,7 @@ static void peer_gps_stream_task(void *arg) {
             }
         }
 
-        vTaskDelay(pdMS_TO_TICKS(PEER_GPS_STREAM_INTERVAL_MS));
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(PEER_GPS_STREAM_INTERVAL_MS));
     }
 }
 
@@ -1478,53 +1483,24 @@ static bool beacon_should_emit_limited(const uint8_t *bssid, bool ssid_has_text)
     return true;
 }
 
-/* Per-slot frame buffer.
- *
- * This started life as 768 bytes, which silently dropped every frame above
- * that. A 1500-byte-MTU data frame is 1536 bytes on the wire, so `capture
- * -raw` was throwing away the only frames anyone wanted, with no counter and
- * no log. Sized to take a full 1500 MTU data frame (1536 bytes) with room for
- * the 30-byte four-address header, the QoS Control field and the FCS.
- *
- * It is not sized for a maximum-size MPDU (2304-byte MSDU, 2340 bytes on the
- * wire). That case is still dropped rather than truncated, and the drop is
- * counted so it shows up in the capture summary. Widening further would cost
- * slots, and slots are what absorb burst rate. */
-#define PCAP_SLOT_DATA_LEN 2048
-
-// queued writer to avoid heavy work in promiscuous callback
-typedef struct {
-    uint16_t length;
-    uint8_t data[PCAP_SLOT_DATA_LEN];
-    bool in_use;
-    /* Radio metadata lifted out of rx_ctrl so the writer task can build a real
-     * radiotap header. has_* flags are all false when the caller had no
-     * rx_ctrl to give. */
-    radiotap_meta_t meta;
-} pcap_pool_slot_t;
+/* Variable-length frame reservations share the former 6 x 2048-byte-slot
+ * budget. Descriptors and wrap padding are included in that same allocation.
+ * Small frames no longer each consume a full 2 KB slot; frames up to 4 KB fit.
+ */
+_Static_assert(PCAP_MAX_FRAME_LEN + RADIOTAP_MAX_LEN + PCAP_PACKET_HEADER_SIZE <= PCAP_BUFFER_SIZE,
+               "Maximum queued frame must fit in the PCAP sink buffer");
 
 typedef struct {
     uint8_t slot_idx;
     pcap_capture_type_t cap_type;
 } pcap_q_item_t;
 
-#define EAPOL_Q_LEN 64
-/* Slot count and slot size trade against each other in a fixed memory budget,
- * and the budget is unchanged from the original design: 16 x 788 bytes was
- * 12,608, and 6 x 2068 is 12,408. The slots are wider so full-size data frames
- * fit, and there are fewer of them. Fewer slots means less buffering behind a
- * slow SD write, so the minimum is kept high enough to still ride out a burst
- * (3 slots x 2068 = 6,204 bytes). */
-#if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(GHOSTESP_NO_NATIVE_BLE)
+#define EAPOL_Q_LEN PCAP_POOL_DESCRIPTOR_COUNT
 #define PCAP_POOL_SLOTS_DEFAULT 6
 #define PCAP_POOL_SLOTS_MIN 3
-#else
-#define PCAP_POOL_SLOTS_DEFAULT 6
-#define PCAP_POOL_SLOTS_MIN 3
-#endif
 static QueueHandle_t s_pcap_q = NULL;
 static TaskHandle_t s_pcap_writer_task = NULL;
-static pcap_pool_slot_t *s_pcap_pool = NULL;
+static pcap_pool_t *s_pcap_pool = NULL;
 static size_t s_pcap_pool_slots = 0;
 static portMUX_TYPE s_pcap_pool_lock = portMUX_INITIALIZER_UNLOCKED;
 
@@ -1535,16 +1511,17 @@ static bool pcap_pool_init(void) {
 
     size_t slots = PCAP_POOL_SLOTS_DEFAULT;
     while (slots >= PCAP_POOL_SLOTS_MIN) {
-        pcap_pool_slot_t *pool = (pcap_pool_slot_t *)heap_caps_calloc(slots, sizeof(pcap_pool_slot_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        size_t bytes = slots * sizeof(pcap_pool_legacy_layout_t);
+        pcap_pool_t *pool = heap_caps_calloc(1, bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (!pool) {
-            pool = (pcap_pool_slot_t *)heap_caps_calloc(slots, sizeof(pcap_pool_slot_t), MALLOC_CAP_8BIT);
+            pool = heap_caps_calloc(1, bytes, MALLOC_CAP_8BIT);
         }
         if (pool != NULL) {
+            if (!pcap_arena_init(pool, bytes)) { heap_caps_free(pool); return false; }
             s_pcap_pool = pool;
-            s_pcap_pool_slots = slots;
-            ESP_LOGI(TAG, "PCAP pool allocated: %lu slots (%lu bytes)",
-                     (unsigned long)s_pcap_pool_slots,
-                     (unsigned long)(s_pcap_pool_slots * sizeof(pcap_pool_slot_t)));
+            s_pcap_pool_slots = PCAP_POOL_DESCRIPTOR_COUNT;
+            ESP_LOGI(TAG, "PCAP arena allocated: %lu bytes, max frame %u bytes",
+                     (unsigned long)bytes, PCAP_MAX_FRAME_LEN);
             return true;
         }
         if (slots == PCAP_POOL_SLOTS_MIN) {
@@ -1560,32 +1537,16 @@ static bool pcap_pool_init(void) {
     return false;
 }
 
-static int pcap_pool_acquire_slot(void) {
-    if (s_pcap_pool == NULL || s_pcap_pool_slots == 0) {
-        return -1;
-    }
-
-    int slot = -1;
+static int pcap_pool_acquire_slot(uint16_t length) {
     taskENTER_CRITICAL(&s_pcap_pool_lock);
-    for (size_t i = 0; i < s_pcap_pool_slots; i++) {
-        if (!s_pcap_pool[i].in_use) {
-            s_pcap_pool[i].in_use = true;
-            slot = (int)i;
-            break;
-        }
-    }
+    int slot = pcap_arena_reserve(s_pcap_pool, length);
     taskEXIT_CRITICAL(&s_pcap_pool_lock);
     return slot;
 }
 
 static void pcap_pool_release_slot(uint8_t slot_idx) {
-    if (s_pcap_pool == NULL || s_pcap_pool_slots == 0 || slot_idx >= s_pcap_pool_slots) {
-        return;
-    }
-
     taskENTER_CRITICAL(&s_pcap_pool_lock);
-    s_pcap_pool[slot_idx].in_use = false;
-    s_pcap_pool[slot_idx].length = 0;
+    pcap_arena_release(s_pcap_pool, slot_idx);
     taskEXIT_CRITICAL(&s_pcap_pool_lock);
 }
 
@@ -1596,9 +1557,9 @@ static void pcap_writer_task(void *arg) {
     for (;;) {
         if (xQueueReceive(s_pcap_q, &item, pdMS_TO_TICKS(500)) == pdTRUE) {
             if (s_pcap_pool != NULL && item.slot_idx < s_pcap_pool_slots) {
-                pcap_pool_slot_t *slot = &s_pcap_pool[item.slot_idx];
+                pcap_pool_slot_t *slot = &s_pcap_pool->slots[item.slot_idx];
                 if (slot->length > 0) {
-                    pcap_write_packet_to_buffer_meta(slot->data, slot->length,
+                    pcap_write_packet_to_buffer_meta(s_pcap_pool->data + slot->offset, slot->length,
                                                     item.cap_type, &slot->meta);
                 }
                 pcap_pool_release_slot(item.slot_idx);
@@ -1703,24 +1664,23 @@ static inline void enqueue_pcap_write_rx(const uint8_t *payload, uint16_t len,
         return;
     }
 
-    /* Too big for a slot. Counted, never truncated: a half-written frame is
+    /* Too big for the arena's frame limit. Counted, never truncated: a half-written frame is
      * worse than a missing one. */
-    if (len > sizeof(s_pcap_pool[0].data)) {
+    if (len > PCAP_MAX_FRAME_LEN || len > s_pcap_pool->capacity) {
         s_pcap_queue_dropped_too_big++;
         return;
     }
 
-    int slot = pcap_pool_acquire_slot();
+    int slot = pcap_pool_acquire_slot(len);
     if (slot < 0) {
-        /* Every slot in flight, normally because an SD write is holding the
-         * writer up. */
+        /* No descriptor or contiguous arena space available, normally because
+         * storage or UART output is holding the writer up. */
         s_pcap_queue_dropped_no_slot++;
         return;
     }
 
-    pcap_pool_slot_t *pool_slot = &s_pcap_pool[slot];
-    pool_slot->length = len;
-    memcpy(pool_slot->data, payload, len);
+    pcap_pool_slot_t *pool_slot = &s_pcap_pool->slots[slot];
+    memcpy(s_pcap_pool->data + pool_slot->offset, payload, len);
     pcap_meta_from_rx_ctrl(rc, &pool_slot->meta);
 
     pcap_q_item_t item = {0};
@@ -1764,7 +1724,7 @@ void cleanup_pcap_queue(void) {
     }
 
     if (s_pcap_pool != NULL) {
-        pcap_pool_slot_t *pool_to_free = NULL;
+        pcap_pool_t *pool_to_free = NULL;
         taskENTER_CRITICAL(&s_pcap_pool_lock);
         pool_to_free = s_pcap_pool;
         s_pcap_pool = NULL;
@@ -2275,7 +2235,7 @@ static void wardrive_heartbeat_cb(void *arg) {
 
     wardrive_scan_stats_t scan = {0};
     wardrive_scan_get_stats(&scan);
-    glog("Wardrive discovery: backend=%s scans=%lu results=%lu scanfail=%lu drainfail=%lu duration=%lu/%lums channel=%u parsefail=%lu tune/probefail=%lu/%lu suppressed=%lu pending_coalesced=%lu\n",
+    ESP_LOGD(TAG, "Wardrive discovery: backend=%s scans=%lu results=%lu scanfail=%lu drainfail=%lu duration=%lu/%lums channel=%u parsefail=%lu tune/probefail=%lu/%lu suppressed=%lu pending_coalesced=%lu",
          wardrive_active_scan_enabled ? "active" : "monitor", (unsigned long)scan.completed,
          (unsigned long)scan.results, (unsigned long)scan.failures, (unsigned long)scan.drain_errors,
          (unsigned long)scan.last_ms, (unsigned long)scan.max_ms, scan.channel,
@@ -2310,9 +2270,9 @@ static void wardrive_heartbeat_cb(void *arg) {
         if (!gps_local->valid || gps_local->fix < GPS_FIX_GPS || gps_local->fix_mode < GPS_MODE_2D) {
             fix_status = using_peer_gps ? "Peer No Fix" : "No Fix";
         } else if (gps_local->fix_mode == GPS_MODE_2D) {
-            fix_status = using_peer_gps ? "Peer 2D" : "2D";
+            fix_status = using_peer_gps ? "Peer Basic" : "Basic";
         } else if (gps_local->fix_mode == GPS_MODE_3D) {
-            fix_status = using_peer_gps ? "Peer 3D" : "3D";
+            fix_status = using_peer_gps ? "Peer Locked" : "Locked";
         } else {
             fix_status = using_peer_gps ? "Peer Fix" : "Fix";
         }
@@ -2345,7 +2305,7 @@ static void wardrive_heartbeat_cb(void *arg) {
     portEXIT_CRITICAL(&wardrive_obs_mux);
 
     if (wardrive_role == WARDRIVE_ROLE_HELPER) {
-        glog("Wardrive: ap=%lu logged=%lu/%lu gpsrej=%lu helper=%lu/%lu tx(n/p/r/t/s)=%lu/%lu/%lu/%lu/%lu send(ok/fail)=%lu/%lu peergps(rx/fix tx_ok/fail)=%lu/%lu %lu/%lu ch=%u up=%lum%02lus gps=%s/%u q=%u/%u hi=%u drop=%lu/%lu/%lu pending=%uB heap=%u/%uB\n",
+        ESP_LOGD(TAG, "Wardrive: ap=%lu logged=%lu/%lu gpsrej=%lu helper=%lu/%lu tx(n/p/r/t/s)=%lu/%lu/%lu/%lu/%lu send(ok/fail)=%lu/%lu peergps(rx/fix tx_ok/fail)=%lu/%lu %lu/%lu ch=%u up=%lum%02lus gps=%s/%u q=%u/%u hi=%u drop=%lu/%lu/%lu pending=%uB heap=%u/%uB",
              (unsigned long)wardrive_wifi_frames_seen,
              (unsigned long)wardrive_log_ok,
              (unsigned long)wardrive_log_attempts,
@@ -2378,7 +2338,7 @@ static void wardrive_heartbeat_cb(void *arg) {
              (unsigned)heap_free,
              (unsigned)heap_largest);
     } else {
-        glog("Wardrive: ap=%lu logged=%lu/%lu gpsrej=%lu helper=%lu/%lu peergps(rx/fix tx_ok/fail)=%lu/%lu %lu/%lu ch=%u up=%lum%02lus gps=%s/%u q=%u/%u hi=%u drop=%lu/%lu/%lu pending=%uB heap=%u/%uB\n",
+        ESP_LOGD(TAG, "Wardrive: ap=%lu logged=%lu/%lu gpsrej=%lu helper=%lu/%lu peergps(rx/fix tx_ok/fail)=%lu/%lu %lu/%lu ch=%u up=%lum%02lus gps=%s/%u q=%u/%u hi=%u drop=%lu/%lu/%lu pending=%uB heap=%u/%uB",
              (unsigned long)wardrive_wifi_frames_seen,
              (unsigned long)wardrive_log_ok,
              (unsigned long)wardrive_log_attempts,
@@ -2403,6 +2363,27 @@ static void wardrive_heartbeat_cb(void *arg) {
              (unsigned)pending,
              (unsigned)heap_free,
              (unsigned)heap_largest);
+    }
+
+    // Keep the serial terminal readable on the Flipper. Emit status even
+    // before the first accepted row; detailed counters remain debug logs.
+    if (wardrive_role == WARDRIVE_ROLE_HELPER) {
+        glog("Wardrive helper\nAP frames: %lu\nSent: %lu\nChannel: %u\n",
+             (unsigned long)wardrive_wifi_frames_seen,
+             (unsigned long)wardrive_helper_stream_send_ok, (unsigned)wardrive_channel);
+    } else {
+        wardriving_data_t quality = {0};
+        quality.gps_quality.has_valid_fix = have_active_gps;
+        quality.gps_quality.hdop = gps_local ? gps_local->dop_h : 0;
+        float speed = have_active_gps && gps_local->speed >= 0.1f &&
+                      gps_local->speed <= 340.0f ? gps_local->speed * 3.6f : 0;
+        glog("GPS: %s\nAPs: %lu\nSats: %u/%u\nSpeed: %.1f km/h\nAccuracy: %s\nRows: %lu\n",
+             fix_status, (unsigned long)csv_get_unique_wifi_ap_count_including_hidden(),
+             (unsigned)sats, gps_local ? (unsigned)gps_local->sats_in_view : 0,
+             speed, get_gps_quality_string(&quality), (unsigned long)wardrive_log_ok);
+        if (wardrive_ble_advs_seen) {
+            glog("BLE: %lu\n", (unsigned long)csv_get_unique_ble_device_count());
+        }
     }
 }
 
@@ -2861,33 +2842,26 @@ void wardriving_register_stream_handler(void) {
     ESP_LOGI(TAG, "Wardrive stream handler: %s", ok ? "OK" : "FAIL");
     ESP_LOGI(TAG, "Peer GPS stream handler: %s", gps_ok ? "OK" : "FAIL");
 
-    if (peer_gps_stream_task_handle == NULL) {
-        peer_gps_stream_stack = heap_caps_malloc(3072 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
-        peer_gps_stream_tcb = malloc(sizeof(StaticTask_t));
-        if (peer_gps_stream_stack && peer_gps_stream_tcb) {
-            peer_gps_stream_task_handle = xTaskCreateStatic(
-                peer_gps_stream_task,
-                "peer_gps_stream",
-                3072,
-                NULL,
-                3,
-                peer_gps_stream_stack,
-                peer_gps_stream_tcb);
-            ESP_LOGI(TAG, "Peer GPS stream task stack allocated from PSRAM: %d bytes", 
-                     (int)(3072 * sizeof(StackType_t)));
-        }
-        if (!peer_gps_stream_task_handle) {
-            if (peer_gps_stream_stack) {
-                free(peer_gps_stream_stack);
-                peer_gps_stream_stack = NULL;
-            }
-            if (peer_gps_stream_tcb) {
-                free(peer_gps_stream_tcb);
-                peer_gps_stream_tcb = NULL;
-            }
-            ESP_LOGW(TAG, "Peer GPS stream task create failed");
-        }
+    peer_gps_stream_mutex = xSemaphoreCreateMutexStatic(&peer_gps_stream_mutex_storage);
+    wardriving_peer_connected();
+}
+
+void wardriving_peer_connected(void) {
+    if (!peer_gps_stream_mutex) return;
+    xSemaphoreTake(peer_gps_stream_mutex, portMAX_DELAY);
+    if (esp_comm_manager_is_connected() && !peer_gps_stream_task_handle) {
+        BaseType_t rc = xTaskCreate(peer_gps_stream_task, "peer_gps_stream",
+                                    3072, NULL, 3, &peer_gps_stream_task_handle);
+        if (rc != pdPASS) ESP_LOGW(TAG, "Peer GPS stream task create failed");
     }
+    xSemaphoreGive(peer_gps_stream_mutex);
+}
+
+void wardriving_peer_disconnected(void) {
+    if (!peer_gps_stream_mutex) return;
+    xSemaphoreTake(peer_gps_stream_mutex, portMAX_DELAY);
+    if (peer_gps_stream_task_handle) xTaskNotifyGive(peer_gps_stream_task_handle);
+    xSemaphoreGive(peer_gps_stream_mutex);
 }
 
 bool wardriving_get_helper_channel_plan_csv(char *out, size_t out_len) {
@@ -3514,8 +3488,8 @@ bool is_pwn_response(const wifi_promiscuous_pkt_t *pkt) {
  * contained, which is the opposite of what a raw capture should do.
  *
  * HE targets report the FCS-free length directly in dump_len. Older targets
- * only have sig_len, so the FCS is subtracted here. The same split is already
- * used by the wardriving callback.
+ * only have sig_len, so the FCS is subtracted here. Some HE receptions leave
+ * dump_len unset; use sig_len in that case for capture and wardriving alike.
  */
 static inline size_t wifi_frame_len_without_fcs(const wifi_pkt_rx_ctrl_t *rc) {
 #if CONFIG_SOC_WIFI_HE_SUPPORT
@@ -3529,19 +3503,16 @@ static inline size_t wifi_frame_len_without_fcs(const wifi_pkt_rx_ctrl_t *rc) {
 }
 
 void wifi_raw_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
+    if (!buf || type == WIFI_PKT_MISC) return;
     wifi_promiscuous_pkt_t *pkt = (wifi_promiscuous_pkt_t *)buf;
-
-    // MISC frames carry a zero-length payload, so there is nothing to write.
-    if (type == WIFI_PKT_MISC) {
-        return;
-    }
 
     /* Control frames are as short as 10 bytes (ACK, CTS), so the 24-byte
      * minimum used for management and data frames would discard every one of
      * them before they reached the file. */
     const size_t min_len = (type == WIFI_PKT_CTRL) ? MIN_CONTROL_PACKET_LENGTH
                                                    : MIN_PACKET_LENGTH;
-    if (pkt->rx_ctrl.sig_len < min_len) {
+    const size_t len = wifi_frame_len_without_fcs(&pkt->rx_ctrl);
+    if (len < min_len) {
         return;
     }
 
@@ -3552,7 +3523,6 @@ void wifi_raw_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
      * trims management frames back to their last valid information element,
      * which is right for a beacon capture but wrong here: a raw capture has to
      * be byte-exact or the trailing elements of a frame go missing. */
-    const size_t len = wifi_frame_len_without_fcs(&pkt->rx_ctrl);
     if (len > 0) {
         enqueue_pcap_write_meta(pkt->payload, (uint16_t)len, &pkt->rx_ctrl);
     }
@@ -3645,15 +3615,7 @@ void wardriving_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     if (!buf || type != WIFI_PKT_MGMT || wardrive_active_scan_enabled) return;
     const wifi_promiscuous_pkt_t *pkt = buf;
     if (pkt->rx_ctrl.rx_state != 0) return;
-    size_t len;
-#if CONFIG_SOC_WIFI_HE_SUPPORT
-    // HE targets supply the captured MPDU length without FCS.
-    len = pkt->rx_ctrl.dump_len;
-    if (len > pkt->rx_ctrl.sig_len) return;
-#else
-    if (pkt->rx_ctrl.sig_len < 4) return;
-    len = pkt->rx_ctrl.sig_len - 4;
-#endif
+    size_t len = wifi_frame_len_without_fcs(&pkt->rx_ctrl);
     if (len < 36 || (pkt->payload[0] != 0x80 && pkt->payload[0] != 0x50)) return;
     wardrive_wifi_frames_seen++;
     wd_ap_t ap;

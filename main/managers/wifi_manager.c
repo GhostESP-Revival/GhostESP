@@ -2398,6 +2398,14 @@ void wifi_manager_start_monitor_mode(wifi_promiscuous_cb_t_t callback) {
     }
     
     ESP_ERROR_CHECK(esp_wifi_set_promiscuous_filter(&filter));
+    if (callback == wifi_raw_scan_callback) {
+        // The category mask alone does not enable control subtypes: IDF's
+        // subtype mask defaults to zero. Include ACK/CTS/RTS/Block Ack in raw.
+        wifi_promiscuous_filter_t ctrl_filter = {
+            .filter_mask = WIFI_PROMIS_CTRL_FILTER_MASK_ALL,
+        };
+        ESP_ERROR_CHECK(esp_wifi_set_promiscuous_ctrl_filter(&ctrl_filter));
+    }
     ESP_LOGI("WIFI_MANAGER", "Set hardware filter mask: 0x%02" PRIx32, filter.filter_mask);
 
     // Backing store for handshake/probe/beacon/WPS/wardrive tables (~5KB).

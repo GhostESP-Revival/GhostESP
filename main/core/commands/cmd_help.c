@@ -539,7 +539,7 @@ void handle_help(int argc, char **argv) {
         glog("uptime | date               Show uptime or current time.\n");
         glog("whoami | status             Show device identity or a system summary.\n");
         glog("hostname [name]             View or set the prompt hostname.\n");
-        glog("color [name|0-255|off]      Set ANSI prompt color (also cli_color).\n");
+        glog("color [name|0-255|off]      Set USB prompt color (also cli_color).\n");
         glog("banner [on|off|status]      Control the boot banner.\n");
         glog("clear                       Clear an ANSI terminal.\n");
         glog("alias [name command]        Create a persistent command shortcut.\n");

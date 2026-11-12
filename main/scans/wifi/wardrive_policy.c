@@ -83,7 +83,14 @@ bool wd_parse_ap(const uint8_t *f, size_t len, uint8_t ch, int8_t rssi, wd_ap_t 
         if (id == 0 && !ssid_seen) {
             if (n > 32) return false;
             ssid_seen = true;
-            for (uint8_t i = 0; i < n; ++i) ap.ssid[i] = (p[i] < 0x20 || p[i] == 0x7f) ? '?' : (char)p[i];
+            // Hidden SSIDs may retain their original length but contain only
+            // zero bytes. Keep these empty so CSV output and dedupe recognise
+            // them as hidden, rather than inventing a name made of '?'.
+            bool hidden = true;
+            for (uint8_t i = 0; i < n; ++i) if (p[i] != 0) hidden = false;
+            if (!hidden) {
+                for (uint8_t i = 0; i < n; ++i) ap.ssid[i] = (p[i] < 0x20 || p[i] == 0x7f) ? '?' : (char)p[i];
+            }
         } else if (id == 3 && n == 1 && wd_channel_valid(p[0])) {
             ap.channel = p[0]; ds_seen = true;
         } else if (id == 61 && n >= 1 && !ds_seen && wd_channel_valid(p[0])) {
