@@ -1224,7 +1224,9 @@ static bool get_battery_info(uint8_t *percentage, bool *is_charging) {
         return result;
     }
 
-    // Cache for non-fuel-gauge configurations to avoid I2C access in low mode
+#ifndef CONFIG_USE_ESPRESSIF_MAX17048
+    // Legacy hardware-backed getters avoid fresh I2C access in low mode.
+    // The component backend below is already a nonblocking snapshot reader.
     static uint8_t last_pct_cache = 0;
     static bool last_chg_cache = false;
     static bool last_valid_cache = false;
@@ -1246,8 +1248,19 @@ static bool get_battery_info(uint8_t *percentage, bool *is_charging) {
         }
         return false;
     }
+#endif
 
 #ifdef CONFIG_HAS_FUEL_GAUGE
+#ifdef CONFIG_USE_ESPRESSIF_MAX17048
+    /* The component backend polls in its own task. UI callbacks only copy a
+     * snapshot and never wait for I2C or write battery state to NVS. */
+    fuel_gauge_data_t fg;
+    if (fuel_gauge_manager_get_data(&fg)) {
+        g_cached_batt_percent = fg.percentage;
+        g_cached_batt_charging = fg.is_charging;
+        g_cached_batt_valid = true;
+    }
+#else
     // Lazy poll on UI thread with rate limiting (every 5s)
     static int64_t last_poll_time = 0;
     int64_t now = esp_timer_get_time() / 1000;
@@ -1260,6 +1273,7 @@ static bool get_battery_info(uint8_t *percentage, bool *is_charging) {
             last_poll_time = now;
         }
     }
+#endif
 
     if (g_cached_batt_valid) {
         *percentage = g_cached_batt_percent;
@@ -1315,6 +1329,10 @@ static bool get_battery_info(uint8_t *percentage, bool *is_charging) {
 
 void display_manager_set_low_i2c_mode(bool on) {
     g_low_i2c_mode = on;
+}
+
+bool display_manager_is_low_i2c_mode(void) {
+    return g_low_i2c_mode;
 }
 
 static void slide_set_x(void *var, int32_t v) {

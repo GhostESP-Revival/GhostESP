@@ -631,6 +631,10 @@ void fuel_gauge_manager_deinit(void) {
     }
 }
 
+#elif defined(CONFIG_USE_ESPRESSIF_MAX17048)
+
+/* Implemented in fuel_gauge_max17048_espressif.c for the selected C5 profiles. */
+
 #elif defined(CONFIG_USE_MAX17048_FUEL_GAUGE)
 
 static const char *TAG = "MAX17048";
