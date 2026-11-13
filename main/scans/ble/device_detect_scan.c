@@ -541,6 +541,9 @@ static bool is_tracking_addr(const ble_addr_t *addr) {
            memcmp(s_tracking.addr.val, addr->val, sizeof(addr->val)) == 0;
 }
 
+static uint32_t s_rx_count;
+uint32_t ble_device_detect_get_rx_count(void) { return s_rx_count; }
+
 static void ble_device_detect_callback(struct ble_gap_event *event, size_t len) {
     (void)len;
 
@@ -580,6 +583,7 @@ static void ble_device_detect_callback(struct ble_gap_event *event, size_t len) 
     }
 
     BLEDetectDeviceType detected_type = BLE_DETECT_DEVICE_UNKNOWN;
+    s_rx_count++;
     const char *detected_subtype = NULL;
     char adv_name[32] = {0};
     char nest_sub[20];
@@ -774,6 +778,7 @@ static void ble_device_detect_callback(struct ble_gap_event *event, size_t len) 
 }
 
 void ble_device_detect_start(void) {
+    s_rx_count = 0;
     free(s_devices);
     s_devices = calloc(MAX_BLE_DETECT_DEVICES, sizeof(*s_devices));
     s_device_count = 0;
@@ -799,7 +804,12 @@ void ble_device_detect_start(void) {
     }
 
     ble_unregister_handler(ble_device_detect_callback);
-    ble_register_handler(ble_device_detect_callback);
+    if (ble_register_handler(ble_device_detect_callback) != ESP_OK) {
+        ESP_LOGE(TAG, "Could not register device detection handler");
+        free(s_devices);
+        s_devices = NULL;
+        return;
+    }
     s_scan_active = true;
 
     if (!ble_start_scanning()) {

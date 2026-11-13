@@ -1467,7 +1467,8 @@ static esp_err_t gps_manager_log_wardriving_data_impl(wardriving_data_t *data,
     ghostchi_manager_add_xp(data->ble_data.is_ble_device ? 3 : 4);
 
     static TickType_t last_status_tick = 0;
-    if (last_status_tick == 0 || (now - last_status_tick) >= pdMS_TO_TICKS(GPS_STATUS_PERIOD_MS)) {
+    if (!wardriving_is_running() &&
+        (last_status_tick == 0 || (now - last_status_tick) >= pdMS_TO_TICKS(GPS_STATUS_PERIOD_MS))) {
         last_status_tick = now;
         const char *fix_status = (!gps.valid || gps.fix == GPS_FIX_INVALID) ? "No Fix"
                                  : (gps.fix_mode == GPS_MODE_2D)             ? "Basic"

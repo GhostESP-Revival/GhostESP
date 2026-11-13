@@ -9,6 +9,7 @@ bool shell_expand_command(const char *input, char *output, size_t output_len);
 
 /* Prompt and boot configuration used by the serial console and main banner. */
 void shell_get_prompt(char *output, size_t output_len);
+void shell_get_plain_prompt(char *output, size_t output_len);
 void shell_set_hostname(const char *hostname);
 bool shell_get_banner_enabled(void);
 void shell_set_banner_enabled(bool enabled);

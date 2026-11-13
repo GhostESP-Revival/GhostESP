@@ -443,14 +443,15 @@ esp_err_t pcap_write_global_header(FILE *f, pcap_capture_type_t capture_type) {
       const char *mark_close = "[BUF/CLOSE]";
       const size_t mark_close_len = strlen(mark_close);
 
-      glog_set_defer(1);
+      glog_console_hold();
       uart_write_bytes(UART_NUM_0, mark_begin, mark_begin_len);
       uart_write_bytes(UART_NUM_0, (const char *)&header, sizeof(header));
       uart_write_bytes(UART_NUM_0, mark_close, mark_close_len);
       const char newline = '\n';
       uart_write_bytes(UART_NUM_0, &newline, 1);
-      glog_set_defer(0);
-      glog_flush_deferred();
+      /* Keep console text from interleaving with the still-draining frame. */
+      uart_wait_tx_done(UART_NUM_0, portMAX_DELAY);
+      glog_console_release();
       return ESP_OK;
     }
   } else {
@@ -1103,12 +1104,13 @@ static void _pcap_flush_buffer_to_uart(void) {
   const size_t mark_begin_len = strlen(mark_begin);
   const char *mark_close = "[BUF/CLOSE]";
   const size_t mark_close_len = strlen(mark_close);
-  glog_set_defer(1);
+  glog_console_hold();
   uart_write_bytes(UART_NUM_0, mark_begin, mark_begin_len);
   uart_write_bytes(UART_NUM_0, (const char *)pcap_buffer, buffer_offset);
   uart_write_bytes(UART_NUM_0, mark_close, mark_close_len);
-  glog_set_defer(0);
-  glog_flush_deferred();
+  /* Keep console text from interleaving with the still-draining frame. */
+  uart_wait_tx_done(UART_NUM_0, portMAX_DELAY);
+  glog_console_release();
 }
 
 static esp_err_t _pcap_flush_buffer_to_file_nolock() {

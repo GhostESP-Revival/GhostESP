@@ -8,6 +8,11 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 
 ### Added
 
+- Sentry now identifies GhostNet networks as GhostESP devices
+- Added Sentry settings to choose which devices appear and turn popups on or off
+- Added Sentry logs to help explain why no devices appear
+- Airspace Monitor now saves packet recordings while open
+- Airspace Monitor now warns about unusual channel changes, connection failures and network security changes
 - Reworked `scanlocal` into a full local host scan: it finds hosts with ARP, then identifies each one by NetBIOS name, mDNS hostname, ICMP TTL and mDNS/SSDP services
 - Local scan results now show MAC, vendor, hostname, OS hint and services for each host
 - Vendor names now appear in AP/station scans, attack target lists, Ethernet ARP results, port/SNMP scans, GATT scans and Sentry rows; randomized MACs are labelled "Private address"
@@ -23,12 +28,32 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Add support for [XIAO ESP32S3 & Wio-SX1262 Kit](https://wiki.seeedstudio.com/wio_sx1262_with_xiao_esp32s3_kit/) - @antonionardella (#428)
 
 ### Changed
+
+- Improved Airspace Monitor alerts in crowded places
+- Airspace Monitor device rows stay in place while updating
+- Added Airspace Monitor logs to help investigate alerts
+- Sentry settings now use iOS-style switches
+- Restored compact wardrive status updates
+- Increased capture frames to 4 KB without increasing packet-pool RAM
 - Sentry now detects Google Nest cameras and doorbells over BLE and over WiFi - pre2
 - Sentry rows now show how long ago each device was last seen - pre2
 - Beacon spam now uses a STA-only attack radio profile, so it can hop DFS channels and no longer broadcasts the device's own AP
 - Updated the WebUI logo
 
 ### Fixed
+
+- Fixed touch drag scrolling in Sentry settings
+- Improved Sentry scan reliability and added messages when a scanner fails to start
+- Fixed Sentry counting the same sighting repeatedly
+- Sentry popups no longer replace each other or interrupt device details
+- Fixed Airspace recordings losing their last packets when closed
+- Reduced false Airspace warnings on mesh networks
+- Fixed a crash when starting GPS sharing over GhostLink
+- Fixed stray color codes appearing in the Flipper terminal
+- Fixed status messages corrupting recordings sent to the Flipper
+- Fixed wardriving missing nearby networks on some devices
+- Fixed hidden network names appearing as question marks
+- Raw packet captures now include previously missing control traffic
 - Fixed the timezone picker freezing on CYD boards by paginating the settings list
 - Fixed `scanarp` over the CLI immediately printing "ARP scan cancelled" and scanning nothing
 - Fixed `scanlocal` finding nothing when the web/AP services weren't running
