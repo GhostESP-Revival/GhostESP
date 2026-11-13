@@ -1,7 +1,18 @@
 dependencies:
   espressif/cjson: ^1.7.19~1
-  espressif/esp_lcd_axs15231b: ==1.0.0
+  espressif/esp_lcd_axs15231b:
+    version: ==1.0.0
+    # The tracked copy uses rgb_ele_order and supports ESP-IDF 6.1.
+    override_path: ../components/espressif__esp_lcd_axs15231b
   espressif/esp_io_expander_tca95xx_16bit: ^2.0.0
+  espressif/max17048:
+    version: ==0.2.0
+    rules:
+    - if: 'target == "esp32c5" && $CONFIG{USE_ESPRESSIF_MAX17048} == True'
+  espressif/i2c_bus:
+    version: ==1.5.2
+    rules:
+    - if: 'target == "esp32c5" && $CONFIG{USE_ESPRESSIF_MAX17048} == True'
   espressif/w5500:
     version: ^1.0.1
     rules:

@@ -92,8 +92,8 @@ static esp_err_t ip5306_configure(void)
     } settings[] = {
         {IP5306_REG_SYS_CTL0,     IP5306_CHARGER_ENABLE_BIT, IP5306_CHARGER_ENABLE_BIT},
         {IP5306_REG_CHARGER_CTL0, 0x03, 0x03}, /* 4.2 V charge-stop voltage */
-        {IP5306_REG_CHARGER_CTL1, 0xC0, 0x40}, /* 400 mA charge-stop detection */
-        {IP5306_REG_CHARGER_CTL2, 0x0F, 0x02}, /* 4.2 V target, vendor-recommended +28 mV */
+        {IP5306_REG_CHARGER_CTL1, 0xC0, (uint8_t)(CONFIG_IP5306_CHARGE_STOP_CURRENT_CODE << 6)},
+        {IP5306_REG_CHARGER_CTL2, 0x0F, 0x00}, /* 4.2 V target, no voltage boost */
         {IP5306_REG_CHARGER_CTL3, 0x20, 0x20}, /* constant-current loop at VIN */
         {IP5306_REG_CHG_DIG_CTL0, 0x1F, CONFIG_IP5306_CHARGE_CURRENT_CODE},
     };
@@ -147,9 +147,12 @@ bool ip5306_manager_init(void)
     }
 
     s_initialized = true;
-    glog("IP5306: Initialized at 0x%02X on I2C0 SDA=%d SCL=%d; charge current code=0x%02X\n",
+    static const unsigned stop_current_ma[] = {200, 400, 500, 600};
+    glog("IP5306: Initialized at 0x%02X on I2C0 SDA=%d SCL=%d; charge current code=0x%02X (VIN limit=%u mA nominal); charge-stop=%u mA; target=4.2 V, voltage boost=0 mV\n",
               CONFIG_IP5306_I2C_ADDRESS, CONFIG_I2C_MANAGER_0_SDA,
-              CONFIG_I2C_MANAGER_0_SCL, CONFIG_IP5306_CHARGE_CURRENT_CODE);
+              CONFIG_I2C_MANAGER_0_SCL, CONFIG_IP5306_CHARGE_CURRENT_CODE,
+              (unsigned)(50 + 100 * CONFIG_IP5306_CHARGE_CURRENT_CODE),
+              stop_current_ma[CONFIG_IP5306_CHARGE_STOP_CURRENT_CODE]);
     return true;
 }
 

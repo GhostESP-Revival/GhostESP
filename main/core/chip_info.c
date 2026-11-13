@@ -28,8 +28,12 @@ static const char *chip_model_name(esp_chip_model_t model) {
 
 static const char *build_config_display_name(const char *build_config) {
     if (!build_config) return "Unknown";
+#ifdef CONFIG_BANSHEE_LITE_C5
+    return "Banshee Lite";
+#else
     if (strcmp(build_config, "somethingsomething") == 0) return "The Banshee";
     return build_config;
+#endif
 }
 
 static void copy_value(char *dst, size_t dst_size, const char *src) {
