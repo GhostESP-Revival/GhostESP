@@ -1014,6 +1014,12 @@ void app_main(void) {
             comm_rx = UART_PIN_NO_CHANGE;
         }
 #endif
+#ifdef CONFIG_WAVESHARE_C5_35_LCD
+        /* The default comm pins (6/7) are this board's display SPI SCLK/MOSI
+         * and 11/12 are the UART0 console; there is no peer-comm header. */
+        comm_tx = UART_PIN_NO_CHANGE;
+        comm_rx = UART_PIN_NO_CHANGE;
+#endif
 #ifdef CONFIG_CROWPANEL_EPAPER_42
         /* GPIO7 is the factory display-power enable, not a UART input. This
          * board has no wired peer-comm header, so leave the optional manager
@@ -1191,6 +1197,11 @@ void app_main(void) {
 #endif
     MEASURE_INIT_RAM("Switch to startup view", startup_ready = display_manager_switch_view_and_wait_for_refresh(startup_view));
     if (startup_ready) {
+#if defined(CONFIG_WAVESHARE_C5_35_LCD)
+        /* The glass lags panel memory by a few frames; let the first frame
+         * appear before the backlight comes on. */
+        vTaskDelay(pdMS_TO_TICKS(150));
+#endif
         set_backlight_brightness(100);
     } else {
         ESP_LOGW(TAG, "Startup view first refresh did not complete; leaving backlight off");
