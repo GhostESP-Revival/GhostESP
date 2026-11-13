@@ -40,7 +40,8 @@
 #define BEACON_SSID_MAX_LEN 32
 #define RANDOM_SSID_LEN 8
 #define BEACON_RANDOM_BURST 4
-#define BEACON_FRAME_MAX 104
+#define BEACON_FRAME_MAX 160
+#define BEACON_FIXED_CHANNEL 6
 static const char *TAG = "BeaconSpam";
 
 // External globals from wifi_manager.c
@@ -80,7 +81,6 @@ static inline void clear_tx_channel_unusable(void) {
 static void beacon_spam_task(void *param);
 static void beacon_spam_list_task(void *param);
 static void generate_random_ssid(char *ssid, size_t length);
-static void generate_random_mac(uint8_t *mac);
 
 // Helper function: Generate random SSID
 static void generate_random_ssid(char *ssid, size_t length) {
@@ -92,27 +92,98 @@ static void generate_random_ssid(char *ssid, size_t length) {
     ssid[length - 1] = '\0'; // Null-terminate the SSID
 }
 
-// Helper function: Generate random MAC address
-static void generate_random_mac(uint8_t *mac) {
-    esp_fill_random(mac, 6); // Fill MAC address with random bytes
-    mac[0] &= 0xFE; // Unicast MAC address (least significant bit of the first byte should be 0)
-    mac[0] |= 0x02; // Locally administered MAC address (set the second least significant bit)
+static const uint8_t beacon_template[] = {
+    0x80, 0x00, 0x00, 0x00,                         // Frame Control, Duration
+    0xff, 0xff, 0xff, 0xff, 0xff, 0xff,             // Destination address (broadcast)
+    0x01, 0x02, 0x03, 0x04, 0x05, 0x06,             // Source address (set per SSID)
+    0x01, 0x02, 0x03, 0x04, 0x05, 0x06,             // BSSID (set per SSID)
+    0xc0, 0x6c,                                     // Seq-ctl (set per frame)
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Timestamp (set per frame)
+    0x64, 0x00,                                     // Beacon interval (100 TU)
+    0x11, 0x04,                                     // Capability info (ESS + Privacy)
+    0x00, 0x00,                                     // SSID IE tag, length (set later)
+};
+
+static esp_err_t send_beacon_on_channel(const char *ssid, uint8_t ch) {
+    uint8_t packet[BEACON_FRAME_MAX];
+    memcpy(packet, beacon_template, sizeof(beacon_template));
+
+    char ssid_buffer[RANDOM_SSID_LEN + 1];
+    const char *ssid_to_use = ssid;
+    if (ssid_to_use == NULL) {
+        generate_random_ssid(ssid_buffer, RANDOM_SSID_LEN + 1);
+        ssid_to_use = ssid_buffer;
+    }
+
+    uint8_t ssid_len = strlen(ssid_to_use);
+    if (ssid_len > BEACON_SSID_MAX_LEN) {
+        ssid_len = BEACON_SSID_MAX_LEN;
+    }
+
+    uint32_t bssid_hash = 2166136261u;
+    for (uint8_t i = 0; i < ssid_len; i++) {
+        bssid_hash ^= (uint8_t)ssid_to_use[i];
+        bssid_hash *= 16777619u;
+    }
+    packet[10] = 0x02;
+    packet[11] = 0x00;
+    packet[12] = 0x00;
+    packet[13] = (uint8_t)(bssid_hash >> 16);
+    packet[14] = (uint8_t)(bssid_hash >> 8);
+    packet[15] = (uint8_t)bssid_hash;
+    memcpy(&packet[16], &packet[10], 6);
+
+    static uint64_t tsf = 0;
+    static uint16_t seq = 0;
+    tsf += 100000;
+    seq = (seq + 1) & 0x0FFF;
+    memcpy(&packet[24], &tsf, 8);
+    packet[22] = (uint8_t)((seq & 0x000F) << 4);
+    packet[23] = (uint8_t)(seq >> 4);
+
+    packet[37] = ssid_len;
+    memcpy(&packet[38], ssid_to_use, ssid_len);
+
+    uint8_t *supported_rates_ie = &packet[38 + ssid_len];
+    supported_rates_ie[0] = 0x01; // Supported Rates IE tag
+    supported_rates_ie[1] = 0x08; // Length (8 rates)
+    supported_rates_ie[2] = 0x82; // 1 Mbps
+    supported_rates_ie[3] = 0x84; // 2 Mbps
+    supported_rates_ie[4] = 0x8B; // 5.5 Mbps
+    supported_rates_ie[5] = 0x96; // 11 Mbps
+    supported_rates_ie[6] = 0x24; // 18 Mbps
+    supported_rates_ie[7] = 0x30; // 24 Mbps
+    supported_rates_ie[8] = 0x48; // 36 Mbps
+    supported_rates_ie[9] = 0x6C; // 54 Mbps
+
+    uint8_t *ds_param_set_ie = &supported_rates_ie[10];
+    ds_param_set_ie[0] = 0x03; // DS Parameter Set IE tag
+    ds_param_set_ie[1] = 0x01; // Length (1 byte)
+    ds_param_set_ie[2] = ch; // Set the current channel
+
+    uint8_t *rsn_ie = &ds_param_set_ie[3];
+    rsn_ie[0] = 0x30; // RSN IE
+    rsn_ie[1] = 0x14; // Length (20 bytes)
+    rsn_ie[2] = 0x01; rsn_ie[3] = 0x00; // Version 1
+    rsn_ie[4] = 0x00; rsn_ie[5] = 0x0F; rsn_ie[6] = 0xAC; rsn_ie[7] = 0x04; // CCMP group
+    rsn_ie[8] = 0x01; rsn_ie[9] = 0x00; // One pairwise cipher
+    rsn_ie[10] = 0x00; rsn_ie[11] = 0x0F; rsn_ie[12] = 0xAC; rsn_ie[13] = 0x04; // CCMP
+    rsn_ie[14] = 0x01; rsn_ie[15] = 0x00; // One AKM
+    rsn_ie[16] = 0x00; rsn_ie[17] = 0x0F; rsn_ie[18] = 0xAC; rsn_ie[19] = 0x02; // PSK
+    rsn_ie[20] = 0x00; rsn_ie[21] = 0x00; // No RSN capabilities
+
+    size_t packet_size = 38 + ssid_len + 10 + 3 + 22;
+
+    esp_err_t err = esp_wifi_80211_tx(ap_manager_get_tx_iface(), packet, packet_size, false);
+    if (err == ESP_ERR_NO_MEM) {
+        vTaskDelay(pdMS_TO_TICKS(2));
+        err = esp_wifi_80211_tx(ap_manager_get_tx_iface(), packet, packet_size, false);
+    }
+    return err;
 }
 
 // Broadcast a beacon frame for a specific SSID
 esp_err_t beacon_spam_broadcast(const char *ssid) {
-    static const uint8_t beacon_template[] = {
-        0x80, 0x00, 0x00, 0x00,                         // Frame Control, Duration
-        0xff, 0xff, 0xff, 0xff, 0xff, 0xff,             // Destination address (broadcast)
-        0x01, 0x02, 0x03, 0x04, 0x05, 0x06,             // Source address (randomized later)
-        0x01, 0x02, 0x03, 0x04, 0x05, 0x06,             // BSSID (randomized later)
-        0xc0, 0x6c,                                     // Seq-ctl (sequence control)
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Timestamp (set to 0)
-        0x64, 0x00,                                     // Beacon interval (100 TU)
-        0x11, 0x04,                                     // Capability info (ESS)
-        0x00, 0x00,                                     // SSID IE tag, length (set later)
-    };
-    
     // Use the active country plan for raw beacon transmission. The TX policy
     // drops DFS only while an AP interface is running (ESP-IDF rejects AP DFS);
     // the STA-only attack profile can hop the full plan.
@@ -167,72 +238,43 @@ esp_err_t beacon_spam_broadcast(const char *ssid) {
             if (!beacon_task_running) {
                 return ESP_OK;
             }
-
-            uint8_t packet[BEACON_FRAME_MAX];
-            memcpy(packet, beacon_template, sizeof(beacon_template));
-
-            generate_random_mac(&packet[10]);
-            memcpy(&packet[16], &packet[10], 6);
-
-            char ssid_buffer[RANDOM_SSID_LEN + 1];
-            const char *ssid_to_use = ssid;
-            if (ssid_to_use == NULL) {
-                generate_random_ssid(ssid_buffer, RANDOM_SSID_LEN + 1);
-                ssid_to_use = ssid_buffer;
-            }
-
-            uint8_t ssid_len = strlen(ssid_to_use);
-            packet[37] = ssid_len;
-            memcpy(&packet[38], ssid_to_use, ssid_len);
-
-            uint8_t *supported_rates_ie = &packet[38 + ssid_len];
-            supported_rates_ie[0] = 0x01; // Supported Rates IE tag
-            supported_rates_ie[1] = 0x08; // Length (8 rates)
-            supported_rates_ie[2] = 0x82; // 1 Mbps
-            supported_rates_ie[3] = 0x84; // 2 Mbps
-            supported_rates_ie[4] = 0x8B; // 5.5 Mbps
-            supported_rates_ie[5] = 0x96; // 11 Mbps
-            supported_rates_ie[6] = 0x24; // 18 Mbps
-            supported_rates_ie[7] = 0x30; // 24 Mbps
-            supported_rates_ie[8] = 0x48; // 36 Mbps
-            supported_rates_ie[9] = 0x6C; // 54 Mbps
-
-            uint8_t *ds_param_set_ie = &supported_rates_ie[10];
-            ds_param_set_ie[0] = 0x03; // DS Parameter Set IE tag
-            ds_param_set_ie[1] = 0x01; // Length (1 byte)
-            ds_param_set_ie[2] = ch; // Set the current channel
-
-            // Add HE Capabilities (for Wi-Fi 6 detection)
-            uint8_t *he_capabilities_ie = &ds_param_set_ie[3];
-            he_capabilities_ie[0] = 0xFF; // Vendor-Specific IE tag (802.11ax capabilities)
-            he_capabilities_ie[1] = 0x0D; // Length of HE Capabilities (13 bytes)
-
-            // Wi-Fi Alliance OUI (00:50:6f) for 802.11ax (Wi-Fi 6)
-            he_capabilities_ie[2] = 0x50; // OUI byte 1
-            he_capabilities_ie[3] = 0x6f; // OUI byte 2
-            he_capabilities_ie[4] = 0x9A; // OUI byte 3 (OUI type)
-
-            // Wi-Fi 6 HE Capabilities: a simplified example of capabilities
-            he_capabilities_ie[5] = 0x00;  // HE MAC capabilities info (placeholder)
-            he_capabilities_ie[6] = 0x08;  // HE PHY capabilities info (supports 80 MHz)
-            he_capabilities_ie[7] = 0x00;  // Other HE PHY capabilities
-            he_capabilities_ie[8] = 0x00;  // More PHY capabilities (placeholder)
-            he_capabilities_ie[9] = 0x40;  // Spatial streams info (2x2 MIMO)
-            he_capabilities_ie[10] = 0x00; // More PHY capabilities
-            he_capabilities_ie[11] = 0x00; // Even more PHY capabilities
-            he_capabilities_ie[12] = 0x01; // Final PHY capabilities (Wi-Fi 6 capabilities set)
-
-            size_t packet_size = (38 + ssid_len + 10 + 3 + 13); // Adjust packet size
-
-            esp_err_t err = esp_wifi_80211_tx(ap_manager_get_tx_iface(), packet, packet_size, false);
-            if (err == ESP_ERR_NO_MEM) {
-                vTaskDelay(pdMS_TO_TICKS(2));
-                esp_wifi_80211_tx(ap_manager_get_tx_iface(), packet, packet_size, false);
-            }
+            send_beacon_on_channel(ssid, ch);
         }
 
         vTaskDelay(pdMS_TO_TICKS(1));
         if (ap_sta_has_ip) break; // only one transmit when a client has IP
+    }
+
+    return ESP_OK;
+}
+
+static esp_err_t beacon_spam_broadcast_multi(const char *const *ssids, size_t count) {
+    if (ssids == NULL || count == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint8_t ch = BEACON_FIXED_CHANNEL;
+    if (ap_sta_has_ip) {
+        wifi_second_chan_t second_channel;
+        esp_wifi_get_channel(&ch, &second_channel);
+    } else {
+        if (!wifi_channels_is_tx_channel(ch)) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        esp_err_t channel_err = esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE);
+        if (channel_err != ESP_OK) {
+            ESP_LOGW(TAG, "Beacon channel %u unavailable: %s",
+                     (unsigned)ch, esp_err_to_name(channel_err));
+            return channel_err;
+        }
+    }
+
+    for (size_t i = 0; i < count; i++) {
+        if (!beacon_task_running) {
+            return ESP_OK;
+        }
+        send_beacon_on_channel(ssids[i], ch);
+        vTaskDelay(pdMS_TO_TICKS(1));
     }
 
     return ESP_OK;
@@ -359,21 +401,20 @@ static void beacon_spam_task(void *param) {
     // Array to store lines of the chorus
     static const char *rickroll_lyrics[] = {"Never gonna give you up",
                                      "Never gonna let you down",
-                                     "Never gonna run around and desert you",
+                                     "Never gonna run around",
                                      "Never gonna make you cry",
                                      "Never gonna say goodbye",
-                                     "Never gonna tell a lie and hurt you"};
+                                     "Never gonna tell a lie"};
     int num_lines = 6;
-    int line_index = 0;
 
     int IsRickRoll = ssid != NULL ? (strcmp(ssid, "RICKROLL") == 0) : false;
     int IsAPList = ssid != NULL ? (strcmp(ssid, "APLISTMODE") == 0) : false;
 
     while (beacon_task_running) {
         if (IsRickRoll) {
-            beacon_spam_broadcast(rickroll_lyrics[line_index]);
-
-            line_index = (line_index + 1) % num_lines;
+            beacon_spam_broadcast_multi(rickroll_lyrics, (size_t)num_lines);
+            vTaskDelay(pdMS_TO_TICKS(10));
+            continue;
         } else if (IsAPList) {
             for (int i = 0; i < ap_count; i++) {
                 if (!beacon_task_running) break;  // Check stop flag in inner loop

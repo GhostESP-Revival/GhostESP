@@ -69,6 +69,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Fixed Cert Scan reliability: concurrent sweeps no longer share TLS contexts, stalled hosts time out, and the CA chain is completed to the trusted emSign root
 - Fixed HTTPS sinkhole and Cert Scan state across restarts, including intercept-list persistence and stale certificate state
 - Fixed beacon spam trying to reconnect to the saved WiFi network while the attack was running
+- Fixed beacon spam beacons being discarded by Wi-Fi 6 clients; fake SSIDs now use valid WPA2 frames with a proper RSN IE and no malformed HE element - @14790897
 
 ## v2.2.2
 
