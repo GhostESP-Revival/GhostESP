@@ -736,14 +736,28 @@ menu "Ghost ESP Options"
 
         config IP5306_CHARGE_CURRENT_CODE
             hex "IP5306 VIN Charge Current Code"
+            default 0x04 if BANSHEE_LITE_C5
             default 0x02
             range 0x00 0x1F
             depends on USE_IP5306_POWER_MANAGER
             help
-                Raw CHG_DIG_CTL0[4:0] code. The IP5306 has no exact 400 mA
-                setting: 0x02 is 250 mA and is the highest setting below the
-                requested 400 mA maximum; 0x04 is the next setting (450 mA
-                nominal per the datasheet equation).
+                Raw CHG_DIG_CTL0[4:0] code. The nominal VIN-side limit is
+                50 + 100 * code milliamps: 0x02 = 250 mA, 0x03 = 350 mA,
+                0x04 = 450 mA, and 0x05 = 550 mA. There is no exact 500 mA
+                setting. This is an input-side setting, not measured battery
+                charging current.
+
+        config IP5306_CHARGE_STOP_CURRENT_CODE
+            hex "IP5306 charge termination current code"
+            default 0x00 if BANSHEE_LITE_C5
+            default 0x01
+            range 0x00 0x03
+            depends on USE_IP5306_POWER_MANAGER
+            help
+                CHARGER_CTL1[7:6] termination threshold: 0x00 = 200 mA,
+                0x01 = 400 mA, 0x02 = 500 mA, 0x03 = 600 mA.
+                200 mA is the lowest supported threshold (0.1C for a
+                2000 mAh cell). This is separate from the VIN current limit.
 
         config HAS_RTC_CLOCK
             bool "Enable RTC Clock"
