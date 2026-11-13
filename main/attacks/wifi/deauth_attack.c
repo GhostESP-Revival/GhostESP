@@ -23,6 +23,7 @@
 #include "managers/views/terminal_screen.h"
 #include "core/callbacks.h"
 #include "core/glog.h"
+#include "core/ouis.h"
 #include "core/utils.h"
 #include "scans/wifi/station_scan.h"
 #include "scans/wifi/hop_profile.h"
@@ -403,10 +404,13 @@ void deauth_attack_start(void) {
             for (int i = 0; i < selected_ap_count_local; i++) {
                 char sanitized_ssid[33];
                 sanitize_ssid(selected_aps_local[i].ssid, sanitized_ssid, sizeof(sanitized_ssid));
-                glog("  [%d] %s (%02X:%02X:%02X:%02X:%02X:%02X)\n", 
+                char vendor[64] = {0};
+                bool has_vendor = ouis_lookup_vendor_bytes(selected_aps_local[i].bssid, vendor, sizeof(vendor));
+                glog("  [%d] %s (%02X:%02X:%02X:%02X:%02X:%02X)%s%s\n", 
                      i, sanitized_ssid,
                      selected_aps_local[i].bssid[0], selected_aps_local[i].bssid[1], selected_aps_local[i].bssid[2],
-                     selected_aps_local[i].bssid[3], selected_aps_local[i].bssid[4], selected_aps_local[i].bssid[5]);
+                     selected_aps_local[i].bssid[3], selected_aps_local[i].bssid[4], selected_aps_local[i].bssid[5],
+                     has_vendor ? " " : "", has_vendor ? vendor : "");
 #ifdef CONFIG_WITH_STATUS_DISPLAY
                 if (i == 0) {
                     char target_disp[33];

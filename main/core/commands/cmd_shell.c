@@ -147,17 +147,25 @@ static bool shell_save_u8(const char *key, uint8_t value) {
     return err == ESP_OK;
 }
 
-void shell_get_prompt(char *output, size_t output_len) {
+static void shell_format_prompt(char *output, size_t output_len, bool ansi) {
     if (!output || output_len == 0) return;
     if (!shell_load()) {
         snprintf(output, output_len, "ghost> ");
         return;
     }
-    if (strcmp(s_color, "off") == 0) {
+    if (!ansi || strcmp(s_color, "off") == 0) {
         snprintf(output, output_len, "%s> ", s_hostname);
     } else {
         snprintf(output, output_len, "\033[38;5;%sm%s\033[0m> ", s_color, s_hostname);
     }
+}
+
+void shell_get_prompt(char *output, size_t output_len) {
+    shell_format_prompt(output, output_len, true);
+}
+
+void shell_get_plain_prompt(char *output, size_t output_len) {
+    shell_format_prompt(output, output_len, false);
 }
 
 void shell_set_hostname(const char *hostname) {

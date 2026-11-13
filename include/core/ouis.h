@@ -17,6 +17,11 @@ bool ouis_parse_prefix(const char *prefix, uint8_t out_oui[3]);
 // lookup vendor by a 3-byte OUI prefix
 bool ouis_lookup_vendor_bytes(const uint8_t oui[3], char *out_vendor, size_t out_sz);
 
+// true when the address is randomized/private (locally administered bit set).
+// These never resolve to a vendor, so callers can say "Private address"
+// instead of "Unknown".
+bool ouis_is_private_mac(const char *mac);
+
 // enumerate unique vendor names from the embedded OUI list, optionally filtered by substring
 int ouis_foreach_unique_vendor(const char *filter, ouis_vendor_iter_cb_t callback,
                                void *user_data, int max_results);

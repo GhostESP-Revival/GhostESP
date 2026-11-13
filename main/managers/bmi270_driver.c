@@ -17,6 +17,8 @@ static const char *TAG = "BMI270";
 static i2c_master_dev_handle_t s_dev;
 static bool s_initialized;
 
+#define BMI270_REG_GYR_X_LSB 0x12
+
 static esp_err_t bmi270_device(void)
 {
     if (s_dev) return ESP_OK;
@@ -134,12 +136,13 @@ esp_err_t bmi270_init(void)
         return ESP_FAIL;
     }
 
-    /* The firmware is loaded but the accelerometer is still suspended. Give it
-       an output data rate and switch acc_en on, otherwise the data registers
-       (0x0C) read all-zero forever and the gauge/numbers never move. */
+    /* The firmware is loaded but both motion sensors are still suspended. Give
+       them output data rates and switch acc_en/gyr_en on before reading the
+       data registers. */
     bmi270_write_reg(0x40, 0xA8); /* ACC_CONF: ODR 100Hz, normal BW, perf mode */
+    bmi270_write_reg(0x42, 0xA9); /* GYR_CONF: ODR 200Hz, normal BW, perf mode */
     bmi270_write_reg(0x7C, 0x02); /* PWR_CONF: advanced power save off */
-    bmi270_write_reg(0x7D, 0x04); /* PWR_CTRL: acc_en */
+    bmi270_write_reg(0x7D, 0x06); /* PWR_CTRL: acc_en | gyr_en */
     vTaskDelay(pdMS_TO_TICKS(5));
 
     s_initialized = true;
@@ -157,6 +160,18 @@ esp_err_t bmi270_read_accel(int16_t *x, int16_t *y, int16_t *z)
     /* M5Unified's official AtomS3R axis correction: order Y/X/Z, invert Y. */
     *x = raw_y;
     *y = (int16_t)-raw_x;
+    *z = (int16_t)((uint16_t)data[4] | ((uint16_t)data[5] << 8));
+    return ESP_OK;
+}
+
+esp_err_t bmi270_read_gyro(int16_t *x, int16_t *y, int16_t *z)
+{
+    if (!x || !y || !z) return ESP_ERR_INVALID_ARG;
+    uint8_t data[6];
+    esp_err_t ret = bmi270_read(BMI270_REG_GYR_X_LSB, data, sizeof(data));
+    if (ret != ESP_OK) return ret;
+    *x = (int16_t)((uint16_t)data[0] | ((uint16_t)data[1] << 8));
+    *y = (int16_t)((uint16_t)data[2] | ((uint16_t)data[3] << 8));
     *z = (int16_t)((uint16_t)data[4] | ((uint16_t)data[5] << 8));
     return ESP_OK;
 }
@@ -200,6 +215,11 @@ esp_err_t bmi270_read_mag(int16_t *x, int16_t *y, int16_t *z)
 #else
 esp_err_t bmi270_init(void) { return ESP_ERR_NOT_SUPPORTED; }
 esp_err_t bmi270_read_accel(int16_t *x, int16_t *y, int16_t *z)
+{
+    (void)x; (void)y; (void)z;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+esp_err_t bmi270_read_gyro(int16_t *x, int16_t *y, int16_t *z)
 {
     (void)x; (void)y; (void)z;
     return ESP_ERR_NOT_SUPPORTED;

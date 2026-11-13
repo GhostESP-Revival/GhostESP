@@ -40,6 +40,7 @@ SOFTWARE.
 #include "sdkconfig.h"
 
 #include "i2c_manager.h"
+#include "i2c_bus_lock.h"
 #include "i2c_shared.h"
 
 
@@ -69,7 +70,7 @@ static bool s_i2c_bus_owned[2] = { false, false };
 	#endif
 
 	#define I2C_MANAGER_0_TIMEOUT 		( pdMS_TO_TICKS( CONFIG_I2C_MANAGER_0_TIMEOUT ) )
-	#define I2C_MANAGER_0_LOCK_TIMEOUT	( ( pdMS_TO_TICKS( CONFIG_I2C_MANAGER_0_LOCK_TIMEOUT ) )
+	#define I2C_MANAGER_0_LOCK_TIMEOUT	( pdMS_TO_TICKS( CONFIG_I2C_MANAGER_0_LOCK_TIMEOUT ) )
 #endif
 
 
@@ -118,6 +119,21 @@ static uint32_t i2c_port_speed(i2c_port_num_t port) {
     }
 #endif
     return 100000;
+}
+
+static int i2c_manager_shared_lock_timeout_ms(i2c_port_num_t port)
+{
+#if defined(I2C_ZERO)
+    if (port == I2C_NUM_0) {
+        return CONFIG_I2C_MANAGER_0_LOCK_TIMEOUT;
+    }
+#endif
+#if defined(I2C_ONE)
+    if (port == I2C_NUM_1) {
+        return CONFIG_I2C_MANAGER_1_LOCK_TIMEOUT;
+    }
+#endif
+    return 100;
 }
 
 static esp_err_t i2c_manager_get_or_create_bus(i2c_port_num_t port)
@@ -185,11 +201,19 @@ esp_err_t I2C_FN(_init)(i2c_port_num_t port) {
         ESP_LOGI(TAG, "Starting I2C master at port %d.", (int)port);
 
         I2C_FN(_mutex)[port] = xSemaphoreCreateMutex();
+        if (I2C_FN(_mutex)[port] == NULL) {
+            ESP_LOGE(TAG, "Failed to create I2C mutex for port %d", (int)port);
+            return ESP_ERR_NO_MEM;
+        }
 
         ret = i2c_manager_get_or_create_bus(port);
 
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to initialise I2C port %d.", (int)port);
+            vSemaphoreDelete(I2C_FN(_mutex)[port]);
+            I2C_FN(_mutex)[port] = NULL;
+            s_i2c_bus[port] = NULL;
+            s_i2c_bus_owned[port] = false;
         } else {
             ESP_LOGI(TAG, "Initialised I2C master bus on port %d", (int)port);
         }
@@ -205,8 +229,10 @@ esp_err_t I2C_FN(_read)(i2c_port_num_t port, uint16_t addr, uint32_t reg, uint8_
 
     esp_err_t result;
 
-    // May seem weird, but init starts with a check if it's needed, no need for that check twice.
-    I2C_FN(_init)(port);
+    esp_err_t init_ret = I2C_FN(_init)(port);
+    if (init_ret != ESP_OK) {
+        return init_ret;
+    }
 
     ESP_LOGV(TAG, "Reading port %d, addr 0x%03x, reg 0x%04lx", port, addr, reg);
 
@@ -223,9 +249,18 @@ esp_err_t I2C_FN(_read)(i2c_port_num_t port, uint16_t addr, uint32_t reg, uint8_
 #endif
 
     if (I2C_FN(_lock)((int)port) == ESP_OK) {
+        bool shared_locked = i2c_bus_lock((int)port,
+                                          i2c_manager_shared_lock_timeout_ms(port));
+        if (!shared_locked) {
+            I2C_FN(_unlock)((int)port);
+            ESP_LOGE(TAG, "Shared lock could not be obtained for port %d.", (int)port);
+            return ESP_ERR_TIMEOUT;
+        }
+
         i2c_master_dev_handle_t dev = NULL;
         result = i2c_manager_add_device(port, addr, &dev);
         if (result != ESP_OK) {
+            i2c_bus_unlock((int)port);
             I2C_FN(_unlock)((int)port);
             return result;
         }
@@ -244,7 +279,11 @@ esp_err_t I2C_FN(_read)(i2c_port_num_t port, uint16_t addr, uint32_t reg, uint8_
         } else {
             result = i2c_master_receive(dev, buffer, size, timeout);
         }
-        i2c_master_bus_rm_device(dev);
+        esp_err_t remove_ret = i2c_master_bus_rm_device(dev);
+        if (result == ESP_OK && remove_ret != ESP_OK) {
+            result = remove_ret;
+        }
+        i2c_bus_unlock((int)port);
         I2C_FN(_unlock)((int)port);
     } else {
         ESP_LOGE(TAG, "Lock could not be obtained for port %d.", (int)port);
@@ -266,8 +305,10 @@ esp_err_t I2C_FN(_write)(i2c_port_num_t port, uint16_t addr, uint32_t reg, const
 
     esp_err_t result;
 
-    // May seem weird, but init starts with a check if it's needed, no need for that check twice.
-    I2C_FN(_init)(port);
+    esp_err_t init_ret = I2C_FN(_init)(port);
+    if (init_ret != ESP_OK) {
+        return init_ret;
+    }
 
     ESP_LOGV(TAG, "Writing port %d, addr 0x%03x, reg 0x%04lx", port, addr, reg);
 
@@ -284,9 +325,18 @@ esp_err_t I2C_FN(_write)(i2c_port_num_t port, uint16_t addr, uint32_t reg, const
 #endif
 
     if (I2C_FN(_lock)((int)port) == ESP_OK) {
+        bool shared_locked = i2c_bus_lock((int)port,
+                                          i2c_manager_shared_lock_timeout_ms(port));
+        if (!shared_locked) {
+            I2C_FN(_unlock)((int)port);
+            ESP_LOGE(TAG, "Shared lock could not be obtained for port %d.", (int)port);
+            return ESP_ERR_TIMEOUT;
+        }
+
         i2c_master_dev_handle_t dev = NULL;
         result = i2c_manager_add_device(port, addr, &dev);
         if (result != ESP_OK) {
+            i2c_bus_unlock((int)port);
             I2C_FN(_unlock)((int)port);
             return result;
         }
@@ -299,11 +349,21 @@ esp_err_t I2C_FN(_write)(i2c_port_num_t port, uint16_t addr, uint32_t reg, const
             tx[tx_len++] = reg & 0xFF;
         }
         if (size > 0) {
+            if (size > sizeof(tx) - tx_len) {
+                i2c_master_bus_rm_device(dev);
+                i2c_bus_unlock((int)port);
+                I2C_FN(_unlock)((int)port);
+                return ESP_ERR_INVALID_SIZE;
+            }
             memcpy(&tx[tx_len], buffer, size);
             tx_len += size;
         }
         result = i2c_master_transmit(dev, tx, tx_len, timeout);
-        i2c_master_bus_rm_device(dev);
+        esp_err_t remove_ret = i2c_master_bus_rm_device(dev);
+        if (result == ESP_OK && remove_ret != ESP_OK) {
+            result = remove_ret;
+        }
+        i2c_bus_unlock((int)port);
         I2C_FN(_unlock)((int)port);
     } else {
         ESP_LOGE(TAG, "Lock could not be obtained for port %d.", (int)port);
@@ -321,15 +381,13 @@ esp_err_t I2C_FN(_write)(i2c_port_num_t port, uint16_t addr, uint32_t reg, const
 
 esp_err_t I2C_FN(_close)(i2c_port_num_t port) {
     I2C_PORT_CHECK(port, ESP_FAIL);
-    vSemaphoreDelete(I2C_FN(_mutex)[port]);
-    I2C_FN(_mutex)[port] = NULL;
-    ESP_LOGI(TAG, "Closing I2C master at port %d", port);
-    if (s_i2c_bus_owned[port] && s_i2c_bus[port]) {
-        esp_err_t ret = i2c_del_master_bus(s_i2c_bus[port]);
-        s_i2c_bus[port] = NULL;
-        s_i2c_bus_owned[port] = false;
-        return ret;
+    if (I2C_FN(_mutex)[port]) {
+        vSemaphoreDelete(I2C_FN(_mutex)[port]);
+        I2C_FN(_mutex)[port] = NULL;
     }
+    ESP_LOGI(TAG, "Closing I2C master at port %d", port);
+    // The bus is shared with the IO manager and other peripherals. Do not
+    // delete it here or leave a dangling handle in i2c_shared's registry.
     s_i2c_bus[port] = NULL;
     s_i2c_bus_owned[port] = false;
     return ESP_OK;
@@ -378,16 +436,7 @@ esp_err_t I2C_FN(_force_unlock)(i2c_port_num_t port) {
 
 
 
-#ifdef I2C_OEM
-
-void I2C_FN(_locking)(void* leader) {
-    if (leader) {
-        ESP_LOGI(TAG, "Now following I2C Manager for locking");
-        I2C_FN(_mutex) = (SemaphoreHandle_t*)leader;
-    }
-}
-
-#else
+#if !defined(I2C_OEM)
 
 void* i2c_manager_locking() {
         return (void*)i2c_manager_mutex;

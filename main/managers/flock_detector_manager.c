@@ -137,11 +137,12 @@ typedef struct {
 } FlockStreamDiag;
 
 #define FLOCK_DIAG_QUEUE_SIZE 8
-static FlockStreamDiag s_diag_queue[FLOCK_DIAG_QUEUE_SIZE];
+static FlockStreamDiag *s_diag_queue = NULL;
 static volatile size_t s_diag_head = 0;
 static volatile size_t s_diag_tail = 0;
 
 static void IRAM_ATTR enqueue_diag(const FlockStreamDiag *d) {
+    if (!s_diag_queue) return;
     portENTER_CRITICAL_ISR(&s_alert_mux);
     size_t next = (s_diag_head + 1) % FLOCK_DIAG_QUEUE_SIZE;
     if (next != s_diag_tail) {
@@ -291,12 +292,13 @@ static void drain_task_fn(void *arg) {
                     s_dets[idx].rssi = e.rssi;
                     s_dets[idx].channel = e.channel;
                     if (conf == FLOCK_CONF_HIGH) s_dets[idx].confidence = FLOCK_CONF_HIGH;
-                    if (e.method == FLOCK_DETECT_STREAM)
+                    if (e.method == FLOCK_DETECT_STREAM || e.cls == FLOCK_CLASS_GHOSTESP)
                         strlcpy(s_dets[idx].method, flock_detector_method_str(e.method),
                                 FLOCK_METHOD_STR_LEN);
-                    if (s_dets[idx].device_class == FLOCK_CLASS_NONE || e.method == FLOCK_DETECT_STREAM)
+                    if (s_dets[idx].device_class == FLOCK_CLASS_NONE || e.method == FLOCK_DETECT_STREAM ||
+                        e.cls == FLOCK_CLASS_GHOSTESP)
                         s_dets[idx].device_class = e.cls;
-                    if (e.ssid[0] && !s_dets[idx].ssid[0])
+                    if (e.ssid[0] && (!s_dets[idx].ssid[0] || e.cls == FLOCK_CLASS_GHOSTESP))
                         strlcpy(s_dets[idx].ssid, e.ssid, FLOCK_SSID_STR_LEN);
                 } else {
                     idx = det_insert(ms, e.method, e.rssi, e.channel, e.ssid, e.cls);
@@ -304,7 +306,8 @@ static void drain_task_fn(void *arg) {
                 if (conf == FLOCK_CONF_HIGH && idx >= 0 &&
                     (s_show_all || flock_detector_is_flock(&s_dets[idx]))) {
                     const char *sig = (e.rssi > -50) ? "Strong" : (e.rssi > -70) ? "Medium" : "Weak";
-                    glog("[FLOCK] Surveillance device detected! %s | MAC: %s | Signal: %s (%ddBm) | Ch: %u%s%s | Hits: %d\n",
+                    glog("[FLOCK] %s: %s | MAC: %s | Signal: %s (%ddBm) | Ch: %u%s%s | Hits: %d\n",
+                         s_dets[idx].device_class == FLOCK_CLASS_GHOSTESP ? "GhostESP SSID match" : "Surveillance device detected",
                          flock_detector_method_str(e.method), ms, sig, e.rssi, e.channel,
                          e.ssid[0] ? " | SSID: " : "", e.ssid[0] ? e.ssid : "",
                          s_dets[idx].count);
@@ -394,6 +397,9 @@ static const struct { const char *kw; uint8_t cls; } flock_ssid_extra[] = {
 
 static uint8_t IRAM_ATTR match_ssid_class(const char *ssid) {
     if (!ssid || !ssid[0]) return FLOCK_CLASS_NONE;
+    if (strncmp(ssid, "GhostNet", 8) == 0 &&
+        (ssid[8] == '\0' || ssid[8] == '-' || ssid[8] == '_' || ssid[8] == ' '))
+        return FLOCK_CLASS_GHOSTESP;
     for (size_t i = 0; i < FLOCK_SSID_KW_COUNT; i++) {
         if (strstr(ssid, flock_ssid_keywords[i])) return FLOCK_CLASS_FLOCK;
     }
@@ -429,7 +435,7 @@ typedef struct {
     uint32_t bytes;
 } stream_trk_t;
 
-static stream_trk_t s_trk[STREAM_SLOTS];
+static stream_trk_t *s_trk = NULL;
 
 static inline bool IRAM_ATTR google_oui(const uint8_t *mac) {
     uint32_t oui = ((uint32_t)mac[0] << 16) | ((uint32_t)mac[1] << 8) | mac[2];
@@ -440,6 +446,7 @@ static inline bool IRAM_ATTR google_oui(const uint8_t *mac) {
 }
 
 static void IRAM_ATTR stream_account(const uint8_t *sta, int len, int8_t rssi, uint8_t ch) {
+    if (!s_trk) return;
     int64_t now_us = esp_timer_get_time();
     uint32_t now = (uint32_t)(now_us / 1000);
 
@@ -493,12 +500,24 @@ static void IRAM_ATTR stream_account(const uint8_t *sta, int len, int8_t rssi, u
     t->bytes = 0;
 }
 
+static uint32_t s_rx_count, s_valid_rx_count;
+uint32_t flock_detector_get_rx_count(void) { return s_rx_count; }
+uint32_t flock_detector_get_valid_rx_count(void) { return s_valid_rx_count; }
+
 static void IRAM_ATTR flock_sniffer_cb(void *buf, wifi_promiscuous_pkt_type_t type) {
     if (!buf || !s_running) return;
     if (type != WIFI_PKT_MGMT && type != WIFI_PKT_DATA) return;
     wifi_promiscuous_pkt_t *pkt = (wifi_promiscuous_pkt_t *)buf;
-    int len = pkt->rx_ctrl.sig_len;
+    s_rx_count++;
+    if (pkt->rx_ctrl.rx_state != 0) return;
+    int len = pkt->rx_ctrl.sig_len > 4 ? pkt->rx_ctrl.sig_len - 4 : 0;
+#if CONFIG_SOC_WIFI_HE_SUPPORT
+    if (pkt->rx_ctrl.dump_len && pkt->rx_ctrl.dump_len <= pkt->rx_ctrl.sig_len)
+        len = pkt->rx_ctrl.dump_len;
+#endif
     if (len < (int)sizeof(flock_mac_hdr_t)) return;
+    if ((pkt->payload[0] & 3U) || ((pkt->payload[0] >> 2) & 3U) != (unsigned)type) return;
+    s_valid_rx_count++;
     flock_mac_hdr_t *hdr = (flock_mac_hdr_t *)pkt->payload;
     int8_t rssi = pkt->rx_ctrl.rssi;
     if (rssi < -95) return;
@@ -554,6 +573,9 @@ static void IRAM_ATTR flock_sniffer_cb(void *buf, wifi_promiscuous_pkt_type_t ty
             uint8_t sc = FLOCK_CLASS_NONE;
             if (extract_ssid(body, blen, ssid, sizeof(ssid)) &&
                 (sc = match_ssid_class(ssid)) != FLOCK_CLASS_NONE) {
+                /* A client probing for GhostNet does not identify that client
+                   as GhostESP. Only AP advertisements establish this match. */
+                if (sc == FLOCK_CLASS_GHOSTESP && sub == 4) return;
                 enqueue_alert(FLOCK_DETECT_SSID, hdr->addr2, rssi, ch, ssid, sc);
             }
         }
@@ -580,16 +602,22 @@ esp_err_t flock_detector_start(void) {
 
     s_dets = calloc(FLOCK_MAX_DETECTIONS, sizeof(FlockDetection));
     s_alert_queue = calloc(FLOCK_ALERT_QUEUE_SIZE, sizeof(FlockAlertEntry));
+    s_trk = calloc(STREAM_SLOTS, sizeof(*s_trk));
+    s_diag_queue = calloc(FLOCK_DIAG_QUEUE_SIZE, sizeof(*s_diag_queue));
     det_chain_alloc();
-    if (!s_dets || !s_alert_queue || !s_det_bucket || !s_det_next) {
+    if (!s_dets || !s_alert_queue || !s_det_bucket || !s_det_next ||
+        !s_trk || !s_diag_queue) {
         ESP_LOGE(TAG, "failed to allocate detection buffers");
         free(s_dets); s_dets = NULL;
         free(s_alert_queue); s_alert_queue = NULL;
+        free(s_trk); s_trk = NULL;
+        free(s_diag_queue); s_diag_queue = NULL;
         det_chain_free();
         return ESP_ERR_NO_MEM;
     }
 
     s_count = 0;
+    s_rx_count = s_valid_rx_count = 0;
     det_chain_init();
     memset(s_dedup, 0, sizeof(s_dedup));
     s_ch_idx = 0;
@@ -609,17 +637,33 @@ esp_err_t flock_detector_start(void) {
     s_diag_head = 0;
     s_diag_tail = 0;
     s_hold_until_us = 0;
-    memset(s_trk, 0, sizeof(s_trk));
+    memset(s_trk, 0, STREAM_SLOTS * sizeof(*s_trk));
     s_running = true;
 
     wifi_manager_start_monitor_mode(flock_sniffer_cb);
+    wifi_promiscuous_filter_t filter = {
+        .filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT | WIFI_PROMIS_FILTER_MASK_DATA |
+                       WIFI_PROMIS_FILTER_MASK_DATA_MPDU,
+    };
+    esp_err_t filter_err = esp_wifi_set_promiscuous_filter(&filter);
+    if (filter_err != ESP_OK) { flock_detector_stop(); return filter_err; }
     esp_wifi_set_channel(s_channels[0], WIFI_SECOND_CHAN_NONE);
 
     esp_timer_create_args_t targs = { .callback = hop_cb, .name = "flock_hop" };
-    esp_timer_create(&targs, &s_hop_timer);
-    esp_timer_start_periodic(s_hop_timer, FLOCK_HOP_MS * 1000);
+    esp_err_t timer_err = esp_timer_create(&targs, &s_hop_timer);
+    if (timer_err == ESP_OK)
+        timer_err = esp_timer_start_periodic(s_hop_timer, FLOCK_HOP_MS * 1000);
+    if (timer_err != ESP_OK) {
+        ESP_LOGE(TAG, "Could not start channel hopping: %s", esp_err_to_name(timer_err));
+        flock_detector_stop();
+        return timer_err;
+    }
 
-    xTaskCreate(drain_task_fn, "flock_drain", 3072, NULL, 2, &s_drain_task);
+    if (xTaskCreate(drain_task_fn, "flock_drain", 3072, NULL, 2, &s_drain_task) != pdPASS) {
+        ESP_LOGE(TAG, "Could not start detection worker");
+        flock_detector_stop();
+        return ESP_ERR_NO_MEM;
+    }
 
     glog("[FLOCK] Scanning for surveillance cameras on %u country/profile channels...\n",
          (unsigned)s_ch_count);
@@ -641,6 +685,8 @@ esp_err_t flock_detector_stop(void) {
     int found = s_count;
     free(s_dets); s_dets = NULL;
     free(s_alert_queue); s_alert_queue = NULL;
+    free(s_trk); s_trk = NULL;
+    free(s_diag_queue); s_diag_queue = NULL;
     det_chain_free();
     s_count = 0;
 

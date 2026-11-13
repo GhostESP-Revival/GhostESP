@@ -8,28 +8,67 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 
 ### Added
 
+- Sentry now identifies GhostNet networks as GhostESP devices
+- Added Sentry settings to choose which devices appear and turn popups on or off
+- Added Sentry logs to help explain why no devices appear
+- Airspace Monitor now saves packet recordings while open
+- Airspace Monitor now warns about unusual channel changes, connection failures and network security changes
 - Reworked `scanlocal` into a full local host scan: it finds hosts with ARP, then identifies each one by NetBIOS name, mDNS hostname, ICMP TTL and mDNS/SSDP services
 - Local scan results now show MAC, vendor, hostname, OS hint and services for each host
+- Vendor names now appear in AP/station scans, attack target lists, Ethernet ARP results, port/SNMP scans, GATT scans and Sentry rows; randomized MACs are labelled "Private address"
 - Added `scanarp stop` and `scanlocal stop`
 - Added `forgetwifi` command to clear the saved WiFi network and disconnect from it
 - Cloud Store now shows a clear "No internet. Connect GhostESP to WiFi" message when opened, refreshed or installing without a connection
 - BadBLE's Run Script list and `badble run`/`badble list` now also find scripts in `/mnt/ghostesp/badusb/`, not just `/mnt/ghostesp/badble/`
 - Renamed the "mDNS Discovery" menu entry to "Local Scan" and added "List Local Scan" to reopen the last results without rescanning
+- Added Cert Scan (`certscan` / Wi-Fi → Cert Scan) to see which hosts still accept a certificate from one of the eight compromised eMudhra intermediates
+  - `certscan hosts` discovers hosts and checks them automatically
+  - Setup works on-device: `certscan cacert <url>` fetches the CA certificate, `certscan key <number>` derives `ca.crt`/`ca.key` from a raw EC scalar, and `certscan genleaf` generates the leaf key; the matching CA is labelled automatically
+- Added optional HTTPS to the DNS sinkhole, signing a certificate per hostname from the SD-card CA and showing results per client
 - Add support for [XIAO ESP32S3 & Wio-SX1262 Kit](https://wiki.seeedstudio.com/wio_sx1262_with_xiao_esp32s3_kit/) - @antonionardella (#428)
 
 ### Changed
+
+- Improved Airspace Monitor alerts in crowded places
+- Airspace Monitor device rows stay in place while updating
+- Added Airspace Monitor logs to help investigate alerts
+- Sentry settings now use iOS-style switches
+- Restored compact wardrive status updates
+- Increased capture frames to 4 KB without increasing packet-pool RAM
 - Sentry now detects Google Nest cameras and doorbells over BLE and over WiFi - pre2
 - Sentry rows now show how long ago each device was last seen - pre2
+- Beacon spam now uses a STA-only attack radio profile, so it can hop DFS channels and no longer broadcasts the device's own AP
+- Updated the WebUI logo
 
 ### Fixed
+
+- Fixed touch drag scrolling in Sentry settings
+- Improved Sentry scan reliability and added messages when a scanner fails to start
+- Fixed Sentry counting the same sighting repeatedly
+- Sentry popups no longer replace each other or interrupt device details
+- Fixed Airspace recordings losing their last packets when closed
+- Reduced false Airspace warnings on mesh networks
+- Fixed a crash when starting GPS sharing over GhostLink
+- Fixed stray color codes appearing in the Flipper terminal
+- Fixed status messages corrupting recordings sent to the Flipper
+- Fixed wardriving missing nearby networks on some devices
+- Fixed hidden network names appearing as question marks
+- Raw packet captures now include previously missing control traffic
+- Fixed the timezone picker freezing on CYD boards by paginating the settings list
 - Fixed `scanarp` over the CLI immediately printing "ARP scan cancelled" and scanning nothing
 - Fixed `scanlocal` finding nothing when the web/AP services weren't running
 - Fixed cancelling the local scan from the UI not actually stopping it
 - Fixed slide-to-unlock not responding when the lockscreen appeared over a view like Sentry
 - Fixed Sentry detection popups showing above the lockscreen
 - Fixed touch drag scrolling in the Sentry list and detail views
+- Fixed Sentry rows constantly changing order during busy scans; devices now stay in the order they were first seen
 - Fixed touch scrolling and the Back row not working in the Local Scan host detail view
 - Fixed CrowPanel Advance 4.3" V1.1 backlight initialization - @patlaluci-prog (#432)
+- Fixed `evilportal -c sethtmlstr` dropping long or minified HTML, which made Evil Portal pages uploaded from the Flipper app impossible to start
+- Fixed 5 GHz DFS channel handling for TX attacks: DFS is usable in STA-only attacks and skipped cleanly while an AP interface is active
+- Fixed Cert Scan reliability: concurrent sweeps no longer share TLS contexts, stalled hosts time out, and the CA chain is completed to the trusted emSign root
+- Fixed HTTPS sinkhole and Cert Scan state across restarts, including intercept-list persistence and stale certificate state
+- Fixed beacon spam trying to reconnect to the saved WiFi network while the attack was running
 
 ## v2.2.2
 

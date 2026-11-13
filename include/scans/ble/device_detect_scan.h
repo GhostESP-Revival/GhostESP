@@ -40,6 +40,7 @@ void ble_device_detect_clear_results(void);
 bool ble_device_detect_is_active(void);
 
 int ble_device_detect_get_count(void);
+uint32_t ble_device_detect_get_rx_count(void);
 int ble_device_detect_get_device(int index, BLEDetectDeviceInfo *out_info);
 
 bool ble_device_detect_start_tracking(int index);

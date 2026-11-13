@@ -13,6 +13,7 @@
 #include "gui/lvgl_safe.h"
 #include "lvgl.h"
 #include "core/esp_comm_manager.h"
+#include "core/ouis.h"
 #include "core/utils.h"
 #include "sdkconfig.h"
 #include <string.h>
@@ -1086,12 +1087,17 @@ static void build_arp_list(void) {
             privacy_redact_text_copy(h->hostname, host_disp, sizeof(host_disp));
             snprintf(label, sizeof(label), "%s  %s", h->ip_str, host_disp);
         } else {
-            char mac_str[18];
-            snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
-                     h->mac[0], h->mac[1], h->mac[2],
-                     h->mac[3], h->mac[4], h->mac[5]);
-            privacy_redact_mac(mac_str);
-            snprintf(label, sizeof(label), "%s  %s", h->ip_str, mac_str);
+            char vendor[64] = {0};
+            if (ouis_lookup_vendor_bytes(h->mac, vendor, sizeof(vendor))) {
+                snprintf(label, sizeof(label), "%s  %s", h->ip_str, vendor);
+            } else {
+                char mac_str[18];
+                snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
+                         h->mac[0], h->mac[1], h->mac[2],
+                         h->mac[3], h->mac[4], h->mac[5]);
+                privacy_redact_mac(mac_str);
+                snprintf(label, sizeof(label), "%s  %s", h->ip_str, mac_str);
+            }
         }
         options_view_add_item(s_action_ov, label, on_arp_host_selected, (void *)(intptr_t)i);
     }
@@ -1158,6 +1164,10 @@ static void build_arp_results(void) {
     privacy_redact_mac(mac_str);
     detail_view_add_info(s_result_dv, "IP",  h->ip_str);
     detail_view_add_info(s_result_dv, "MAC", mac_str);
+    char vendor[64] = {0};
+    if (ouis_lookup_vendor_bytes(h->mac, vendor, sizeof(vendor))) {
+        detail_view_add_info(s_result_dv, "Vendor", vendor);
+    }
     if (h->hostname[0]) {
         char host_disp[48];
         privacy_redact_text_copy(h->hostname, host_disp, sizeof(host_disp));

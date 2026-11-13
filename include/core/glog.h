@@ -14,6 +14,24 @@ void glog(const char *fmt, ...);
 void glog_set_defer(int on);
 void glog_flush_deferred(void);
 
+/* Console hold/release for wire-atomic binary streams (CSV/PCAP over UART).
+ *
+ * printf-based console output writes straight to the UART FIFO and can interleave
+ * with a still-draining uart_write_bytes() chunk, corrupting the data and the
+ * [BUF/BEGIN]/[BUF/CLOSE] framing host tools rely on. Bracket such chunks with
+ * glog_console_hold()/glog_console_release(); deferred and concurrent glog
+ * lines and stdout writers then wait until the stream is idle again. Callers must finish with
+ * uart_wait_tx_done() before glog_console_release() so the chunk has left the
+ * wire before any text is emitted. Not ISR-safe.
+ *
+ *   glog_console_hold();
+ *   uart_write_bytes(...);
+ *   uart_wait_tx_done(UART_NUM_0, portMAX_DELAY);
+ *   glog_console_release();
+ */
+void glog_console_hold(void);
+void glog_console_release(void);
+
 /* Capture sink: when set, every glog line is also delivered to the callback.
  * Used by GhostScript to stream command output to scripts. The callback
  * runs on the emitting task; keep it fast. Pass NULL to disable. */
