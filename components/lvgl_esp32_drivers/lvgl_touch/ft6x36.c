@@ -68,6 +68,32 @@ uint8_t ft6x36_get_gesture_id() {
   * @retval None
   */
 void ft6x06_init(uint16_t dev_addr) {
+#if defined(CONFIG_BANSHEE_LITE_C5) && defined(CONFIG_LV_FT6X36_INT_PIN) && \
+    CONFIG_LV_FT6X36_INT_PIN >= 0
+    const gpio_config_t int_cfg = {
+        .pin_bit_mask = 1ULL << CONFIG_LV_FT6X36_INT_PIN,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    ESP_ERROR_CHECK(gpio_config(&int_cfg));
+#endif
+#if defined(CONFIG_BANSHEE_LITE_C5) && defined(CONFIG_LV_FT6X36_RESET_PIN) && \
+    CONFIG_LV_FT6X36_RESET_PIN >= 0
+    const gpio_config_t reset_cfg = {
+        .pin_bit_mask = 1ULL << CONFIG_LV_FT6X36_RESET_PIN,
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    ESP_ERROR_CHECK(gpio_config(&reset_cfg));
+    gpio_set_level(CONFIG_LV_FT6X36_RESET_PIN, 0);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    gpio_set_level(CONFIG_LV_FT6X36_RESET_PIN, 1);
+    vTaskDelay(pdMS_TO_TICKS(10));
+#endif
 #if defined(CONFIG_CROWPANEL_ADVANCE_24_LCD) || defined(CONFIG_CROWPANEL_ADVANCE_28_LCD)
     /* Elecrow's V1.1/V1.2 ESP-IDF example identifies the controller as an
      * FT6336U/FT5x06 with RESET on GPIO48 and INT on GPIO47. */

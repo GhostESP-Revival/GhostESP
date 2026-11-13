@@ -214,6 +214,18 @@ menu "LVGL Touch controller"
             help
             Receive from the FreeRTOS queue using the handle 'ft6x36_touch_queue_handle'.
 
+        config LV_FT6X36_RESET_PIN
+            int "FT6336U reset GPIO (-1 if not connected)"
+            range -1 48
+            default -1
+            depends on BANSHEE_LITE_C5
+
+        config LV_FT6X36_INT_PIN
+            int "FT6336U interrupt GPIO (-1 if not connected)"
+            range -1 48
+            default -1
+            depends on BANSHEE_LITE_C5
+
     endmenu
 
     menu "Touchpanel (STMPE610) Pin Assignments"

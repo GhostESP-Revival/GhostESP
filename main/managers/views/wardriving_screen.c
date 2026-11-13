@@ -485,12 +485,20 @@ static void update_display_cb(lv_timer_t *timer) {
     }
 
     if (lbl_link_mode) {
+#ifdef CONFIG_BANSHEE_LITE_C5
+        /* This board has no local GPS. Scan-helper status is independent of
+         * the GPS stream and must never imply a standalone GPS fallback. */
+        lv_label_set_text(lbl_link_mode, !esp_comm_manager_is_connected() ? "GhostLink Lost"
+                                      : !gps_recent ? "GhostLink GPS Stale"
+                                      : "GhostLink");
+#else
         bool connected = esp_comm_manager_is_connected();
         bool peer_gps_mode = !wardriving_scan_mode && gps_manager_is_peer_gps_preferred();
         bool ghostlink_enabled = connected && !wardriving_is_helper_mode() &&
                                  ((wardriving_scan_mode && wardriving_has_peer_helper()) ||
                                   peer_gps_mode);
         lv_label_set_text(lbl_link_mode, ghostlink_enabled ? "GhostLink" : "Standalone");
+#endif
     }
     
     if (lbl_fix_icon) {
