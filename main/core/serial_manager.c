@@ -619,8 +619,17 @@ static void clear_entire_line(void) {
 
 static void display_prompt(void) {
     char prompt[96];
+    shell_get_plain_prompt(prompt, sizeof(prompt));
+    glog_console_hold();
+    if (!s_uart_disabled && !s_uart_paused) {
+        uart_write_bytes(UART_NUM, prompt, strlen(prompt));
+        uart_wait_tx_done(UART_NUM, portMAX_DELAY);
+    }
+#if JTAG_SUPPORTED
     shell_get_prompt(prompt, sizeof(prompt));
-    serial_manager_write_bytes(prompt, strlen(prompt));
+    usb_serial_jtag_write_bytes((const uint8_t *)prompt, strlen(prompt), 0);
+#endif
+    glog_console_release();
     prompt_displayed = true;
 }
 

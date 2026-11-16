@@ -30,7 +30,7 @@ void touch_driver_init(void)
     cst820_init();
 #endif
 
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+#if !defined(CONFIG_BANSHEE_LITE_C5) && defined(CONFIG_BUILD_CONFIG_TEMPLATE)
     if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
         tsc2007_init();
     }
@@ -63,7 +63,7 @@ bool touch_driver_read(lv_indev_drv_t *drv, lv_indev_data_t *data)
     res = cst820_read(drv, data);
 #endif
 
-#ifdef CONFIG_BUILD_CONFIG_TEMPLATE
+#if !defined(CONFIG_BANSHEE_LITE_C5) && defined(CONFIG_BUILD_CONFIG_TEMPLATE)
     if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0) {
         res = tsc2007_read(drv, data);
     }

@@ -2384,7 +2384,7 @@ void wifi_manager_start_monitor_mode(wifi_promiscuous_cb_t_t callback) {
         // tracking needs MGMT (AP beacons) + DATA (active stations);
         // CTRL frames carry no usable RSSI targets, so leave them out.
         filter.filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT | WIFI_PROMIS_FILTER_MASK_DATA;
-    } else if (callback == wifi_raw_scan_callback) {
+    } else if (callback == wifi_raw_scan_callback || callback == wifi_airspace_monitor_callback) {
         /* Ask for individual MPDUs rather than whole A-MPDUs. An aggregate can
          * run to tens of kilobytes, which no per-frame buffer can hold, and
          * writing one blob as if it were a single frame produces garbage in
@@ -2393,11 +2393,19 @@ void wifi_manager_start_monitor_mode(wifi_promiscuous_cb_t_t callback) {
         filter.filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT | WIFI_PROMIS_FILTER_MASK_DATA |
                              WIFI_PROMIS_FILTER_MASK_CTRL | WIFI_PROMIS_FILTER_MASK_DATA_MPDU;
     } else {
-        // Default: capture all frame types (for SAE flood, airspace, etc.)
+        // Default: capture all frame types (for SAE flood, etc.)
         filter.filter_mask = WIFI_PROMIS_FILTER_MASK_ALL;
     }
     
     ESP_ERROR_CHECK(esp_wifi_set_promiscuous_filter(&filter));
+    if (callback == wifi_raw_scan_callback || callback == wifi_airspace_monitor_callback) {
+        // The category mask alone does not enable control subtypes: IDF's
+        // subtype mask defaults to zero. Include ACK/CTS/RTS/Block Ack in raw.
+        wifi_promiscuous_filter_t ctrl_filter = {
+            .filter_mask = WIFI_PROMIS_CTRL_FILTER_MASK_ALL,
+        };
+        ESP_ERROR_CHECK(esp_wifi_set_promiscuous_ctrl_filter(&ctrl_filter));
+    }
     ESP_LOGI("WIFI_MANAGER", "Set hardware filter mask: 0x%02" PRIx32, filter.filter_mask);
 
     // Backing store for handshake/probe/beacon/WPS/wardrive tables (~5KB).

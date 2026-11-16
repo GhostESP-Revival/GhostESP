@@ -38,6 +38,10 @@
 #include "gui/toast.h"
 #include "gui/touch_bar.h"
 #include "gui/view_input.h"
+#include "gui/options_view.h"
+#include "gui/ios_toggle.h"
+#include "esp_log.h"
+#include "nvs.h"
 #include "managers/display_manager.h"
 #include "managers/flock_detector_manager.h"
 #include "managers/settings_manager.h"
@@ -67,9 +71,45 @@ extern const lv_img_dsc_t what2_50x50;
 #define SENTRY_REFRESH_MS 400
 #define SENTRY_ALERT_MS 8000
 #define SENTRY_ALERT_SCORE 80
-#define SENTRY_ALERT_DEDUP 8
+#define SENTRY_ALERT_DEDUP SENTRY_RECENT
 #define SENTRY_ALERT_COOLDOWN_MS 60000
 #define SENTRY_PHASE_MS 8000
+#define SENTRY_POPUPS 0x40U
+
+static uint8_t s_preferences = 0x7fU;
+static uint32_t s_last_popup;
+static uint32_t s_last_diagnostics;
+static View sentry_monitor_view;
+
+static bool sentry_enabled(uint8_t kind, uint8_t cls, bool ble) {
+    unsigned bit;
+    if (!ble) {
+        bit = (cls == FLOCK_CLASS_HAK5 || cls == FLOCK_CLASS_GHOSTESP) ? 4 :
+              (cls == FLOCK_CLASS_CAMERA || cls == FLOCK_CLASS_RING ||
+               cls == FLOCK_CLASS_NEST || cls == FLOCK_CLASS_AXON) ? 1 : 0;
+    } else {
+        bit = kind == 1 ? 2 : kind == 2 ? 3 : kind == 3 ? 4 : kind == 5 ? 1 : 5;
+    }
+    return (s_preferences & (1U << bit)) != 0;
+}
+
+static void sentry_preferences_load(void) {
+    nvs_handle_t handle;
+    s_preferences = 0x7fU;
+    if (nvs_open("storage", NVS_READONLY, &handle) == ESP_OK) {
+        (void)nvs_get_u8(handle, "sentry_flags", &s_preferences);
+        nvs_close(handle);
+    }
+}
+
+static bool sentry_preferences_save(void) {
+    nvs_handle_t handle;
+    if (nvs_open("storage", NVS_READWRITE, &handle) != ESP_OK) return false;
+    esp_err_t err = nvs_set_u8(handle, "sentry_flags", s_preferences);
+    if (err == ESP_OK) err = nvs_commit(handle);
+    nvs_close(handle);
+    return err == ESP_OK;
+}
 
 // Horizontal-swipe-to-cancel-tap threshold, matching badble/nfc: resistive
 // XPT2046 panels use ratio 1, everything else 10.
@@ -276,6 +316,7 @@ static const char *flock_class_tag(uint8_t cls) {
         case FLOCK_CLASS_AXON:   return "AXON";
         case FLOCK_CLASS_HAK5:   return "PINEAPPLE";
         case FLOCK_CLASS_NEST:   return "NEST";
+        case FLOCK_CLASS_GHOSTESP: return "GhostESP";
         default:                 return "FLOCK";
     }
 }
@@ -291,6 +332,7 @@ static const char *rec_category(const sentry_rec_t *r) {
             case FLOCK_CLASS_AXON:   return "Body camera";
             case FLOCK_CLASS_HAK5:   return "WiFi Pineapple (Hak5)";
             case FLOCK_CLASS_NEST:   return "Nest camera / doorbell";
+            case FLOCK_CLASS_GHOSTESP: return "GhostESP device (SSID match)";
             default:                 return "Flock Safety camera";
         }
     }
@@ -366,8 +408,10 @@ static void rec_upsert(const char *mac, bool ble, uint8_t kind, uint8_t flock_cl
     // Real time the radio last heard it (merges run every tick, so now_ms()
     // would pin every row at "just now"). Never move backwards.
     if (seen_ms == 0 || seen_ms > now_ms()) seen_ms = now_ms();
-    if (seen_ms > s_rec[i].last_seen) s_rec[i].last_seen = seen_ms;
-    if (s_rec[i].hits < 0xFFFFFFFFu) s_rec[i].hits++;
+    if (seen_ms > s_rec[i].last_seen) {
+        s_rec[i].last_seen = seen_ms;
+        if (s_rec[i].hits < 0xFFFFFFFFu) s_rec[i].hits++;
+    }
     snprintf(s_rec[i].tag, sizeof(s_rec[i].tag), "%s", tag);
     if (name && name[0]) snprintf(s_rec[i].name, sizeof(s_rec[i].name), "%s", name);
     if (sub && sub[0]) snprintf(s_rec[i].sub, sizeof(s_rec[i].sub), "%s", sub);
@@ -395,11 +439,14 @@ static void sentry_merge(void) {
         if (d == NULL) continue;
         bool high = (d->confidence == FLOCK_CONF_HIGH);
         uint8_t cls = d->device_class;
+        if (!sentry_enabled(SENTRY_KIND_FLOCK, cls, false)) continue;
         bool vendor = (cls != FLOCK_CLASS_NONE && cls != FLOCK_CLASS_FLOCK);
+        bool ghost = cls == FLOCK_CLASS_GHOSTESP;
         bool alert = high || vendor;
-        rec_upsert(d->mac, false, SENTRY_KIND_FLOCK, cls,
-                   (uint8_t)(vendor ? 85 : (high ? 95 : 50)), alert,
-                   d->rssi, d->channel, alert ? c_error : c_warn,
+        if (ghost) alert = false;
+        rec_upsert(d->mac, false, ghost ? SENTRY_KIND_GEAR : SENTRY_KIND_FLOCK, cls,
+                   (uint8_t)(ghost ? 30 : vendor ? 85 : (high ? 95 : 50)), alert,
+                   d->rssi, d->channel, ghost ? c_accent : alert ? c_error : c_warn,
                    flock_class_tag(cls), d->ssid[0] ? d->ssid : d->mac, d->method,
                    d->last_seen_ms);
     }
@@ -409,6 +456,7 @@ static void sentry_merge(void) {
         BLEDetectDeviceInfo info;
         if (ble_device_detect_get_device(i, &info) != 0) continue;
         uint8_t kind = ble_kind(info.type);
+        if (!sentry_enabled(kind, FLOCK_CLASS_NONE, true)) continue;
         uint8_t score = ble_score(info.type);
         bool alert = (score >= SENTRY_ALERT_SCORE);
         char mac[18];
@@ -483,6 +531,7 @@ static void radio_start_flock(void) {
     if (flock_detector_is_running()) return;
     flock_detector_init();
     if (flock_detector_start() == ESP_OK) s_flock_started = true;
+    else toast_show("WiFi detector failed to start", TOAST_ERROR);
 }
 
 static void radio_stop_flock(void) {
@@ -496,7 +545,8 @@ static void radio_stop_flock(void) {
 static void radio_start_ble(void) {
     if (ble_device_detect_is_active()) return;
     ble_device_detect_start();
-    s_ble_started = true;
+    s_ble_started = ble_device_detect_is_active();
+    if (!s_ble_started) toast_show("BLE detector failed to start", TOAST_ERROR);
 }
 
 static void radio_stop_ble(void) {
@@ -577,7 +627,7 @@ static void show_alert(const sentry_rec_t *r) {
     lv_img_set_src(face, kind_face(r->kind));
 
     char badge[24];
-    snprintf(badge, sizeof(badge), "%s DETECTED", r->tag);
+    snprintf(badge, sizeof(badge), "%s MATCH", r->tag);
     lv_obj_t *tag = lv_label_create(alert_overlay);
     lv_label_set_text(tag, badge);
     lv_obj_set_style_text_color(tag, lv_color_hex(r->color), 0);
@@ -677,8 +727,9 @@ static void render_rows(void) {
                 lv_obj_set_style_bg_color(s_rows[0].card, lv_color_hex(c_card), 0);
                 lv_obj_set_style_text_color(s_rows[0].head, lv_color_hex(c_good), 0);
                 lv_obj_set_style_text_color(s_rows[0].detail, lv_color_hex(c_dim), 0);
-                lv_label_set_text(s_rows[0].head, "Clear");
-                lv_label_set_text(s_rows[0].detail, "Listening for cameras, trackers, gear");
+                bool running = flock_detector_is_running() || ble_device_detect_is_active();
+                lv_label_set_text(s_rows[0].head, running ? "Clear" : "Idle");
+                lv_label_set_text(s_rows[0].detail, running ? "Listening for enabled categories" : "No active detection");
             } else {
                 lv_obj_add_flag(s_rows[i].card, LV_OBJ_FLAG_HIDDEN);
             }
@@ -1155,7 +1206,12 @@ static void sentry_input_callback(InputEvent *event) {
 static void update_counts(int counts[6]) {
     memset(counts, 0, sizeof(int) * 6);
     for (int i = 0; i < s_rec_count; i++) {
-        if (!s_rec[i].ble) { counts[0]++; if (s_rec[i].alert) counts[1]++; continue; }
+        if (!s_rec[i].ble) {
+            if (s_rec[i].flock_class == FLOCK_CLASS_GHOSTESP || s_rec[i].flock_class == FLOCK_CLASS_HAK5)
+                counts[4]++;
+            else { counts[0]++; if (s_rec[i].alert) counts[1]++; }
+            continue;
+        }
         counts[5]++;
         if (s_rec[i].kind == SENTRY_KIND_SKIMMER) counts[3]++;
         else if (s_rec[i].kind == SENTRY_KIND_GEAR) counts[4]++;
@@ -1174,6 +1230,14 @@ static void update_display_cb(lv_timer_t *timer) {
 
     manage_phase();
     sentry_merge();
+    if ((uint32_t)(now_ms() - s_last_diagnostics) >= 5000U) {
+        s_last_diagnostics = now_ms();
+        ESP_LOGI("Sentry", "wifi=%u rx=%lu valid=%lu matches=%d ble=%u adverts=%lu matches=%d visible=%d filters=0x%02x",
+                 flock_detector_is_running(), (unsigned long)flock_detector_get_rx_count(),
+                 (unsigned long)flock_detector_get_valid_rx_count(), flock_detector_get_count(),
+                 ble_device_detect_is_active(), (unsigned long)ble_device_detect_get_rx_count(),
+                 ble_device_detect_get_count(), s_rec_count, s_preferences);
+    }
 
     if (s_selected >= s_rec_count) s_selected = s_rec_count > 0 ? s_rec_count - 1 : 0;
 
@@ -1188,7 +1252,10 @@ static void update_display_cb(lv_timer_t *timer) {
             if (remain < 0) remain = 0;
             snprintf(state, sizeof(state), "Scanning %s (%ds)", s_phase_ble ? "BLE" : "WiFi", remain);
         } else {
-            snprintf(state, sizeof(state), "%s", running ? "Scanning" : "Idle");
+            snprintf(state, sizeof(state), "%s",
+                     flock_detector_is_running() && ble_device_detect_is_active() ? "Scanning WiFi + BLE" :
+                     flock_detector_is_running() ? "Scanning WiFi" :
+                     ble_device_detect_is_active() ? "Scanning BLE" : "Idle");
         }
         lv_label_set_text(lbl_state, state);
         lv_obj_set_style_text_color(lbl_state, lv_color_hex(running ? c_good : c_dim), 0);
@@ -1221,8 +1288,10 @@ static void update_display_cb(lv_timer_t *timer) {
     }
     if (!s_alert_primed) {
         s_alert_primed = true;
-    } else if (pick != NULL && !locked) {
+    } else if (pick != NULL && !locked && s_mode == SENTRY_LIST && (s_preferences & SENTRY_POPUPS) &&
+               !alert_overlay && (uint32_t)(now_ms() - s_last_popup) >= 10000U) {
         alert_mark(pick->mac);
+        s_last_popup = now_ms();
         show_alert(pick);
     }
 
@@ -1231,8 +1300,8 @@ static void update_display_cb(lv_timer_t *timer) {
 
 // ---- lifecycle ------------------------------------------------------------
 
-void sentry_view_create(void) {
-    if (sentry_view.root != NULL) return;
+static void sentry_monitor_create(void) {
+    if (sentry_monitor_view.root != NULL) return;
 
     s_rec = sentry_alloc(sizeof(sentry_rec_t) * SENTRY_RECENT);
     s_rows = sentry_alloc(sizeof(sentry_row_t) * SENTRY_RECENT);
@@ -1258,6 +1327,8 @@ void sentry_view_create(void) {
     s_mode = SENTRY_LIST;
     detail = NULL;
     s_alert_primed = false;
+    s_last_popup = now_ms() - 10000U;
+    s_last_diagnostics = now_ms();
     s_touch_moved = false;
     touch_drag_reset(&s_touch_drag);
 
@@ -1268,23 +1339,30 @@ void sentry_view_create(void) {
     s_phase_ble = false;
     s_phase_since = now_ms();
 
+    bool want_wifi = (s_preferences & ((1U << 0) | (1U << 1) | (1U << 4))) != 0;
 #if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(GHOSTESP_NO_NATIVE_BLE)
-    radio_start_flock();             // no BLE radio: WiFi only
+    if (want_wifi) radio_start_flock(); // no native BLE
 #else
-    if (has_psram()) {
+    bool want_ble = (s_preferences & ((1U << 1) | (1U << 2) | (1U << 3) |
+                                      (1U << 4) | (1U << 5))) != 0;
+    if (want_wifi && want_ble && has_psram()) {
         ble_set_suspend_allowed(false);
         s_coexist = true;
         radio_start_flock();
         radio_start_ble();
-    } else {
+    } else if (want_wifi && want_ble) {
         s_dual_phase = true;         // sequence wifi then ble
         radio_start_flock();
+    } else if (want_wifi) {
+        radio_start_flock();
+    } else if (want_ble) {
+        radio_start_ble();
     }
 #endif
 
     display_manager_fill_screen(lv_color_hex(c_bg));
     root_container = gui_screen_create_root(NULL, "Sentry", lv_color_hex(c_bg), LV_OPA_COVER);
-    sentry_view.root = root_container;
+    sentry_monitor_view.root = root_container;
 
     lv_obj_t *content = gui_screen_create_content_with_bottom_reserved(
         root_container, GUI_STATUS_BAR_HEIGHT, gui_touch_bar_height() + GUI_HOME_SAFE_H);
@@ -1332,7 +1410,7 @@ void sentry_view_create(void) {
     update_display_cb(NULL);
 }
 
-void sentry_view_destroy(void) {
+static void sentry_monitor_destroy(void) {
     lvgl_timer_del_safe(&update_timer);
     hide_alert();
     close_detail();
@@ -1349,7 +1427,7 @@ void sentry_view_destroy(void) {
 #endif
 
     lvgl_obj_del_safe(&root_container);
-    sentry_view.root = NULL;
+    sentry_monitor_view.root = NULL;
 
     lbl_state = NULL;
     lbl_summary = NULL;
@@ -1376,11 +1454,165 @@ static void get_sentry_callback(void **callback) {
     }
 }
 
+static View sentry_monitor_view = {
+    .root = NULL,
+    .create = sentry_monitor_create,
+    .destroy = sentry_monitor_destroy,
+    .input_callback = sentry_input_callback,
+    .name = "SentryView",
+    .get_hardwareinput_callback = get_sentry_callback
+};
+
+/* The options screen owns no detector buffers or radios. Starting the monitor
+   navigates to the existing live view; Back returns here and stops scanning. */
+static options_view_t *s_options;
+static lv_obj_t *s_options_root;
+static bool s_options_settings;
+static bool s_options_touch;
+
+static void sentry_options_render(void);
+
+static void sentry_options_select(int row) {
+    if (!s_options_settings) {
+        if (row == 0) display_manager_switch_view(&sentry_monitor_view);
+        else if (row == 1) { s_options_settings = true; sentry_options_render(); }
+        else display_manager_go_back();
+        return;
+    }
+    if (row >= 0 && row < 7) {
+        unsigned bit = row == 0 ? 6U : (unsigned)(row - 1);
+        uint8_t old = s_preferences;
+        s_preferences ^= (uint8_t)(1U << bit);
+        if (!sentry_preferences_save()) {
+            s_preferences = old;
+            toast_show("Could not save Sentry settings", TOAST_ERROR);
+        }
+        sentry_options_render();
+        options_view_set_selected(s_options, row);
+    } else {
+        s_options_settings = false;
+        sentry_options_render();
+        options_view_set_selected(s_options, 1);
+    }
+}
+
+static void sentry_options_click(lv_event_t *event) {
+    sentry_options_select((int)(intptr_t)lv_event_get_user_data(event));
+}
+
+static void sentry_options_render(void) {
+    options_view_clear(s_options);
+    options_view_set_title(s_options, s_options_settings ? "Sentry Settings" : "Sentry");
+    if (!s_options_settings) {
+        options_view_add_item(s_options, "Start monitoring", sentry_options_click, (void *)(intptr_t)0);
+        options_view_add_item(s_options, "Settings", sentry_options_click, (void *)(intptr_t)1);
+        options_view_add_back_row(s_options, sentry_options_click, (void *)(intptr_t)2);
+        return;
+    }
+    static const char *const names[] = {
+        "Popups", "Flock / ALPR", "Cameras", "Trackers", "Skimmers", "Pentest gear", "Other BLE"
+    };
+    for (int i = 0; i < 7; i++) {
+        unsigned bit = i == 0 ? 6U : (unsigned)(i - 1);
+        char label[48];
+        snprintf(label, sizeof(label), "%s", names[i]);
+        lv_obj_t *row = options_view_add_item(s_options, label, sentry_options_click, (void *)(intptr_t)i);
+        if (row) {
+            lv_obj_t *text = lv_obj_get_child(row, 0);
+            lv_obj_t *toggle = ios_toggle_create(row);
+            lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+            lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+            if (text) {
+                lv_obj_set_flex_grow(text, 1);
+                lv_obj_set_width(text, LV_SIZE_CONTENT);
+                lv_obj_set_style_text_align(text, LV_TEXT_ALIGN_LEFT, 0);
+            }
+            lv_obj_set_flex_grow(toggle, 0);
+            lv_obj_update_layout(row);
+            ios_toggle_set_value(toggle, (s_preferences & (1U << bit)) != 0, false);
+        }
+    }
+    options_view_add_back_row(s_options, sentry_options_click, (void *)(intptr_t)7);
+}
+
+static void sentry_options_input(InputEvent *event) {
+    if (!event || !s_options) return;
+    if (event->type == INPUT_TYPE_TOUCH) {
+        lv_indev_data_t *d = &event->data.touch_data;
+        lv_obj_t *list = options_view_get_list(s_options);
+        if (event->is_touch_move) {
+            if (s_touch_drag.started) touch_drag_update(&s_touch_drag, d, list);
+        } else if (d->state == LV_INDEV_STATE_PR) {
+            s_options_touch = true;
+            touch_drag_begin(&s_touch_drag, d);
+        } else if (d->state == LV_INDEV_STATE_REL && s_options_touch) {
+            s_options_touch = false;
+            if (touch_drag_release(&s_touch_drag, d)) {
+                display_manager_flush_pending_scroll();
+            } else {
+                int row = options_view_item_at(s_options, d->point.x, d->point.y);
+                if (row >= 0) { options_view_set_selected(s_options, row); sentry_options_select(row); }
+            }
+        }
+        return;
+    }
+    int direction = 0;
+    bool select = false, back = false;
+    if (event->type == INPUT_TYPE_JOYSTICK) {
+        int key = event->data.joystick_index;
+        direction = key == 2 ? -1 : key == 4 ? 1 : 0;
+        select = key == 1; back = key == 0;
+    } else if (event->type == INPUT_TYPE_KEYBOARD) {
+        uint32_t key = event->data.key_value;
+        direction = (key == LV_KEY_UP || key == 'k' || key == ';') ? -1 :
+                    (key == LV_KEY_DOWN || key == 'j' || key == '.') ? 1 : 0;
+        select = key == LV_KEY_ENTER || key == 13 || key == 10;
+        back = view_input_is_back_event(event) || key == 'q' || key == 'Q';
+    } else if (event->type == INPUT_TYPE_ENCODER) {
+        select = event->data.encoder.button;
+        if (!select) direction = event->data.encoder.direction > 0 ? 1 :
+                                 event->data.encoder.direction < 0 ? -1 : 0;
+    } else if (event->type == INPUT_TYPE_EXIT_BUTTON || event->type == INPUT_TYPE_HOME_BUTTON) {
+        back = true;
+    }
+    if (direction) options_view_move_selection(s_options, direction);
+    else if (select) sentry_options_select(options_view_get_selected(s_options));
+    else if (back) sentry_options_select(s_options_settings ? 7 : 2);
+}
+
+static void sentry_options_create(void) {
+    if (sentry_view.root) return;
+    sentry_preferences_load();
+    s_options_settings = false;
+    s_options_touch = false;
+    touch_drag_reset(&s_touch_drag);
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    s_options_root = gui_screen_create_root(NULL, NULL, lv_color_hex(theme_palette_get_background(theme)), LV_OPA_TRANSP);
+    if (!s_options_root) return;
+    sentry_view.root = s_options_root;
+    s_options = options_view_create(s_options_root, "Sentry");
+    if (s_options) sentry_options_render();
+}
+
+static void sentry_options_destroy(void) {
+    if (s_options) { options_view_destroy(s_options); s_options = NULL; }
+    lvgl_obj_del_safe(&s_options_root);
+    sentry_view.root = NULL;
+    touch_drag_reset(&s_touch_drag);
+}
+
+static void sentry_options_get_callback(void **callback) {
+    if (callback) *callback = (void *)sentry_options_input;
+}
+
+void sentry_view_create(void) { sentry_options_create(); }
+void sentry_view_destroy(void) { sentry_options_destroy(); }
+
 View sentry_view = {
     .root = NULL,
     .create = sentry_view_create,
     .destroy = sentry_view_destroy,
-    .input_callback = sentry_input_callback,
-    .name = "SentryView",
-    .get_hardwareinput_callback = get_sentry_callback
+    .input_callback = sentry_options_input,
+    .name = "SentryOptionsView",
+    .get_hardwareinput_callback = sentry_options_get_callback
 };
