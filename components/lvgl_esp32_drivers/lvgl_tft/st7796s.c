@@ -69,7 +69,29 @@ static void st7796s_send_color(void *data, uint16_t length);
 
 void st7796s_init(void)
 {
-#if defined(CONFIG_BANSHEE_LITE_C5)
+#if defined(CONFIG_HOSYOND_E32R35T_LCD)
+	/* Hosyond ST7796U panel: keep its power/gamma sequence board-specific. */
+	lcd_init_cmd_t init_cmds[] = {
+		{0x01, {0}, 0x80},                                                                                  /*Software reset, delay*/
+		{0x11, {0}, 0x80},                                                                                  /*Sleep out, delay*/
+		{0xF0, {0xC3}, 1},                                                                                  /*Command Set Control: unlock 1*/
+		{0xF0, {0x96}, 1},                                                                                  /*Command Set Control: unlock 2*/
+		{0x36, {0x28}, 1},                                                                                  /*Memory Access Control (Portrait, BGR)*/
+		{0x3A, {0x55}, 1},                                                                                  /*Pixel Format: 16 bit*/
+		{0xB4, {0x01}, 1},                                                                                  /*Column Inversion*/
+		{0xB6, {0x80, 0x02, 0x3B}, 3},                                                                      /*Display Function Control*/
+		{0xE8, {0x40, 0x8A, 0x00, 0x00, 0x29, 0x19, 0xA5, 0x33}, 8},                                        /*Display Output Ctrl Adjust*/
+		{0xC1, {0x06}, 1},                                                                                  /*Power Control 2*/
+		{0xC2, {0xA7}, 1},                                                                                  /*Power Control 3*/
+		{0xC5, {0x18}, 0x81},                                                                               /*VCOM Control, delay*/
+		{0xE0, {0xF0, 0x09, 0x0B, 0x06, 0x04, 0x15, 0x2F, 0x54, 0x42, 0x3C, 0x17, 0x14, 0x18, 0x1B}, 14},   /*Positive Gamma*/
+		{0xE1, {0xE0, 0x09, 0x0B, 0x06, 0x04, 0x03, 0x2B, 0x43, 0x42, 0x3B, 0x16, 0x14, 0x17, 0x1B}, 0x8E}, /*Negative Gamma, delay*/
+		{0xF0, {0x3C}, 1},                                                                                  /*Command Set Control: lock 1*/
+		{0xF0, {0x69}, 0x81},                                                                               /*Command Set Control: lock 2, delay*/
+		{0x29, {0}, 0x80},                                                                                  /*Display ON, delay*/
+		{0, {0}, 0xff},                                                                                     /*End*/
+	};
+#elif defined(CONFIG_BANSHEE_LITE_C5)
 	/* The Banshee Lite panel is an ST7796U.  Its command unlock and power
 	 * setup differ from the legacy ILI9341-compatible table below. */
 	lcd_init_cmd_t init_cmds[] = {

@@ -233,6 +233,15 @@ menu "Ghost ESP Options"
         help
             Enable support for Sunton LCD.
 
+    config HOSYOND_E32R35T_LCD
+        bool "Enable Hosyond E32R35T 3.5-inch LCD"
+        default n
+        depends on IDF_TARGET_ESP32 && WITH_SCREEN && USE_TOUCHSCREEN
+        depends on LV_TFT_DISPLAY_CONTROLLER_ST7796S && LV_TOUCH_CONTROLLER_XPT2046
+        help
+            Use the Hosyond E32R35T ST7796U panel initialization sequence.
+            Other ST7796S boards retain their existing panel initialization.
+
     config JC3248W535EN_LCD
         bool "Enable JC3248W535EN LCD"
         default n
