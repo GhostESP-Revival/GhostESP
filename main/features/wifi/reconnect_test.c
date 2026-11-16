@@ -1,5 +1,5 @@
 /**
- * @file deauth_attack.c
+ * @file reconnect_test.c
  * @brief Deauthentication attack implementation
  * 
  * This module handles WiFi deauthentication attacks including:
@@ -11,7 +11,7 @@
  * and WiFi control functions.
  */
 
-#include "attacks/wifi/deauth_attack.h"
+#include "features/wifi/reconnect_test.h"
 #include "scans/wifi/wpa3_compliance.h"
 #include "managers/wifi_manager.h"
 #include "core/system_manager.h"
@@ -377,7 +377,7 @@ void deauth_attack_start(void) {
         printf("Restarting Wi-Fi\n");
 
 #ifdef CONFIG_WITH_STATUS_DISPLAY
-        status_display_show_attack("Deauth", "starting");
+        status_display_show_attack("Reconnect Test", "starting");
 #endif
         
         // Build channel list for broadcast deauth (user hop profile or the
@@ -399,7 +399,7 @@ void deauth_attack_start(void) {
         selected_ap_count_local = selected_ap_count;
         
         if (selected_ap_count_local > 0 && selected_aps_local != NULL) {
-            glog("Starting deauth attack on %d selected APs:\n", selected_ap_count_local);
+            glog("Starting reconnect test on %d selected APs:\n", selected_ap_count_local);
             
             for (int i = 0; i < selected_ap_count_local; i++) {
                 char sanitized_ssid[33];
@@ -415,22 +415,22 @@ void deauth_attack_start(void) {
                 if (i == 0) {
                     char target_disp[33];
                     privacy_redact_ssid_copy(sanitized_ssid, target_disp, sizeof(target_disp));
-                    status_display_show_attack("Deauth", target_disp);
+                    status_display_show_attack("Reconnect Test", target_disp);
                 }
 #endif
             }
         } else if (strlen((const char *)selected_ap_local.ssid) > 0) {
             char sanitized_ssid[33];
             sanitize_ssid(selected_ap_local.ssid, sanitized_ssid, sizeof(sanitized_ssid));
-            glog("Starting deauth attack on selected AP: %s\n", sanitized_ssid);
+            glog("Starting reconnect test on selected AP: %s\n", sanitized_ssid);
 #ifdef CONFIG_WITH_STATUS_DISPLAY
             char target_disp[33];
             privacy_redact_ssid_copy(sanitized_ssid, target_disp, sizeof(target_disp));
-            status_display_show_attack("Deauth", target_disp);
+            status_display_show_attack("Reconnect Test", target_disp);
 #endif
         } else {
-            glog("No AP selected. Select a target AP before starting deauth.\n");
-            TERMINAL_VIEW_ADD_TEXT("No AP selected. Select a target AP before starting deauth.\n");
+            glog("No AP selected. Select a target AP before starting a reconnect test.\n");
+            TERMINAL_VIEW_ADD_TEXT("No AP selected. Select a target AP before starting a reconnect test.\n");
 #ifdef CONFIG_WITH_STATUS_DISPLAY
             status_display_show_status("No AP Selected");
 #endif
@@ -443,8 +443,8 @@ void deauth_attack_start(void) {
         deauth_stop_requested = false;
         BaseType_t rc = xTaskCreate_psram(deauth_task, "deauth_task", 4096, NULL, 5, &deauth_task_handle);
         if (rc != pdPASS) {
-            glog("Failed to start deauth task (%ld)\n", (long)rc);
-            status_display_show_status("Deauth Start Fail");
+            glog("Failed to start reconnect test task (%ld)\n", (long)rc);
+            status_display_show_status("Reconnect Test Start Fail");
             deauth_task_handle = NULL;
             deauth_stop_requested = false;
             return;
@@ -455,15 +455,15 @@ void deauth_attack_start(void) {
         snprintf(da_payload, sizeof(da_payload), "%d", selected_ap_count_local);
         ghostscript_emit_event("attack_started", "deauth");
     } else {
-        glog("Deauth already running.\n");
+        glog("Reconnect Test already running.\n");
     }
 }
 
 void deauth_attack_stop(void) {
     if (deauth_task_running) {
-        printf("Stopping deauth transmission...\n");
-        TERMINAL_VIEW_ADD_TEXT("Stopping deauth transmission...\n");
-        status_display_show_status("Deauth Stopping");
+        printf("Stopping reconnect test transmission...\n");
+        TERMINAL_VIEW_ADD_TEXT("Stopping reconnect test transmission...\n");
+        status_display_show_status("Reconnect Test Stopping");
         
         deauth_stop_requested = true;
         
@@ -476,7 +476,7 @@ void deauth_attack_stop(void) {
             }
             
             if (deauth_task_handle != NULL) {
-                glog("Deauth stop timeout; waiting for task to exit cleanly\n");
+                glog("Reconnect Test stop timeout; waiting for task to exit cleanly\n");
             }
         }
 
@@ -485,17 +485,17 @@ void deauth_attack_stop(void) {
         rgb_manager_set_color(&rgb_manager, -1, 0, 0, 0, false);
         esp_wifi_stop();
         (void)ap_manager_restore_after_attack("deauth stop");
-        status_display_show_status("Deauth Stopped");
+        status_display_show_status("Reconnect Test Stopped");
         ghostscript_emit_event("attack_stopped", "deauth");
     } else {
-        status_display_show_status("No Deauth Active");
+        status_display_show_status("No Reconnect Test Active");
     }
 }
 
 void deauth_attack_start_station(void) {
     station_selected_local = station_scan_get_selection(&selected_station_local);
     if (!station_selected_local) {
-        glog("No station selected; falling back to AP deauth mode.\n");
+        glog("No station selected; falling back to AP reconnect test mode.\n");
         deauth_attack_start();
         return;
     }
@@ -515,7 +515,7 @@ void deauth_attack_start_station(void) {
     // + wide/LR protocols (enables 5GHz TX, frees channel hopping)
     ESP_ERROR_CHECK(ap_manager_apply_attack_radio());
 
-    glog("Deauthing station %02X:%02X:%02X:%02X:%02X:%02X from AP %02X:%02X:%02X:%02X:%02X:%02X, starting background task...\n",
+    glog("Testing reconnection for station %02X:%02X:%02X:%02X:%02X:%02X from AP %02X:%02X:%02X:%02X:%02X:%02X, starting background task...\n",
          selected_station_local.station_mac[0], selected_station_local.station_mac[1], selected_station_local.station_mac[2], 
          selected_station_local.station_mac[3], selected_station_local.station_mac[4], selected_station_local.station_mac[5],
          selected_station_local.ap_bssid[0], selected_station_local.ap_bssid[1], selected_station_local.ap_bssid[2], 
@@ -523,8 +523,8 @@ void deauth_attack_start_station(void) {
     deauth_station_stop_requested = false;
     BaseType_t station_rc = xTaskCreate_psram(deauth_station_task, "deauth_station", 4096, NULL, 5, &deauth_station_task_handle);
     if (station_rc != pdPASS) {
-        glog("Failed to start station deauth task (%ld)\n", (long)station_rc);
-        status_display_show_status("Deauth Station Fail");
+        glog("Failed to start station reconnect test task (%ld)\n", (long)station_rc);
+        status_display_show_status("Reconnect Test Station Fail");
         deauth_station_task_handle = NULL;
         deauth_station_stop_requested = false;
         (void)ap_manager_restore_after_attack("station deauth start");
@@ -711,7 +711,7 @@ static void handshake_deauth_task(void *param) {
 
 void deauth_attack_start_handshake_deauth(void) {
     if (handshake_deauth_task_running) {
-        glog("Handshake+Deauth already running.\n");
+        glog("Handshake + Reconnect Test already running.\n");
         return;
     }
 
@@ -755,7 +755,7 @@ void deauth_attack_start_handshake_deauth(void) {
     // Attack radio profile: STA-only mode (GhostNet AP off, clients kicked)
     // + wide/LR protocols (enables 5GHz TX, frees channel hopping)
     ESP_ERROR_CHECK(ap_manager_apply_attack_radio());
-    printf("Restarting Wi-Fi for Handshake+Deauth\n");
+    printf("Restarting Wi-Fi for Handshake + Reconnect Test\n");
 
     // Enable promiscuous mode for EAPOL capture (on top of AP mode)
     wifi_callbacks_reset_handshake_tracking();
@@ -803,11 +803,11 @@ void deauth_attack_start_handshake_deauth(void) {
             selected_aps_local = NULL;
             selected_ap_count_local = 0;
         }
-        glog("Starting Handshake+Deauth on station (AP: %s)\n", sanitized_ssid);
+        glog("Starting Handshake + Reconnect Test on station (AP: %s)\n", sanitized_ssid);
 #ifdef CONFIG_WITH_STATUS_DISPLAY
         char target_disp[33];
         privacy_redact_ssid_copy(sanitized_ssid, target_disp, sizeof(target_disp));
-        status_display_show_attack("HS+Deauth", target_disp);
+        status_display_show_attack("HS+Reconnect", target_disp);
 #endif
     } else {
         extern wifi_ap_record_t selected_ap;
@@ -818,7 +818,7 @@ void deauth_attack_start_handshake_deauth(void) {
         selected_ap_count_local = selected_ap_count;
 
         if (selected_ap_count_local > 0 && selected_aps_local != NULL) {
-            glog("Starting Handshake+Deauth on %d APs:\n", selected_ap_count_local);
+            glog("Starting Handshake + Reconnect Test on %d APs:\n", selected_ap_count_local);
             for (int i = 0; i < selected_ap_count_local; i++) {
                 char sanitized_ssid[33];
                 sanitize_ssid(selected_aps_local[i].ssid, sanitized_ssid, sizeof(sanitized_ssid));
@@ -827,18 +827,18 @@ void deauth_attack_start_handshake_deauth(void) {
                 if (i == 0) {
                     char target_disp[33];
                     privacy_redact_ssid_copy(sanitized_ssid, target_disp, sizeof(target_disp));
-                    status_display_show_attack("HS+Deauth", target_disp);
+                    status_display_show_attack("HS+Reconnect", target_disp);
                 }
 #endif
             }
         } else if (strlen((const char *)selected_ap_local.ssid) > 0) {
             char sanitized_ssid[33];
             sanitize_ssid(selected_ap_local.ssid, sanitized_ssid, sizeof(sanitized_ssid));
-            glog("Starting Handshake+Deauth on: %s\n", sanitized_ssid);
+            glog("Starting Handshake + Reconnect Test on: %s\n", sanitized_ssid);
 #ifdef CONFIG_WITH_STATUS_DISPLAY
             char target_disp[33];
             privacy_redact_ssid_copy(sanitized_ssid, target_disp, sizeof(target_disp));
-            status_display_show_attack("HS+Deauth", target_disp);
+            status_display_show_attack("HS+Reconnect", target_disp);
 #endif
         }
     }
@@ -846,7 +846,7 @@ void deauth_attack_start_handshake_deauth(void) {
     handshake_deauth_handshake_count = 0;
 
     if (handshake_deauth_stop_requested) {
-        glog("Handshake+Deauth cancelled before start.\n");
+        glog("Handshake + Reconnect Test cancelled before start.\n");
         handshake_deauth_stop_requested = false;
         esp_wifi_set_promiscuous(false);
         pcap_file_close();
@@ -857,8 +857,8 @@ void deauth_attack_start_handshake_deauth(void) {
 
     BaseType_t rc = xTaskCreate_psram(handshake_deauth_task, "hs_deauth_task", 4096, NULL, 5, &handshake_deauth_task_handle);
     if (rc != pdPASS) {
-        glog("Failed to start handshake+deauth task (%ld)\n", (long)rc);
-        status_display_show_status("HS+Deauth Fail");
+        glog("Failed to start handshake + reconnect test task (%ld)\n", (long)rc);
+        status_display_show_status("HS+Reconnect Fail");
         handshake_deauth_task_handle = NULL;
         handshake_deauth_stop_requested = false;
         esp_wifi_set_promiscuous(false);
@@ -870,7 +870,7 @@ void deauth_attack_start_handshake_deauth(void) {
     handshake_deauth_task_running = true;
     rgb_manager_set_color(&rgb_manager, -1, 255, 128, 0, false);
     ghostscript_emit_event("attack_started", "handshake_deauth");
-    glog("Handshake+Deauth running. Use 'stopdeauth' or 'stop' to end.\n");
+    glog("Handshake + Reconnect Test running. Use 'stopreconnect' or 'stop' to end.\n");
 }
 
 bool deauth_attack_stop_handshake_deauth(void) {
@@ -880,8 +880,8 @@ bool deauth_attack_stop_handshake_deauth(void) {
         return false;
     }
 
-    glog("Stopping Handshake+Deauth...\n");
-    status_display_show_status("HS+Deauth Stop");
+    glog("Stopping Handshake + Reconnect Test...\n");
+    status_display_show_status("HS+Reconnect Stop");
 
     if (handshake_deauth_task_handle != NULL) {
         int wait_count = 0;
@@ -891,7 +891,7 @@ bool deauth_attack_stop_handshake_deauth(void) {
         }
 
         if (handshake_deauth_task_handle != NULL) {
-            glog("Handshake+Deauth stop timeout; waiting for task to exit\n");
+            glog("Handshake + Reconnect Test stop timeout; waiting for task to exit\n");
         }
     }
 
@@ -904,9 +904,9 @@ bool deauth_attack_stop_handshake_deauth(void) {
     rgb_manager_set_color(&rgb_manager, -1, 0, 0, 0, false);
     esp_wifi_stop();
     (void)ap_manager_restore_after_attack("hs+deauth stop");
-    status_display_show_status("HS+Deauth Stopped");
+    status_display_show_status("HS+Reconnect Stopped");
 
-    glog("Handshake+Deauth stopped. %" PRIu32 " handshakes captured.\n", handshake_deauth_handshake_count);
+    glog("Handshake + Reconnect Test stopped. %" PRIu32 " handshakes captured.\n", handshake_deauth_handshake_count);
     ghostscript_emit_event("attack_stopped", "handshake_deauth");
     return true;
 }

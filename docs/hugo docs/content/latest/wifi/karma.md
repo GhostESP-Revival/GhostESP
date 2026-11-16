@@ -1,5 +1,5 @@
 ---
-title: "Karma Attack"
+title: "Karma Test"
 description: "Automatically respond to device probes with fake networks"
 weight: 50
 ---
@@ -21,13 +21,13 @@ Attacker -> Client : captive portal | Optional portal page served on connect
 
 ### On-device UI
 
-1. Open **Menu → Wi-Fi → Attacks → Karma Attack**.
+1. Open **Menu → Wi-Fi → Wi-Fi Tests → Karma Test**.
    The device will begin learning SSIDs from probe requests.
-2. To use specific SSIDs instead, choose **Karma Attack (Custom SSIDs)**.
+2. To use specific SSIDs instead, choose **Karma Test (Custom SSIDs)**.
    Enter the SSIDs you want to broadcast (separated by commas), up to 32.
-3. To serve a custom captive portal on the fake networks, choose **Karma Attack (Custom Portal)**.
+3. To serve a custom captive portal on the fake networks, choose **Karma Test (Custom Portal)**.
 4. The device will start broadcasting fake networks. Leave it running to catch devices.
-5. To stop, go back to the menu or select **Stop Karma Attack**.
+5. To stop, go back to the menu or select **Stop Karma Test**.
 
 ### CLI
 

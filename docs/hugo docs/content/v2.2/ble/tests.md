@@ -1,10 +1,12 @@
 ---
-title: "Attacks"
+title: "BLE Tests"
 description: "Send BLE advertisement spam and spoof AirTags"
+aliases:
+  - "/v2.2/ble/attacks/"
 weight: 20
 ---
 
-Broadcast fake BLE advertisements to simulate nearby devices, or spoof Apple AirTags and other Find My devices. You need a Bluetooth-capable GhostESP; attacks are not available on ESP32-S2.
+Broadcast fake BLE advertisements to simulate nearby devices, or spoof Apple AirTags and other Find My devices. You need a Bluetooth-capable GhostESP; these tests are not available on ESP32-S2.
 
 > **Wi-Fi impact:** BLE spam and spoofing pause the GhostNet AP until you run `stop` (or the task ends). See [Scanning]({{< relref "scanning.md" >}}) for how BLE sessions affect Wi-Fi.
 

@@ -18,7 +18,7 @@
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 #include "managers/ble_manager.h"
 #include "managers/ble_bridge_manager.h"
-#include "attacks/ble/ble_spam.h"
+#include "features/ble/ble_spam.h"
 #include "scans/ble/advertiser_scan.h"
 #include "scans/ble/flipper_scan.h"
 #include "host/ble_gap.h"
@@ -59,7 +59,7 @@
 #include "managers/ethernet/eth_fingerprint.h"
 #include "managers/ethernet/eth_utils.h"
 #include "managers/ethernet/eth_http.h"
-#include "attacks/ethernet/eth_arp_poison.h"
+#include "features/ethernet/eth_arp_poison.h"
 #include "lwip/ip4_addr.h"
 #include "lwip/etharp.h"
 #include "lwip/netif.h"
@@ -139,7 +139,7 @@ extern dns_server_handle_t dns_handle;
 #endif
 
 
-#include "attacks/wifi/dhcp_starvation.h"
+#include "features/wifi/dhcp_starvation.h"
 
 static Command *command_list_head = NULL;
 static Command *command_pool = NULL;
@@ -411,6 +411,7 @@ void register_commands() {
     register_command("scansta", handle_sta_scan);
     register_command("scanlocal", handle_ip_lookup);
     register_command("stopscan", cmd_wifi_scan_stop);
+    register_command("wifitest", handle_attack_cmd);
     register_command("attack", handle_attack_cmd);
     register_command("list", handle_list);
     register_command("beaconspam", handle_beaconspam);
@@ -421,6 +422,8 @@ void register_commands() {
     register_command("beaconshow", handle_beaconshow);
     register_command("beaconspamlist", handle_beaconspamlist);
     register_command("stopspam", handle_stop_spam);
+    register_command("reconnect", handle_reconnect_cmd);
+    register_command("stopreconnect", handle_stop_deauth);
     register_command("stopdeauth", handle_stop_deauth);
     register_command("select", handle_select_cmd);
     register_command("capture", handle_capture_scan);

@@ -11,7 +11,7 @@
  * and WiFi control functions.
  */
 
-#include "attacks/wifi/bad_msg.h"
+#include "features/wifi/bad_msg.h"
 #include "managers/wifi_manager.h"
 #include "managers/ap_manager.h"
 #include "managers/status_display_manager.h"
@@ -267,7 +267,7 @@ void bad_msg_start(void) {
     ghostscript_emit_event("attack_started", "bad_msg");
     BaseType_t attack_rc = xTaskCreate_psram(bad_msg_task, "bad_msg", 4096, NULL, 5, &bad_msg_task_handle);
     if (attack_rc != pdPASS) {
-        glog("Bad Msg failed to start (attack=%ld)\n", (long)attack_rc);
+        glog("Bad Msg failed to start (test=%ld)\n", (long)attack_rc);
         bad_msg_running = false;
         if (bad_msg_task_handle) {
             vTaskDeleteWithCaps(bad_msg_task_handle);
@@ -280,7 +280,7 @@ void bad_msg_start(void) {
 #endif
         return;
     }
-    glog("Bad Msg running. Use 'stopdeauth' or 'stop' to end.\n");
+    glog("Bad Msg running. Use 'stopreconnect' or 'stop' to end.\n");
 }
 
 void bad_msg_stop(void) {

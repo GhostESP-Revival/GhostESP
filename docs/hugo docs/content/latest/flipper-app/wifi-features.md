@@ -36,7 +36,7 @@ keywords: ["wifi", "scanning", "capture", "attacks", "beacon spam"]
   - Random mode (random SSIDs)
   - Rickroll mode (entertainment)
   - Custom SSID mode
-- **Deauthentication Attacks**: Disconnect devices from networks
+- **Reconnect Test**: Disconnect devices from networks
 - **EAPOL Logoff Attacks**: Force re-authentication
 - **SAE Handshake Flood**: WPA3 attack method
 - **Karma Rogue AP**: Create fake access points with custom SSIDs

@@ -16,7 +16,7 @@
  * and WiFi control functions.
  */
 
-#include "attacks/wifi/auth_flood.h"
+#include "features/wifi/auth_flood.h"
 #include "managers/wifi_manager.h"
 #include "managers/ap_manager.h"
 #include "managers/status_display_manager.h"
@@ -67,7 +67,7 @@ static void sanitize_ssid(const uint8_t* input_ssid, char* output_buffer, size_t
     }
 }
 
-// Rate limiting (mirrors deauth_attack.c burst governor)
+// Rate limiting (mirrors reconnect_test.c burst governor)
 static bool check_packet_rate(void) {
     static uint32_t last_time = 0;
     static uint32_t packets_this_second = 0;
@@ -251,7 +251,7 @@ void auth_flood_start(void) {
     ghostscript_emit_event("attack_started", "auth_flood");
     BaseType_t attack_rc = xTaskCreate_psram(auth_flood_task, "auth_flood", 4096, NULL, 5, &auth_flood_task_handle);
     if (attack_rc != pdPASS) {
-        glog("Auth Flood failed to start (attack=%ld)\n", (long)attack_rc);
+        glog("Auth Flood failed to start (test=%ld)\n", (long)attack_rc);
         auth_flood_running = false;
         if (auth_flood_task_handle) {
             vTaskDeleteWithCaps(auth_flood_task_handle);
@@ -264,7 +264,7 @@ void auth_flood_start(void) {
 #endif
         return;
     }
-    glog("Auth Flood running. Use 'stopdeauth' or 'stop' to end.\n");
+    glog("Auth Flood running. Use 'stopreconnect' or 'stop' to end.\n");
 }
 
 void auth_flood_stop(void) {

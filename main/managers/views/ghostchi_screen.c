@@ -364,7 +364,7 @@ static const char *bubble_text(const ghostchi_snapshot_t *snap,
                     return phase == 0 ? "getting loud." : (phase == 1 ? "bit rude, yeah." : "wake up already.");
                 return act_slot >= 3
                            ? (phase == 0 ? "forcing it." : (phase == 1 ? "nudging them." : "stirring things up."))
-                           : (phase == 0 ? "fine. deauthing." : (phase == 1 ? "pushing them." : "making noise."));
+                           : (phase == 0 ? "trying a reconnect." : (phase == 1 ? "pushing them." : "making noise."));
             case GHOSTCHI_STATE_COOLDOWN:
                 if (snap->handshakes) {
                     if (act_slot == 4)

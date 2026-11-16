@@ -1,4 +1,4 @@
-#include "attacks/wifi/channel_switch_attack.h"
+#include "features/wifi/channel_switch_test.h"
 #include "managers/wifi_manager.h"
 #include "managers/ap_manager.h"
 #include "managers/rgb_manager.h"
@@ -93,7 +93,7 @@ static void csa_attack_task(void *param) {
     uint8_t beacon_buf[300];
     size_t beacon_len;
     
-    glog("CSA Attack: Targeting %d AP(s)\n", selected_ap_count);
+    glog("CSA Test: Targeting %d AP(s)\n", selected_ap_count);
     
     for (int i = 0; i < selected_ap_count; i++) {
         char *ssid = (char *)selected_aps[i].ssid;
@@ -172,7 +172,7 @@ static void csa_attack_task(void *param) {
 
 void channel_switch_attack_start(void) {
     if (csa_task_handle != NULL) {
-        glog("CSA Attack already running.\n");
+        glog("CSA Test already running.\n");
         return;
     }
 
@@ -194,15 +194,15 @@ void channel_switch_attack_start(void) {
     // + wide/LR protocols for unrestricted channel hopping and raw TX
     ESP_ERROR_CHECK(ap_manager_apply_attack_radio());
 
-    glog("Starting Channel Switch Attack on %d AP(s)...\n", selected_ap_count);
-    status_display_show_status("CSA Attack Start");
+    glog("Starting Channel Switch Test on %d AP(s)...\n", selected_ap_count);
+    status_display_show_status("CSA Test Start");
     
     csa_stop_requested = false;
     csa_packets_sent = 0;
     
     BaseType_t rc = xTaskCreate_psram(csa_attack_task, "csa_attack", 3072, NULL, 5, &csa_task_handle);
     if (rc != pdPASS) {
-        glog("Failed to start CSA attack task (%ld)\n", (long)rc);
+        glog("Failed to start CSA test task (%ld)\n", (long)rc);
         status_display_show_status("CSA Start Fail");
         csa_task_handle = NULL;
         csa_stop_requested = false;
@@ -214,7 +214,7 @@ void channel_switch_attack_start(void) {
 
 void channel_switch_attack_stop(void) {
     if (csa_task_handle != NULL) {
-        glog("Stopping CSA attack...\n");
+        glog("Stopping CSA test...\n");
         status_display_show_status("CSA Stopping");
         
         csa_stop_requested = true;

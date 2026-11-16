@@ -77,15 +77,15 @@
 #include "mbedtls/private/hmac_drbg.h"
 #include "mbedtls/private/bignum.h"
 #include "core/serial_manager.h"
-#include "attacks/wifi/deauth_attack.h"
-#include "attacks/wifi/beacon_spam.h"
-#include "attacks/wifi/eapol_logoff.h"
-#include "attacks/wifi/sae_flood.h"
-#include "attacks/wifi/channel_switch_attack.h"
-#include "attacks/wifi/gtk_abuse.h"
-#include "attacks/wifi/probe_request_flood.h"
-#include "attacks/wifi/bad_msg.h"
-#include "attacks/wifi/auth_flood.h"
+#include "features/wifi/reconnect_test.h"
+#include "features/wifi/beacon_spam.h"
+#include "features/wifi/eapol_logoff.h"
+#include "features/wifi/sae_flood.h"
+#include "features/wifi/channel_switch_test.h"
+#include "features/wifi/gtk_abuse.h"
+#include "features/wifi/probe_request_flood.h"
+#include "features/wifi/bad_msg.h"
+#include "features/wifi/auth_flood.h"
 #include "scans/wifi/ap_scan.h"
 #include "scans/wifi/airspace_monitor.h"
 #include "scans/wifi/station_scan.h"
@@ -3863,7 +3863,7 @@ void wifi_manager_start_live_ap_scan(void) {
     TERMINAL_VIEW_ADD_TEXT("Live AP scan started.\n");
 }
 
-// Beacon spam functions are now in attacks/wifi/beacon_spam.c
+// Beacon spam functions are now in features/wifi/beacon_spam.c
 // Wrapper functions to maintain API compatibility
 
 esp_err_t wifi_manager_broadcast_ap(const char *ssid) {
@@ -4907,8 +4907,8 @@ static void karma_stop_portal_if_active(void) {
 }
 
 static void karma_task(void *param) {
-    printf("Karma attack started\n");
-    TERMINAL_VIEW_ADD_TEXT("Karma attack started\n");
+    printf("Karma test started\n");
+    TERMINAL_VIEW_ADD_TEXT("Karma test started\n");
 
     // Enable promiscuous mode for capturing probe requests
     wifi_promiscuous_filter_t filter = { .filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT };
@@ -4989,14 +4989,14 @@ static void karma_task(void *param) {
     esp_wifi_set_promiscuous(false);
     karma_stop_portal_if_active();
     karma_task_handle = NULL;
-    printf("Karma attack stopped\n");
-    TERMINAL_VIEW_ADD_TEXT("Karma attack stopped\n");
+    printf("Karma test stopped\n");
+    TERMINAL_VIEW_ADD_TEXT("Karma test stopped\n");
     vTaskDelete(NULL);
 }
 void wifi_manager_start_karma(void) {
     if (karma_running) {
-        printf("Karma attack already running\n");
-        TERMINAL_VIEW_ADD_TEXT("Karma attack already running\n");
+        printf("Karma test already running\n");
+        TERMINAL_VIEW_ADD_TEXT("Karma test already running\n");
         return;
     }
     if (!karma_ssid_manual_mode) {
@@ -5016,8 +5016,8 @@ void wifi_manager_start_karma(void) {
 
 void wifi_manager_stop_karma(void) {
     if (!karma_running) {
-        printf("Karma attack not running\n");
-        TERMINAL_VIEW_ADD_TEXT("Karma attack not running\n");
+        printf("Karma test not running\n");
+        TERMINAL_VIEW_ADD_TEXT("Karma test not running\n");
         return;
     }
     karma_running = false;
@@ -5037,8 +5037,8 @@ void wifi_manager_stop_karma(void) {
         vTaskDelete(karma_task_handle);
         karma_task_handle = NULL;
     }
-    printf("Karma attack stopped\n");
-    TERMINAL_VIEW_ADD_TEXT("Karma attack stopped\n");
+    printf("Karma test stopped\n");
+    TERMINAL_VIEW_ADD_TEXT("Karma test stopped\n");
 }
 
 bool wifi_manager_karma_is_running(void) {

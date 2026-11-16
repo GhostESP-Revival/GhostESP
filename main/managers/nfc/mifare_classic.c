@@ -5,7 +5,7 @@
 #include <string.h>
 #include <stdio.h>
 #include "managers/nfc/mifare_classic.h"
-#include "managers/nfc/mifare_attack.h"
+#include "managers/nfc/mifare_test.h"
 #include "managers/sd_card_manager.h"
 #include "esp_heap_caps.h"
 #include "gui/toast.h"

@@ -442,19 +442,19 @@ function simulateCommand(command, remote) {
   }
 
   // Attacks
-  if (/^attack\s+-d\b/i.test(c)) {
+  if (/^(?:(?:attack|wifitest)\s+-d\b|reconnect(?:\s+-d)?$)/i.test(c)) {
     simulateDisconnect(c);
-    addLog(`${prefix}Starting deauth attack on selected APs...`);
+    addLog(`${prefix}Starting reconnect test on selected APs...`);
     addLog(`${prefix}Use stopdeauth to halt.`);
     return;
   }
-  if (/^attack\s+-e\b/i.test(c)) {
+  if (/^(?:attack|wifitest)\s+-e\b/i.test(c)) {
     simulateDisconnect(c);
     addLog(`${prefix}Starting EAPOL logoff attack...`);
     return;
   }
-  if (/^stopdeauth\b/i.test(c)) {
-    addLog(`${prefix}Deauth attack stopped.`);
+  if (/^(?:stopdeauth|stopreconnect)\b/i.test(c)) {
+    addLog(`${prefix}Reconnect test stopped.`);
     return;
   }
   if (/^beaconspam\b/i.test(c)) {

@@ -9,7 +9,7 @@
  * and WiFi control functions.
  */
 
-#include "attacks/wifi/eapol_logoff.h"
+#include "features/wifi/eapol_logoff.h"
 #include "managers/wifi_manager.h"
 #include "managers/ap_manager.h"
 #include "managers/status_display_manager.h"
@@ -188,7 +188,7 @@ void eapol_logoff_start(void) {
 #endif
     BaseType_t attack_rc = xTaskCreate_psram(eapol_logoff_task, "eapol_logoff", 2048, NULL, 5, &eapol_logoff_task_handle);
     if (attack_rc != pdPASS) {
-        glog("EAPOL Logoff failed to start (attack=%ld)\n", (long)attack_rc);
+        glog("EAPOL Logoff failed to start (test=%ld)\n", (long)attack_rc);
         eapol_logoff_running = false;
         if (eapol_logoff_task_handle) {
             vTaskDeleteWithCaps(eapol_logoff_task_handle);
@@ -239,7 +239,7 @@ void eapol_logoff_display(void) {
 }
 
 void eapol_logoff_help(void) {
-    glog("Usage: attack -e (for EAPOL logoff attack)\n");
+    glog("Usage: attack -e (for EAPOL logoff test)\n");
 }
 
 bool eapol_logoff_is_running(void) {

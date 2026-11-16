@@ -31,7 +31,7 @@ A Wi-Fi attack is any action that disrupts, intercepts, or tricks Wi-Fi networks
 
 **Legal note**: Deauthing devices you don't own is illegal. Only test on your own network.
 
-**Learn more**: [Deauthentication attacks]({{< relref "deauth.md" >}})
+**Learn more**: [Reconnect Test]({{< relref "reconnect-test.md" >}})
 
 ### Karma attack
 **What it does**: Pretends to be a Wi-Fi network that a device is looking for, tricking the device into connecting.
@@ -60,18 +60,18 @@ A Wi-Fi attack is any action that disrupts, intercepts, or tricks Wi-Fi networks
 
 **Learn more**: [Handshakes]({{< relref "handshakes.md" >}})
 
-### Other attack modes
+### Other test modes {#other-attack-modes}
 
-GhostESP also exposes additional management-frame attacks from **Menu → Wi-Fi → Attacks** (or the `attack` command):
+GhostESP also exposes additional management-frame attacks from **Menu → Wi-Fi → Wi-Fi Tests** (or the `wifitest` command):
 
-- **Handshake + Deauth** (`attack -hsd`): Captures handshakes while deauthing to force a reconnect.
-- **Channel Switch (CSA)** (`attack -c`): Sends channel switch announcement frames.
-- **EAPOL Logoff** (`attack -e`): Sends logoff frames instead of deauth frames.
-- **Probe Request Flood** (`attack -p`): Floods the air with probe requests.
-- **Bad Message** (`attack -b`): Sends malformed management frames.
-- **Auth Flood** (`attack -a`): Floods a target with authentication requests.
-- **SAE Flood** (`attack -s <password>`): Floods WPA3 networks with authentication requests (ESP32-C5/C6).
-- **GTK Abuse** (`attack -g <ssid> <password>`): Tests client isolation using the shared group key.
+- **Handshake + Deauth** (`reconnect -hsd`): Captures handshakes while deauthing to force a reconnect.
+- **Channel Switch (CSA)** (`wifitest -c`): Sends channel switch announcement frames.
+- **EAPOL Logoff** (`wifitest -e`): Sends logoff frames instead of deauth frames.
+- **Probe Request Flood** (`wifitest -p`): Floods the air with probe requests.
+- **Bad Message** (`wifitest -b`): Sends malformed management frames.
+- **Auth Flood** (`wifitest -a`): Floods a target with authentication requests.
+- **SAE Flood** (`wifitest -s <password>`): Floods WPA3 networks with authentication requests (ESP32-C5/C6).
+- **GTK Abuse** (`wifitest -g <ssid> <password>`): Tests client isolation using the shared group key.
 
 ## Before you start
 

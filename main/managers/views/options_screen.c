@@ -714,8 +714,8 @@ static void ble_adv_set_subtext(int found_count) {
 #include "managers/views/setup_wizard_screen.h"
 #include "managers/wifi_manager.h"
 #include "core/wpa_crypto.h"
-#include "attacks/wifi/gtk_abuse.h"
-#include "attacks/ble/ble_spam.h"
+#include "features/wifi/gtk_abuse.h"
+#include "features/ble/ble_spam.h"
 #include "managers/settings_manager.h"
 #include "managers/infrared_manager.h"
 #include "managers/gps_manager.h"
@@ -1494,15 +1494,15 @@ static bool nav_pop_wifi_detail_return(WifiMenuState *return_state_out) {
 }
 
 static const char * const wifi_attacks_options[] = {
-    "Deauth Attack",
-    "Handshake Capture + Deauth",
-    "Channel Switch (CSA) Attack",
+    "Reconnect Test",
+    "Handshake + Reconnect Test",
+    "Channel Switch (CSA) Test",
     "Beacon Spam - Random",
     "Beacon Spam - Rickroll",
     "Beacon Spam - List",
     "EAPOL Logoff",
     "Probe Request Flood",
-    "Bad Msg Attack",
+    "Bad Msg Test",
     "Auth Flood",
     "GTK Isolation Bypass Test",
     "DHCP Starvation",
@@ -1510,10 +1510,10 @@ static const char * const wifi_attacks_options[] = {
 #if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
     "SAE DoS Flood",
 #endif
-    "Karma Attack",
-    "Karma Attack (Custom SSIDs)",
-    "Karma Attack (Custom Portal)",
-    "Stop Karma Attack",       
+    "Karma Test",
+    "Karma Test (Custom SSIDs)",
+    "Karma Test (Custom Portal)",
+    "Stop Karma Test",
     NULL
 };
 
@@ -1588,7 +1588,7 @@ static const char * const wifi_misc_options[] = {
 static const char * const wifi_govee_options[] = {"Scan Govee Devices", "List Govee Devices", NULL};
 
 static const char * const wifi_main_options[] = {
-    "Attacks", "Recon", "Monitor", "Network", "Capture", "Evil Portal", "DNS Sinkhole",
+    "Wi-Fi Tests", "Recon", "Monitor", "Network", "Capture", "Evil Portal", "DNS Sinkhole",
     "Cert Scan", "Connection", "Gadgets", NULL
 };
 
@@ -1626,7 +1626,7 @@ static const char * const dual_comm_main_options[] = {
     "Discovery / Session",
     "Scanning",
     "WiFi",
-    "Attacks",
+    "Wi-Fi Tests",
     "Capture",
     "Tools",
     "BLE",
@@ -1695,17 +1695,17 @@ static const char * const dual_comm_wifi_options[] = {
 };
 
 static const char * const dual_comm_attacks_options[] = {
-    "Start Deauth Attack",
-    "Start Handshake+Deauth",
+    "Start Reconnect Test",
+    "Start Handshake + Reconnect Test",
     "Start EAPOL Logoff",
     "Start DHCP-Starve",
     "Stop DHCP-Starve",
 #if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
     "Start SAE Flood",
 #endif
-    "Start Karma Attack",
-    "Start Karma Attack (Custom SSIDs)",
-    "Stop Karma Attack",
+    "Start Karma Test",
+    "Start Karma Test (Custom SSIDs)",
+    "Stop Karma Test",
     NULL
 };
 
@@ -8114,7 +8114,7 @@ static void karma_custom_ssids_cb(const char *input) {
 
     terminal_set_return_view(&options_menu_view);
     display_manager_switch_view(&terminal_view);
-    TERMINAL_VIEW_ADD_TEXT("Karma attack started with custom SSIDs\n");
+    TERMINAL_VIEW_ADD_TEXT("Karma test started with custom SSIDs\n");
     keyboard_view_set_submit_callback(NULL);
 }
 
@@ -8302,7 +8302,7 @@ static void karma_portal_ssids_cb(const char *input) {
     selected_karma_portal[0] = '\0';
     terminal_set_return_view(&options_menu_view);
     display_manager_switch_view(&terminal_view);
-    TERMINAL_VIEW_ADD_TEXT("Karma attack started with custom portal: %s\n", portal_path);
+    TERMINAL_VIEW_ADD_TEXT("Karma test started with custom portal: %s\n", portal_path);
     free(portal_path);
     keyboard_view_set_submit_callback(NULL);
 }
@@ -8471,7 +8471,7 @@ void option_event_cb(lv_event_t *e) {
                 rebuild_current_menu();
                 option_invoked = false;
                 return;
-            } else if (strcmp(Selected_Option, "Attacks") == 0) {
+            } else if (strcmp(Selected_Option, "Wi-Fi Tests") == 0) {
                 current_dualcomm_menu_state = DUALCOMM_MENU_ATTACKS;
                 rebuild_current_menu();
                 option_invoked = false;
@@ -8742,19 +8742,19 @@ void option_event_cb(lv_event_t *e) {
             display_manager_switch_view(&terminal_view);
             simulateCommand("commsend apenable off");
             view_switched = true;
-        } else if (strcmp(Selected_Option, "Start Deauth Attack") == 0) {
+        } else if (strcmp(Selected_Option, "Start Reconnect Test") == 0) {
             terminal_set_return_view(&options_menu_view);
             terminal_set_dualcomm_filter(true);
             display_manager_switch_view(&terminal_view);
             simulateCommand("commsend attack -d");
             view_switched = true;
-        } else if (strcmp(Selected_Option, "Start Handshake+Deauth") == 0) {
+        } else if (strcmp(Selected_Option, "Start Handshake + Reconnect Test") == 0) {
             terminal_set_return_view(&options_menu_view);
             terminal_set_dualcomm_filter(true);
             display_manager_switch_view(&terminal_view);
             simulateCommand("commsend attack -hsd");
             view_switched = true;
-        } else if (strcmp(Selected_Option, "Start Channel Switch Attack") == 0) {
+        } else if (strcmp(Selected_Option, "Start Channel Switch Test") == 0) {
             terminal_set_return_view(&options_menu_view);
             terminal_set_dualcomm_filter(true);
             display_manager_switch_view(&terminal_view);
@@ -8778,13 +8778,13 @@ void option_event_cb(lv_event_t *e) {
             display_manager_switch_view(&terminal_view);
             simulateCommand("commsend dhcpstarve stop");
             view_switched = true;
-        } else if (strcmp(Selected_Option, "Start Karma Attack") == 0) {
+        } else if (strcmp(Selected_Option, "Start Karma Test") == 0) {
             terminal_set_return_view(&options_menu_view);
             terminal_set_dualcomm_filter(true);
             display_manager_switch_view(&terminal_view);
             simulateCommand("commsend karma start");
             view_switched = true;
-        } else if (strcmp(Selected_Option, "Stop Karma Attack") == 0) {
+        } else if (strcmp(Selected_Option, "Stop Karma Test") == 0) {
             terminal_set_return_view(&options_menu_view);
             terminal_set_dualcomm_filter(true);
             display_manager_switch_view(&terminal_view);
@@ -8798,7 +8798,7 @@ void option_event_cb(lv_event_t *e) {
             keyboard_view_set_placeholder("Password");
             return;
 #endif
-        } else if (strcmp(Selected_Option, "Start Karma Attack (Custom SSIDs)") == 0) {
+        } else if (strcmp(Selected_Option, "Start Karma Test (Custom SSIDs)") == 0) {
             keyboard_view_set_submit_callback(dual_comm_karma_custom_ssids_cb);
             display_manager_switch_view(&keyboard_view);
             keyboard_view_set_placeholder("SSID1 SSID2 SSID3");
@@ -9236,7 +9236,7 @@ void option_event_cb(lv_event_t *e) {
 
     if (SelectedMenuType == OT_Wifi) {
         if (current_wifi_menu_state == WIFI_MENU_MAIN) {
-            if (strcmp(Selected_Option, "Attacks") == 0) current_wifi_menu_state = WIFI_MENU_ATTACKS;
+            if (strcmp(Selected_Option, "Wi-Fi Tests") == 0) current_wifi_menu_state = WIFI_MENU_ATTACKS;
             else if (strcmp(Selected_Option, "Recon") == 0) current_wifi_menu_state = WIFI_MENU_SCAN_SELECT;
             else if (strcmp(Selected_Option, "Monitor") == 0) current_wifi_menu_state = WIFI_MENU_ENVIRONMENT;
             else if (strcmp(Selected_Option, "Network") == 0) current_wifi_menu_state = WIFI_MENU_NETWORK;
@@ -9888,7 +9888,7 @@ void option_event_cb(lv_event_t *e) {
         return;
     }
 
-    else if (strcmp(Selected_Option, "Deauth Attack") == 0) {
+    else if (strcmp(Selected_Option, "Reconnect Test") == 0) {
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         if (!scanned_aps) {
@@ -9899,7 +9899,7 @@ void option_event_cb(lv_event_t *e) {
         view_switched = true; 
     }
     
-    else if (strcmp(Selected_Option, "Handshake Capture + Deauth") == 0) {
+    else if (strcmp(Selected_Option, "Handshake + Reconnect Test") == 0) {
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         if (!scanned_aps) {
@@ -9910,7 +9910,7 @@ void option_event_cb(lv_event_t *e) {
         view_switched = true; 
     }
     
-    else if (strcmp(Selected_Option, "Channel Switch (CSA) Attack") == 0) {
+    else if (strcmp(Selected_Option, "Channel Switch (CSA) Test") == 0) {
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         if (!scanned_aps) {
@@ -9932,7 +9932,7 @@ void option_event_cb(lv_event_t *e) {
         view_switched = true; 
     }
 
-    else if (strcmp(Selected_Option, "Bad Msg Attack") == 0) {
+    else if (strcmp(Selected_Option, "Bad Msg Test") == 0) {
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
         if (!scanned_aps) {
@@ -10214,27 +10214,27 @@ void option_event_cb(lv_event_t *e) {
     }
 #endif
 
-    else if (strcmp(Selected_Option, "Karma Attack") == 0) {
+    else if (strcmp(Selected_Option, "Karma Test") == 0) {
         wifi_manager_start_karma();
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
-        TERMINAL_VIEW_ADD_TEXT("Karma attack started\n");
+        TERMINAL_VIEW_ADD_TEXT("Karma test started\n");
         view_switched = true;
     }
-    else if (strcmp(Selected_Option, "Stop Karma Attack") == 0) {
+    else if (strcmp(Selected_Option, "Stop Karma Test") == 0) {
         wifi_manager_stop_karma();
         terminal_set_return_view(&options_menu_view);
         display_manager_switch_view(&terminal_view);
-        TERMINAL_VIEW_ADD_TEXT("Karma attack stopped\n");
+        TERMINAL_VIEW_ADD_TEXT("Karma test stopped\n");
         view_switched = true;
     }
-    else if (strcmp(Selected_Option, "Karma Attack (Custom SSIDs)") == 0) {
+    else if (strcmp(Selected_Option, "Karma Test (Custom SSIDs)") == 0) {
         keyboard_view_set_submit_callback(karma_custom_ssids_cb);
         display_manager_switch_view(&keyboard_view);
         keyboard_view_set_placeholder("SSID1,SSID2,SSID3");
         return;
     }
-    else if (strcmp(Selected_Option, "Karma Attack (Custom Portal)") == 0) {
+    else if (strcmp(Selected_Option, "Karma Test (Custom Portal)") == 0) {
         portal_page_offset = 0;
         strcpy(portal_browse_dir, PORTAL_BROWSER_ROOT);
         current_wifi_menu_state = WIFI_MENU_KARMA_PORTAL_SELECT;
@@ -14137,8 +14137,8 @@ static void show_ap_detail(int ap_index) {
     if (!compact_detail) {
         detail_view_add_info(ap_detail_view, "Actions:", "");
     }
-    detail_view_add_action(ap_detail_view, "Deauth", ap_deauth_cb, NULL);
-    detail_view_add_action(ap_detail_view, "HS+Deauth", ap_hs_deauth_cb, NULL);
+    detail_view_add_action(ap_detail_view, "Reconnect Test", ap_deauth_cb, NULL);
+    detail_view_add_action(ap_detail_view, "HS+Reconnect", ap_hs_deauth_cb, NULL);
     detail_view_add_action(ap_detail_view, "Probe Flood", ap_probe_flood_cb, NULL);
     detail_view_add_action(ap_detail_view, "Bad Msg", ap_bad_msg_cb, NULL);
     detail_view_add_action(ap_detail_view, "Auth Flood", ap_auth_flood_cb, NULL);
@@ -14393,8 +14393,8 @@ static void show_station_detail(int station_index) {
         detail_view_add_info(sta_detail_view, "AP Vendor", ap_vendor);
         detail_view_add_info(sta_detail_view, "Actions:", "");
     }
-    detail_view_add_action(sta_detail_view, "Deauth", station_deauth_cb, NULL);
-    detail_view_add_action(sta_detail_view, "HS+Deauth", station_hs_deauth_cb, NULL);
+    detail_view_add_action(sta_detail_view, "Reconnect Test", station_deauth_cb, NULL);
+    detail_view_add_action(sta_detail_view, "HS+Reconnect", station_hs_deauth_cb, NULL);
     detail_view_add_action(sta_detail_view, "Track Station", station_track_cb, NULL);
     detail_view_add_action(sta_detail_view, "Select Station", station_select_cb, NULL);
     detail_view_add_back(sta_detail_view, station_detail_back_cb, NULL);

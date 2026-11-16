@@ -13,7 +13,7 @@
  * and WiFi control functions.
  */
 
-#include "attacks/wifi/beacon_spam.h"
+#include "features/wifi/beacon_spam.h"
 #include "managers/wifi_manager.h"
 #include "managers/ap_manager.h"
 #include "managers/ghostchi_manager.h"

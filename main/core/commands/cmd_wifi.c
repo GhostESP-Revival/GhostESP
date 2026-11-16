@@ -255,22 +255,22 @@ void handle_sta_scan(int argc, char **argv) {
 void handle_attack_cmd(int argc, char **argv) {
     if (argc > 1) {
         if (strcmp(argv[1], "-d") == 0) {
-            glog("Deauthentication starting...\n");
+            glog("Reconnect test starting...\n");
             wifi_manager_deauth_station();
-            status_display_show_status("Deauth Start");
+            status_display_show_status("Reconnect Start");
             return;
         } else if (strcmp(argv[1], "-hsd") == 0) {
-            glog("Handshake+Deauth starting...\n");
+            glog("Handshake + Reconnect Test starting...\n");
             wifi_manager_start_handshake_deauth();
-            status_display_show_status("HS+Deauth Start");
+            status_display_show_status("HS+Reconnect Start");
             return;
         } else if (strcmp(argv[1], "-c") == 0) {
-            glog("Channel Switch attack starting...\n");
+            glog("Channel Switch test starting...\n");
             wifi_manager_start_channel_switch_attack();
-            status_display_show_status("CSA Attack Start");
+            status_display_show_status("CSA Test Start");
             return;
         } else if (strcmp(argv[1], "-e") == 0) {
-            glog("EAPOL Logoff attack starting...\n");
+            glog("EAPOL Logoff test starting...\n");
             wifi_manager_start_eapollogoff_attack();
             status_display_show_status("EAPOL Start");
             return;
@@ -280,28 +280,28 @@ void handle_attack_cmd(int argc, char **argv) {
             status_display_show_status("Probe Flood Start");
             return;
         } else if (strcmp(argv[1], "-b") == 0) {
-            glog("Bad Msg attack starting...\n");
+            glog("Bad Msg test starting...\n");
             wifi_manager_start_bad_msg();
             status_display_show_status("Bad Msg Start");
             return;
         } else if (strcmp(argv[1], "-a") == 0) {
-            glog("Auth Flood attack starting...\n");
+            glog("Auth Flood test starting...\n");
             wifi_manager_start_auth_flood();
             status_display_show_status("Auth Flood Start");
             return;
         } else if (strcmp(argv[1], "-s") == 0) {
             if (argc < 3) {
-                glog("Usage: attack -s <password>\n");
+                glog("Usage: wifitest -s <password>\n");
                 status_display_show_status("Need Password");
                 return;
             }
-            glog("SAE flood attack starting...\n");
+            glog("SAE flood test starting...\n");
             wifi_manager_start_sae_flood(argv[2]);
             status_display_show_status("SAE Start");
             return;
         } else if (strcmp(argv[1], "-g") == 0) {
             if (argc < 4) {
-                glog("Usage: attack -g <ssid> <password>\n");
+                glog("Usage: wifitest -g <ssid> <password>\n");
                 status_display_show_status("GTK Usage");
                 return;
             }
@@ -311,8 +311,8 @@ void handle_attack_cmd(int argc, char **argv) {
             return;
         }
     }
-    glog("Usage: attack -d (deauth) | attack -hsd (handshake+deauth) | attack -c (channel switch) | attack -e (EAPOL logoff) | attack -p (probe flood) | attack -b (bad msg) | attack -a (auth flood) | attack -s <password> (SAE flood) | attack -g <ssid> <password> (GTK abuse)\n");
-    status_display_show_status("Attack Usage");
+    glog("Usage: wifitest -d (reconnect test) | wifitest -hsd (handshake + reconnect test) | wifitest -c (channel switch) | wifitest -e (EAPOL logoff) | wifitest -p (probe flood) | wifitest -b (bad msg) | wifitest -a (auth flood) | wifitest -s <password> (SAE flood) | wifitest -g <ssid> <password> (GTK abuse)\n");
+    status_display_show_status("Test Usage");
 }
 
 void handle_sae_flood_cmd(int argc, char **argv) {
@@ -320,7 +320,7 @@ void handle_sae_flood_cmd(int argc, char **argv) {
         glog("Usage: saeflood <password>\n");
         return;
     }
-    glog("Starting SAE flood attack...\n");
+    glog("Starting SAE flood test...\n");
     wifi_manager_start_sae_flood(argv[1]);
     status_display_show_status("SAE Flood On");
 }
@@ -328,7 +328,7 @@ void handle_sae_flood_cmd(int argc, char **argv) {
 void handle_stop_sae_flood_cmd(int argc, char **argv) {
     (void)argc;
     (void)argv;
-    glog("Stopping SAE flood attack...\n");
+    glog("Stopping SAE flood test...\n");
     wifi_manager_stop_sae_flood();
     status_display_show_status("SAE Flood Off");
 }
@@ -338,6 +338,19 @@ void handle_sae_flood_help_cmd(int argc, char **argv) {
     (void)argv;
     wifi_manager_sae_flood_help();
     status_display_show_status("SAE Help");
+}
+
+void handle_reconnect_cmd(int argc, char **argv) {
+    if (argc == 1) {
+        char *legacy_argv[] = {"attack", "-d"};
+        handle_attack_cmd(2, legacy_argv);
+    } else if (argc == 2 &&
+               (strcmp(argv[1], "-d") == 0 || strcmp(argv[1], "-hsd") == 0)) {
+        handle_attack_cmd(argc, argv);
+    } else {
+        glog("Usage: reconnect [-d|-hsd]\n");
+        glog("Sends deauthentication/disassociation frames to test client reconnection.\n");
+    }
 }
 
 void handle_stop_deauth(int argc, char **argv) {
@@ -353,8 +366,8 @@ void handle_stop_deauth(int argc, char **argv) {
     wifi_manager_stop_probe_flood();
     wifi_manager_stop_bad_msg();
     wifi_manager_stop_auth_flood();
-    glog("All WiFi attacks stopped...\n");
-    status_display_show_status("Attacks Off");
+    glog("All WiFi tests stopped...\n");
+    status_display_show_status("Tests Off");
 }
 
 void handle_select_cmd(int argc, char **argv) {

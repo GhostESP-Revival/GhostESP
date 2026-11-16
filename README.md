@@ -59,10 +59,10 @@ GhostESP is a platform, not a bag of tools. Five things set it apart:
 <summary><strong>WiFi Features</strong></summary>
 
 - Evil Portal (with custom HTML from buffer via serial)
-- Deauth / disassoc attacks
-- Channel switch attack
+- Reconnect Test (deauthentication/disassociation frames)
+- Channel switch test
 - GTK abuse / client isolation testing
-- EAPOL logoff attack
+- EAPOL logoff test
 - Karma (with custom SSID lists and custom portal chaining)
 - Beacon spam (single/list/random/Rickroll)
 - AP scan / STA scan / scanall
@@ -77,7 +77,7 @@ GhostESP is a platform, not a bag of tools. Five things set it apart:
 - mDNS discovery / NetBIOS scan / HTTP banner scan / SNMP probe (with per-host and per-subnet variants)
 - Passive local-name sniffer (`mdnssniff`: mDNS/LLMNR/SSDP/NetBIOS) per ARP-discovered host
 - WiFi OUI vendor lookup
-- WPA3/SAE attacks (flood + compliance checker)
+- WPA3/SAE tests (flood + compliance checker)
 - Wardriving exports (WiFi/BLE/GPS) + sweep CSV (WiFi/BLE/GPS/802.15.4)
 - Split-channel wardriving helper via GhostLink
 - Dual-band `dualwd` BLE + Wi-Fi coexistence wardriving (PSRAM boards)
@@ -393,17 +393,17 @@ The table below compares GhostESP against other broad-scope firmware. It is base
 | Web dashboard / REST control | [x] | [x] |  |  |
 | Captive portal web server | [x] | [x] | [x] | [x] |
 | AP / station WiFi scanning | [x] | [x] | [x] | [x] |
-| Deauth / disassoc testing | [x] | [x] | [x] | [x] |
+| Reconnect Test | [x] | [x] | [x] | [x] |
 | Beacon spam | [x] | [x] | [x] | [x] |
-| Karma / probe response attack | [x] | [x] | [x] |  |
+| Karma / probe response test | [x] | [x] | [x] |  |
 | Handshake / EAPOL capture | [x] | [x] | [x] |  |
 | On-device PCAP browser / hc22000 export | [x] |  | [x] |  |
 | PMKID capture / export | [x] |  | [x] |  |
 | Live Wireshark USB streaming | [x] |  |  |  |
 | SAE flood / WPA3-specific testing | [x] |  |  |  |
 | WPA3 compliance checker | [x] |  |  |  |
-| EAPOL logoff attack | [x] |  |  |  |
-| Channel switch attack | [x] |  |  |  |
+| EAPOL logoff test | [x] |  |  |  |
+| Channel switch test | [x] |  |  |  |
 | GTK abuse / client isolation testing | [x] |  |  |  |
 | DHCP starvation | [x] | [x] |  |  |
 | ARP / port / SSH scanners | [x] | [x] | [x] |  |

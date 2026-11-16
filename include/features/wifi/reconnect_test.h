@@ -1,5 +1,5 @@
-#ifndef DEAUTH_ATTACK_H
-#define DEAUTH_ATTACK_H
+#ifndef RECONNECT_TEST_H
+#define RECONNECT_TEST_H
 
 #include <stdbool.h>
 #include "esp_err.h"
@@ -70,4 +70,4 @@ bool deauth_attack_stop_handshake_deauth(void);
  */
 bool deauth_attack_handshake_deauth_is_running(void);
 
-#endif // DEAUTH_ATTACK_H
+#endif // RECONNECT_TEST_H

@@ -10,7 +10,7 @@
  * Based on AirSnitch (Vanhoef, NDSS 2026) research.
  */
 
-#include "attacks/wifi/gtk_abuse.h"
+#include "features/wifi/gtk_abuse.h"
 #include "core/wpa_crypto.h"
 #include "core/glog.h"
 #include "core/system_manager.h"

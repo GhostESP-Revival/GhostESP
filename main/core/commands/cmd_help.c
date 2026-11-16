@@ -19,7 +19,7 @@ void handle_help(int argc, char **argv) {
 
     // List of all categories to print in order
     const char *all_categories[] = {
-        "wifi", "ble", "chameleon", "comm", "sd", "led", "gps", "shell", "misc", "portal", "printer", "cast", "gadgets", "capture", "beacon", "attack"
+        "wifi", "ble", "chameleon", "comm", "sd", "led", "gps", "shell", "misc", "portal", "printer", "cast", "gadgets", "capture", "beacon", "tests", "attack"
 #ifdef CONFIG_HAS_LORA
         , "lora"
 #endif
@@ -56,19 +56,22 @@ void handle_help(int argc, char **argv) {
         glog("stopscan\n");
         glog("    Description: Stop any ongoing Wi-Fi scan.\n");
         glog("    Usage: stopscan\n\n");
-        glog("attack\n");
-        glog("    Description: Launch an attack (e.g., deauthentication attack).\n");
+        glog("reconnect [-hsd]\n");
+        glog("    Reconnect Test: sends deauthentication/disassociation frames to test client reconnection.\n");
+        glog("    -hsd also records authentication handshakes. Stop with stopreconnect.\n\n");
+        glog("wifitest (legacy alias: attack)\n");
+        glog("    Description: Run a Wi-Fi test (including client reconnection tests).\n");
         glog("                 Supports multiple selected APs when using 'select -a 1,2,3'.\n");
-        glog("    Usage: attack -d (deauth) | attack -hsd (handshake+deauth) | attack -c (channel switch) | attack -e (EAPOL logoff) | attack -p (probe flood) | attack -b (bad msg) | attack -a (auth flood) | attack -s (SAE flood)\n");
+        glog("    Usage: wifitest -d (reconnect test) | wifitest -hsd (handshake + reconnect test) | wifitest -c (channel switch) | wifitest -e (EAPOL logoff) | wifitest -p (probe flood) | wifitest -b (bad msg) | wifitest -a (auth flood) | wifitest -s (SAE flood)\n");
         glog("    Arguments:\n");
-        glog("        -d  : Start deauth attack (supports multiple APs)\n");
-        glog("        -hsd: Start handshake capture + deauth attack (forces handshakes)\n");
-        glog("        -c  : Start channel switch attack (supports multiple APs)\n");
-        glog("        -e  : Start EAPOL logoff attack\n");
-        glog("        -p  : Start probe request flood attack (supports multiple APs)\n");
-        glog("        -b  : Start bad msg attack (EAPOL key install + zero MIC)\n");
-        glog("        -a  : Start auth flood attack (supports multiple APs)\n");
-        glog("        -s  : Start SAE flood attack (ESP32-C5/C6 only)\n\n");
+        glog("        -d  : Start reconnect test (supports multiple APs)\n");
+        glog("        -hsd: Start handshake capture + reconnect test (forces handshakes)\n");
+        glog("        -c  : Start channel switch test (supports multiple APs)\n");
+        glog("        -e  : Start EAPOL logoff test\n");
+        glog("        -p  : Start probe request flood test (supports multiple APs)\n");
+        glog("        -b  : Start bad msg test (EAPOL key install + zero MIC)\n");
+        glog("        -a  : Start auth flood test (supports multiple APs)\n");
+        glog("        -s  : Start SAE flood test (ESP32-C5/C6 only)\n\n");
         glog("list\n");
         glog("    Description: List Wi-Fi scan results or connected stations.\n");
         glog("    Usage: list -a | list -s | list -airtags\n");
@@ -102,9 +105,9 @@ void handle_help(int argc, char **argv) {
         glog("        hop all         : Hop every legal channel for this device\n");
         glog("        hop basic       : Fixed 1,6,11\n");
         glog("        hop auto        : Default per-feature channel plan (country / AP list)\n\n");
-        glog("stopdeauth\n");
-        glog("    Description: Stop ongoing deauthentication attack.\n");
-        glog("    Usage: stopdeauth\n\n");
+        glog("stopreconnect (legacy alias: stopdeauth)\n");
+        glog("    Description: Stop reconnect and other running Wi-Fi tests.\n");
+        glog("    Usage: stopreconnect\n\n");
         glog("select\n");
         glog("    Description: Select access point(s), station, or AirTag by index from the scan results.\n");
         glog("    Usage: select -a <num[,num,...]> | select -s <num> | select -airtag <num>\n");
@@ -166,12 +169,12 @@ void handle_help(int argc, char **argv) {
         glog("        [channel] : Listen on specific channel (1-165), omit for channel hopping\n");
         glog("        stop      : Stop probe request listening\n\n");
         glog("karma\n");
-        glog("    Description: Start or stop the Karma attack (responds to probe requests with specified or all SSIDs).\n");
+        glog("    Description: Start or stop the Karma test (responds to probe requests with specified or all SSIDs).\n");
         glog("    Usage: karma start [ssid1 ssid2 ...]\n");
         glog("           karma stop\n");
         glog("    Arguments:\n");
-        glog("        start : Begin Karma attack. Optionally specify SSIDs to respond with (default: all known SSIDs).\n");
-        glog("        stop  : Stop Karma attack.\n");
+        glog("        start : Begin Karma test. Optionally specify SSIDs to respond with (default: all known SSIDs).\n");
+        glog("        stop  : Stop Karma test.\n");
         glog("    Examples:\n");
         glog("        karma start\n");
         glog("        karma start FreeWiFi Starbucks\n");
@@ -197,7 +200,7 @@ void handle_help(int argc, char **argv) {
     }
 
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
-    #include "attacks/ble/ble_spam.h"
+    #include "features/ble/ble_spam.h"
     if (strcmp(category, "ble") == 0) {
         glog("\nBLE Commands:\n\n");
         glog("blescan\n");
@@ -226,7 +229,7 @@ void handle_help(int argc, char **argv) {
         glog("        -u          : Stop following the tracked device\n");
         glog("        -sp <index> : Advertise as a discovered AirTag; 'stopspoof' ends it\n\n");
         glog("blespam\n");
-        glog("    Description: Start BLE advertisement spam attacks.\n");
+        glog("    Description: Start BLE advertisement spam tests.\n");
         glog("    Usage: blespam [OPTION] [-name <text>]\n");
         glog("    Arguments:\n");
         glog("        -apple     : Apple device spam (AirPods, Apple TV, etc.)\n");
@@ -678,18 +681,18 @@ void handle_help(int argc, char **argv) {
         return;
     }
 
-    if (strcmp(category, "attack") == 0) {
+    if (strcmp(category, "tests") == 0 || strcmp(category, "attack") == 0) {
         glog("\nAttack Commands:\n\n");
         glog("dhcpstarve\n");
-        glog("    Description: DHCP starvation flood attack\n");
+        glog("    Description: DHCP starvation flood test\n");
         glog("    Usage: dhcpstarve start [threads]\n");
         glog("           dhcpstarve stop\n");
         glog("           dhcpstarve display\n\n");
         glog("saeflood\n");
-        glog("    Description: SAE handshake flooding attack (ESP32-C5/C6 only)\n");
+        glog("    Description: SAE handshake flooding test (ESP32-C5/C6 only)\n");
         glog("    Usage: saeflood <password> (requires selected WPA3 AP)\n\n");
-        glog("stopsaeflood\n    Stop SAE flood attack.\n    Usage: stopsaeflood\n\n");
-        glog("saefloodhelp\n    Show detailed SAE flood attack help.\n    Usage: saefloodhelp\n\n");
+        glog("stopsaeflood\n    Stop SAE flood test.\n    Usage: stopsaeflood\n\n");
+        glog("saefloodhelp\n    Show detailed SAE flood test help.\n    Usage: saefloodhelp\n\n");
         return;
     }
     
@@ -917,7 +920,7 @@ void handle_help(int argc, char **argv) {
     glog("  help cast      - YouTube cast commands\n");
     glog("  help capture   - Wi-Fi packet capture commands\n");
     glog("  help beacon    - Beacon spam commands\n");
-    glog("  help attack    - Attack/flood commands\n");
+    glog("  help tests   - Test/flood commands\n");
 #ifdef CONFIG_HAS_LORA
     glog("  help lora      - LoRa / Meshtastic / mesh commands\n");
 #endif

@@ -16,7 +16,7 @@ Finding pages (do not guess URLs):
    headings[].title, then description/summary. Prefer version "latest" unless
    the user names a version.
 4. Read the best record as clean text by fetching its text_url
-   (for example DOCS_URL/latest/wifi/deauth/index.txt). That is the full page
+   (for example DOCS_URL/latest/wifi/reconnect-test/index.txt). That is the full page
    with headings and links, and costs far fewer tokens than the HTML page.
 5. If you need a narrower slice, search within the per-version index that
    includes full text: DOCS_URL/latest/search-index.json.
@@ -38,6 +38,6 @@ Endpoints
 ---------
 - /search-index.json                 Compact index, all versions (for ranking)
 - /latest/search-index.json          Per-version index, includes full page text
-- /latest/wifi/deauth/index.txt      Any page as clean plain text
+- /latest/wifi/reconnect-test/index.txt      Any page as clean plain text
 - /search/?q=deauth&version=latest   Human, URL-addressable search
 - /llms.txt                          Full docs map + this prompt

@@ -33,6 +33,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 
 ### Changed
 
+- Renamed Deauth to Reconnect Test and refreshed testing terminology
 - Improved Airspace Monitor alerts in crowded places
 - Airspace Monitor device rows stay in place while updating
 - Added Airspace Monitor logs to help investigate alerts

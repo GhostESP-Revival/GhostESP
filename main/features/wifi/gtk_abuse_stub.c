@@ -1,4 +1,4 @@
-#include "attacks/wifi/gtk_abuse.h"
+#include "features/wifi/gtk_abuse.h"
 
 static gtk_abuse_result_t s_result;
 

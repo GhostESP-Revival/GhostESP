@@ -42,6 +42,7 @@ void handle_beaconclear(int argc, char **argv);
 void handle_beaconshow(int argc, char **argv);
 void handle_beaconspamlist(int argc, char **argv);
 void handle_stop_spam(int argc, char **argv);
+void handle_reconnect_cmd(int argc, char **argv);
 void handle_stop_deauth(int argc, char **argv);
 void handle_sae_flood_cmd(int argc, char **argv);
 void handle_stop_sae_flood_cmd(int argc, char **argv);

@@ -14,7 +14,7 @@
 
 #ifdef CONFIG_WITH_ETHERNET
 
-#include "attacks/ethernet/eth_arp_poison.h"
+#include "features/ethernet/eth_arp_poison.h"
 #include "managers/ethernet_manager.h"
 #include "core/glog.h"
 #include "core/ouis.h"

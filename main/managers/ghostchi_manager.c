@@ -1010,7 +1010,7 @@ void ghostchi_manager_tick(void) {
                 ++s_total_deauths;
                 ghostchi_manager_add_xp(2);
                 s_phase_deadline_ms = now + s_active_strategy.deauth_ms;
-                snapshot_set_state(GHOSTCHI_STATE_STIM, "deauth burst", s_current_target.reason);
+                snapshot_set_state(GHOSTCHI_STATE_STIM, "reconnect test", s_current_target.reason);
             } else {
                 target_result_update(&s_current_target, false);
                 session_log("result=miss\n");

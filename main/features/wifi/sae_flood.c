@@ -9,7 +9,7 @@
  * and WiFi control functions.
  */
 
-#include "attacks/wifi/sae_flood.h"
+#include "features/wifi/sae_flood.h"
 #include "managers/wifi_manager.h"
 #include "managers/settings_manager.h"
 #include "managers/status_display_manager.h"
@@ -719,7 +719,7 @@ static void sae_monitor_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
 
 void sae_flood_start(const char *password) {
     if (sae_flood_running) {
-        glog("SAE flood attack already running\n");
+        glog("SAE flood test already running\n");
         return;
     }
 
@@ -750,7 +750,7 @@ void sae_flood_start(const char *password) {
     }
 
     if (!sae_heap_alloc()) {
-        glog("SAE flood: out of memory for attack buffers\n");
+        glog("SAE flood: out of memory for test buffers\n");
         return;
     }
 
@@ -837,7 +837,7 @@ void sae_flood_start(const char *password) {
     BaseType_t attack_rc = xTaskCreate_psram(sae_flood_task, "sae_flood_task", 3072, NULL, 5, &sae_flood_task_handle);
     BaseType_t display_rc = xTaskCreate_psram(sae_flood_display_task, "sae_displ", 2048, NULL, 3, &sae_flood_display_task_handle);
     if (attack_rc != pdPASS || display_rc != pdPASS) {
-        glog("SAE flood failed to start tasks (attack=%ld, display=%ld)\n", (long)attack_rc, (long)display_rc);
+        glog("SAE flood failed to start tasks (test=%ld, display=%ld)\n", (long)attack_rc, (long)display_rc);
         sae_flood_running = false;
         if (sae_flood_task_handle != NULL) {
             vTaskDeleteWithCaps(sae_flood_task_handle);
@@ -859,7 +859,7 @@ void sae_flood_start(const char *password) {
              sae_target_bssid[0], sae_target_bssid[1], sae_target_bssid[2],
              sae_target_bssid[3], sae_target_bssid[4], sae_target_bssid[5]);
 
-    glog("SAE flood attack started against %s (%s) on channel %d\n", 
+    glog("SAE flood test started against %s (%s) on channel %d\n",
          selected_ap.ssid, bssid_str, sae_target_channel);
 #ifdef CONFIG_WITH_STATUS_DISPLAY
     status_display_show_attack("SAE flood", "running");
@@ -915,7 +915,7 @@ void sae_flood_stop(void) {
 }
 
 void sae_flood_help(void) {
-    glog("SAE Flood Attack - Overwhelms WPA3 APs with commit frames\n");
+    glog("SAE Flood Test - Overwhelms WPA3 APs with commit frames\n");
     glog("Rate: 100+ frames/sec with randomization\n");
     glog("Requirements: ESP32-C5/C6, WPA3 AP selected\n");
     glog("Usage: scanap -> list -a -> select -a <index> -> saeflood\n");
@@ -930,14 +930,14 @@ bool sae_flood_is_running(void) {
 
 void sae_flood_start(const char *password) {
     (void)password;
-    glog("SAE flood attack only supported on ESP32-C5 and ESP32-C6\n");
+    glog("SAE flood test only supported on ESP32-C5 and ESP32-C6\n");
 }
 
 void sae_flood_stop(void) {
 }
 
 void sae_flood_help(void) {
-    glog("SAE Flood Attack - Only supported on ESP32-C5/C6\n");
+    glog("SAE Flood Test - Only supported on ESP32-C5/C6\n");
     glog("Commands: saeflood, stopsaeflood, saefloodhelp\n");
 }
 

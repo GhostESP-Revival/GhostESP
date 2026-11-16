@@ -17,7 +17,7 @@
 
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 #include "managers/ble_manager.h"
-#include "attacks/ble/ble_spam.h"
+#include "features/ble/ble_spam.h"
 #include "scans/ble/advertiser_scan.h"
 #include "scans/ble/device_detect_scan.h"
 #include "scans/ble/flipper_scan.h"

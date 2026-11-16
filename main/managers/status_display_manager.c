@@ -1098,7 +1098,7 @@ void status_display_show_attack(const char *attack_name, const char *target) {
         return;
     }
     char line_one[sizeof(s_line1)];
-    snprintf(line_one, sizeof(line_one), "Attack: %s", attack_name ? attack_name : "?");
+    snprintf(line_one, sizeof(line_one), "Test: %s", attack_name ? attack_name : "?");
     const char *line_two_src = target ? target : "";
     status_display_set_lines(line_one, line_two_src);
 }

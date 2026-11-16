@@ -100,7 +100,7 @@ void tdongle_status_show_status(const char *status_line)
 void tdongle_status_show_attack(const char *attack_name, const char *target)
 {
     char line1[TDONGLE_STATUS_LINE_LEN];
-    snprintf(line1, sizeof(line1), "Attack: %s", attack_name ? attack_name : "?");
+    snprintf(line1, sizeof(line1), "Test: %s", attack_name ? attack_name : "?");
     tdongle_status_set_lines(line1, target ? target : "");
 }
 

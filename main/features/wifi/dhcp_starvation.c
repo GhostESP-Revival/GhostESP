@@ -9,7 +9,7 @@
  * and WiFi control functions.
  */
 
-#include "attacks/wifi/dhcp_starvation.h"
+#include "features/wifi/dhcp_starvation.h"
 #include "managers/wifi_manager.h"
 #include "managers/status_display_manager.h"
 #include "core/glog.h"
@@ -98,7 +98,7 @@ static void dhcp_starve_task(void *param) {
         pkt.options[7] = 255;
         ssize_t sent = sendto(sock, &pkt, sizeof(pkt), 0, (struct sockaddr*)&addr, sizeof(addr));
         if (sent < 0) {
-            glog("DHCP-Starve: send failed, stopping attack\n");
+            glog("DHCP-Starve: send failed, stopping test\n");
             dhcp_starve_running = false;
             break;
         }
@@ -136,7 +136,7 @@ void dhcp_starvation_start(int threads) {
         return;
     }
     
-    glog("Starting DHCP starvation attack...\n");
+    glog("Starting DHCP starvation test...\n");
     dhcp_starve_running = true;
     dhcp_starve_packets_sent = 0;
     
@@ -183,7 +183,7 @@ void dhcp_starvation_display(void) {
 }
 
 void dhcp_starvation_help(void) {
-    glog("DHCP Starvation Attack - Floods DHCP server to exhaust IP pool\n");
+    glog("DHCP Starvation Test - Floods DHCP server to exhaust IP pool\n");
     glog("Usage: dhcpstarve start [threads]\n");
     glog("       dhcpstarve stop\n");
     glog("       dhcpstarve display\n");

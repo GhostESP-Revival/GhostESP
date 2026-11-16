@@ -12,7 +12,7 @@ weight: 80
 
 ## Core
 
-- **`help [category|all]`** - List commands by category (`wifi`, `ble`, `chameleon`, `comm`, `sd`, `led`, `gps`, `misc`, `portal`, `printer`, `cast`, `capture`, `beacon`, `attack`, `ir`, `ethernet`, `camera`, `shell`, `gadgets`). Use `help all` to list every command in the standard categories.
+- **`help [category|all]`** - List commands by category (`wifi`, `ble`, `chameleon`, `comm`, `sd`, `led`, `gps`, `misc`, `portal`, `printer`, `cast`, `capture`, `beacon`, `wifitest`, `ir`, `ethernet`, `camera`, `shell`, `gadgets`). Use `help all` to list every command in the standard categories.
 - **`chipinfo`** - Print SoC model, cores, features, and IDF version. When core dumps are enabled to flash, it also shows coredump partition status and (when available) the panic reason from the last crash.
 - (for developers) **`mem [heaps|tasks|regions|check|dump|trace <start|leaks|all|stop|dump>]`** - Print heap stats, show task stack marks or heap regions, run a heap integrity check, dump allocation state, or control heap tracing.
 - **`reboot`** - Soft restart the device.
@@ -91,7 +91,7 @@ These headless commands make up the `help shell` category, plus a few related sy
 
 ### Offense
 
-- **`attack -d|-c|-e|-s|-g|-hsd|-p|-b|-a <args>`** - Trigger various Wi-Fi attacks.
+- **`reconnect|-c|-e|-s|-g|-hsd|-p|-b|-a <args>`** - Trigger various Wi-Fi attacks.
   - `-d` - Deauthentication attack on selected AP(s).
   - `-c` - Channel Switch Announcement (CSA) attack. Sends forged 802.11 beacons with the AP's real SSID/BSSID and a Channel Switch Element (IE 37) directing clients to a different channel, causing disconnection.
   - `-e` - EAPOL logoff attack.
@@ -102,7 +102,7 @@ These headless commands make up the `help shell` category, plus a few related sy
   - `-b` - Bad message attack (EAPOL key install).
   - `-a` - Authentication flood. Sends mass authentication frames to the AP.
 - **`stop`** - Stops all active attacks, scans, and background tasks, including BLE device detect and tracking.
-- **`stopdeauth`** / **`stopspam`** - Halt active attacks or beacon floods.
+- **`stopreconnect`** / **`stopspam`** - Halt active attacks or beacon floods.
 - **`beaconspam [mode]`** - Broadcast spoof SSIDs (`-r`, `-rr`, `-l`, or custom text).
 - **`beaconadd <ssid>`** - Add an SSID to the beacon spam list.
 - **`beaconremove <ssid>`** - Remove an SSID from the beacon spam list.

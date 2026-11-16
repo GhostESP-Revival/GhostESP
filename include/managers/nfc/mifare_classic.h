@@ -3,7 +3,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include "managers/nfc/mifare_attack.h"
+#include "managers/nfc/mifare_test.h"
 #include "managers/nfc/pn532_compat.h"
 
 typedef enum {

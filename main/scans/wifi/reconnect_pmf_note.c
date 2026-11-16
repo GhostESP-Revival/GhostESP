@@ -1,5 +1,5 @@
 /**
- * @file deauth_pmf_note.c
+ * @file reconnect_pmf_note.c
  * @brief Plain-English note about whether deauth is expected to get through
  *
  * A network that requires protected management frames (PMF, 802.11w) discards
@@ -12,7 +12,7 @@
  * what will actually happen and what to try instead.
  */
 
-#include "scans/wifi/deauth_pmf_note.h"
+#include "scans/wifi/reconnect_pmf_note.h"
 
 /* Only the enum is needed from ESP-IDF, and only so the switch names the modes
  * symbolically instead of using bare numbers. */

@@ -27,7 +27,7 @@ Firmware versions documented: {{ delimit $versions ", " }}
 
 - Site-wide search index (JSON, compact, all versions): {{ "search-index.json" | relURL }}
 - Per-version search index (JSON, includes full page text): e.g. {{ "latest/search-index.json" | relURL }}
-- Per-page plain text: append `index.txt` to any docs URL, e.g. {{ "latest/wifi/deauth/index.txt" | relURL }}
+- Per-page plain text: append `index.txt` to any docs URL, e.g. {{ "latest/wifi/reconnect-test/index.txt" | relURL }}
 - Human, URL-addressable search page: {{ "search/" | relURL }}?q=your+query
 - Sitemap: {{ "sitemap.xml" | relURL }}
 
@@ -49,7 +49,7 @@ Finding pages (do not guess URLs):
    headings[].title, then description/summary. Prefer version "latest" unless the
    user names a version.
 4. Read the best record as clean text by fetching its text_url
-   (for example DOCS_URL/latest/wifi/deauth/index.txt). That is the full page with
+   (for example DOCS_URL/latest/wifi/reconnect-test/index.txt). That is the full page with
    headings and links, and costs far fewer tokens than the HTML page.
 5. If you need a narrower slice, search within the per-version index that includes
    full text: DOCS_URL/latest/search-index.json.

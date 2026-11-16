@@ -4,7 +4,7 @@
  */
 
 #include "managers/chameleon_manager.h"
-#include "managers/nfc/mifare_attack.h"
+#include "managers/nfc/mifare_test.h"
 #include "managers/ble_manager.h"
 #include "managers/ghostchi_manager.h"
 

@@ -792,7 +792,7 @@ esp_err_t ap_manager_apply_attack_radio(void) {
     };
     ret = esp_wifi_set_protocols(WIFI_IF_STA, &p);
     if (ret != ESP_OK) {
-        printf("Warning: Failed to set attack protocols: %s\n", esp_err_to_name(ret));
+        printf("Warning: Failed to set test protocols: %s\n", esp_err_to_name(ret));
     }
 #else
     (void)esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
@@ -802,7 +802,7 @@ esp_err_t ap_manager_apply_attack_radio(void) {
     if (ret != ESP_OK) {
         glog("WiFi start failed\n");
     } else {
-        printf("GhostNet AP off for attack (clients kicked)\n");
+        printf("GhostNet AP off for test (clients kicked)\n");
     }
     return ret;
 }
