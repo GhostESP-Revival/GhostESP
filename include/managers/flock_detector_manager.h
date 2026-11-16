@@ -44,6 +44,7 @@ typedef enum {
     FLOCK_CLASS_AXON,
     FLOCK_CLASS_HAK5,
     FLOCK_CLASS_NEST,
+    FLOCK_CLASS_GHOSTESP,
 } FlockDeviceClass;
 
 typedef struct {
@@ -69,6 +70,8 @@ esp_err_t flock_detector_stop(void);
 bool flock_detector_is_running(void);
 
 int flock_detector_get_count(void);
+uint32_t flock_detector_get_rx_count(void);
+uint32_t flock_detector_get_valid_rx_count(void);
 const FlockDetection* flock_detector_get_detection(int index);
 void flock_detector_clear_detections(void);
 

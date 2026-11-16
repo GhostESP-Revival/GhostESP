@@ -44,6 +44,8 @@ bool wardriving_is_helper_mode(void);
 bool wardriving_is_peer_assist_active(void);
 bool wardriving_has_peer_helper(void);
 void wardriving_register_stream_handler(void);
+void wardriving_peer_connected(void);
+void wardriving_peer_disconnected(void);
 bool wardriving_get_helper_channel_plan_csv(char *out, size_t out_len);
 bool wardriving_set_helper_channels_from_csv(const char *csv);
 void wardriving_set_helper_hop_ms(uint16_t ms);
@@ -110,6 +112,8 @@ extern bool g_listen_probes_save_to_sd;
 
 // cleanup function to free pcap queue when not capturing
 void cleanup_pcap_queue(void);
+/* Call after stopping capture producers, before closing the PCAP sink. */
+bool pcap_drain_queue(void);
 
 // Handshake tracking helpers used by adaptive capture UIs.
 uint32_t wifi_callbacks_get_handshake_count(void);

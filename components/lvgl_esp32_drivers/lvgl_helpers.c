@@ -39,8 +39,6 @@
 
 #define TAG "lvgl_helpers"
 
-static void *s_lvgl_lock_handle = NULL;
-
 /**********************
  *      TYPEDEFS
  **********************/
@@ -177,7 +175,9 @@ void lvgl_driver_init(void)
 
 void lvgl_i2c_locking(void* leader)
 {
-    s_lvgl_lock_handle = leader;
+    // Kept for the legacy helper API. I2C transactions use the shared
+    // per-port lock directly in lvgl_i2c_manager.c.
+    (void)leader;
 }
 
 

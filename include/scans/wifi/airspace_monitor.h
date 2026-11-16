@@ -56,11 +56,16 @@ typedef struct {
     uint8_t offender_mac[6];
     uint8_t offender_channel;
     int8_t offender_rssi;
+    /* Occupies existing alignment padding; snapshot allocation is unchanged. */
+    uint8_t sample_channel;
+    uint8_t coverage_flags; /* 1=device pressure, 2=AP pressure, 4=learning */
+    uint8_t evidence_strength; /* supporting observations, 0..4; not probability */
     uint32_t offender_deauth_rate;
     uint32_t offender_disassoc_rate;
     uint32_t offender_total;
 
     uint8_t suspect_count;
+    /* Stable display order; offender_* always identifies the current top score. */
     airspace_suspect_t suspects[AIRSPACE_MAX_SUSPECTS];
 
     airspace_threat_level_t threat_level;
