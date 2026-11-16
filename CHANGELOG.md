@@ -8,6 +8,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 
 ### Added
 
+- Added support for the Waveshare ESP32-C5-Touch-LCD-3.5 - @slickrick773 (#433)
 - Sentry now identifies GhostNet networks as GhostESP devices
 - Added Sentry settings to choose which devices appear and turn popups on or off
 - Added Sentry logs to help explain why no devices appear
