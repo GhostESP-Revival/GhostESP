@@ -44,6 +44,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 
 ### Fixed
 
+- Fixed BadUSB HID enumeration on affected ESP32-S3 boards, including Banshee Lite S3 - @14790897 (#440)
 - Fixed touch drag scrolling in Sentry settings
 - Improved Sentry scan reliability and added messages when a scanner fails to start
 - Fixed Sentry counting the same sighting repeatedly
