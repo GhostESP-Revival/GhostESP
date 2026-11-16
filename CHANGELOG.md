@@ -20,6 +20,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Vendor names now appear in AP/station scans, attack target lists, Ethernet ARP results, port/SNMP scans, GATT scans and Sentry rows; randomized MACs are labelled "Private address"
 - Added `scanarp stop` and `scanlocal stop`
 - Added `forgetwifi` command to clear the saved WiFi network and disconnect from it
+- Added support for the Waveshare ESP32-C5-Touch-LCD-3.5 - @slickrick773 (#433)
 - Cloud Store now shows a clear "No internet. Connect GhostESP to WiFi" message when opened, refreshed or installing without a connection
 - BadBLE's Run Script list and `badble run`/`badble list` now also find scripts in `/mnt/ghostesp/badusb/`, not just `/mnt/ghostesp/badble/`
 - Renamed the "mDNS Discovery" menu entry to "Local Scan" and added "List Local Scan" to reopen the last results without rescanning
