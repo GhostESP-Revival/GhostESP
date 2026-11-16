@@ -399,10 +399,12 @@ static void beacon_spam_task(void *param) {
     static const char *rickroll_lyrics[] = {"Never gonna give you up",
                                      "Never gonna let you down",
                                      "Never gonna run around",
+                                     "and desert you",
                                      "Never gonna make you cry",
                                      "Never gonna say goodbye",
-                                     "Never gonna tell a lie"};
-    int num_lines = 6;
+                                     "Never gonna tell a lie",
+                                     "and hurt you"};
+    const size_t num_lines = sizeof(rickroll_lyrics) / sizeof(rickroll_lyrics[0]);
 
     int IsRickRoll = ssid != NULL ? (strcmp(ssid, "RICKROLL") == 0) : false;
     int IsAPList = ssid != NULL ? (strcmp(ssid, "APLISTMODE") == 0) : false;
