@@ -115,10 +115,7 @@ static esp_err_t send_beacon_on_channel(const char *ssid, uint8_t ch) {
         ssid_to_use = ssid_buffer;
     }
 
-    uint8_t ssid_len = strlen(ssid_to_use);
-    if (ssid_len > BEACON_SSID_MAX_LEN) {
-        ssid_len = BEACON_SSID_MAX_LEN;
-    }
+    size_t ssid_len = strnlen(ssid_to_use, BEACON_SSID_MAX_LEN);
 
     uint32_t bssid_hash = 2166136261u;
     for (uint8_t i = 0; i < ssid_len; i++) {
@@ -413,7 +410,7 @@ static void beacon_spam_task(void *param) {
     while (beacon_task_running) {
         if (IsRickRoll) {
             beacon_spam_broadcast_multi(rickroll_lyrics, (size_t)num_lines);
-            vTaskDelay(pdMS_TO_TICKS(10));
+            vTaskDelay(pdMS_TO_TICKS(settings_get_broadcast_speed(&G_Settings)));
             continue;
         } else if (IsAPList) {
             for (int i = 0; i < ap_count; i++) {
