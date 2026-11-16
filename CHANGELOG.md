@@ -8,6 +8,8 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 
 ### Added
 
+- Added Banshee Lite support - @Billi-Green (#408)
+- Added IP5306 charger configuration and status support, and configured the Banshee Lite C5 to use its MAX17048 fuel gauge - @Billi-Green (#408)
 - Sentry now identifies GhostNet networks as GhostESP devices
 - Added Sentry settings to choose which devices appear and turn popups on or off
 - Added Sentry logs to help explain why no devices appear
