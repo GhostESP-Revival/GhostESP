@@ -1,6 +1,6 @@
 ---
 title: "Network Scanning"
-description: "Discover and scan devices on your Ethernet network."
+description: "Discover and scan devices on your Ethernet network"
 weight: 15
 ---
 
@@ -75,19 +75,27 @@ ethports 192.168.1.100 22-443
 
 ### Scan Gateway
 
-Scan the gateway (DHCP server):
+Scan the gateway (DHCP server) for common ports:
 
 ```
 ethports local
 ```
 
+To sweep every port on the gateway (1-65535), add `all`:
+
+```
+ethports local all
+```
+
 ### Scan All Ports
 
-Scan all common ports on a target:
+Scan the full 1-65535 range on a target:
 
 ```
 ethports 192.168.1.100 all
 ```
+
+> **Note:** `all` scans every port from 1 to 65535, so it takes much longer than the common-port scan. To scan only the common ports, omit the port argument entirely (e.g. `ethports 192.168.1.100`).
 
 ## Traceroute
 
@@ -106,8 +114,6 @@ Shows each hop (router) between your device and the target.
 
 ## DNS Resolution
 
-### DNS Lookup
-
 Resolve a domain name to an IP address:
 
 ```
@@ -119,22 +125,15 @@ ethdns <domain>
 ethdns google.com
 ```
 
-### Reverse DNS Lookup
-
-Resolve an IP address to a hostname:
+Reverse (PTR) lookups are **not implemented**. The command only prints a notice that PTR records may not be fully supported:
 
 ```
 ethdns reverse <ip_address>
 ```
 
-**Example**:
-```
-ethdns reverse 8.8.8.8
-```
+> **Note:** To resolve a hostname, use a forward lookup instead: `ethdns <domain>`.
 
 ## Statistics
-
-### Network Statistics
 
 Display Ethernet interface statistics:
 

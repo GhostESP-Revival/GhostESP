@@ -49,7 +49,7 @@ static void badble_strip_quotes(char *text) {
 static void badble_usage(void) {
     glog("Usage: badble <status|list|run|stop|keyboard_start|keyboard_stop|type|keysend|name|set_name>\n");
     glog("  badble status                 - Show BLE keyboard state\n");
-    glog("  badble list                   - List scripts in /mnt/ghostesp/badble/\n");
+    glog("  badble list                   - List scripts in /mnt/ghostesp/badble/ and /mnt/ghostesp/badusb/\n");
     glog("  badble run <filename>         - Wait for a host and execute a script\n");
     glog("  badble stop                  - Stop the keyboard and restore BLE\n");
     glog("  badble keyboard_start         - Advertise for live typing\n");
@@ -77,7 +77,7 @@ void handle_badble_cmd(int argc, char **argv) {
             glog("  [%d] %s\n", i, scripts[i]);
         }
         if (count == 0) {
-            glog("  No scripts found in /mnt/ghostesp/badble/\n");
+            glog("  No scripts found in /mnt/ghostesp/badble/ or /mnt/ghostesp/badusb/\n");
         }
     } else if (strcmp(sub, "run") == 0) {
         if (argc < 3) {

@@ -16,10 +16,10 @@ Search index: /search-index.json
 
 ---
 
-GhostESP offers scanning, monitoring, and portal tools that run on-device. Here you can find help on how to use these features.
+GhostESP’s Wi-Fi tools scan, monitor, connect, capture, and attack from the device itself.
 ## Quick links
-- [Wi-Fi Basics](/latest/wifi/basics/) — how the Wi-Fi radio is used
-- [Scanning networks](/latest/wifi/survey/) — passive scans and AP lists
-- [Connect to a Wi-Fi Network](/latest/wifi/connect/) — join a network you own
+- [Wi-Fi Basics](/latest/wifi/basics/) - how the Wi-Fi radio is used
+- [Scanning networks](/latest/wifi/survey/) - network scans and AP lists
+- [Connect to a Wi-Fi Network](/latest/wifi/connect/) - join a network you own
 - [Capturing packets](/latest/wifi/capture/) and [handshakes](/latest/wifi/handshakes/)
-- [Attacks](/latest/wifi/deauth/) — deauth, Karma, Evil Portal, DNS Sinkhole, and more
+- [Attacks](/latest/wifi/deauth/) - deauth, Karma, Evil Portal, DNS Sinkhole, and more

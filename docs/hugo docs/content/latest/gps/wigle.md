@@ -13,83 +13,38 @@ Upload your wardriving CSV captures to [WiGLE.net](https://wigle.net) to contrib
 - Wi-Fi connection (for uploading)
 - WiGLE account with API credentials
 
-## 2-Minute Setup
+## Setup
 
-### Option 1: Using Encoded Token (Recommended)
+Get your API credentials from [wigle.net/account](https://wigle.net/account) - create a free account at [wigle.net](https://wigle.net) first if you need one. Either copy the **"Encoded for Use"** token (recommended) or the **API Name** and **API Token** in legacy `APIName:APIToken` form.
 
-1. Get your "Encoded for Use" token from [wigle.net/account](https://wigle.net/account)
-2. Set API token:
-   ```
-   wigle API <EncodedForUseToken>
-   ```
-
-### Option 2: Using Legacy Format
-
-1. Get credentials from [wigle.net/account](https://wigle.net/account) (`APIName:APIToken`)
-2. Set API key:
-   ```
-   wigle API <APIName>:<APIToken>
-   ```
-
-### Complete Setup
-
-1. (Recommended) Enable upload on Wi-Fi connect:
-
-   ```
-   wigle auto on
-   ```
-
-2. (Recommended) Donate mapped data:
-
-   ```
-   wigle donate on
-   ```
-
-3. Verify settings:
-
-   ```
-   wigle show
-   ```
-
-## Getting WiGLE API Credentials
-
-1. Create a free account at [wigle.net](https://wigle.net)
-2. Go to your [account page](https://wigle.net/account)
-3. Find the "API" section and copy your **API Name** and **API Token**
-4. Your credentials are in the format: `APIName:APIToken`
-
-## Configuration
-
-### On-device Display
-
-1. Open **Menu → Settings → WiGLE**
-2. Toggle **Auto Upload** to enable automatic uploads when Wi-Fi (STA) connects
-3. Toggle **Donate Data** to share your scans with WiGLE (recommended)
-4. Use **Manual Upload** to browse CSV files in `/mnt/ghostesp/gps/`
-5. Select a CSV to view details (file name, Wi-Fi row count, total row count), then press **Upload**
-6. Use **View WiGLE Stats** to fetch and display account stats for the current API key
-
-### Command Line
-
-Set your API key:
+Set the API key:
+```
+wigle API <EncodedForUseToken>
+```
+Or with legacy credentials:
 ```
 wigle API <APIName>:<APIToken>
 ```
 
-Enable auto-upload when STA gets an IP:
+Then, recommended:
 ```
 wigle auto on
 ```
-
-Enable data donation:
 ```
 wigle donate on
 ```
 
-View current settings:
+Verify:
 ```
 wigle show
 ```
+
+On display builds the same options live under **Menu → Settings → WiGLE**:
+
+1. Toggle **Auto Upload** to enable automatic uploads when Wi-Fi (STA) connects.
+2. Toggle **Donate Data** to share your scans with WiGLE (recommended).
+3. Use **Manual Upload** to browse CSV files in `/mnt/ghostesp/gps/`.
+4. Select a CSV to view details (file name, Wi-Fi row count, total row count), then press **Upload**.
 
 ## CLI Commands
 
@@ -101,8 +56,9 @@ wigle show
 | `wigle donate on/off` | Enable/disable data donation |
 | `wigle show` | Display current settings |
 | `wigle list` | List previously uploaded files |
-| `wigle files [page]` | List CSV files in `/mnt/ghostesp/gps/` (paged) |
+| `wigle files [page]` | List CSV files in `/mnt/ghostesp/gps/` (8 per page) |
 | `wigle upload <filename>` | Upload one CSV file manually |
+| `wigle upload` | With no filename, behaves like `wigle upload all` |
 | `wigle upload all` | Upload all pending queued files |
 | `wigle stats` | Show WiGLE account stats for current credentials |
 
@@ -157,6 +113,8 @@ Upload all queued files:
 wigle upload all
 ```
 
+Running `wigle upload` with no filename behaves the same as `wigle upload all`.
+
 Manual upload checks:
 
 - Filename safety (must be a CSV basename, no path traversal)
@@ -205,23 +163,7 @@ Typical names:
 
 ## SD Card Config Loader
 
-You can load WiGLE credentials and WiFi settings from a config file on your SD card.
-
-**Quick Setup:**
-1. Create `config.cfg` in SD card root with:
-   ```ini
-   SSID=YourNetwork
-   PASSKEY=YourPassword
-   EncodedForUseToken=YourBase64Token
-   AutoUpload=true
-   Donate=true
-   ```
-
-2. Load via:
-   - **GUI**: Settings → WiGLE → Load Config from SD
-   - **CLI**: `loadconfig`
-
-See [SD Card Configuration]({{< relref "sd-card-config.md" >}}) for complete documentation.
+WiGLE credentials and Wi-Fi settings can also be loaded from `config.cfg` on the SD card. See [SD card configuration]({{< relref "sd-card-config.md" >}}) for the file format and loading steps.
 
 ## Troubleshooting
 

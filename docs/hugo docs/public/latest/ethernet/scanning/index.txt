@@ -1,5 +1,5 @@
 Title: Network Scanning
-Description: Discover and scan devices on your Ethernet network.
+Description: Discover and scan devices on your Ethernet network
 URL: /latest/ethernet/scanning/
 Version: latest
 Section: Ethernet
@@ -7,7 +7,7 @@ Search index: /search-index.json
 
 # Network Scanning
 
-> Discover and scan devices on your Ethernet network.
+> Discover and scan devices on your Ethernet network
 
 ## On this page
 
@@ -23,10 +23,7 @@ Search index: /search-index.json
 - [Scan All Ports](#scan-all-ports)
 - [Traceroute](#traceroute)
 - [DNS Resolution](#dns-resolution)
-- [DNS Lookup](#dns-lookup)
-- [Reverse DNS Lookup](#reverse-dns-lookup)
 - [Statistics](#statistics)
-- [Network Statistics](#network-statistics)
 
 ---
 
@@ -60,11 +57,14 @@ ethports 192.168.1.100 80-80
 ethports 192.168.1.100 22-443
 Note: Port scanning uses range format (start-end), not comma-separated lists. To scan a single port, use the same number for start and end (e.g., 80-80). To scan common ports on the gateway, omit the port argument.
 ### Scan Gateway
-Scan the gateway (DHCP server):
+Scan the gateway (DHCP server) for common ports:
 ethports local
+To sweep every port on the gateway (1-65535), add all:
+ethports local all
 ### Scan All Ports
-Scan all common ports on a target:
+Scan the full 1-65535 range on a target:
 ethports 192.168.1.100 all
+Note: all scans every port from 1 to 65535, so it takes much longer than the common-port scan. To scan only the common ports, omit the port argument entirely (e.g. ethports 192.168.1.100).
 ## Traceroute
 Trace the network path to a host:
 ethtrace &lt;ip&gt;
@@ -72,18 +72,14 @@ Example:
 ethtrace 8.8.8.8
 Shows each hop (router) between your device and the target.
 ## DNS Resolution
-### DNS Lookup
 Resolve a domain name to an IP address:
 ethdns &lt;domain&gt;
 Example:
 ethdns google.com
-### Reverse DNS Lookup
-Resolve an IP address to a hostname:
+Reverse (PTR) lookups are not implemented. The command only prints a notice that PTR records may not be fully supported:
 ethdns reverse &lt;ip_address&gt;
-Example:
-ethdns reverse 8.8.8.8
+Note: To resolve a hostname, use a forward lookup instead: ethdns &lt;domain&gt;.
 ## Statistics
-### Network Statistics
 Display Ethernet interface statistics:
 ethstats
 Shows packet counts, errors, and other interface metrics.

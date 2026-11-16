@@ -1,52 +1,45 @@
 ---
 title: "Karma Attack"
-description: "Automatically respond to device probes with fake networks."
+description: "Automatically respond to device probes with fake networks"
 weight: 50
 ---
 
-Create fake Wi-Fi networks based on SSIDs that nearby devices are searching for. When devices search for a network, Karma broadcasts it back to them.
+Create fake Wi-Fi networks based on SSIDs that nearby devices are searching for. When a device searches for a network, Karma broadcasts it back; when the device connects, a captive portal starts automatically to capture credentials. In **automatic** mode Karma learns SSIDs from probe requests, while **custom** mode broadcasts SSIDs you specify. You need a flashed, powered device with a wireless antenna; an SD card is optional for Evil Portal integration.
 
-> **Note**: Only test this on networks you own or have explicit permission to test. Unauthorized access to networks is illegal in most jurisdictions.
+> **Note:** Only test on networks you own or have permission to test. See [Legal and ethical rules]({{< relref "basics.md#legal-and-ethical-rules" >}}).
 
-## Prerequisites
-
-- GhostESP flashed device, powered on with a wireless antenna.
-- Optional: SD card for evil portal integration.
-
-## Legal and ethical
-
-- Only test on your own devices or with written permission.
-- Never use Karma on networks you don't own.
+{{< seq title="How Karma catches a client" caption="Karma answers the networks a device is already asking for." >}}
+participant Client
+participant Attacker
+Client -> Attacker : Probe Request (broadcast) | The client names an SSID it is looking for
+Attacker -> Client : Probe Response (spoofed SSID) | GhostESP answers as that network
+Client -> Attacker : association + DHCP | The client joins the fake open network
+Attacker -> Client : captive portal | Optional portal page served on connect
+{{< /seq >}}
 
 ## Starting Karma
 
 ### On-device UI
 
-1. Open **Menu → WiFi → Attacks → Start Karma Attack**.
+1. Open **Menu → Wi-Fi → Attacks → Karma Attack**.
    The device will begin learning SSIDs from probe requests.
-2. To use specific SSIDs instead, choose **Start Karma Attack (Custom SSIDs)**.
-   Enter the SSIDs you want to broadcast (separated by commas).
-3. The device will start broadcasting fake networks. Leave it running to catch devices.
-4. To stop, go back to the menu or select **Stop Karma Attack**.
+2. To use specific SSIDs instead, choose **Karma Attack (Custom SSIDs)**.
+   Enter the SSIDs you want to broadcast (separated by commas), up to 32.
+3. To serve a custom captive portal on the fake networks, choose **Karma Attack (Custom Portal)**.
+4. The device will start broadcasting fake networks. Leave it running to catch devices.
+5. To stop, go back to the menu or select **Stop Karma Attack**.
 
-### Command line
+### CLI
 
 1. Run `karma start` to begin automatic SSID learning.
    The device will cache SSIDs from probe requests.
-2. Or run `karma start SSID1 SSID2 SSID3` to use specific SSIDs.
+2. Or run `karma start SSID1 SSID2 SSID3` to use specific SSIDs (up to 32).
    Example: `karma start FreeWiFi Starbucks McDonald's`
 3. Run `karma stop` when you're done.
 
-## How it works
-
-**Automatic mode**: Karma listens for Wi-Fi probe requests from nearby devices and broadcasts fake networks with the SSIDs they're searching for.
-
-**Custom mode**: You specify which SSIDs to broadcast instead of learning them automatically.
-
-When a device connects to a fake network, a captive portal starts automatically to capture credentials.
+The learned-SSID cache holds at most 32 SSIDs.
 
 ## Troubleshooting
 
 - **Fake networks not appearing**: Try restarting with `karma stop` then `karma start`.
 - **No devices connecting**: Ensure devices are actually searching for networks. Try moving closer to the GhostESP device.
-

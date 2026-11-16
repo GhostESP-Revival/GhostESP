@@ -1,3 +1,5 @@
+#include "managers/views/file_browser.h"
+#include "managers/sd_card_manager.h"
 #include "managers/views/favorites_manager_screen.h"
 #include "managers/settings_manager.h"
 #include "managers/display_manager.h"
@@ -29,6 +31,8 @@ typedef enum {
     ROW_CATEGORY,   // index = k_fav_categories entry
     ROW_ITEM,       // index = filtered picker entry
     ROW_BACK,
+    ROW_PREV,
+    ROW_NEXT,
 } row_type_t;
 
 typedef struct {
@@ -38,7 +42,7 @@ typedef struct {
 
 #define FAV_FILES_MAX 32
 #define FAV_LIST_ROWS_MAX  (FAVORITES_MAX + 4)          // favs + info + Add/Clear/Back
-#define FAV_PICKER_ROWS_MAX (FAV_FILES_MAX + 2)         // items + info + Back
+#define FAV_PICKER_ROWS_MAX (FAV_FILES_MAX + 4)         // items + info + Prev/Next/Back
 #define FAV_ROWS_MAX (FAV_LIST_ROWS_MAX > FAV_PICKER_ROWS_MAX ? FAV_LIST_ROWS_MAX : FAV_PICKER_ROWS_MAX)
 
 static lv_obj_t *s_root = NULL;
@@ -60,6 +64,11 @@ static int s_picker_stage = 0;   // 0 = category chooser, 1 = item chooser
 static int s_picker_category = 0;
 static char (*s_file_paths)[FAVORITE_NAME_LEN] = NULL;
 static int s_file_count = 0;
+static char s_browse_dir[FILE_BROWSER_PATH_MAX] = "";
+static char **s_browse_paths = NULL;
+static size_t s_browse_count = 0;
+static size_t s_browse_offset = 0;
+static bool s_browse_has_next = false;
 static bool s_touch_started = false;
 #ifdef CONFIG_USE_TOUCHSCREEN
 // Shared live drag-scroll state (same smooth scrolling the native views use).
@@ -194,67 +203,83 @@ static bool handle_touch(InputEvent *event) {
 
 // --- SD / plugin scans ----------------------------------------------------
 
-static int scan_ir_files(void) {
-    s_file_count = 0;
-    if (!s_file_paths) return 0;
-    const char *dirs[] = { "/mnt/ghostesp/infrared/remotes", "/mnt/ghostesp/infrared/universals" };
-    for (int d = 0; d < 2 && s_file_count < FAV_FILES_MAX; d++) {
-        DIR *dir = opendir(dirs[d]);
-        if (!dir) continue;
-        struct dirent *ent;
-        while ((ent = readdir(dir)) != NULL && s_file_count < FAV_FILES_MAX) {
-            if (ent->d_name[0] == '.') continue;
-            size_t len = strlen(ent->d_name);
-            if (len < 3 || strcasecmp(ent->d_name + len - 3, ".ir") != 0) continue;
-            int n = snprintf(s_file_paths[s_file_count], FAVORITE_NAME_LEN, "ir:%s/%s", dirs[d], ent->d_name);
-            if (n < 0 || n >= FAVORITE_NAME_LEN) continue; // path too long for a favorite slot
-            s_file_count++;
+static const char *favorite_browser_root(int category) {
+    switch (category) {
+        case 1: return "/mnt/ghostesp/infrared";
+        case 2: return "/mnt/ghostesp/nfc";
+        case 3: return "/mnt/ghostesp/subghz";
+        case 5: return "/mnt/ghostesp/scripts";
+        case 6: return "/mnt/ghostesp/badusb";
+        default: return NULL;
+    }
+}
+
+static const char *favorite_browser_prefix(int category) {
+    switch (category) {
+        case 1: return "ir:";
+        case 2: return "nfc:";
+        case 3: return "subghz:";
+        case 5: return "gs:";
+        case 6: return "badusb:";
+        default: return "";
+    }
+}
+
+static bool favorite_accept_file(const char *name) {
+    const char *ext = strrchr(name, '.');
+    if (!ext) return false;
+    switch (s_picker_category) {
+        case 1: return strcasecmp(ext, ".ir") == 0;
+        case 2: return strcasecmp(ext, ".nfc") == 0 || strcasecmp(ext, ".picopass") == 0;
+        case 3: return strcasecmp(ext, ".sub") == 0;
+        case 5: return strcasecmp(ext, ".gs") == 0;
+        case 6: return strcasecmp(ext, ".txt") == 0;
+        default: return false;
+    }
+}
+
+static void favorite_browser_clear(void) {
+    file_browser_free(s_browse_paths, s_browse_count);
+    s_browse_paths = NULL;
+    s_browse_count = 0;
+    s_browse_has_next = false;
+}
+
+/* Keep the existing settings format and legacy bare-name payload favorites.
+ * Check the slot length before saving instead of truncating a nested path. */
+static bool favorite_browser_encode(const char *path, char *out, size_t capacity) {
+    const char *stored_path = path;
+    if (s_picker_category == 6) {
+        const char *root = favorite_browser_root(6);
+        size_t len = strlen(root);
+        if (strncmp(path, root, len) == 0 && path[len] == '/') stored_path = path + len + 1;
+    }
+    int len = snprintf(out, capacity, "%s%s", favorite_browser_prefix(s_picker_category), stored_path);
+    return len >= 0 && (size_t)len < capacity;
+}
+
+static bool favorite_browser_scan(void) {
+    favorite_browser_clear();
+    bool susp = false;
+    if (!sd_card_jit_begin(&susp, false)) return false;
+    /* IR favorites can be opened from either supported library. Keep this
+     * level as a two-folder chooser instead of offering unrelated IR assets. */
+    if (s_picker_category == 1 && strcmp(s_browse_dir, favorite_browser_root(1)) == 0) {
+        s_browse_paths = calloc(2, sizeof(char *));
+        if (s_browse_paths) {
+            s_browse_count = 2;
+            s_browse_paths[0] = strdup("/mnt/ghostesp/infrared/remotes/");
+            s_browse_paths[1] = strdup("/mnt/ghostesp/infrared/universals/");
         }
-        closedir(dir);
+        bool ok = s_browse_paths && s_browse_paths[0] && s_browse_paths[1];
+        if (!ok) favorite_browser_clear();
+        sd_card_jit_end(susp);
+        return ok;
     }
-    return s_file_count;
-}
-
-static int scan_nfc_files(void) {
-    s_file_count = 0;
-    if (!s_file_paths) return 0;
-    const char *dirp = "/mnt/ghostesp/nfc";
-    DIR *dir = opendir(dirp);
-    if (!dir) return 0;
-    struct dirent *ent;
-    while ((ent = readdir(dir)) != NULL && s_file_count < FAV_FILES_MAX) {
-        if (ent->d_name[0] == '.') continue;
-        size_t len = strlen(ent->d_name);
-        if (len < 4 || strcasecmp(ent->d_name + len - 4, ".nfc") != 0) continue;
-        int n = snprintf(s_file_paths[s_file_count], FAVORITE_NAME_LEN, "nfc:%s/%s", dirp, ent->d_name);
-        if (n < 0 || n >= FAVORITE_NAME_LEN) continue;
-        s_file_count++;
-    }
-    closedir(dir);
-    return s_file_count;
-}
-
-static int scan_subghz_files(void) {
-    s_file_count = 0;
-    if (!s_file_paths) return 0;
-    const char *dirp = "/mnt/ghostesp/subghz";
-    DIR *dir = opendir(dirp);
-    if (!dir) {
-        dirp = "/mnt/ghostesp/subghz/captures";
-        dir = opendir(dirp);
-        if (!dir) return 0;
-    }
-    struct dirent *ent;
-    while ((ent = readdir(dir)) != NULL && s_file_count < FAV_FILES_MAX) {
-        if (ent->d_name[0] == '.') continue;
-        size_t len = strlen(ent->d_name);
-        if (len < 4 || strcasecmp(ent->d_name + len - 4, ".sub") != 0) continue;
-        int n = snprintf(s_file_paths[s_file_count], FAVORITE_NAME_LEN, "subghz:%s/%s", dirp, ent->d_name);
-        if (n < 0 || n >= FAVORITE_NAME_LEN) continue;
-        s_file_count++;
-    }
-    closedir(dir);
-    return s_file_count;
+    bool ok = file_browser_read(s_browse_dir, favorite_accept_file, s_browse_offset, FAV_FILES_MAX,
+                                &s_browse_paths, &s_browse_count, &s_browse_has_next);
+    sd_card_jit_end(susp);
+    return ok;
 }
 
 static int scan_app_ids(void) {
@@ -271,46 +296,6 @@ static int scan_app_ids(void) {
     return s_file_count;
 }
 
-static int scan_script_files(void) {
-    s_file_count = 0;
-    if (!s_file_paths) return 0;
-    const char *dirp = "/mnt/ghostesp/scripts";
-    DIR *dir = opendir(dirp);
-    if (!dir) return 0;
-    struct dirent *ent;
-    while ((ent = readdir(dir)) != NULL && s_file_count < FAV_FILES_MAX) {
-        if (ent->d_name[0] == '.') continue;
-        size_t len = strlen(ent->d_name);
-        if (len < 4 || strcasecmp(ent->d_name + len - 3, ".gs") != 0) continue;
-        int n = snprintf(s_file_paths[s_file_count], FAVORITE_NAME_LEN, "gs:%s/%s", dirp, ent->d_name);
-        if (n < 0 || n >= FAVORITE_NAME_LEN) continue;
-        s_file_count++;
-    }
-    closedir(dir);
-    return s_file_count;
-}
-
-static int scan_badusb_files(void) {
-    s_file_count = 0;
-    if (!s_file_paths) return 0;
-    const char *dirp = "/mnt/ghostesp/badusb";
-    DIR *dir = opendir(dirp);
-    if (!dir) return 0;
-    struct dirent *ent;
-    while ((ent = readdir(dir)) != NULL && s_file_count < FAV_FILES_MAX) {
-        if (ent->d_name[0] == '.') continue;
-        size_t len = strlen(ent->d_name);
-        if (len < 5 || strcasecmp(ent->d_name + len - 4, ".txt") != 0) continue;
-        // Store the bare script name: the BadUSB view addresses payloads by
-        // name, and the launcher derives it from the path anyway.
-        int n = snprintf(s_file_paths[s_file_count], FAVORITE_NAME_LEN, "badusb:%s", ent->d_name);
-        if (n < 0 || n >= FAVORITE_NAME_LEN) continue;
-        s_file_count++;
-    }
-    closedir(dir);
-    return s_file_count;
-}
-
 // --- list building ---------------------------------------------------------
 
 static void add_row(row_type_t type, int index, const char *label) {
@@ -322,6 +307,7 @@ static void add_row(row_type_t type, int index, const char *label) {
 }
 
 static void build_main_list(int select_row) {
+    favorite_browser_clear();
     s_picker_mode = false;
     s_picker_stage = 0;
     s_picker_category = 0;
@@ -354,6 +340,9 @@ static void build_main_list(int select_row) {
 }
 
 static void build_category_picker(void) {
+    favorite_browser_clear();
+    s_browse_dir[0] = '\0';
+    s_browse_offset = 0;
     s_picker_mode = true;
     s_picker_stage = 0;
     options_view_clear(s_ov);
@@ -388,25 +377,24 @@ static void build_item_picker(int category) {
             add_row(ROW_ITEM, i, k_pin_options[i]);
             avail++;
         }
-    } else if (category == 5) {
-        scan_script_files();
-        for (int i = 0; i < s_file_count; i++) {
-            if (settings_is_favorite(&G_Settings, s_file_paths[i])) continue;
-            add_row(ROW_ITEM, i, fav_display_name(s_file_paths[i]));
+    } else if (favorite_browser_root(category)) {
+        bool scanned = favorite_browser_scan();
+        if (!scanned) {
+            add_row(ROW_NONE, -1, "Unable to read folder");
             avail++;
         }
-    } else if (category == 6) {
-        scan_badusb_files();
-        for (int i = 0; i < s_file_count; i++) {
-            if (settings_is_favorite(&G_Settings, s_file_paths[i])) continue;
-            add_row(ROW_ITEM, i, fav_display_name(s_file_paths[i]));
+        for (size_t i = 0; i < s_browse_count; i++) {
+            const char *path = s_browse_paths[i];
+            char encoded[FAVORITE_NAME_LEN];
+            if (!file_browser_is_dir(path) && favorite_browser_encode(path, encoded, sizeof(encoded)) &&
+                settings_is_favorite(&G_Settings, encoded)) continue;
+            add_row(ROW_ITEM, (int)i, file_browser_name(path));
             avail++;
         }
-    } else {
-        if (category == 1) scan_ir_files();
-        else if (category == 2) scan_nfc_files();
-        else if (category == 3) scan_subghz_files();
-        else if (category == 4) scan_app_ids();
+        if (s_browse_offset > 0) add_row(ROW_PREV, -1, "< Prev Page");
+        if (s_browse_has_next) add_row(ROW_NEXT, -1, "Next Page >");
+    } else if (category == 4) {
+        scan_app_ids();
         for (int i = 0; i < s_file_count; i++) {
             if (settings_is_favorite(&G_Settings, s_file_paths[i])) continue;
             add_row(ROW_ITEM, i, fav_display_name(s_file_paths[i]));
@@ -466,6 +454,9 @@ static void add_favorite(const char *fav) {
 
 static void pick_category(int category) {
     if (category < 0 || category >= k_fav_categories_count) return;
+    const char *root = favorite_browser_root(category);
+    if (root) snprintf(s_browse_dir, sizeof(s_browse_dir), "%s", root);
+    s_browse_offset = 0;
     build_item_picker(category);
 }
 
@@ -474,6 +465,24 @@ static void pick_item(int row_index) {
     if (row_index < 0 || row_index >= s_row_count) return;
     int item_index = s_rows[row_index].index;
     const char *chosen = NULL;
+    if (favorite_browser_root(s_picker_category)) {
+        if (item_index < 0 || (size_t)item_index >= s_browse_count) return;
+        const char *path = s_browse_paths[item_index];
+        if (file_browser_is_dir(path)) {
+            if (file_browser_enter(s_browse_dir, sizeof(s_browse_dir), path)) {
+                s_browse_offset = 0;
+                build_item_picker(s_picker_category);
+            }
+            return;
+        }
+        char encoded[FAVORITE_NAME_LEN];
+        if (!favorite_browser_encode(path, encoded, sizeof(encoded))) {
+            toast_show("Path too long for a favorite", TOAST_WARN);
+            return;
+        }
+        add_favorite(encoded);
+        return;
+    }
     if (s_picker_category == 0) {
         if (item_index >= 0 && item_index < k_pin_options_count) chosen = k_pin_options[item_index];
     } else {
@@ -502,6 +511,14 @@ static void activate_row(int selected) {
             break;
         case ROW_ITEM:
             pick_item(selected);
+            break;
+        case ROW_PREV:
+            if (s_browse_offset >= FAV_FILES_MAX) s_browse_offset -= FAV_FILES_MAX;
+            build_item_picker(s_picker_category);
+            break;
+        case ROW_NEXT:
+            if (s_browse_has_next) s_browse_offset += FAV_FILES_MAX;
+            build_item_picker(s_picker_category);
             break;
         case ROW_BACK:
             favorites_manager_handle_back();
@@ -541,7 +558,11 @@ static bool favorites_manager_handle_back(void) {
     if (s_picker_stage == 0) {
         build_main_list(-1);
     } else {
-        build_category_picker();
+        const char *root = favorite_browser_root(s_picker_category);
+        if (root && file_browser_parent(s_browse_dir, root)) {
+            s_browse_offset = 0;
+            build_item_picker(s_picker_category);
+        } else build_category_picker();
     }
     return true;
 }
@@ -660,6 +681,7 @@ void favorites_manager_create(void) {
 }
 
 void favorites_manager_destroy(void) {
+    favorite_browser_clear();
     // Remember where the cursor was for the next open.
     if (s_ov) s_resume_row = options_view_get_selected(s_ov);
     if (s_ov) { options_view_destroy(s_ov); s_ov = NULL; }

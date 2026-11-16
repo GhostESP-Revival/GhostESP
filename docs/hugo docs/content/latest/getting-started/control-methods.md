@@ -1,18 +1,10 @@
 ---
 title: "Connect to GhostESP"
-description: "Choose the best way to control your GhostESP device."
+description: "Choose the best way to control your GhostESP device"
 weight: 30
-toc: true
 ---
 
-## What this does
-
-GhostESP can be controlled from the device itself, a browser, a serial terminal, a Flipper Zero, or the desktop Control App. Choose the interface that matches the task you want to perform.
-
-## Before you start
-
-- GhostESP is flashed and has completed its first boot.
-- You know which interface you want to use, or can start with the on-device UI or serial CLI.
+Once GhostESP is flashed and has completed its first boot, control it from the device itself, a browser, a serial terminal, a Flipper Zero, or the desktop Control App. Start with the on-device UI or serial CLI if you are unsure which interface you want.
 
 ## Choose a control method
 
@@ -24,21 +16,9 @@ GhostESP can be controlled from the device itself, a browser, a serial terminal,
 | Flipper Zero App | Portable control through a compatible Flipper setup | GhostESP Flipper app and wiring | Feature availability depends on the connected board. |
 | Desktop Control App | Serial workflows and advanced customization | USB data cable and the desktop app | Requires a computer. |
 
-## On-device steps
+## Connect
 
-1. Open the main menu on a supported display board.
-2. Choose the feature you want to use, such as **WiFi → Scanning**.
-3. Follow the on-screen prompts and use the board's supported touch, keys, or encoder controls.
-
-## CLI steps
-
-1. Connect the board with a USB data cable.
-2. Open a serial console at 115200 baud.
-3. Send `help` and confirm that GhostESP prints a command list.
-
-## Expected result
-
-You can access a GhostESP menu or receive output from the `help` command. If you connect through the WebUI, `ghostesp.local` or `192.168.4.1` opens the control interface.
+On a supported display board, open the main menu and choose the feature you want, such as **Wi-Fi → Scanning**, then follow the on-screen prompts with the board's supported touch, keys, or encoder controls. Over a wired link, connect the board with a USB data cable and open a serial console at 115200 baud, then send `help` and confirm GhostESP prints a command list.
 
 ## Troubleshooting
 

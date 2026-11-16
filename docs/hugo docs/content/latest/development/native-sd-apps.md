@@ -1,13 +1,12 @@
 ---
 title: "Native SD Apps"
-description: "Build and run native plug-in apps from the SD card with the GhostESP SDK."
+description: "Build and run native plug-in apps from the SD card with the GhostESP SDK"
 weight: 30
-toc: true
 ---
 
-Native SD apps are ESP-IDF shared objects (`.so`) loaded from the SD card at runtime with Espressif's ELF loader. Apps get a stable API surface with access to the UI system, storage, WiFi, BLE, GPS, NFC, IR, SubGHz, BadUSB, RGB LEDs, and more.
+Native SD apps are ESP-IDF shared objects (`.so`) loaded from the SD card at runtime with Espressif's ELF loader. Apps get a stable API surface with access to the UI system, storage, Wi-Fi, BLE, GPS, NFC, IR, SubGHz, BadUSB, RGB LEDs, and more.
 
-> **PSRAM required**: Native SD apps require a board with PSRAM. Boards without PSRAM (e.g. stock ESP32-S3 without octal PSRAM) cannot load or run native SD apps. Native SD apps are hidden from the Apps menu on no-PSRAM boards; a warning toast is shown on entry. The `requires_psram` per-app manifest field is checked separately for apps that need extra PSRAM beyond the baseline — these apps are also hidden from the gallery on no-PSRAM boards.
+> **PSRAM required**: Native SD apps require a board with PSRAM. Boards without PSRAM (e.g. stock ESP32-S3 without octal PSRAM) cannot load or run native SD apps. Native SD apps are hidden from the Apps menu on no-PSRAM boards; a warning toast is shown on entry. The `requires_psram` per-app manifest field is checked separately for apps that need extra PSRAM beyond the baseline - these apps are also hidden from the gallery on no-PSRAM boards.
 
 Enable the system via `CONFIG_ENABLE_NATIVE_SD_APPS=y` in `menuconfig` (on by default for supported targets).
 
@@ -23,7 +22,9 @@ gbt dist my_tool --target esp32s3 --gapp
 
 Copy the resulting `.gapp` file to `/mnt/ghostesp/apps/` on your SD card, then reboot the device. GhostESP discovers and extracts the app during startup.
 
-A full build tool (`gbt`) is also available — see [GBT Reference]({{< relref "gbt" >}}).
+`.gapp` archives are also scanned from `/mnt/ghostesp/packages/`, which is useful for shipping a bundle of apps or keeping staged packages separate from extracted app folders.
+
+A full build tool (`gbt`) is also available - see [GBT Reference]({{< relref "gbt" >}}).
 
 ## SD Card Layout
 
@@ -32,9 +33,12 @@ A full build tool (`gbt`) is also available — see [GBT Reference]({{< relref "
   apps/<app_id>/           Extracted app folders
     manifest.json
     <entry>.so
+  packages/                .gapp archives staged here are materialized too
   app_cache/               Auto-extracted .gapp content
   appdata/<app_id>/        Per-app storage + .state.json
 ```
+
+At startup the loader scans both `apps/` and `packages/` for `.gapp` archives and extracted folders.
 
 ## Manifest Format
 
@@ -81,15 +85,15 @@ Every app needs a `manifest.json` at its root. Required fields: `id`, `name`, `e
 | `api_version` | Yes | Must be `1`. |
 | `author` | No | Attribution string. |
 | `description` | No | Short description. |
-| `category` | No | Category for future gallery grouping. |
+| `category` | No | Apps gallery folder. One of `Tools`, `System`, `Games`, `Communication`, `Media`, `Sensors` (matched case-insensitively). The app joins that folder alongside the built-ins; an absent or unrecognised value leaves it at the gallery root. Folders with no members are not shown. |
 | `manifest_version` | No | Must be `1` if set. |
 | `package_version` | No | Integer, minimum `1`. |
 | `data_version` | No | Integer, minimum `1`. Bump to trigger data migration. |
-| `storage_scope` | No | `"app"` (default — scoped to `/mnt/ghostesp/appdata/<id>/`) or `"ghostesp"` (absolute paths under `/mnt/ghostesp/`). |
+| `storage_scope` | No | `"app"` (default - scoped to `/mnt/ghostesp/appdata/<id>/`) or `"ghostesp"` (absolute paths under `/mnt/ghostesp/`). |
 | `permissions` | No | Array of permission strings (see below). Unknown permission names make the manifest invalid. |
 | `memory_limit` | No | Advisory limit in bytes for `app_malloc`/`app_calloc` tracked allocations. |
 | `stack_size` | No | Advisory stack size hint in bytes. Also used as the native app tick task's stack size when set (minimum 4096). |
-| `tick_interval_ms` | No | Interval in ms between `on_tick` calls, `16`-`1000`. Defaults to `100` when unset. Use a small value (e.g. `28` for a 35 Hz game loop) only for apps that need frequent updates — every app with `on_tick` gets its own dedicated FreeRTOS task at this interval. |
+| `tick_interval_ms` | No | Interval in ms between `on_tick` calls, `16`-`1000`. Defaults to `100` when unset. Use a small value (e.g. `28` for a 35 Hz game loop) only for apps that need frequent updates - every app with `on_tick` gets its own dedicated FreeRTOS task at this interval. |
 | `requires_psram` | No | If `true`, loader additionally checks that PSRAM is available (all native SD apps already require PSRAM at a baseline). Apps with this flag are hidden from the gallery on no-PSRAM boards. |
 | `requires_features` | No | Array of required physical inputs: `touchscreen` (or `touch`), `dpad` (or `joystick`), `encoder`, and `keyboard` (or `physical_keyboard`). The app remains visible on unsupported hardware; selecting it shows a requirement toast and does not launch it. Unknown feature names make the manifest invalid. |
 | `icon` | No | Path relative to app folder (raw RGB565 binary). |
@@ -99,6 +103,13 @@ Every app needs a `manifest.json` at its root. Required fields: `id`, `name`, `e
 | `icon_source` | No | Path to a PNG file (auto-converted to `icon` format at package time by GBT). |
 | `accent_color` | No | `#RRGGBB` hex accent for gallery cards. |
 | `assets` | No | Array of relative file/folder paths included in the package. |
+| `targets` | No | Array of accepted native SD app targets. When present it is matched instead of `target`: the app loads if any listed target equals the current chip. |
+| `firmware_min` | No | Minimum firmware version string accepted for the app. |
+| `firmware_max` | No | Maximum firmware version string accepted for the app. |
+| `checksum` | No | App checksum string recorded in the manifest. |
+| `forward_back` | No | Boolean, defaults to `false`. |
+
+`targets` is used for target matching; `firmware_min`, `firmware_max`, `checksum`, and `forward_back` are recorded from the manifest.
 
 ### Permissions
 
@@ -120,6 +131,28 @@ Apps request permissions in `manifest.json`. The host API gates every subsystem 
 | `lvgl` | Raw `lv_scr_act()` and `display_get_current_view()` |
 | `rgb` | `rgb_set_all` and any LED APIs |
 | `nrf24` | `nrf24_start`, `nrf24_stop`, pause/state queries |
+| `adc` | ADC channel reads (`adc_read_raw`, `adc_read_mv`) |
+| `pwm` | PWM attach/write/detach |
+| `uart` / `serial` | UART open/write/read/close |
+| `i2c` | I2C probe/write/read/write-read |
+| `spi` | SPI open/transfer/close |
+| `network` | HTTP (`http_get`, `http_post`) and TCP/UDP sockets |
+| `wifi_control` | Wi-Fi connect/disconnect, channel changes, raw TX, deauth, beacon |
+| `power` | Battery percent/voltage/charging |
+| `input` | Button state and input-snapshot APIs |
+| `display` | Backlight brightness get/set |
+| `time` | Wall-clock (`time_unix`, `time_set_unix`) |
+| `random` | Random number/bytes |
+| `system` | Reboot |
+| `camera` | JPEG capture |
+| `usb` | USB HID keyboard/mouse |
+| `ethernet` / `eth` | Ethernet connection status and IP |
+| `audio` / `mic` | Microphone availability/read/RMS |
+| `settings` | Settings get/set/save |
+| `zigbee` | Zigbee/802.15.4 capture |
+| `espnow` / `esp_now` | ESP-NOW start/stop, peers, send/receive |
+
+Several permissions accept aliases: `command`, `infrared`, `led`/`leds`, `ledc`, `http`, `battery`, `buttons`, `backlight`, `microphone`, `ieee802154`, and `esp_now` all resolve to the same bit as their canonical name.
 
 ## Entry Point
 
@@ -154,7 +187,7 @@ The host advertises its capabilities through the `flags` field of `ghostesp_api_
 | `GHOSTESP_APP_FLAG_PERMISSIONS_ENFORCED` | Host enforces the `permissions` array in the manifest. Calls to gated APIs without the matching permission return false / -1. |
 | `GHOSTESP_APP_FLAG_ABSOLUTE_STORAGE_ALLOWED` | Host allows the `storage_*` (non-`app_storage_*`) calls to operate on paths outside `/mnt/ghostesp/appdata/<id>/`. Required for any app that writes to `/mnt/ghostesp/...` directly. |
 
-The `GHOSTESP_API_STRUCT_SIZE_V1` macro is the host-side equivalent of the app-side `GHOSTESP_APP_STRUCT_SIZE_V1`; both expand to `sizeof(ghostesp_api_t)` / `sizeof(ghostesp_app_t)`. Apps rarely need it — only when comparing against a `struct_size` field the host itself publishes.
+The `GHOSTESP_API_STRUCT_SIZE_V1` macro is the host-side equivalent of the app-side `GHOSTESP_APP_STRUCT_SIZE_V1`; both expand to `sizeof(ghostesp_api_t)` / `sizeof(ghostesp_app_t)`. Apps rarely need it - only when comparing against a `struct_size` field the host itself publishes.
 
 Future v1-compatible additions to the API struct are append-only; the host uses `struct_size` to detect which fields are valid.
 
@@ -173,9 +206,9 @@ Load → on_start() → [on_tick() / on_input()] → on_pause() / on_resume() �
 | `on_resume()` | App regains foreground. |
 | `on_stop()` | App is being unloaded. Free resources, save state. Callback runs before `dlclose`. |
 
-Because `on_tick` runs off the UI task, calls into the UI API from it still marshal onto the LVGL task under the hood and block until applied — for high frame-rate rendering, use the async canvas blit (below) instead of a synchronous UI call every tick.
+Because `on_tick` runs off the UI task, calls into the UI API from it still marshal onto the LVGL task under the hood and block until applied - for high frame-rate rendering, use the async canvas blit (below) instead of a synchronous UI call every tick.
 
-Call `api->app_exit()` from your app to request a clean shutdown, or `api->request_exit()` to immediately back out of the app's screen (equivalent to pressing the hardware back button) — useful from a context outside your own callbacks where the cooperative `on_stop` flow doesn't apply.
+Call `api->app_exit()` from your app to request a clean shutdown, or `api->request_exit()` to immediately back out of the app's screen (equivalent to pressing the hardware back button) - useful from a context outside your own callbacks where the cooperative `on_stop` flow doesn't apply.
 
 The host then releases app-owned API resources before unloading the app binary. This includes managed tasks, sockets, event subscriptions, GPIO interrupts, PWM channels, SPI devices, and active radio capture state. Apps must still stop work in `on_stop()` so their own state is consistent before that cleanup runs.
 
@@ -326,7 +359,7 @@ void (*ui_obj_set_scrollbar)(ghostesp_ui_obj_t obj, bool enabled);
 void (*ui_obj_scroll_by)(ghostesp_ui_obj_t obj, int32_t dx, int32_t dy, bool animated);
 ```
 
-`ui_obj_set_scrollable` enables scroll gestures (drag / wheel) on any container. `ui_obj_set_scrollbar` toggles the scrollbar indicator (visible by default once the content overflows). `ui_obj_scroll_by` programmatically nudges the viewport — pass `animated = true` for a tween, `false` for an instant jump (useful when resetting to the top of a list).
+`ui_obj_set_scrollable` enables scroll gestures (drag / wheel) on any container. `ui_obj_set_scrollbar` toggles the scrollbar indicator (visible by default once the content overflows). `ui_obj_scroll_by` programmatically nudges the viewport - pass `animated = true` for a tween, `false` for an instant jump (useful when resetting to the top of a list).
 
 ### Theme Colors
 
@@ -376,7 +409,7 @@ void (*ui_detail_destroy)(ghostesp_detail_t dv);
 ghostesp_ui_obj_t (*ui_detail_finish)(ghostesp_detail_t dv, ghostesp_ui_button_cb_t on_back, void *user);
 ```
 
-`ui_detail_finish` adds a back button — a convenient shorthand. Add a divider first if desired via `ui_detail_add_divider`.
+`ui_detail_finish` adds a back button - a convenient shorthand. Add a divider first if desired via `ui_detail_add_divider`.
 
 ### Popup Dialog
 
@@ -427,9 +460,9 @@ bool (*ui_canvas_blit_async_wait)(uint32_t timeout_ms);
 
 `ui_canvas_blit_rgb565` copies a raw RGB565 buffer into a canvas, nearest-neighbor scaling from `src_width`x`src_height` (row `src_stride` pixels apart) into a `dst_width`x`dst_height` region at `(dst_x, dst_y)`, clipped to the canvas bounds. Requires `ui` permission.
 
-`ui_canvas_is_rgb565_native_byte_order` reports whether the canvas's internal storage already matches the display panel's native RGB565 byte order. When it returns `true`, fill your source buffer directly in screen byte order and skip any manual swap — the blit still handles byte-swapping internally either way, this is purely an optimization hint for apps doing their own pixel packing upstream.
+`ui_canvas_is_rgb565_native_byte_order` reports whether the canvas's internal storage already matches the display panel's native RGB565 byte order. When it returns `true`, fill your source buffer directly in screen byte order and skip any manual swap - the blit still handles byte-swapping internally either way, this is purely an optimization hint for apps doing their own pixel packing upstream.
 
-`ui_canvas_blit_rgb565_async` queues the same blit on the UI task and returns immediately instead of blocking until it's applied — a rendering loop that blits synchronously every frame serializes its own render against the UI task's compositing/flush, which roughly halves achievable frame rate. Only one async blit may be outstanding at a time (it returns `false` if one is already queued), and **`pixels` must stay valid and unmodified until the blit completes** — render into a second buffer, don't touch the one just handed over. Call `ui_canvas_blit_async_wait(timeout_ms)` before reusing that buffer; it returns `true` once no blit is outstanding (or immediately if none ever was).
+`ui_canvas_blit_rgb565_async` queues the same blit on the UI task and returns immediately instead of blocking until it's applied - a rendering loop that blits synchronously every frame serializes its own render against the UI task's compositing/flush, which roughly halves achievable frame rate. Only one async blit may be outstanding at a time (it returns `false` if one is already queued), and **`pixels` must stay valid and unmodified until the blit completes** - render into a second buffer, don't touch the one just handed over. Call `ui_canvas_blit_async_wait(timeout_ms)` before reusing that buffer; it returns `true` once no blit is outstanding (or immediately if none ever was).
 
 ### Animations
 
@@ -514,7 +547,7 @@ bool (*ui_screen_is_compact)(void);
 bool (*ui_has_touchscreen)(void);
 ```
 
-`ui_screen_is_compact` reports whether the host considers the current screen a "compact" layout (narrow, single-column — e.g. cardputer, M5StickC) versus a wide layout (gallery / grid). Use it to swap list views for grids, hide labels, or pick a denser font. `ui_has_touchscreen` reports whether the device has a touch panel; combine with `GHOSTESP_INPUT_TOUCH` events in `on_input` to add touch-only affordances.
+`ui_screen_is_compact` reports whether the host considers the current screen a "compact" layout (narrow, single-column - e.g. cardputer, M5StickC) versus a wide layout (gallery / grid). Use it to swap list views for grids, hide labels, or pick a denser font. `ui_has_touchscreen` reports whether the device has a touch panel; combine with `GHOSTESP_INPUT_TOUCH` events in `on_input` to add touch-only affordances.
 
 ### Storage (Absolute, `storage` Permission + `storage_scope: "ghostesp"`)
 
@@ -578,11 +611,11 @@ bool (*asset_session_begin)(void);
 void (*asset_session_end)(void);
 ```
 
-`storage_read_at` and `app_storage_read_at` are offset-seeking variants of `storage_read`/`app_storage_read`, following the same absolute/app-scoped path rules. `asset_storage_read_at` reads from a path under the app's `assets/` folder — but transparently, some assets may never be extracted to the SD cache at all: if the app's `.gapp` package was materialized with those assets left packed, `asset_storage_read_at` reads straight out of the installed `.gapp` archive at the recorded byte offset instead. Use `asset_storage_size` to get an asset's length regardless of which of the two cases applies — don't assume a real file exists on disk at the path `asset_path()` returns.
+`storage_read_at` and `app_storage_read_at` are offset-seeking variants of `storage_read`/`app_storage_read`, following the same absolute/app-scoped path rules. `asset_storage_read_at` reads from a path under the app's `assets/` folder - but transparently, some assets may never be extracted to the SD cache at all: if the app's `.gapp` package was materialized with those assets left packed, `asset_storage_read_at` reads straight out of the installed `.gapp` archive at the recorded byte offset instead. Use `asset_storage_size` to get an asset's length regardless of which of the two cases applies - don't assume a real file exists on disk at the path `asset_path()` returns.
 
-Bracket a run of many small reads against the same file with `asset_session_begin()`/`asset_session_end()`. Without a session, every `*_read_at` call opens and closes the file fresh; inside a session, the file handle for the most recently touched path is kept open across calls, which matters when per-read `fopen`/`fclose` overhead would otherwise dominate frame time (e.g. a game reading several small lumps every tick). `asset_session_begin` also holds the SD card mounted (relevant on JIT-mount boards) for the duration — always pair it with `asset_session_end`, including on error paths.
+Bracket a run of many small reads against the same file with `asset_session_begin()`/`asset_session_end()`. Without a session, every `*_read_at` call opens and closes the file fresh; inside a session, the file handle for the most recently touched path is kept open across calls, which matters when per-read `fopen`/`fclose` overhead would otherwise dominate frame time (e.g. a game reading several small lumps every tick). `asset_session_begin` also holds the SD card mounted (relevant on JIT-mount boards) for the duration - always pair it with `asset_session_end`, including on error paths.
 
-### WiFi
+### Wi-Fi
 
 ```c
 bool      (*wifi_start_scan)(void);
@@ -591,7 +624,7 @@ uint16_t  (*wifi_ap_count)(void);
 bool      (*wifi_scan_get_ap)(uint16_t index, ghostesp_wifi_ap_info_t *out);
 ```
 
-### WiFi Control (`wifi_control` Permission)
+### Wi-Fi Control (`wifi_control` Permission)
 
 ```c
 bool (*wifi_connect)(const char *ssid, const char *password, uint32_t timeout_ms);
@@ -700,7 +733,7 @@ typedef struct {
 bool (*input_snapshot)(ghostesp_input_snapshot_t *out);
 ```
 
-`held` is the current bitmask (same bits as `input_buttons_state`). `pressed`/`released` are edge bitmasks accumulated since the *last* `input_snapshot` call — a button pressed and released between two polls still sets its bit in both, so nothing gets lost even if `on_tick` isn't called often enough to catch every raw event. `last_change_ms` is the host uptime (ms) of the most recent state change. Both edge masks are cleared each time `input_snapshot` is called, so read it once per tick rather than from multiple call sites.
+`held` is the current bitmask (same bits as `input_buttons_state`). `pressed`/`released` are edge bitmasks accumulated since the *last* `input_snapshot` call - a button pressed and released between two polls still sets its bit in both, so nothing gets lost even if `on_tick` isn't called often enough to catch every raw event. `last_change_ms` is the host uptime (ms) of the most recent state change. Both edge masks are cleared each time `input_snapshot` is called, so read it once per tick rather than from multiple call sites.
 
 ### App Tasks (`tasks` Permission)
 
@@ -739,7 +772,7 @@ void    (*system_reboot)(void);
 
 Time APIs require `time`. Reboot requires `system`.
 
-### WiFi Monitor And Raw TX
+### Wi-Fi Monitor And Raw TX
 
 ```c
 typedef void (*ghostesp_wifi_packet_cb_t)(const uint8_t *data, size_t len, int8_t rssi, uint8_t channel, void *user);
@@ -753,7 +786,7 @@ bool    (*wifi_raw_tx)(const void *data, size_t len);
 
 Monitor receive requires `wifi`. Channel changes and raw TX require `wifi_control`. Monitor mode is stopped automatically when the app exits.
 
-### WiFi Async and Live Scan
+### Wi-Fi Async and Live Scan
 
 The basic `wifi_start_scan` blocks the calling task until the scan completes. For non-blocking or continuous scans:
 
@@ -773,7 +806,7 @@ void (*wifi_live_scan_stop)(void);
 bool (*wifi_live_scan_active)(void);
 ```
 
-`wifi_live_scan_start` begins a repeating scan loop in the background; the AP list refreshes automatically between calls to `wifi_ap_count` and `wifi_scan_get_ap`. `wifi_live_scan_active` reports whether the background loop is currently running. Always call `wifi_live_scan_stop` from `on_stop` to release the worker task — it is not auto-stopped on app exit.
+`wifi_live_scan_start` begins a repeating scan loop in the background; the AP list refreshes automatically between calls to `wifi_ap_count` and `wifi_scan_get_ap`. `wifi_live_scan_active` reports whether the background loop is currently running. Always call `wifi_live_scan_stop` from `on_stop` to release the worker task - it is not auto-stopped on app exit.
 
 ### Protocol Native Hooks
 
@@ -922,6 +955,39 @@ void (*nrf24_set_paused)(bool paused);
 
 Requires `nrf24` permission. Available on targets with NRF24 radio module support.
 
+### ESP-NOW
+
+```c
+typedef struct {
+    uint8_t  mac[6];
+    int8_t   rssi;
+    uint32_t last_seen_ms;
+    char     name[24];   /* GHOSTESP_ESPNOW_NAME_MAX */
+} ghostesp_espnow_peer_t;
+
+typedef struct {
+    uint8_t  sender_mac[6];
+    uint32_t received_at_ms;
+    char     sender_name[24];   /* GHOSTESP_ESPNOW_NAME_MAX */
+    char     text[160];         /* GHOSTESP_ESPNOW_MESSAGE_MAX */
+} ghostesp_espnow_message_t;
+
+bool        (*espnow_start)(uint8_t channel);
+void        (*espnow_stop)(void);
+bool        (*espnow_is_active)(void);
+uint8_t     (*espnow_channel)(void);
+const char *(*espnow_name)(void);
+const char *(*espnow_last_error)(void);
+bool        (*espnow_announce)(void);
+int         (*espnow_peer_count)(void);
+bool        (*espnow_get_peer)(int index, ghostesp_espnow_peer_t *out);
+bool        (*espnow_send)(const uint8_t mac[6], const char *text);
+int         (*espnow_message_count)(void);
+bool        (*espnow_receive)(ghostesp_espnow_message_t *out);
+```
+
+Requires the `espnow` permission (alias `esp_now`). `espnow_start` brings ESP-NOW up on a channel and `espnow_announce` broadcasts the device name so peers can discover it. Enumerate peers with `espnow_peer_count`/`espnow_get_peer`, send with `espnow_send`, and drain incoming messages with `espnow_message_count`/`espnow_receive`. `espnow_last_error` returns the last failure text (or an `ESP-NOW permission required` message). The link is stopped automatically when the app exits.
+
 ### NFC
 
 ```c
@@ -991,7 +1057,7 @@ void *(*raw_symbol)(const char *name);
 
 ## SDK Helpers (`ghostesp_helpers.h`)
 
-The SDK ships an optional `ghostesp_helpers.h` header alongside `ghostesp_plugin_api.h`. It provides inline functions and macros that eliminate the most common boilerplate patterns. All helpers are zero-cost for unused functions — just `#include "ghostesp_helpers.h"` alongside the API header.
+The SDK ships an optional `ghostesp_helpers.h` header alongside `ghostesp_plugin_api.h`. It provides inline functions and macros that eliminate the most common boilerplate patterns. All helpers are zero-cost for unused functions - just `#include "ghostesp_helpers.h"` alongside the API header.
 
 ### Null-Safe API Calls
 
@@ -1333,7 +1399,7 @@ Build one `.so` per supported native SD app target. Xtensa (esp32/s2/s3) and RIS
 
 `esp32c3` is not listed because the current ELF loader configuration does not enable native SD `.gapp` shared-object loading for C3.
 
-### Target-specific release workflow
+### Target-Specific Release Workflow
 
 Use `gbt dist` once per target. Do not build for one target and then run `gbt package`: packaging otherwise falls back to the target in `manifest.json` and can label the archive incorrectly.
 
@@ -1388,9 +1454,9 @@ The load will fail with `ELC: exec alloc N -> 0x0 internal=0 exec=0` if the app'
 - Use `memory_limit` in `manifest.json` conservatively (the tracked limit covers `app_malloc`/`app_calloc` usage, but the .so's executable sections consume separate internal heap).
 - Reduce code size (link-time optimization, strip unused functions, enable `-Os`).
 
-### Flash-XIP on ESP32-C5 (>4 MB flash)
+### Flash-XIP on ESP32-C5 (>4 MB Flash)
 
-C5 firmware builds with a dedicated `napps` flash partition (boards with more than 4 MB of flash) lift the internal-RAM ceiling entirely. The loader stages relocation in RAM, programs the relocated `.text` into the `napps` partition, and executes it **in place** from the flash mapping. `.data`/`.bss`/`.got` still live in RAM, but the app's executable footprint in internal SRAM drops to near zero — a typical app consumes only a few hundred bytes of internal heap regardless of code size. An identical relocated image already resident in the partition is reused on subsequent launches, so repeat loads do not re-erase flash. This is on by default on supported C5 boards; 4 MB C5 boards have no room for the partition and fall back to the internal-RAM exec path above.
+C5 firmware builds with a dedicated `napps` flash partition (boards with more than 4 MB of flash) lift the internal-RAM ceiling entirely. The loader stages relocation in RAM, programs the relocated `.text` into the `napps` partition, and executes it **in place** from the flash mapping. `.data`/`.bss`/`.got` still live in RAM, but the app's executable footprint in internal SRAM drops to near zero - a typical app consumes only a few hundred bytes of internal heap regardless of code size. An identical relocated image already resident in the partition is reused on subsequent launches, so repeat loads do not re-erase flash. This is on by default on supported C5 boards; 4 MB C5 boards have no room for the partition and fall back to the internal-RAM exec path above.
 
 ### Non-Executable Data PSRAM Preference
 
@@ -1403,11 +1469,11 @@ This conserves internal RAM for executable allocations.
 
 ### Stack
 
-The app's stack is allocated from internal RAM (or PSRAM where the board supports it and PSRAM stacks are stable). The `stack_size` field in `manifest.json` is advisory — the firmware allocates a fixed runner task stack. Deep call chains or large stack locals may exhaust it.
+The app's stack is allocated from internal RAM (or PSRAM where the board supports it and PSRAM stacks are stable). The `stack_size` field in `manifest.json` is advisory - the firmware allocates a fixed runner task stack. Deep call chains or large stack locals may exhaust it.
 
 ### Firmware-Side Internal RAM Budget
 
-The firmware's ELF loading infrastructure does not reserve a dedicated pool; it shares internal heap with other subsystems. Free internal RAM at load time depends on which features are active (WiFi, BLE, LVGL buffers, etc.). Use `api->system_free_internal_heap()` from your app to see the remaining budget at runtime.
+The firmware's ELF loading infrastructure does not reserve a dedicated pool; it shares internal heap with other subsystems. Free internal RAM at load time depends on which features are active (Wi-Fi, BLE, LVGL buffers, etc.). Use `api->system_free_internal_heap()` from your app to see the remaining budget at runtime.
 
 A boot-time message in the monitor log shows free internal RAM after init:
 ```
@@ -1425,4 +1491,4 @@ If your app fails to load with an exec-memory error, check this value. Disabling
 | `apps info <id>` | Show manifest details and failure count |
 | `apps run <id>` | Launch app (UI mode if screen available, headless otherwise) |
 | `apps stop` | Stop the currently running app |
-| `apps reset <id>` | Clear failure diagnostic state |
+| `apps reset <id>` | Clear failure diagnostic state (alias: `apps unquarantine <id>`) |

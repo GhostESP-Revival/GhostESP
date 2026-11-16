@@ -11,24 +11,24 @@ Search index: /search-index.json
 
 ## On this page
 
-- [File format](#file-format)
+- [File Format](#file-format)
 - [Fields](#fields)
-- [Raw signal format](#raw-signal-format)
-- [Storage location](#storage-location)
-- [Managing saved signals](#managing-saved-signals)
-- [On-device UI](#on-device-ui)
-- [Command line](#command-line)
-- [Manual file creation](#manual-file-creation)
-- [Flipper Zero compatibility](#flipper-zero-compatibility)
-- [File naming](#file-naming)
+- [Raw Signal Format](#raw-signal-format)
+- [CLI Snapshot Format](#cli-snapshot-format)
+- [Managing Saved Signals](#managing-saved-signals)
+- [On-Device UI](#on-device-ui)
+- [CLI](#cli)
+- [Manual File Creation](#manual-file-creation)
+- [Flipper Zero Compatibility](#flipper-zero-compatibility)
+- [File Naming](#file-naming)
 - [Notes](#notes)
 - [Troubleshooting](#troubleshooting)
 
 ---
 
-GhostESP uses the Flipper SubGhz Key File format for storing captured signals. This format is compatible with Flipper Zero devices, allowing signal interchange.
-## File format
-SubGHz signals are saved as .sub text files with the following structure:
+The on-device UI stores captured signals as Flipper SubGhz Key File .sub files, compatible with Flipper Zero devices. The subghz CLI writes a different file with the same .sub extension: a ghostesp_subghz_snapshot RSSI spectrum snapshot, which is not a Flipper file and cannot be transmitted. Both live in /mnt/ghostesp/subghz/ on the SD card.
+## File Format
+On-device signals are saved as Flipper .sub text files with the following structure:
 Filetype: Flipper SubGhz Key File
 Version: 1
 Frequency: 433920000
@@ -49,7 +49,7 @@ Manufacture: Unknown
 - TE: Timing element (microseconds) for the protocol
 - Manufacture: Manufacturer information (optional)
 - RAW_Data: Raw timing sequence (for raw captures only)
-## Raw signal format
+## Raw Signal Format
 For undecoded signals, the file uses the RAW_Data field:
 Filetype: Flipper SubGhz Key File
 Version: 1
@@ -58,23 +58,36 @@ Preset: FuriHalSubGhzPresetOok270Async
 Protocol: RAW
 RAW_Data: 100 -200 100 -200 100 -400 100 -200 ...
 RAW_Data contains timing values in microseconds, alternating between positive (HIGH) and negative (LOW) periods.
-## Storage location
-All SubGHz files are stored in /mnt/ghostesp/subghz/ on the SD card.
-## Managing saved signals
-### On-device UI
+## CLI Snapshot Format
+subghz save writes the scanner’s RSSI level buffer as a spectrum snapshot under the same .sub extension:
+ghostesp_subghz_snapshot=1
+name=snapshot_1A2B3C4D
+base_mhz=43392
+step_khz=200
+cursor=37
+levels=12,14,11,9,...
+- name: snapshot name (sanitized from the name hint, or snapshot_%08X)
+- base_mhz / step_khz: scan band and channel spacing
+- cursor: scanner position when captured
+- levels: 64 RSSI display levels (0-100), comma-separated
+A snapshot is a picture of RF activity; it cannot be replayed or transmitted. Signals you can transmit are Flipper .sub files written by the on-device UI.
+## Managing Saved Signals
+### On-Device UI
 - Open SubGHz → Saved to browse captured signals.
 - Navigate through the list using the arrow keys.
 - Select a file to view details or replay.
 - Use Delete to remove unwanted signals.
-### Command line
-# List all saved signals
+### CLI
+The CLI works on spectrum snapshots, not decodable signals:
+# List saved spectrum snapshots
 subghz list
-# Load a specific signal
+# Restore a snapshot into the scanner display (does not transmit)
 subghz load &lt;name&gt;
-# Load the last captured signal
+# Restore the last captured/loaded snapshot
 subghz load last
-## Manual file creation
-You can manually create .sub files if you know the protocol details:
+To view or replay an on-device .sub signal, use the on-device Saved list instead.
+## Manual File Creation
+You can manually create Flipper .sub files for the on-device Saved list if you know the protocol details:
 - Create a text file with the .sub extension.
 - Add the required fields in the correct format.
 - Save to /mnt/ghostesp/subghz/.
@@ -89,18 +102,16 @@ Bit: 24
 Key: A1 B2 C3 D4 E5 F6
 TE: 390
 Manufacture: Unknown
-## Flipper Zero compatibility
-GhostESP uses the same file format as Flipper Zero, enabling:
+## Flipper Zero Compatibility
+On-device signal files use the same format as Flipper Zero, enabling:
 - Import signals from Flipper Zero devices
 - Export signals to Flipper Zero devices
 - Use community signal databases
 - Share signals across platforms
 Simply copy .sub files between devices using the SD card.
-## File naming
-GhostESP auto-generates file names based on:
-- Decoded signals: Protocol name &#43; decoded code (e.g., Princeton_A1B2C3.sub)
-- Raw signals: Timestamp (e.g., capture_12345678.sub)
-- Custom names: You can provide a name hint during capture
+## File Naming
+- CLI snapshots: auto-generated as snapshot_%08X (tick-based), or the sanitized name hint you pass to subghz save.
+- On-device signals: the UI names the file from the decoded protocol/code, or a raw timestamp, when you save.
 ## Notes
 - Files are plain text and can be edited with any text editor.
 - Editing frequency or protocol fields can enable transmission on different bands.

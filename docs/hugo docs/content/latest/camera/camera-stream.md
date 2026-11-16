@@ -1,22 +1,23 @@
 ---
 title: "Camera Stream"
-description: "Live MJPEG camera stream viewable in a browser via the GhostESP web interface."
+description: "Live MJPEG camera stream viewable in a browser via the GhostESP web interface"
 weight: 5
-toc: true
 ---
 
 GhostESP can serve a live camera stream over HTTP, viewable directly in a web browser at `http://ghostesp.local/camera`. The stream uses MJPEG multipart encoding for low-latency live video.
 
 ## Supported Boards
 
-- **Seeed Studio XIAO ESP32-S3 Sense** (`xiao_esp32s3_sense`) — the only camera-enabled build currently available.
+- **Seeed Studio XIAO ESP32-S3 Sense** (`xiao_esp32s3_sense`) - enables `CONFIG_HAS_CAMERA` and provides the MJPEG stream and motion detector described here.
 - Requires `CONFIG_HAS_CAMERA` and 8 MB PSRAM for best results.
+
+The CrowPanel Advanced P4 builds also ship a separate native camera app (`CONFIG_CROWPANEL_P4_CAMERA`); this page covers the S3 Sense streaming and motion-detector features.
 
 ## Quality
 
 Unlike the motion detector (which uses QQVGA grayscale at 160x120), the camera stream uses:
 
-- **JPEG** pixel format (hardware-encoded by the OV2640 sensor)
+- **JPEG** pixel format (hardware-encoded by the OV3660 sensor)
 - **SVGA (800x600)** default resolution
 - **Quality 80** JPEG compression
 - **2 frame buffers in PSRAM** for smooth double-buffered capture
@@ -26,7 +27,7 @@ Resolution and quality can be changed at runtime without restarting the stream.
 
 ## Quick Start
 
-### From the web interface
+### From the Web Interface
 
 Open a browser connected to the GhostESP access point and navigate to:
 
@@ -54,21 +55,21 @@ camerastream stop
 
 The camera page at `/camera` includes inline controls:
 
-- **Quality slider** (10–100) — adjusts JPEG compression quality in real time
-- **Resolution dropdown** — switch between QQVGA, QVGA, VGA, SVGA, XGA, SXGA, and UXGA
-- **FPS selector** — set target framerate (5–30 fps)
-- **Stop / Start buttons** — toggle the stream on and off
+- **Quality slider** (10-100) - adjusts JPEG compression quality in real time
+- **Resolution dropdown** - switch between QQVGA, QVGA, VGA, SVGA, XGA, SXGA, and UXGA
+- **FPS selector** - set target framerate (5-30 fps)
+- **Stop / Start buttons** - toggle the stream on and off
 
 Controls send commands through the `/camera/api` endpoint, which is restricted to camera commands only.
 
 ## CLI Commands
 
-- `camerastream start` — Initialize camera and enable streaming.
-- `camerastream stop` — Stop streaming and release the camera.
-- `camerastream status` — Show current state (running, quality, resolution, FPS, PSRAM, client count, frames served).
-- `camerastream quality <1-100>` — Set JPEG quality.
-- `camerastream resolution <name>` — Set resolution (see below).
-- `camerastream fps <1-30>` — Set target framerate.
+- `camerastream start` - Initialize camera and enable streaming.
+- `camerastream stop` - Stop streaming and release the camera.
+- `camerastream status` - Show current state (running, quality, resolution, FPS, PSRAM, client count, frames served).
+- `camerastream quality <1-100>` - Set JPEG quality.
+- `camerastream resolution <name>` - Set resolution (see below).
+- `camerastream fps <1-30>` - Set target framerate.
 
 ### Available Resolutions
 
@@ -94,8 +95,8 @@ The camera stream and motion detector **share the same camera hardware** and can
 
 ## Troubleshooting
 
-- **"Stream Unavailable" in browser** — The stream hasn't started yet. The page auto-starts it, but if it fails, try `camerastream start` from the CLI.
-- **"Stream busy — another client is connected"** — Only one client can view the stream at a time. Close the other tab or browser.
-- **Camera init failed** — Check the camera ribbon cable connection on the XIAO Sense.
-- **Low framerate at high resolutions** — Drop to VGA or SVGA for smoother streaming. UXGA is bandwidth-heavy.
-- **Stream disconnects after a while** — The HTTP server has send timeouts; the page will auto-reconnect after 3 seconds.
+- **"Stream Unavailable" in browser** - The stream hasn't started yet. The page auto-starts it, but if it fails, try `camerastream start` from the CLI.
+- **"Stream busy - another client is connected"** - Only one client can view the stream at a time. Close the other tab or browser.
+- **Camera init failed** - Check the camera ribbon cable connection on the XIAO Sense.
+- **Low framerate at high resolutions** - Drop to VGA or SVGA for smoother streaming. UXGA is bandwidth-heavy.
+- **Stream disconnects after a while** - The HTTP server has send timeouts; the page will auto-reconnect after 3 seconds.

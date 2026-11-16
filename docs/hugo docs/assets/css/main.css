@@ -291,6 +291,26 @@ html[data-theme="dark"] .sidebar__result mark {
   padding-bottom: 2rem;
 }
 
+/* Classic vs curated (neon-skin) navigation. Both are rendered; CSS picks one. */
+.sidebar__nav--classic,
+.sidebar__nav--new {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.sidebar__nav--new {
+  display: none;
+}
+
+html[data-skin="neon"] .sidebar__nav--classic {
+  display: none;
+}
+
+html[data-skin="neon"] .sidebar__nav--new {
+  display: flex;
+}
+
 .sidebar__link {
   padding: 0.55rem 0.75rem;
   border-radius: 0.5rem;
@@ -377,7 +397,7 @@ html[data-theme="dark"] .sidebar__link--active {
    states, and keep the list rendered while `.collapsing` animates its height.
    Without this, `display: none` during the transition means the height
    animation renders nothing, no `transitionend` fires, and the section only
-   appears after Bootstrap's transition-timeout fallback — a visible delay
+   appears after Bootstrap's transition-timeout fallback Ã¢â‚¬â€ a visible delay
    before the list pops open. */
 .sidebar__group-items.show,
 .sidebar__group-items.collapsing {
@@ -439,6 +459,11 @@ html[data-theme="dark"] .sidebar__sublink--active {
   min-height: calc(100vh - var(--topbar-height));
   flex-grow: 1;
   min-width: 0;
+  /* Backstop: `clip` (unlike `hidden`) does not create a scroll container, so
+     it never breaks `position: sticky`, but still stops stray wide content
+     from widening the page. Wide tables live in .table-scroll and scroll
+     themselves instead. */
+  overflow-x: clip;
 }
 
 
@@ -446,6 +471,9 @@ html[data-theme="dark"] .sidebar__sublink--active {
   flex: 1;
   padding: 2rem;
   background-color: var(--bg-alt);
+  /* Long unbroken tokens (config flags, URLs, file paths) should wrap on
+     narrow screens instead of pushing the page wide. */
+  overflow-wrap: break-word;
 }
 
 .content__body h1,
@@ -453,6 +481,7 @@ html[data-theme="dark"] .sidebar__sublink--active {
 .content__body h3,
 .content__body h4 {
   color: var(--fg);
+  overflow-wrap: break-word;
 }
 
 .content__body h1[id],
@@ -479,6 +508,8 @@ html[data-theme="dark"] .sidebar__sublink--active {
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
   gap: 0.6rem;
 }
 
@@ -557,7 +588,13 @@ html[data-theme="dark"] .content__body h2 .heading-anchor {
   display: grid;
   gap: 1.25rem;
   margin-top: 2rem;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
+}
+
+/* A paragraph placed directly under the card grid (e.g. the home page's
+   "Stuck?" line) needs breathing room from the cards above it. */
+.doc__cards + p {
+  margin-top: 2rem;
 }
 
 .doc__card {
@@ -601,6 +638,7 @@ html[data-theme="dark"] .doc__card:hover {
   box-shadow: 0 20px 44px rgba(0, 0, 0, 0.55);
 }
 
+/* Classic "On this page" (the default look) */
 .doc__toc {
   margin-top: 3rem;
   margin-bottom: 3rem;
@@ -629,6 +667,66 @@ html[data-theme="dark"] .doc__card:hover {
   gap: 0.75rem;
 }
 
+/* --- Neon-skin "On this page": compact and collapsible --- */
+.doc__toc--new {
+  display: none;
+}
+
+html[data-skin="neon"] .doc__toc--classic {
+  display: none;
+}
+
+html[data-skin="neon"] .doc__toc--new {
+  display: flex;
+  margin: 1.5rem 0 2rem;
+  padding: 0.85rem 1.05rem;
+  border-radius: 0.85rem;
+  gap: 0;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.05);
+}
+
+.doc__toc--new > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 0;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  list-style: none;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-family: var(--font-mono);
+  color: var(--fg-muted);
+}
+
+.doc__toc--new > summary::-webkit-details-marker {
+  display: none;
+}
+
+.doc__toc--new > summary::after {
+  content: "▾";
+  font-size: 0.8rem;
+  transition: transform 0.2s ease;
+}
+
+.doc__toc--new[open] > summary::after {
+  transform: rotate(180deg);
+}
+
+.doc__toc--new > summary:hover {
+  color: var(--fg);
+}
+
+.doc__toc--new nav {
+  margin-top: 0.85rem;
+  max-height: 45vh;
+  overflow: auto;
+}
+
 .doc__toc ul {
   list-style: none;
   margin: 0;
@@ -636,7 +734,6 @@ html[data-theme="dark"] .doc__card:hover {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
-  margin-top: 1rem;
 }
 
 .doc__toc ul ul {
@@ -848,6 +945,117 @@ html[data-theme="dark"] .topbar__theme {
   color: var(--fg);
 }
 
+/* Opt-in neon skin toggle (see assets/css/skin-neon.css). Styled as a small
+   text link with a "beta" badge rather than a circular icon button. */
+.topbar__skin {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.55rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: none;
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.topbar__skin:hover,
+.topbar__skin:focus-visible {
+  color: var(--fg);
+  outline: none;
+}
+
+/* Underline only the wording, never the "beta" badge. */
+.topbar__skin:hover .topbar__skin-label,
+.topbar__skin:focus-visible .topbar__skin-label {
+  text-decoration: underline;
+  text-underline-offset: 0.2rem;
+}
+
+.topbar__skin-label--on {
+  display: none;
+}
+
+/* Compact label shown only on small screens, where the descriptive labels
+   would push the theme toggle off the edge of the topbar. */
+.topbar__skin-label--short {
+  display: none;
+}
+
+.topbar__skin-badge {
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0.1rem 0.3rem;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+}
+
+html[data-skin="neon"] .topbar__skin-label--off {
+  display: none;
+}
+
+html[data-skin="neon"] .topbar__skin-label--on {
+  display: inline;
+}
+
+html[data-skin="neon"] .topbar__skin-badge {
+  display: none;
+}
+
+@media (max-width: 600px) {
+  .topbar__skin {
+    font-size: 0.68rem;
+    padding: 0.2rem 0.35rem;
+    gap: 0.25rem;
+  }
+
+  .topbar__skin-badge {
+    display: none;
+  }
+
+  /* Swap the long descriptive labels for a single compact one so the topbar
+     actions always fit next to the logo. */
+  .topbar__skin .topbar__skin-label--off,
+  .topbar__skin .topbar__skin-label--on {
+    display: none;
+  }
+
+  .topbar__skin .topbar__skin-label--short {
+    display: inline;
+  }
+
+  .topbar__logo {
+    height: 32px;
+  }
+
+  .sidebar__logo {
+    height: 40px;
+  }
+
+  .topbar__actions {
+    gap: 0.5rem;
+  }
+}
+
+@media (max-width: 400px) {
+  .topbar__logo {
+    height: 28px;
+  }
+
+  .topbar__actions {
+    gap: 0.4rem;
+  }
+}
+
 html[data-theme="dark"] .sidebar__group-toggle:hover {
   background-color: rgba(255, 255, 255, 0.06);
 }
@@ -995,6 +1203,40 @@ html[data-theme="dark"] .icon-theme__moon path {
   border: 1px solid var(--border);
 }
 
+/* Every Markdown table is wrapped by render-table.html. The wrapper is what
+   scrolls horizontally, so a table can be wider than the viewport without
+   widening the page. Tables that fit still stretch to 100% as before. */
+.table-scroll {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  margin: 1.5rem 0;
+}
+
+.table-scroll > table {
+  margin: 0;
+}
+
+/* Touch devices can't hover to see a hidden column, so let cell contents wrap
+   instead of forcing an unnecessarily wide table. */
+@media (max-width: 700px) {
+  .content__body td code {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .content__body thead th,
+  .content__body tbody td {
+    padding: 0.6rem 0.7rem;
+  }
+
+  .content__body table {
+    font-size: 0.92rem;
+  }
+}
+
 .content__body thead th {
   background-color: var(--code-bg);
   padding: 0.85rem 1rem;
@@ -1023,11 +1265,27 @@ html[data-theme="dark"] .icon-theme__moon path {
 }
 
 blockquote {
-  margin: 2rem 0;
-  padding: 1rem 1.25rem;
-  border-left: 5px solid var(--accent);
+  margin: 1.5rem 0;
+  padding: 0.8rem 1.05rem;
+  border: 1px solid rgba(var(--accent-rgb), 0.18);
   border-radius: 0.75rem;
   background-color: var(--blockquote-bg);
+}
+
+/* Keep callout padding even: the browser default paragraph margins inside a
+   blockquote made the bottom look roomier than the top. */
+.content__body blockquote > p {
+  margin: 0;
+}
+
+.content__body blockquote > p + p,
+.content__body blockquote > ul,
+.content__body blockquote > ol {
+  margin-top: 0.6rem;
+}
+
+.content__body blockquote > :last-child {
+  margin-bottom: 0;
 }
 
 .content__body blockquote .note-heading {
@@ -1041,7 +1299,7 @@ blockquote {
 .content__body blockquote.docs-danger {
   margin: 1.25rem 0;
   padding: 0.6rem 0.9rem;
-  border-left: 4px solid #d63031;
+  border: 1px solid rgba(214, 48, 49, 0.35);
   border-radius: 0.5rem;
   background-color: rgba(214, 48, 49, 0.08);
 }
@@ -1134,8 +1392,28 @@ html[data-theme="dark"] .content__body iframe {
     padding: 1rem;
   }
 
+  /* .content__body already supplies the page gutter on phones; the nested
+     .doc padding only squeezed the text column, so drop it here. */
   .doc {
-    padding: 1.5rem;
+    padding: 0;
+  }
+
+  /* Long single-word headings ("Troubleshooting", "Fingerprinting") overflow
+     at the desktop sizes once the font renders in the wide mono face. */
+  .content__body h1 {
+    font-size: 1.8rem;
+  }
+
+  .content__body h2 {
+    font-size: 1.45rem;
+  }
+
+  .content__body h3 {
+    font-size: 1.25rem;
+  }
+
+  .content__body h4 {
+    font-size: 1.1rem;
   }
 
   .topbar {
@@ -1771,4 +2049,229 @@ html[data-theme="dark"] .search-page__submit {
   line-height: 1.55;
   white-space: pre-wrap;
   overflow-x: auto;
+}
+
+/* ---------------------------------------------------------------------------
+   Diagrams Ã¢â‚¬â€ used by the `seq` (packet/sequence) and `flow` (steps) shortcodes
+   --------------------------------------------------------------------------- */
+.diagram {
+  margin: 1.75rem 0;
+  padding: 1rem 1.15rem 1.15rem;
+  border: 1px solid var(--border);
+  border-radius: 0.85rem;
+  background-color: var(--surface);
+}
+
+.diagram__title {
+  margin: 0 0 1rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg-muted);
+}
+
+.diagram__caption {
+  margin: 1rem 0 0;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--fg-muted);
+}
+
+/* --- sequence / packet flow --- */
+.diagram__actors {
+  display: grid;
+  grid-template-columns: repeat(var(--n, 2), minmax(0, 1fr));
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.diagram__actor {
+  justify-self: center;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 0.45rem;
+  background-color: var(--bg-alt);
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.diagram__actor--ap {
+  border-color: rgba(var(--accent-rgb), 0.5);
+}
+
+.diagram__actor--attacker {
+  border-color: rgba(214, 48, 49, 0.6);
+}
+
+.diagram__track {
+  position: relative;
+  padding-top: 0.9rem;
+}
+
+.diagram__lifeline {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc((var(--i) + 0.5) / var(--n) * 100%);
+  border-left: 1px dashed var(--border);
+  z-index: 0;
+}
+
+.diagram__msg {
+  position: relative;
+  height: 2.8rem;
+}
+
+/* Raise the hovered message above later rows so its tip is never covered. */
+.diagram__msg:hover,
+.diagram__msg:focus-within {
+  z-index: 50;
+}
+
+.diagram__arrow {
+  position: absolute;
+  top: 50%;
+  left: calc((var(--l) + 0.5) / var(--n) * 100%);
+  right: calc((var(--n) - var(--r) - 0.5) / var(--n) * 100%);
+  height: 2px;
+  background-color: var(--border);
+}
+
+.diagram__arrow::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.diagram__msg--ltr .diagram__arrow::after {
+  right: -1px;
+  border-left: 7px solid var(--accent);
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+}
+
+.diagram__msg--rtl .diagram__arrow::after {
+  left: -1px;
+  border-right: 7px solid var(--accent);
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+}
+
+.diagram__arrow-label {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 3px);
+  transform: translateX(-50%);
+  padding: 0 0.45rem;
+  background-color: var(--surface);
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+/* hover detail */
+.diagram__arrow--info {
+  cursor: help;
+}
+
+.diagram__arrow--info .diagram__arrow-label {
+  border-bottom: 1px dotted rgba(var(--accent-rgb), 0.6);
+}
+
+.diagram__arrow:hover,
+.diagram__arrow:focus-within {
+  z-index: 30;
+}
+
+.diagram__tip {
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 0.5rem);
+  transform: translateX(-50%);
+  z-index: 50;
+  display: none;
+  min-width: 11rem;
+  max-width: 20rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background-color: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  line-height: 1.45;
+  white-space: pre-line;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+}
+
+.diagram__arrow--info:hover .diagram__tip,
+.diagram__arrow--info:focus-within .diagram__tip {
+  display: block;
+}
+
+/* --- vertical flow --- */
+.diagram__flow {
+  display: flex;
+  flex-direction: column;
+}
+
+.diagram__step {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+}
+
+.diagram__step-num {
+  flex: 0 0 auto;
+  width: 1.55rem;
+  height: 1.55rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid rgba(var(--accent-rgb), 0.5);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+
+.diagram__step-body {
+  display: inline-block;
+  position: relative;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 0.55rem;
+  background-color: var(--bg-alt);
+  color: var(--fg);
+}
+
+.diagram__step-body--info {
+  cursor: help;
+}
+
+.diagram__step-body--info > span:first-child {
+  border-bottom: 1px dotted rgba(var(--accent-rgb), 0.6);
+}
+
+.diagram__step-body--info:hover,
+.diagram__step-body--info:focus-within {
+  z-index: 30;
+}
+
+.diagram__step-body--info:hover .diagram__tip,
+.diagram__step-body--info:focus-within .diagram__tip {
+  display: block;
+}
+
+.diagram__connector {
+  width: 2px;
+  height: 0.9rem;
+  margin-left: 0.77rem;
+  background-color: var(--border);
 }

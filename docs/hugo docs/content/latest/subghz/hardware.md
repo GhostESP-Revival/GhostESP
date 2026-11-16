@@ -6,18 +6,18 @@ weight: 70
 
 SubGHz functionality requires a CC1101-based radio module. Not all GhostESP boards include this hardware.
 
-## Supported boards
+## Supported Boards
 
 SubGHz support depends on the board configuration. Check the build configuration (sdkconfig) for these options:
 
-- **CONFIG_HAS_SUBGHZ** - Board has local CC1101 hardware
-- **CONFIG_HAS_SUBGHZ_REMOTE** - Board supports remote SubGHz mode (display/control only)
+- **CONFIG_HAS_SUBGHZ** - Board has local CC1101 hardware (shipped builds: **Banshee S3 only**)
+- **CONFIG_HAS_SUBGHZ_REMOTE** - Board supports remote SubGHz mode, display/control only (shipped builds: **Banshee C5 only**)
 
-## CC1101 module
+## CC1101 Module
 
 The SubGHz functionality uses the Texas Instruments CC1101 low-power sub-1 GHz transceiver chip.
 
-### Frequency coverage
+### Frequency Coverage
 
 The CC1101 supports the following frequency ranges:
 - 300-348 MHz
@@ -26,7 +26,7 @@ The CC1101 supports the following frequency ranges:
 
 GhostESP uses the common bands within these ranges: 315, 390, 433.92, 868.35, and 915 MHz.
 
-## SPI configuration
+## SPI Configuration
 
 The CC1101 communicates via SPI. The board configuration defines the following pins:
 
@@ -35,12 +35,12 @@ The CC1101 communicates via SPI. The board configuration defines the following p
 - **CONFIG_SUBGHZ_SPI_MISO_PIN** - MISO pin
 - **CONFIG_SUBGHZ_SPI_SCK_PIN** - SCK pin
 - **CONFIG_SUBGHZ_CSN_PIN** - Chip select pin
-- **CONFIG_SUBGHZ_GDO0_PIN** - GPIO0 interrupt pin
-- **CONFIG_SUBGHZ_GDO2_PIN** - GPIO2 interrupt pin
+- **CONFIG_SUBGHZ_GDO0_PIN** - GDO0 interrupt pin (default 41)
+- **CONFIG_SUBGHZ_GDO2_PIN** - optional GDO2 interrupt pin (default -1, disabled)
 
 These values are set in the board's sdkconfig file and should not be modified unless adding custom hardware.
 
-## Antenna requirements
+## Antenna Requirements
 
 A properly matched antenna is essential for SubGHz operation:
 
@@ -49,13 +49,13 @@ A properly matched antenna is essential for SubGHz operation:
 - **Connector**: SMA or u.FL connector depending on the board.
 - **Gain**: Higher gain antennas improve range but may violate regulatory limits.
 
-### Common antenna types
+### Common Antenna Types
 
 - **Dipole antennas** - Simple, omnidirectional, good for general use
 - **Helical antennas** - Compact, moderate gain
 - **Yagi antennas** - Directional, high gain for long-range applications
 
-## Power considerations
+## Power Considerations
 
 The CC1101 operates at low power but current draw increases during transmission:
 
@@ -64,7 +64,7 @@ The CC1101 operates at low power but current draw increases during transmission:
 
 Ensure your power supply can handle these currents, especially during extended transmission periods.
 
-## Remote mode
+## Remote Mode
 
 Some boards support remote SubGHz mode (CONFIG_HAS_SUBGHZ_REMOTE only). In this mode:
 
@@ -73,7 +73,7 @@ Some boards support remote SubGHz mode (CONFIG_HAS_SUBGHZ_REMOTE only). In this 
 - Commands are sent over the communication link
 - Useful for separating display from radio hardware
 
-## Developer notes
+## Developer Notes
 
 When adding SubGHz support to a custom board:
 
@@ -83,7 +83,7 @@ When adding SubGHz support to a custom board:
 4. Add an appropriate antenna connector
 5. Test with the `subghz status` command to verify hardware detection
 
-## Regulatory compliance
+## Regulatory Compliance
 
 SubGHz radio operation is subject to local regulations:
 

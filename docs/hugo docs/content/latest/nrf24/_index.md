@@ -7,6 +7,9 @@ aliases:
   - "/nrf24/"
 ---
 
-GhostESP includes an NRF24 analyzer for viewing 2.4 GHz activity across channels 0-125 with built-in jamming threat detection.
+GhostESP includes an NRF24 analyzer for viewing 2.4 GHz activity across channels 0-125 with built-in jamming threat detection. It runs either locally on a connected NRF24L01 module or remotely through a GhostLink peer.
 
-Use this section for local analyzer usage, jamming identification, hardware setup, and GhostLink remote control mode.
+## Quick Links
+
+- [Frequency Analyzer]({{< relref "analyzer.md" >}}) - read the graph and identify jamming threats
+- [Setup and Remote Mode]({{< relref "setup-and-remote.md" >}}) - local pin configuration and GhostLink remote control

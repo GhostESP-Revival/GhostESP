@@ -22,6 +22,7 @@ void handle_sta_scan(int argc, char **argv);
 void handle_select_cmd(int argc, char **argv);
 void handle_wifi_connection(int argc, char **argv);
 void handle_wifi_disconnect(int argc, char **argv);
+void handle_wifi_forget(int argc, char **argv);
 void handle_wifi_status(int argc, char **argv);
 void handle_wifi_autoreconnect_cmd(int argc, char **argv);
 #if defined(CONFIG_IDF_TARGET_ESP32P4)
@@ -54,6 +55,7 @@ void handle_timezone_cmd(int argc, char **argv);
 void handle_loadconfig_cmd(int argc, char **argv);
 void handle_web_auth_cmd(int argc, char **argv);
 void handle_webuiap_cmd(int argc, char **argv);
+void handle_privacy_cmd(int argc, char **argv);
 void handle_clockstyle_cmd(int argc, char **argv);
 void handle_statusbarclock_cmd(int argc, char **argv);
 
@@ -123,6 +125,7 @@ void stop_portal(int argc, char **argv);
 void handle_listportals(int argc, char **argv);
 void handle_evilportal(int argc, char **argv);
 void handle_sinkhole_cmd(int argc, char **argv);
+void handle_certscan_cmd(int argc, char **argv);
 
 // GPS commands
 void handle_gps_info(int argc, char **argv);

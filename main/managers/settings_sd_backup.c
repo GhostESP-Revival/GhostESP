@@ -143,6 +143,9 @@ static cJSON *settings_to_json_object(const FSettings *s) {
   cJSON_AddNumberToObject(o, "terminal_text_color", (double)s->terminal_text_color);
   cJSON_AddNumberToObject(o, "terminal_font_size", (double)s->terminal_font_size);
   cJSON_AddBoolToObject(o, "invert_colors", s->invert_colors);
+#ifdef CONFIG_BANSHEE_LITE_C5
+  cJSON_AddBoolToObject(o, "auto_flip_enabled", s->auto_flip_enabled);
+#endif
   cJSON_AddBoolToObject(o, "web_auth_enabled", s->web_auth_enabled);
   cJSON_AddBoolToObject(o, "webui_restrict_to_ap", s->webui_restrict_to_ap);
   cJSON_AddNumberToObject(o, "esp_comm_tx_pin", (double)s->esp_comm_tx_pin);
@@ -196,6 +199,7 @@ static cJSON *settings_to_json_object(const FSettings *s) {
   cJSON_AddBoolToObject(o, "theme_background_effects", s->theme_background_effects);
   cJSON_AddBoolToObject(o, "high_contrast", s->high_contrast);
   cJSON_AddBoolToObject(o, "sun_mode", s->sun_mode);
+  cJSON_AddBoolToObject(o, "privacy_mode", s->privacy_mode);
   cJSON_AddBoolToObject(o, "menu_rounded", s->menu_rounded);
   cJSON_AddBoolToObject(o, "menu_item_borders", s->menu_item_borders);
   cJSON_AddBoolToObject(o, "menu_card_bg", s->menu_card_bg);
@@ -286,6 +290,11 @@ static void json_apply_to_settings(FSettings *s, const cJSON *root) {
   if (cJSON_GetObjectItemCaseSensitive(root, "invert_colors")) {
     s->invert_colors = jget_bool(root, "invert_colors", s->invert_colors);
   }
+#ifdef CONFIG_BANSHEE_LITE_C5
+  if (cJSON_GetObjectItemCaseSensitive(root, "auto_flip_enabled")) {
+    s->auto_flip_enabled = jget_bool(root, "auto_flip_enabled", s->auto_flip_enabled);
+  }
+#endif
   if (cJSON_GetObjectItemCaseSensitive(root, "web_auth_enabled")) {
     s->web_auth_enabled = jget_bool(root, "web_auth_enabled", s->web_auth_enabled);
   }
@@ -396,6 +405,9 @@ static void json_apply_to_settings(FSettings *s, const cJSON *root) {
   }
   if (cJSON_GetObjectItemCaseSensitive(root, "sun_mode")) {
     s->sun_mode = jget_bool(root, "sun_mode", s->sun_mode);
+  }
+  if (cJSON_GetObjectItemCaseSensitive(root, "privacy_mode")) {
+    s->privacy_mode = jget_bool(root, "privacy_mode", s->privacy_mode);
   }
   settings_normalize_modes(s);
   if (cJSON_GetObjectItemCaseSensitive(root, "menu_rounded")) {

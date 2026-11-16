@@ -6,15 +6,15 @@ weight: 30
 
 Replay captured signals to control garage doors, gates, alarms, and other SubGHz devices.
 
-## Before you start
+Transmission is an **on-device UI** feature: it plays back Flipper `.sub` files from the SD card. The `subghz` CLI cannot transmit - `subghz list`, `subghz load`, and `subghz replay` only work with RSSI spectrum snapshots (see [Files and Management]({{< relref "files.md" >}})).
+
+## Before You Start
 
 - **Hardware**: Board with CC1101 SubGHz support (see [Hardware Support]({{< relref "hardware.md" >}})).
-- **Captured signals**: Saved `.sub` files in `/mnt/ghostesp/subghz/` (see [Capturing]({{< relref "capturing.md" >}})).
+- **Captured signals**: Flipper `.sub` files in `/mnt/ghostesp/subghz/` (see [Capturing]({{< relref "capturing.md" >}})).
 - **Frequency matching**: Ensure the transmission frequency matches the target device's expected frequency.
 
-## Transmitting a saved signal
-
-### On-device UI
+## Replaying a Saved Signal
 
 1. Open **SubGHz → Saved** to browse captured signals.
 2. Select a `.sub` file from the list.
@@ -22,29 +22,16 @@ Replay captured signals to control garage doors, gates, alarms, and other SubGHz
 4. Choose **Replay** to transmit the signal.
 5. The device will transmit on the frequency stored in the file.
 
-### Command line
-
-```bash
-# List all saved signals
-subghz list
-
-# Load and replay a specific signal (load and replay are aliases — only call one)
-subghz load <name>
-
-# Load the last captured signal
-subghz load last
-```
-
-## Frequency matching
+## Frequency Matching
 
 Signals are transmitted at the frequency stored in the `.sub` file. If the target device expects a different frequency:
 
 1. Edit the `.sub` file to change the `Frequency` field (see [Files]({{< relref "files.md" >}})).
 2. Or use the [Frequency Analyzer]({{< relref "freq-analyzer.md" >}}) to determine the correct frequency before capturing.
 
-## Protocol considerations
+## Protocol Considerations
 
-### Decoded signals
+### Decoded Signals
 
 For signals with decoded protocols (Princeton, CAME, KeeLoq, etc.):
 
@@ -52,7 +39,7 @@ For signals with decoded protocols (Princeton, CAME, KeeLoq, etc.):
 - Transmission should be reliable if the protocol was correctly identified.
 - Some protocols use rolling codes; replay may fail if the target device expects a new code.
 
-### Raw signals
+### Raw Signals
 
 For raw captures (unknown protocol):
 
@@ -60,7 +47,7 @@ For raw captures (unknown protocol):
 - Ensure the capture was clean and complete for reliable replay.
 - Raw signals are more sensitive to timing and environmental factors.
 
-## Tips for successful transmission
+## Tips for Successful Transmission
 
 - **Distance**: Start within 5-10 meters of the target device.
 - **Antenna orientation**: Point the antenna toward the target receiver.

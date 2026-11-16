@@ -1,29 +1,24 @@
 ---
 title: "Wiring Modules and Peripherals"
-description: "Find the pins your board uses for CC1101, NRF24, NFC, GPS, and SD cards, and wire add-on modules safely."
+description: "Find the pins your board uses for CC1101, NRF24, NFC, GPS, and SD cards, and wire add-on modules safely"
 weight: 70
-toc: true
 keywords: ["wiring", "pinout", "pins", "GPIO", "CC1101", "NRF24", "PN532", "GPS", "SD card", "SPI", "I2C", "UART"]
 ---
 
-## What this does
-
-This page explains how GhostESP maps add-on modules to ESP32 pins, and how to find the exact pins your board is already using.
+GhostESP maps add-on modules to ESP32 pins. Every release build ships with its pins already configured, so a board with a built-in CC1101, NRF24, NFC, or GPS works out of the box.
 
 ## Do I need this page?
 
-**If you bought or already own a supported board, you probably don't.** Every release build ships with its pins already configured, so a board with a built-in CC1101, NRF24, NFC, or GPS works out of the box.
-
-You need this page when you are:
+**If you bought or already own a supported board, you probably don't.** You need this page when you are:
 
 - Adding a module to a generic ESP32 board
 - Changing SD card pins
 - Building a custom board configuration
 
-## Before you start
+## Prerequisites
 
 - **3.3 V logic only.** ESP32 GPIOs are not 5 V tolerant. Feeding 5 V into a pin can destroy the chip.
-- Check the [Supported Hardware]({{< relref "supported-hardware.md" >}}) table first — many "missing feature" problems are really "this board doesn't have that hardware."
+- Check the [Supported Hardware]({{< relref "supported-hardware.md" >}}) table first - many "missing feature" problems are really "this board doesn't have that hardware."
 - Have a way to read serial output at 115200 baud. Boot logs and status commands are how you confirm wiring.
 
 ## Find your board's pins
@@ -68,10 +63,10 @@ If you are compiling your own build, every peripheral pin is set under **Ghost E
 | CC1101 | **SubGHz Options** |
 | NRF24 | **Misc Options → NRF24 Options** |
 | NFC (PN532) | **NFC Options** |
-| GPS | **GPS Options** |
-| IR | **Infrared Options** |
+| GPS | **GPS Configuration** |
+| IR | **Misc Options** (Infrared Support) |
 
-The Kconfig defaults for a CC1101 are MOSI `18`, MISO `38`, SCK `40`, CSN `39`, GDO0 `41`, and GDO2 disabled (`-1`). These are generic defaults, **not** a wiring recommendation for any specific board — confirm against your board's own configuration before connecting anything.
+The Kconfig defaults for a CC1101 are MOSI `18`, MISO `38`, SCK `40`, CSN `39`, GDO0 `41`, and GDO2 disabled (`-1`). These are generic defaults, **not** a wiring recommendation for any specific board - confirm against your board's own configuration before connecting anything.
 
 ## Module wiring reference
 
@@ -104,7 +99,7 @@ Attach a **frequency-matched antenna before transmitting**. Powering a CC1101 wi
 | CSN | ESP32 chip select |
 | CE | ESP32 CE pin |
 
-> **Note:** the PA+LNA versions of the NRF24 draw far more current than the plain modules. A weak 3.3 V supply causes "radio not responding" failures that look like wiring bugs — add a decoupling capacitor across VCC/GND, or power it from a dedicated 3.3 V regulator.
+> **Note:** the PA+LNA versions of the NRF24 draw far more current than the plain modules. A weak 3.3 V supply causes "radio not responding" failures that look like wiring bugs - add a decoupling capacitor across VCC/GND, or power it from a dedicated 3.3 V regulator.
 
 ### PN532 (NFC)
 
@@ -132,7 +127,7 @@ GPS modules are UART devices. Cross the lines:
 | VCC | 3.3 V |
 | GND | GND |
 
-Most modules default to 9600 baud. Some need a battery or a clear view of the sky before they output a fix — no data indoors is normal.
+Most modules default to 9600 baud. Some need a battery or a clear view of the sky before they output a fix - no data indoors is normal.
 
 ## Verified board wiring
 
@@ -172,4 +167,4 @@ The GhostLink P1 handheld has a complete, board-specific wiring map for its disp
 - [Supported Hardware]({{< relref "supported-hardware.md" >}})
 - [SD card storage]({{< relref "sd-card.md" >}})
 - [Custom board configurations]({{< relref "../development/custom-board-configs.md" >}})
-- [Command line reference]({{< relref "command-line-reference.md" >}})
+- [CLI reference]({{< relref "command-line-reference.md" >}})

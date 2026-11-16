@@ -4,16 +4,11 @@ description: "Monitor SubGHz radio activity across frequency bands"
 weight: 10
 ---
 
-Monitor radio activity across 64 channels in real-time to detect signals on supported frequency bands.
+Monitor radio activity across 64 channels in real-time to detect signals on supported frequency bands. This needs a GhostESP with CC1101 SubGHz hardware and an attached antenna (see [Hardware Support]({{< relref "hardware.md" >}})).
 
-## Prerequisites
+## Scanning for Signals
 
-- GhostESP device with CC1101 SubGHz hardware (see [Hardware Support]({{< relref "hardware.md" >}}))
-- Device powered on with antenna attached
-
-## Scanning for signals
-
-### On-device UI
+### On-Device UI
 
 1. Open **Menu → SubGHz → Capture**.
 2. Select **Start** from the popup menu to begin scanning.
@@ -22,7 +17,7 @@ Monitor radio activity across 64 channels in real-time to detect signals on supp
 5. Use **Cycle Frequency** to switch between bands (315, 390, 433.92, 868.35, 915 MHz).
 5. Press **Back** to stop scanning.
 
-### Command line
+### CLI
 
 ```bash
 # Start scanning on current frequency
@@ -42,7 +37,7 @@ subghz cycle_freq
 subghz status
 ```
 
-## Frequency bands
+## Frequency Bands
 
 The scanner supports five common SubGHz bands. Cycle through them to find the one used by your target device:
 
@@ -52,7 +47,7 @@ The scanner supports five common SubGHz bands. Cycle through them to find the on
 - **868.35 MHz** - European standard for remote controls and alarm systems
 - **915 MHz** - North America ISM band for various devices
 
-## Signal strength visualization
+## Signal Strength Visualization
 
 The scanner displays signal strength across 64 channels within the selected band. Higher bars indicate stronger signals. Use this to:
 
@@ -62,9 +57,8 @@ The scanner displays signal strength across 64 channels within the selected band
 
 ## Notes
 
-- SubGHz scanning requires CC1101 hardware with `CONFIG_HAS_SUBGHZ` enabled. `CONFIG_HAS_SUBGHZ_REMOTE` only enables a display-only remote UI that routes commands to a peer — it does not enable scanning itself.
+- SubGHz scanning requires CC1101 hardware with `CONFIG_HAS_SUBGHZ` enabled (shipped builds: Banshee S3 only). `CONFIG_HAS_SUBGHZ_REMOTE` (Banshee C5 only) only enables a display-only remote UI that routes commands to a peer - it does not enable scanning itself.
 - Scanning is mutually exclusive with other SubGHz operations; starting a new scan will stop any ongoing capture or transmission.
-- Signal strength is displayed as relative levels; higher values indicate stronger signals.
 - Some devices transmit intermittently; leave the scanner running for several minutes to detect periodic signals.
 
 ## Troubleshooting

@@ -1,26 +1,18 @@
 ---
 title: "Network Fingerprinting"
-description: "Scan and identify devices on your Ethernet network."
+description: "Scan and identify devices on your Ethernet network"
 weight: 10
 ---
 
 Network fingerprinting discovers and identifies devices on your Ethernet network. GhostESP scans for common protocols to build a device profile.
 
-## Overview
-
 When you run a fingerprint scan, GhostESP listens for network traffic and service announcements to identify devices. It looks for:
 
-- **mDNS** — Service announcements (printers, speakers, etc.)
-- **NBNS** (NetBIOS Name Service) — Windows device name broadcasts
-- **SSDP** — UPnP device announcements
+- **mDNS** - Service announcements (printers, speakers, etc.)
+- **NBNS** (NetBIOS Name Service) - Windows device name broadcasts
+- **SSDP** - UPnP device announcements
 
-The scan collects device names, IP addresses, detected device types (Chromecast, Roku, Apple, Samsung, etc.), and service information.
-
-## Prerequisites
-
-- A device with Ethernet support (`CONFIG_WITH_ETHERNET` enabled)
-- Access to the device via GhostLink display menu or terminal
-- A network with active devices
+Fingerprinting requires the Ethernet build (`CONFIG_WITH_ETHERNET`). Reach the device through the GhostLink display menu or terminal, and make sure the network has active devices.
 
 ## How to Use
 
@@ -32,14 +24,26 @@ Run the fingerprint scan from the terminal:
 ethfp
 ```
 
-The scan runs three sequential sub-scans (mDNS, NBNS, SSDP) at approximately 3 seconds each, totaling around 9 seconds. Discovered devices are displayed with their details:
+The scan runs three sequential sub-scans (mDNS, NBNS, SSDP) at approximately 3 seconds each, totaling around 9 seconds. Discovered devices are printed as a `-` title line followed by indented fields:
 
 ```
-IP Address: 192.168.1.100
-Device Name: Living-Room-TV
-Device Type: Samsung
-Service: upnp
+- Living-Room-TV
+    IP: 192.168.1.100
+    Type: Samsung
+    Service: upnp
+    OS: Tizen
+    Protocol: SSDP
 ```
+
+Each discovered device shows:
+
+- **IP Address** - The device's IP on the network
+- **Device Name** - Hostname or friendly name if available
+- **Device Type** - Detected manufacturer or device category (Samsung, Apple, Google, etc.)
+- **Service Type** - Protocol used for detection (mDNS, SSDP, NBNS)
+- **OS Info** - Operating system or device model if detected
+
+`Service` and `OS` lines are omitted when that information was not discovered.
 
 ### Via GhostLink Display Menu
 
@@ -49,18 +53,7 @@ Service: upnp
 4. **Wait** for the scan to complete (approximately 9 seconds)
 5. **View** the list of discovered devices
 
-## Understanding Results
-
-Each discovered device shows:
-
-- **IP Address** — The device's IP on the network
-- **Device Name** — Hostname or friendly name if available
-- **Device Type** — Detected manufacturer or device category (Samsung, Apple, Google, etc.)
-- **Service Type** — Protocol used for detection (mDNS, SSDP, NBNS)
-- **OS Info** — Operating system or device model if detected
-
 ## Troubleshooting
 
 - **No devices found**: Ensure devices are powered on and on the same network. Some devices don't broadcast.
-- **Incomplete information**: Not all devices provide full details. GhostESP shows what it can detect from available network traffic.
-- **Timeout**: The scan runs for 3 seconds. If you need more time, run the scan again.
+- **Timeout**: The scan takes about 9 seconds (three ~3-second sub-scans). If no devices appear, run the scan again.

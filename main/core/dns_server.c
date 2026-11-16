@@ -23,6 +23,7 @@
 #include "core/dns_server.h"
 #include "managers/ghostscript_runtime.h"
 #include "managers/sd_card_manager.h"
+#include "freertos/semphr.h"
 #include "lwip/err.h"
 #include "lwip/netdb.h"
 #include "lwip/sockets.h"
@@ -189,6 +190,13 @@ struct dns_server_handle {
     bool sinkhole_jit_mounted;
     bool sinkhole_display_suspended;
     bool auto_stats;
+
+    // Interception: hostnames listed in the interception file are answered
+    // with intercept_ip so that the HTTPS server on the board terminates TLS
+    // for them.  The blocklist itself is not intercepted.
+    bool intercept_enabled;
+    uint32_t intercept_ip;
+    bool intercept_all;
 
     struct sinkhole_cache_entry *cache;
     int cache_next;
@@ -557,6 +565,202 @@ static bool blocklist_check(dns_server_handle_t h, const char *domain,
     return false;
 }
 
+// --- Interception list ----------------------------------------------------
+
+// Kept out of the server handle: the handle carries a StaticTask_t for the
+// sinkhole task, and FreeRTOS requires that to live in internal RAM.  A large
+// array inside the handle pushed the whole allocation into PSRAM and tripped
+// xTaskCreateStatic's TCB check.
+//
+// The arrays are allocated when the sinkhole starts rather than living in .bss,
+// so boards that never use the sinkhole pay nothing and boards with PSRAM can
+// keep the list off the internal heap.
+static char (*s_intercept)[SINKHOLE_MAX_DOMAIN] = NULL;
+static int s_intercept_count = 0;
+
+static void *sinkhole_calloc(size_t count, size_t size) {
+    void *p = heap_caps_calloc(count, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!p) p = heap_caps_calloc(count, size, MALLOC_CAP_8BIT);
+    return p;
+}
+
+// Serializes the list and the client notes between the DNS task, the TLS
+// server task and the command handlers (which also run in their own tasks).
+static SemaphoreHandle_t s_intercept_mutex = NULL;
+
+static void intercept_lock(void) {
+    if (s_intercept_mutex) xSemaphoreTake(s_intercept_mutex, portMAX_DELAY);
+}
+
+static void intercept_unlock(void) {
+    if (s_intercept_mutex) xSemaphoreGive(s_intercept_mutex);
+}
+
+// Client attribution is guarded by the same lock: the DNS task writes a note
+// and the HTTPS server task reads it.
+#define SINKHOLE_CLIENT_RING 8
+#define SINKHOLE_CLIENT_TTL_US (5LL * 60 * 1000000)
+
+typedef struct {
+    bool used;
+    char host[SINKHOLE_MAX_DOMAIN];
+    uint32_t ip;
+    int64_t when_us;
+} sinkhole_client_note_t;
+
+static sinkhole_client_note_t *s_client_notes = NULL;
+static int s_client_note_next = 0;
+
+// Matches a queried name against the interception list.  An entry matches the
+// name itself, and an entry starting with "*." matches every subdomain of
+// the name that follows it.
+static bool intercept_list_check(dns_server_handle_t h, const char *domain) {
+    if (!h || !domain || !s_intercept) return false;
+
+    bool matched = false;
+    intercept_lock();
+    size_t dlen = strlen(domain);
+
+    for (int i = 0; i < s_intercept_count; i++) {
+        const char *entry = s_intercept[i];
+        if (entry[0] == '*' && entry[1] == '.') {
+            const char *base = entry + 2;
+            size_t blen = strlen(base);
+            if (dlen > blen && domain[dlen - blen - 1] == '.' &&
+                strcmp(domain + dlen - blen, base) == 0) {
+                matched = true;
+                break;
+            }
+        } else if (strcmp(entry, domain) == 0) {
+            matched = true;
+            break;
+        }
+    }
+    intercept_unlock();
+    return matched;
+}
+
+static void load_intercept_list(dns_server_handle_t h) {
+    (void)h;
+    intercept_lock();
+    s_intercept_count = 0;
+    if (!s_intercept) {
+        s_intercept = sinkhole_calloc(SINKHOLE_INTERCEPT_MAX, SINKHOLE_MAX_DOMAIN);
+        if (!s_intercept) {
+            glog("DNS sinkhole: no memory for the interception list\n");
+            intercept_unlock();
+            return;
+        }
+    }
+    if (!s_client_notes) {
+        s_client_notes = sinkhole_calloc(SINKHOLE_CLIENT_RING,
+                                         sizeof(*s_client_notes));
+    }
+    if (s_client_notes) {
+        memset(s_client_notes, 0,
+               SINKHOLE_CLIENT_RING * sizeof(*s_client_notes));
+    }
+    s_client_note_next = 0;
+
+    if (sd_card_exists(SINKHOLE_INTERCEPT_PATH)) {
+        FILE *f = fopen(SINKHOLE_INTERCEPT_PATH, "r");
+        if (f) {
+            char line[SINKHOLE_MAX_DOMAIN];
+            while (fgets(line, sizeof(line), f) &&
+                   s_intercept_count < SINKHOLE_INTERCEPT_MAX) {
+                char *entry = normalize_blocklist_line(line);
+                if (!entry) continue;
+                snprintf(s_intercept[s_intercept_count], SINKHOLE_MAX_DOMAIN, "%s", entry);
+                s_intercept_count++;
+            }
+            fclose(f);
+        }
+    }
+    int count = s_intercept_count;
+    intercept_unlock();
+
+    if (count > 0) {
+        glog("DNS sinkhole: %d hostname(s) queued for interception\n", count);
+    }
+}
+
+// Writes the list to the card.  Must be called with the lock held.  An empty
+// list truncates the file, otherwise a removed entry would come back on the
+// next start.
+static void save_intercept_list_locked(void) {
+    if (!s_intercept) return;
+    size_t cap = SINKHOLE_INTERCEPT_MAX * (SINKHOLE_MAX_DOMAIN + 1);
+    char *buf = sinkhole_calloc(1, cap);
+    if (!buf) {
+        glog("DNS sinkhole: no memory to save the interception list\n");
+        return;
+    }
+    size_t used = 0;
+    for (int i = 0; i < s_intercept_count; i++) {
+        size_t need = strlen(s_intercept[i]) + 1;
+        if (used + need > cap) break;
+        memcpy(buf + used, s_intercept[i], need);
+        used += need;
+    }
+    sd_card_write_file(SINKHOLE_INTERCEPT_PATH, buf, used);
+    heap_caps_free(buf);
+}
+
+// --- Client attribution ---------------------------------------------------
+
+// Remembers which device asked for an intercepted name, so the TLS server can
+// name the device that connected a moment later.  httpd does not expose the
+// peer address to a URI handler, and this is the only place the address is
+// known.
+static void note_intercepted_client(const char *host, uint32_t ip) {
+    if (!host || !ip) return;
+
+    intercept_lock();
+    if (!s_client_notes) {
+        intercept_unlock();
+        return;
+    }
+    for (int i = 0; i < SINKHOLE_CLIENT_RING; i++) {
+        if (s_client_notes[i].used && strcmp(s_client_notes[i].host, host) == 0) {
+            s_client_notes[i].ip = ip;
+            s_client_notes[i].when_us = esp_timer_get_time();
+            intercept_unlock();
+            return;
+        }
+    }
+
+    sinkhole_client_note_t *n = &s_client_notes[s_client_note_next];
+    s_client_note_next = (s_client_note_next + 1) % SINKHOLE_CLIENT_RING;
+    snprintf(n->host, sizeof(n->host), "%s", host);
+    n->ip = ip;
+    n->when_us = esp_timer_get_time();
+    n->used = true;
+    intercept_unlock();
+}
+
+bool dns_sinkhole_lookup_client(const char *hostname, uint32_t *out_ip) {
+    if (!hostname || !out_ip) return false;
+
+    bool found = false;
+    int64_t now = esp_timer_get_time();
+
+    intercept_lock();
+    if (!s_client_notes) {
+        intercept_unlock();
+        return false;
+    }
+    for (int i = 0; i < SINKHOLE_CLIENT_RING; i++) {
+        if (!s_client_notes[i].used) continue;
+        if (strcmp(s_client_notes[i].host, hostname) != 0) continue;
+        if (now - s_client_notes[i].when_us > SINKHOLE_CLIENT_TTL_US) break;
+        *out_ip = s_client_notes[i].ip;
+        found = true;
+        break;
+    }
+    intercept_unlock();
+    return found;
+}
+
 static char *skip_dns_name(char *ptr, char *packet_end) {
     while (ptr < packet_end) {
         uint8_t len = (uint8_t)*ptr;
@@ -770,6 +974,47 @@ static void send_blocked_response(int sock, char *rx, int rx_len,
     send_nxdomain(sock, rx, rx_len, dest);
 }
 
+// Answers an A query with a single address.  Used to point an intercepted
+// hostname at the board so the HTTPS server can take over the connection.
+static void send_a_response(int sock, char *rx, int rx_len,
+                            struct sockaddr_in *dest, uint32_t addr) {
+    int qd_len = dns_query_len(rx, rx_len);
+    if (qd_len < (int)sizeof(dns_header_t)) return;
+    // A multi-question query can fill the whole packet; the answer has to fit
+    // in the same fixed-size buffer.
+    if (qd_len + (int)sizeof(dns_answer_t) > DNS_MAX_LEN) return;
+
+    char reply[DNS_MAX_LEN];
+    memset(reply, 0, sizeof(reply));
+    memcpy(reply, rx, qd_len);
+
+    dns_header_t *hdr = (dns_header_t *)reply;
+    uint16_t flags = ntohs(hdr->flags);
+    flags |= 0x8000;        /* QR = response */
+    flags &= ~0x0F00;       /* Opcode = 0 (standard query) */
+    flags &= ~0x0080;       /* RA = 0 */
+    flags &= ~0x0020;       /* AD = 0 */
+    flags &= ~0x000F;       /* Clear RCODE */
+    flags |= 0x0000;        /* RCODE = NOERROR */
+    hdr->flags = htons(flags);
+    hdr->an_count = htons(1);
+    hdr->ns_count = htons(0);
+    hdr->ar_count = htons(0);
+
+    // The answer follows the question section.
+    int off = qd_len;
+    dns_answer_t *ans = (dns_answer_t *)(reply + off);
+    ans->ptr_offset = htons(0xC00C); /* pointer to the name at offset 12 */
+    ans->type = htons(QD_TYPE_A);
+    ans->class = htons(1); /* IN */
+    ans->ttl = htonl(ANS_TTL_SEC);
+    ans->addr_len = htons(4);
+    ans->ip_addr = addr;
+    off += (int)sizeof(dns_answer_t);
+
+    sendto(sock, reply, off, 0, (struct sockaddr *)dest, sizeof(*dest));
+}
+
 // --- Blocklist loading ---
 
 static int count_blocklist_lines(FILE *f) {
@@ -898,355 +1143,392 @@ static void log_query(dns_server_handle_t h, const char *client_ip,
 
 // --- Main DNS task ---
 
-void dns_server_task(void *pvParameters) {
-    dns_server_handle_t handle = pvParameters;
+// Legacy evil-portal DNS loop.  Kept out of line so its buffers do not share a
+// stack frame with the (much larger) sinkhole branch of dns_server_task.
+static void __attribute__((noinline)) dns_portal_run(dns_server_handle_t handle) {
+    char addr_str[INET6_ADDRSTRLEN];
     char rx_buffer[DNS_MAX_LEN];
+    char reply[DNS_MAX_LEN];
+    dns_portal_rate_limit_entry_t rate_limit_table[DNS_PORTAL_RATE_LIMIT_TABLE_SIZE] = {0};
 
-    if (handle->sinkhole_mode) {
-        // --- Sinkhole mode ---
-        struct sockaddr_in bind_addr;
-        memset(&bind_addr, 0, sizeof(bind_addr));
-        bind_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-        bind_addr.sin_family = AF_INET;
-        bind_addr.sin_port = htons(DNS_PORT);
+    while (handle->started) {
+        struct sockaddr_in dest_addr;
+        dest_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        dest_addr.sin_family = AF_INET;
+        dest_addr.sin_port = htons(DNS_PORT);
+        inet_ntoa_r(dest_addr.sin_addr, addr_str, sizeof(addr_str) - 1);
 
-        int listen_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
-        if (listen_sock < 0) {
-            ESP_LOGE(TAG, "Sinkhole: socket create failed");
-            handle->started = false;
-            vTaskDelete(NULL);
-            return;
+        int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
+        if (sock < 0) {
+            ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
+            break;
         }
 
-        int opt = 1;
-        setsockopt(listen_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-
-        if (bind(listen_sock, (struct sockaddr *)&bind_addr,
-                 sizeof(bind_addr)) < 0) {
-            ESP_LOGE(TAG, "Sinkhole: bind failed errno %d", errno);
-            close(listen_sock);
-            handle->started = false;
-            vTaskDelete(NULL);
-            return;
-        }
-        ESP_LOGI(TAG, "Sinkhole bound to 0.0.0.0:53");
-
-        int fwd_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
-        if (fwd_sock < 0) {
-            ESP_LOGE(TAG, "Sinkhole: fwd socket failed");
-            close(listen_sock);
-            handle->started = false;
-            vTaskDelete(NULL);
-            return;
-        }
-
-        struct sockaddr_in fwd_bind;
-        memset(&fwd_bind, 0, sizeof(fwd_bind));
-        fwd_bind.sin_addr.s_addr = handle->bind_ip;
-        fwd_bind.sin_family = AF_INET;
-        fwd_bind.sin_port = 0;
-        if (bind(fwd_sock, (struct sockaddr *)&fwd_bind, sizeof(fwd_bind)) < 0) {
-            ESP_LOGE(TAG, "Sinkhole: fwd bind failed errno %d", errno);
-            close(fwd_sock);
-            close(listen_sock);
-            handle->started = false;
-            vTaskDelete(NULL);
-            return;
-        }
-
-        struct sockaddr_in upstream_addr;
-        memset(&upstream_addr, 0, sizeof(upstream_addr));
-        upstream_addr.sin_addr.s_addr = handle->upstream_dns;
-        upstream_addr.sin_family = AF_INET;
-        upstream_addr.sin_port = htons(DNS_PORT);
-
-        fwd_ring_t fwd_ring[SINKHOLE_FWD_RING];
-        memset(fwd_ring, 0, sizeof(fwd_ring));
-        uint16_t next_fwd_id = (uint16_t)esp_random();
-
-        load_blocklist(handle);
-
-        if (!handle->bloom && !handle->blocklist_fp) {
-            glog("DNS sinkhole: no blocklist, running in proxy mode\n");
-        } else {
-            const char *lookup_mode = handle->use_psram_path ? "PSRAM bloom+ht" :
-                                      handle->bloom ? "SD bloom+binary verify" :
-                                      "raw SD binary search";
-            glog("DNS sinkhole: ready (%s, upstream " IPSTR ")\n",
-                 lookup_mode,
-                 IP2STR(&(esp_ip4_addr_t){.addr = handle->upstream_dns}));
-        }
+        int err = bind(sock, (struct sockaddr *)&dest_addr,
+                       sizeof(dest_addr));
+        if (err < 0)
+            ESP_LOGE(TAG, "Socket unable to bind: errno %d", errno);
 
         while (handle->started) {
-            fd_set readfds;
-            FD_ZERO(&readfds);
-            FD_SET(listen_sock, &readfds);
-            FD_SET(fwd_sock, &readfds);
-            int maxfd = listen_sock > fwd_sock ? listen_sock : fwd_sock;
+            struct sockaddr_in6 source_addr;
+            socklen_t socklen = sizeof(source_addr);
+            int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer), 0,
+                               (struct sockaddr *)&source_addr, &socklen);
 
-            struct timeval sel_tv = {1, 0};
-            int sel = select(maxfd + 1, &readfds, NULL, NULL, &sel_tv);
-            if (sel <= 0) continue;
-
-            // Handle upstream responses first (non-blocking)
-            if (FD_ISSET(fwd_sock, &readfds)) {
-                char resp[DNS_MAX_LEN];
-                struct sockaddr_in resp_src;
-                socklen_t resp_len = sizeof(resp_src);
-                int rlen = recvfrom(fwd_sock, resp, sizeof(resp), 0,
-                                    (struct sockaddr *)&resp_src, &resp_len);
-                if (rlen >= (int)sizeof(dns_header_t)) {
-                    if (resp_src.sin_addr.s_addr != upstream_addr.sin_addr.s_addr ||
-                        resp_src.sin_port != upstream_addr.sin_port) {
-                        continue;
-                    }
-                    uint16_t resp_id = ntohs(((dns_header_t *)resp)->id);
-                    int ri = fwd_ring_find(fwd_ring, SINKHOLE_FWD_RING, resp_id);
-                    if (ri >= 0) {
-                        ((dns_header_t *)resp)->id = htons(fwd_ring[ri].client_id);
-                        char matched_domain[SINKHOLE_MAX_DOMAIN] = {0};
-                        if (response_has_blocked_cname(handle, resp, rlen,
-                                                       matched_domain,
-                                                       sizeof(matched_domain))) {
-                            send_nxdomain(listen_sock, resp, rlen,
-                                          &fwd_ring[ri].client_addr);
-                            handle->stat_blocked++;
-                            char cip[INET_ADDRSTRLEN];
-                            inet_ntoa_r(fwd_ring[ri].client_addr.sin_addr, cip,
-                                        sizeof(cip) - 1);
-                            log_query(handle, cip, fwd_ring[ri].domain,
-                                      fwd_ring[ri].qtype, "BLOCKED_CNAME",
-                                      matched_domain);
-                        } else {
-                            sendto(listen_sock, resp, rlen, 0,
-                                   (struct sockaddr *)&fwd_ring[ri].client_addr,
-                                   sizeof(fwd_ring[ri].client_addr));
-                        }
-                        fwd_ring[ri].used = false;
-                    }
-                }
-            }
-
-            // Handle incoming client queries
-            if (!FD_ISSET(listen_sock, &readfds)) continue;
-
-            struct sockaddr_in client_addr;
-            socklen_t client_len = sizeof(client_addr);
-            int len = recvfrom(listen_sock, rx_buffer, sizeof(rx_buffer), 0,
-                               (struct sockaddr *)&client_addr, &client_len);
-            if (len < 0 || len < (int)sizeof(dns_header_t)) continue;
-
-            dns_header_t *hdr = (dns_header_t *)rx_buffer;
-            uint16_t flags = ntohs(hdr->flags);
-            if ((flags & OPCODE_MASK) != 0) continue;
-            if (flags & 0x8000) continue;
-            if (ntohs(hdr->qd_count) == 0) continue;
-
-            char name[SINKHOLE_MAX_DOMAIN];
-            char *name_end = parse_dns_name(
-                rx_buffer + sizeof(dns_header_t), rx_buffer + len,
-                name, sizeof(name));
-            if (!name_end) continue;
-            if (name_end + sizeof(dns_question_t) > rx_buffer + len) continue;
-            dns_question_t *question = (dns_question_t *)name_end;
-            uint16_t qtype = ntohs(question->type);
-
-            for (char *p = name; *p; p++) *p = (char)tolower((uint8_t)*p);
-
-            handle->stat_total++;
-            if (handle->stat_total == 1) {
-                glog("DNS sinkhole: first query received (%s)\n", name);
-            } else if (handle->stat_total == 2) {
-                glog("DNS sinkhole: forwarding to upstream " IPSTR "\n",
-                     IP2STR(&(esp_ip4_addr_t){.addr = handle->upstream_dns}));
-            } else if (handle->stat_total % 50 == 0) {
-                glog("Sinkhole: %lu queries, %lu blocked, %lu dropped\n",
-                     (unsigned long)handle->stat_total,
-                     (unsigned long)handle->stat_blocked,
-                     (unsigned long)handle->stat_dropped);
-                if (handle->auto_stats) {
-                    char sbuf[256];
-                    int sn = snprintf(sbuf, sizeof(sbuf),
-                        "total=%lu\nblocked=%lu\ndropped=%lu\nupstream=" IPSTR "\nlog=%s\n",
-                        (unsigned long)handle->stat_total,
-                        (unsigned long)handle->stat_blocked,
-                        (unsigned long)handle->stat_dropped,
-                        IP2STR(&(esp_ip4_addr_t){.addr = handle->upstream_dns}),
-                        handle->log_enabled ? "on" : "off");
-                    if (sn > 0) sd_card_write_file(SINKHOLE_STATS_PATH, sbuf, (size_t)sn);
-                }
-            }
-            uint32_t hash = fnv1a_hash(name);
-
-            bool blocked = false;
-            char matched_domain[SINKHOLE_MAX_DOMAIN] = {0};
-            bool cache_hit = cache_check(handle, name, hash, &blocked,
-                                         matched_domain,
-                                         sizeof(matched_domain));
-
-            if (!cache_hit) {
-                blocked = blocklist_check(handle, name, matched_domain,
-                                          sizeof(matched_domain));
-                cache_insert(handle, name, hash, blocked, matched_domain);
-            }
-
-            if (blocked) {
-                send_blocked_response(listen_sock, rx_buffer, len,
-                                      &client_addr, handle);
-                handle->stat_blocked++;
-
-                char cip[INET_ADDRSTRLEN];
-                inet_ntoa_r(client_addr.sin_addr, cip, sizeof(cip) - 1);
-                log_query(handle, cip, name, qtype, "BLOCKED", matched_domain);
-            } else {
-                uint16_t client_id = ntohs(hdr->id);
-                int slot = -1;
-                for (int i = 0; i < SINKHOLE_FWD_RING; i++) {
-                    if (!fwd_ring[i].used) { slot = i; break; }
-                }
-                if (slot < 0) {
-                    handle->stat_dropped++;
-                    if ((handle->stat_dropped & 0xFF) == 1) {
-                        glog("Sinkhole: forward ring full, dropping query for %s\n", name);
-                    }
+            if (len < 0) {
+                // Transient errors should not tear down the socket; doing so
+                // under a UDP flood recreates sockets repeatedly and exhausts
+                // LWIP descriptors.  Back off briefly and continue.
+                if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+                    vTaskDelay(pdMS_TO_TICKS(10));
                     continue;
                 }
-
-                uint16_t upstream_id = ++next_fwd_id;
-                if (upstream_id == 0) upstream_id = ++next_fwd_id;
-                fwd_ring[slot].upstream_id = upstream_id;
-                fwd_ring[slot].client_id = client_id;
-                fwd_ring[slot].qtype = qtype;
-                fwd_ring[slot].client_addr = client_addr;
-                snprintf(fwd_ring[slot].domain, sizeof(fwd_ring[slot].domain),
-                         "%s", name);
-                fwd_ring[slot].used = true;
-
-                hdr->id = htons(upstream_id);
-                sendto(fwd_sock, rx_buffer, len, 0,
-                       (struct sockaddr *)&upstream_addr,
-                       sizeof(upstream_addr));
-
-                char cip[INET_ADDRSTRLEN];
-                inet_ntoa_r(client_addr.sin_addr, cip, sizeof(cip) - 1);
-                log_query(handle, cip, name, qtype, "FORWARDED", NULL);
-            }
-        }
-
-        close(fwd_sock);
-        close(listen_sock);
-
-        if (handle->use_psram_path) {
-            free_sinkhole_psram(handle);
-        } else if (handle->bloom) {
-            heap_caps_free(handle->bloom);
-            handle->bloom = NULL;
-            handle->bloom_size_bytes = 0;
-        }
-        if (handle->blocklist_fp) {
-            fclose(handle->blocklist_fp);
-            handle->blocklist_fp = NULL;
-        }
-
-        if (handle->sinkhole_jit_mounted) {
-            sd_card_unmount_after_flush(handle->sinkhole_display_suspended);
-            handle->sinkhole_jit_mounted = false;
-        }
-    } else {
-        // --- Legacy evil portal DNS mode ---
-        char addr_str[128];
-        dns_portal_rate_limit_entry_t rate_limit_table[DNS_PORTAL_RATE_LIMIT_TABLE_SIZE] = {0};
-
-        while (handle->started) {
-            struct sockaddr_in dest_addr;
-            dest_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-            dest_addr.sin_family = AF_INET;
-            dest_addr.sin_port = htons(DNS_PORT);
-            inet_ntoa_r(dest_addr.sin_addr, addr_str, sizeof(addr_str) - 1);
-
-            int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
-            if (sock < 0) {
-                ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
+                ESP_LOGW(TAG, "DNS recvfrom error %d, closing socket", errno);
+                close(sock);
                 break;
             }
 
-            int err = bind(sock, (struct sockaddr *)&dest_addr,
-                           sizeof(dest_addr));
-            if (err < 0)
-                ESP_LOGE(TAG, "Socket unable to bind: errno %d", errno);
+            uint32_t src_addr = 0;
+            if (source_addr.sin6_family == PF_INET) {
+                src_addr = ((struct sockaddr_in *)&source_addr)->sin_addr.s_addr;
+                inet_ntoa_r(src_addr, addr_str, sizeof(addr_str) - 1);
+            } else if (source_addr.sin6_family == PF_INET6) {
+                inet6_ntoa_r(source_addr.sin6_addr, addr_str,
+                             sizeof(addr_str) - 1);
+            }
 
-            while (handle->started) {
-                struct sockaddr_in6 source_addr;
-                socklen_t socklen = sizeof(source_addr);
-                int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer), 0,
-                                   (struct sockaddr *)&source_addr, &socklen);
-
-                if (len < 0) {
-                    // Transient errors should not tear down the socket; doing so
-                    // under a UDP flood recreates sockets repeatedly and exhausts
-                    // LWIP descriptors.  Back off briefly and continue.
-                    if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
-                        vTaskDelay(pdMS_TO_TICKS(10));
-                        continue;
-                    }
-                    ESP_LOGW(TAG, "DNS recvfrom error %d, closing socket", errno);
-                    close(sock);
-                    break;
+            // Apply per-client rate limiting in legacy evil-portal mode.
+            if (src_addr != 0) {
+                int64_t now = esp_timer_get_time();
+                if (!dns_portal_rate_limit_allow(rate_limit_table, src_addr, now)) {
+                    ESP_LOGD(TAG, "Dropping DNS query from %s (rate limit)", addr_str);
+                    continue;
                 }
-
-                uint32_t src_addr = 0;
-                if (source_addr.sin6_family == PF_INET) {
-                    src_addr = ((struct sockaddr_in *)&source_addr)->sin_addr.s_addr;
-                    inet_ntoa_r(src_addr, addr_str, sizeof(addr_str) - 1);
-                } else if (source_addr.sin6_family == PF_INET6) {
-                    inet6_ntoa_r(source_addr.sin6_addr, addr_str,
-                                 sizeof(addr_str) - 1);
-                }
-
-                // Apply per-client rate limiting in legacy evil-portal mode.
-                if (src_addr != 0) {
-                    int64_t now = esp_timer_get_time();
-                    if (!dns_portal_rate_limit_allow(rate_limit_table, src_addr, now)) {
-                        ESP_LOGD(TAG, "Dropping DNS query from %s (rate limit)", addr_str);
-                        continue;
+                /* Emit a structured event for the qname if we can extract it. */
+                if (len >= 17) {
+                    char qname[128];
+                    int qpos = 0;
+                    int i = 12;
+                    while (i < len && rx_buffer[i] != 0 && qpos < (int)127) {
+                        uint8_t lbl = rx_buffer[i++];
+                        if (lbl > 63) break;
+                        for (int k = 0; k < lbl && i < len && qpos < (int)127; ++k)
+                            qname[qpos++] = rx_buffer[i++];
+                        if (qpos < (int)127) qname[qpos++] = '.';
                     }
-                    /* Emit a structured event for the qname if we can extract it. */
-                    if (len >= 17) {
-                        char qname[128];
-                        int qpos = 0;
-                        int i = 12;
-                        while (i < len && rx_buffer[i] != 0 && qpos < (int)sizeof(qname) - 1) {
-                            uint8_t lbl = rx_buffer[i++];
-                            if (lbl > 63) break;
-                            for (int k = 0; k < lbl && i < len && qpos < (int)sizeof(qname) - 1; ++k)
-                                qname[qpos++] = rx_buffer[i++];
-                            if (qpos < (int)sizeof(qname) - 1) qname[qpos++] = '.';
-                        }
-                        if (qpos > 0) qname[qpos - 1] = '\0'; else qname[0] = '\0';
-                        if (qname[0]) {
-                            char dns_payload[300];
-                            snprintf(dns_payload, sizeof(dns_payload), "%s|%s",
-                                addr_str, qname);
-                            ghostscript_emit_event_escaped("dns_request", dns_payload);
-                        }
+                    if (qpos > 0) qname[qpos - 1] = '\0'; else qname[0] = '\0';
+                    if (qname[0]) {
+                        /* reply[] is idle here; parse_dns_request rewrites it below. */
+                        snprintf(reply, 300, "%s|%s", addr_str, qname);
+                        ghostscript_emit_event_escaped("dns_request", reply);
                     }
-                }
-
-                char reply[DNS_MAX_LEN];
-                int reply_len = parse_dns_request(rx_buffer, len, reply,
-                                                  DNS_MAX_LEN, handle);
-                if (reply_len > 0) {
-                    sendto(sock, reply, reply_len, 0,
-                           (struct sockaddr *)&source_addr,
-                           sizeof(source_addr));
                 }
             }
 
-            if (sock != -1) {
-                shutdown(sock, 0);
-                close(sock);
+            int reply_len = parse_dns_request(rx_buffer, len, reply,
+                                              DNS_MAX_LEN, handle);
+            if (reply_len > 0) {
+                sendto(sock, reply, reply_len, 0,
+                       (struct sockaddr *)&source_addr,
+                       sizeof(source_addr));
             }
         }
+
+        if (sock != -1) {
+            shutdown(sock, 0);
+            close(sock);
+        }
+    }
+}
+
+// Sinkhole loop, out of line so the task entry frame stays tiny.  Its locals
+// (forward ring, buffers, inlined blocklist helpers) are ~2.7 KB and must not be
+// charged to the evil-portal path.
+static void __attribute__((noinline)) dns_sinkhole_run(dns_server_handle_t handle) {
+    char rx_buffer[DNS_MAX_LEN];
+    // --- Sinkhole mode ---
+    struct sockaddr_in bind_addr;
+    memset(&bind_addr, 0, sizeof(bind_addr));
+    bind_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    bind_addr.sin_family = AF_INET;
+    bind_addr.sin_port = htons(DNS_PORT);
+
+    int listen_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
+    if (listen_sock < 0) {
+        ESP_LOGE(TAG, "Sinkhole: socket create failed");
+        handle->started = false;
+        vTaskDelete(NULL);
+        return;
+    }
+
+    int opt = 1;
+    setsockopt(listen_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+    if (bind(listen_sock, (struct sockaddr *)&bind_addr,
+             sizeof(bind_addr)) < 0) {
+        ESP_LOGE(TAG, "Sinkhole: bind failed errno %d", errno);
+        close(listen_sock);
+        handle->started = false;
+        vTaskDelete(NULL);
+        return;
+    }
+    ESP_LOGI(TAG, "Sinkhole bound to 0.0.0.0:53");
+
+    int fwd_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
+    if (fwd_sock < 0) {
+        ESP_LOGE(TAG, "Sinkhole: fwd socket failed");
+        close(listen_sock);
+        handle->started = false;
+        vTaskDelete(NULL);
+        return;
+    }
+
+    struct sockaddr_in fwd_bind;
+    memset(&fwd_bind, 0, sizeof(fwd_bind));
+    fwd_bind.sin_addr.s_addr = handle->bind_ip;
+    fwd_bind.sin_family = AF_INET;
+    fwd_bind.sin_port = 0;
+    if (bind(fwd_sock, (struct sockaddr *)&fwd_bind, sizeof(fwd_bind)) < 0) {
+        ESP_LOGE(TAG, "Sinkhole: fwd bind failed errno %d", errno);
+        close(fwd_sock);
+        close(listen_sock);
+        handle->started = false;
+        vTaskDelete(NULL);
+        return;
+    }
+
+    struct sockaddr_in upstream_addr;
+    memset(&upstream_addr, 0, sizeof(upstream_addr));
+    upstream_addr.sin_addr.s_addr = handle->upstream_dns;
+    upstream_addr.sin_family = AF_INET;
+    upstream_addr.sin_port = htons(DNS_PORT);
+
+    fwd_ring_t fwd_ring[SINKHOLE_FWD_RING];
+    memset(fwd_ring, 0, sizeof(fwd_ring));
+    uint16_t next_fwd_id = (uint16_t)esp_random();
+
+    load_blocklist(handle);
+
+    if (!handle->bloom && !handle->blocklist_fp) {
+        glog("DNS sinkhole: no blocklist, running in proxy mode\n");
+    } else {
+        const char *lookup_mode = handle->use_psram_path ? "PSRAM bloom+ht" :
+                                  handle->bloom ? "SD bloom+binary verify" :
+                                  "raw SD binary search";
+        glog("DNS sinkhole: ready (%s, upstream " IPSTR ")\n",
+             lookup_mode,
+             IP2STR(&(esp_ip4_addr_t){.addr = handle->upstream_dns}));
+    }
+
+    while (handle->started) {
+        fd_set readfds;
+        FD_ZERO(&readfds);
+        FD_SET(listen_sock, &readfds);
+        FD_SET(fwd_sock, &readfds);
+        int maxfd = listen_sock > fwd_sock ? listen_sock : fwd_sock;
+
+        struct timeval sel_tv = {1, 0};
+        int sel = select(maxfd + 1, &readfds, NULL, NULL, &sel_tv);
+        if (sel <= 0) continue;
+
+        // Handle upstream responses first (non-blocking)
+        if (FD_ISSET(fwd_sock, &readfds)) {
+            char resp[DNS_MAX_LEN];
+            struct sockaddr_in resp_src;
+            socklen_t resp_len = sizeof(resp_src);
+            int rlen = recvfrom(fwd_sock, resp, sizeof(resp), 0,
+                                (struct sockaddr *)&resp_src, &resp_len);
+            if (rlen >= (int)sizeof(dns_header_t)) {
+                if (resp_src.sin_addr.s_addr != upstream_addr.sin_addr.s_addr ||
+                    resp_src.sin_port != upstream_addr.sin_port) {
+                    continue;
+                }
+                uint16_t resp_id = ntohs(((dns_header_t *)resp)->id);
+                int ri = fwd_ring_find(fwd_ring, SINKHOLE_FWD_RING, resp_id);
+                if (ri >= 0) {
+                    ((dns_header_t *)resp)->id = htons(fwd_ring[ri].client_id);
+                    char matched_domain[SINKHOLE_MAX_DOMAIN] = {0};
+                    if (response_has_blocked_cname(handle, resp, rlen,
+                                                   matched_domain,
+                                                   sizeof(matched_domain))) {
+                        send_nxdomain(listen_sock, resp, rlen,
+                                      &fwd_ring[ri].client_addr);
+                        handle->stat_blocked++;
+                        char cip[INET_ADDRSTRLEN];
+                        inet_ntoa_r(fwd_ring[ri].client_addr.sin_addr, cip,
+                                    sizeof(cip) - 1);
+                        log_query(handle, cip, fwd_ring[ri].domain,
+                                  fwd_ring[ri].qtype, "BLOCKED_CNAME",
+                                  matched_domain);
+                    } else {
+                        sendto(listen_sock, resp, rlen, 0,
+                               (struct sockaddr *)&fwd_ring[ri].client_addr,
+                               sizeof(fwd_ring[ri].client_addr));
+                    }
+                    fwd_ring[ri].used = false;
+                }
+            }
+        }
+
+        // Handle incoming client queries
+        if (!FD_ISSET(listen_sock, &readfds)) continue;
+
+        struct sockaddr_in client_addr;
+        socklen_t client_len = sizeof(client_addr);
+        int len = recvfrom(listen_sock, rx_buffer, sizeof(rx_buffer), 0,
+                           (struct sockaddr *)&client_addr, &client_len);
+        if (len < 0 || len < (int)sizeof(dns_header_t)) continue;
+
+        dns_header_t *hdr = (dns_header_t *)rx_buffer;
+        uint16_t flags = ntohs(hdr->flags);
+        if ((flags & OPCODE_MASK) != 0) continue;
+        if (flags & 0x8000) continue;
+        if (ntohs(hdr->qd_count) == 0) continue;
+
+        char name[SINKHOLE_MAX_DOMAIN];
+        char *name_end = parse_dns_name(
+            rx_buffer + sizeof(dns_header_t), rx_buffer + len,
+            name, sizeof(name));
+        if (!name_end) continue;
+        if (name_end + sizeof(dns_question_t) > rx_buffer + len) continue;
+        dns_question_t *question = (dns_question_t *)name_end;
+        uint16_t qtype = ntohs(question->type);
+
+        for (char *p = name; *p; p++) *p = (char)tolower((uint8_t)*p);
+
+        handle->stat_total++;
+        if (handle->stat_total == 1) {
+            glog("DNS sinkhole: first query received (%s)\n", name);
+        } else if (handle->stat_total == 2) {
+            glog("DNS sinkhole: forwarding to upstream " IPSTR "\n",
+                 IP2STR(&(esp_ip4_addr_t){.addr = handle->upstream_dns}));
+        } else if (handle->stat_total % 50 == 0) {
+            glog("Sinkhole: %lu queries, %lu blocked, %lu dropped\n",
+                 (unsigned long)handle->stat_total,
+                 (unsigned long)handle->stat_blocked,
+                 (unsigned long)handle->stat_dropped);
+            if (handle->auto_stats) {
+                char sbuf[256];
+                int sn = snprintf(sbuf, sizeof(sbuf),
+                    "total=%lu\nblocked=%lu\ndropped=%lu\nupstream=" IPSTR "\nlog=%s\n",
+                    (unsigned long)handle->stat_total,
+                    (unsigned long)handle->stat_blocked,
+                    (unsigned long)handle->stat_dropped,
+                    IP2STR(&(esp_ip4_addr_t){.addr = handle->upstream_dns}),
+                    handle->log_enabled ? "on" : "off");
+                if (sn > 0) sd_card_write_file(SINKHOLE_STATS_PATH, sbuf, (size_t)sn);
+            }
+        }
+        uint32_t hash = fnv1a_hash(name);
+
+        bool blocked = false;
+        char matched_domain[SINKHOLE_MAX_DOMAIN] = {0};
+        bool cache_hit = cache_check(handle, name, hash, &blocked,
+                                     matched_domain,
+                                     sizeof(matched_domain));
+
+        if (!cache_hit) {
+            blocked = blocklist_check(handle, name, matched_domain,
+                                      sizeof(matched_domain));
+            cache_insert(handle, name, hash, blocked, matched_domain);
+        }
+
+        // An intercepted hostname is pointed at this board so that the HTTPS
+        // server can terminate TLS for it.
+        bool intercepted = handle->intercept_all ||
+                           (handle->intercept_enabled &&
+                            intercept_list_check(handle, name));
+
+        if (intercepted) {
+            char cip[INET_ADDRSTRLEN];
+            inet_ntoa_r(client_addr.sin_addr, cip, sizeof(cip) - 1);
+            // Remember who asked, so the TLS server can attribute the
+            // connection that follows to this device.
+            note_intercepted_client(name, client_addr.sin_addr.s_addr);
+            if (qtype == QD_TYPE_A) {
+                send_a_response(listen_sock, rx_buffer, len, &client_addr,
+                                handle->intercept_ip);
+                log_query(handle, cip, name, qtype, "INTERCEPTED", NULL);
+            } else if (qtype == 0x001C) { /* AAAA */
+                // Answering with NXDOMAIN makes the client fall back to IPv4
+                // instead of connecting straight to the real host.
+                send_nxdomain(listen_sock, rx_buffer, len, &client_addr);
+                log_query(handle, cip, name, qtype, "INTERCEPTED", NULL);
+            } else {
+                send_nxdomain(listen_sock, rx_buffer, len, &client_addr);
+                log_query(handle, cip, name, qtype, "INTERCEPTED", NULL);
+            }
+        } else if (blocked) {
+            send_blocked_response(listen_sock, rx_buffer, len,
+                                  &client_addr, handle);
+            handle->stat_blocked++;
+
+            char cip[INET_ADDRSTRLEN];
+            inet_ntoa_r(client_addr.sin_addr, cip, sizeof(cip) - 1);
+            log_query(handle, cip, name, qtype, "BLOCKED", matched_domain);
+        } else {
+            uint16_t client_id = ntohs(hdr->id);
+            int slot = -1;
+            for (int i = 0; i < SINKHOLE_FWD_RING; i++) {
+                if (!fwd_ring[i].used) { slot = i; break; }
+            }
+            if (slot < 0) {
+                handle->stat_dropped++;
+                if ((handle->stat_dropped & 0xFF) == 1) {
+                    glog("Sinkhole: forward ring full, dropping query for %s\n", name);
+                }
+                continue;
+            }
+
+            uint16_t upstream_id = ++next_fwd_id;
+            if (upstream_id == 0) upstream_id = ++next_fwd_id;
+            fwd_ring[slot].upstream_id = upstream_id;
+            fwd_ring[slot].client_id = client_id;
+            fwd_ring[slot].qtype = qtype;
+            fwd_ring[slot].client_addr = client_addr;
+            snprintf(fwd_ring[slot].domain, sizeof(fwd_ring[slot].domain),
+                     "%s", name);
+            fwd_ring[slot].used = true;
+
+            hdr->id = htons(upstream_id);
+            sendto(fwd_sock, rx_buffer, len, 0,
+                   (struct sockaddr *)&upstream_addr,
+                   sizeof(upstream_addr));
+
+            char cip[INET_ADDRSTRLEN];
+            inet_ntoa_r(client_addr.sin_addr, cip, sizeof(cip) - 1);
+            log_query(handle, cip, name, qtype, "FORWARDED", NULL);
+        }
+    }
+
+    close(fwd_sock);
+    close(listen_sock);
+
+    if (handle->use_psram_path) {
+        free_sinkhole_psram(handle);
+    } else if (handle->bloom) {
+        heap_caps_free(handle->bloom);
+        handle->bloom = NULL;
+        handle->bloom_size_bytes = 0;
+    }
+    if (handle->blocklist_fp) {
+        fclose(handle->blocklist_fp);
+        handle->blocklist_fp = NULL;
+    }
+
+    if (handle->sinkhole_jit_mounted) {
+        sd_card_unmount_after_flush(handle->sinkhole_display_suspended);
+        handle->sinkhole_jit_mounted = false;
+    }
+}
+
+void dns_server_task(void *pvParameters) {
+    dns_server_handle_t handle = pvParameters;
+
+    if (handle->sinkhole_mode) {
+        dns_sinkhole_run(handle);
+    } else {
+        dns_portal_run(handle);
     }
 
     vTaskDelete(NULL);
@@ -1268,7 +1550,7 @@ dns_server_handle_t start_dns_server(dns_server_config_t *config) {
     memcpy(handle->entry, config->item,
            config->num_of_entries * sizeof(dns_entry_pair_t));
 
-    xTaskCreate(dns_server_task, "dns_server", 4096, handle, 5, &handle->task);
+    xTaskCreate(dns_server_task, "dns_server", 5120, handle, 5, &handle->task);
     return handle;
 }
 
@@ -1303,7 +1585,10 @@ dns_server_handle_t start_dns_sinkhole(dns_sinkhole_config_t *config) {
         }
     }
 
-    dns_server_handle_t h = calloc(1, sizeof(struct dns_server_handle));
+    // The handle embeds the sinkhole task's TCB, which FreeRTOS requires to be
+    // in internal RAM, so this must never be satisfied from PSRAM.
+    dns_server_handle_t h = heap_caps_calloc(1, sizeof(struct dns_server_handle),
+                                             MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (!h) return NULL;
 
     h->started = true;
@@ -1313,6 +1598,9 @@ dns_server_handle_t start_dns_sinkhole(dns_sinkhole_config_t *config) {
     h->redirect_ip = config->redirect_ip;
     h->log_enabled = config->enable_logging;
     h->num_of_entries = 0;
+    h->intercept_enabled = config->intercept_enabled;
+    h->intercept_all = config->intercept_all;
+    h->intercept_ip = config->redirect_ip ? config->redirect_ip : h->bind_ip;
 
     h->cache = heap_caps_calloc(SINKHOLE_CACHE_SIZE,
                                 sizeof(struct sinkhole_cache_entry),
@@ -1361,6 +1649,22 @@ dns_server_handle_t start_dns_sinkhole(dns_sinkhole_config_t *config) {
         free(h);
         return NULL;
     }
+
+    // One lock for the process lifetime: it is reused when the sinkhole is
+    // restarted, so there is no race with a TLS task that still holds it.
+    if (!s_intercept_mutex) {
+        s_intercept_mutex = xSemaphoreCreateMutex();
+        if (!s_intercept_mutex) {
+            ESP_LOGE(TAG, "Failed to create interception lock");
+            heap_caps_free(h->task_stack);
+            if (h->cache) heap_caps_free(h->cache);
+            free(h);
+            return NULL;
+        }
+    }
+
+    // Before the task runs, so it cannot read a half-loaded list.
+    load_intercept_list(h);
 
     h->task = xTaskCreateStatic(dns_server_task, "dns_sinkhole", stack_words,
                                  h, 5, h->task_stack, &h->task_tcb);
@@ -1498,4 +1802,101 @@ void dns_sinkhole_save_stats(void) {
         IP2STR(&(esp_ip4_addr_t){.addr = s_sinkhole_handle->upstream_dns}),
         s_sinkhole_handle->log_enabled ? "on" : "off");
     if (n > 0) sd_card_write_file(SINKHOLE_STATS_PATH, buf, (size_t)n);
+}
+
+// --- Interception --------------------------------------------------------
+
+void dns_sinkhole_set_intercept(bool enabled) {
+    if (!s_sinkhole_handle) return;
+    s_sinkhole_handle->intercept_enabled = enabled;
+    ESP_LOGI(TAG, "Interception %s", enabled ? "enabled" : "disabled");
+}
+
+bool dns_sinkhole_get_intercept(void) {
+    if (!s_sinkhole_handle) return false;
+    return s_sinkhole_handle->intercept_enabled;
+}
+
+void dns_sinkhole_set_intercept_all(bool enabled) {
+    if (!s_sinkhole_handle) return;
+    s_sinkhole_handle->intercept_all = enabled;
+    if (enabled) {
+        s_sinkhole_handle->intercept_enabled = true;
+    }
+    ESP_LOGI(TAG, "Intercept every query: %s", enabled ? "on" : "off");
+}
+
+bool dns_sinkhole_get_intercept_all(void) {
+    if (!s_sinkhole_handle) return false;
+    return s_sinkhole_handle->intercept_all;
+}
+
+bool dns_sinkhole_add_intercept(const char *domain) {
+    if (!s_sinkhole_handle) return false;
+
+    char entry[SINKHOLE_MAX_DOMAIN];
+    if (!normalize_domain_arg(domain, entry, sizeof(entry))) return false;
+
+    bool added = false;
+    intercept_lock();
+    if (!s_intercept) {
+        intercept_unlock();
+        return false;
+    }
+    for (int i = 0; i < s_intercept_count; i++) {
+        if (strcmp(s_intercept[i], entry) == 0) {
+            intercept_unlock();
+            return false;
+        }
+    }
+    if (s_intercept_count < SINKHOLE_INTERCEPT_MAX) {
+        snprintf(s_intercept[s_intercept_count],
+                 SINKHOLE_MAX_DOMAIN, "%s", entry);
+        s_intercept_count++;
+        save_intercept_list_locked();
+        added = true;
+    }
+    intercept_unlock();
+    return added;
+}
+
+bool dns_sinkhole_remove_intercept(const char *domain) {
+    if (!s_sinkhole_handle) return false;
+
+    char entry[SINKHOLE_MAX_DOMAIN];
+    if (!normalize_domain_arg(domain, entry, sizeof(entry))) return false;
+
+    bool removed = false;
+    intercept_lock();
+    for (int i = 0; i < s_intercept_count; i++) {
+        if (strcmp(s_intercept[i], entry) != 0) continue;
+        for (int j = i; j < s_intercept_count - 1; j++) {
+            memcpy(s_intercept[j], s_intercept[j + 1],
+                   SINKHOLE_MAX_DOMAIN);
+        }
+        s_intercept_count--;
+        s_intercept[s_intercept_count][0] = '\0';
+        save_intercept_list_locked();
+        removed = true;
+        break;
+    }
+    intercept_unlock();
+    return removed;
+}
+
+size_t dns_sinkhole_list_intercept(char *out, size_t out_len) {
+    if (!out || out_len == 0) return 0;
+    out[0] = '\0';
+    if (!s_sinkhole_handle) return 0;
+
+    size_t used = 0;
+    intercept_lock();
+    for (int i = 0; i < s_intercept_count; i++) {
+        int n = snprintf(out + used, out_len - used, "%s\n",
+                         s_intercept[i]);
+        if (n < 0 || (size_t)n >= out_len - used) break;
+        used += (size_t)n;
+    }
+    intercept_unlock();
+    return used;
 }

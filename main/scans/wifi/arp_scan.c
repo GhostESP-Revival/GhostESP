@@ -11,9 +11,11 @@
 #include "scans/wifi/arp_scan.h"
 #include "core/callbacks.h"
 #include "core/glog.h"
+#include "core/ouis.h"
 #include "core/scan_saver.h"
 #include "core/system_manager.h"
 #include "core/utils.h"
+#include "vendor/wifi_l2.h"
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
@@ -58,6 +60,7 @@ static arp_host_t *g_arp_results = NULL;
 static int g_arp_result_count = 0;
 static volatile bool g_arp_scan_running = false;
 static volatile bool g_arp_scan_done = false;
+static volatile bool g_arp_task_active = false;  // async task alive (even if cancelled)
 
 // Live progress tracking (read from UI poll timer)
 static volatile int g_arp_progress_pass = 0;
@@ -81,16 +84,14 @@ typedef struct {
 // Internal Helpers (Module-specific)
 // ============================================================================
 
-static const char *lookup_oui_vendor(const uint8_t *mac);
-
 /**
  * @brief Format a host entry for display (single source of truth)
  */
 static void format_host_entry(char *buffer, size_t size, size_t index, const char *ip, const uint8_t *mac) {
     char mac_str[18];
     format_mac_address(mac, mac_str, sizeof(mac_str), true);
-    const char *vendor = lookup_oui_vendor(mac);
-    if (vendor) {
+    char vendor[64] = {0};
+    if (ouis_lookup_vendor_bytes(mac, vendor, sizeof(vendor))) {
         snprintf(buffer, size, "%2zu. %s [%s] %s", index, ip, mac_str, vendor);
     } else {
         snprintf(buffer, size, "%2zu. %s [%s]", index, ip, mac_str);
@@ -101,7 +102,7 @@ static void format_host_entry(char *buffer, size_t size, size_t index, const cha
  * @brief Log and save a host entry
  */
 static void log_host_entry(scan_file_t *sf, size_t index, const char *ip, const uint8_t *mac) {
-    char entry[80];
+    char entry[112];
     format_host_entry(entry, sizeof(entry), index, ip, mac);
     glog("%s\n", entry);
     if (scan_file_is_open(sf)) {
@@ -435,8 +436,11 @@ static void process_batch(arp_scanner_ctx_t *ctx, uint32_t batch_start, uint32_t
  * Runs multiple passes, unioning results across passes. Inter-pass delays
  * give power-saving mobile clients a chance to wake up and respond.
  * Technique inspired by DecentLabs/officeAir (MIT-licensed).
+ *
+ * Callers must have set g_arp_scan_running; clearing it requests cancellation.
+ * @param report print the result table and save it to the SD card
  */
-bool arp_scan_subnet(void) {
+static bool arp_scan_run(bool report) {
     arp_scanner_ctx_t *ctx = arp_scanner_init();
     if (!ctx) {
         glog("Failed to initialize ARP scanner context\n");
@@ -535,6 +539,11 @@ bool arp_scan_subnet(void) {
     ctx->hosts = NULL;
     g_arp_result_count = limit;
 
+    if (!report) {
+        arp_scanner_cleanup(ctx);
+        return true;
+    }
+
     // Open scan file for saving results
     scan_file_t sf = SCAN_FILE_INIT;
     bool saving = (scan_file_open(&sf, "arp_scan", "txt") == ESP_OK);
@@ -571,31 +580,57 @@ bool arp_scan_subnet(void) {
     return true;
 }
 
-/**
- * @brief FreeRTOS task wrapper for async ARP scan
- */
-static void arp_scan_task(void *pvParameters) {
-    (void)pvParameters;
-    arp_scan_subnet();
-    g_arp_scan_done = true;
-    vTaskDeleteWithCaps(NULL);
-}
-
-esp_err_t arp_scan_start_async(void) {
-    if (g_arp_scan_running) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    arp_scan_clear_results();
-    g_arp_scan_running = true;
-    g_arp_scan_done = false;
+static void arp_scan_reset_progress(void) {
     g_arp_progress_pass = 0;
     g_arp_progress_total_passes = 0;
     g_arp_progress_scanned = 0;
     g_arp_progress_total_hosts = 0;
     g_arp_progress_found = 0;
+}
+
+bool arp_scan_run_blocking(bool report) {
+    if (g_arp_scan_running || g_arp_task_active) {
+        return false;
+    }
+    arp_scan_reset_progress();
+    g_arp_scan_running = true;
+    bool ok = arp_scan_run(report);
+    g_arp_scan_running = false;
+    return ok;
+}
+
+bool arp_scan_subnet(void) {
+    return arp_scan_run_blocking(true);
+}
+
+/**
+ * @brief FreeRTOS task wrapper for async ARP scan
+ */
+static void arp_scan_task(void *pvParameters) {
+    (void)pvParameters;
+    arp_scan_run(true);
+    // Release the scan on our own so CLI starts (which have no poll timer to
+    // call arp_scan_finish_async) can run again.
+    g_arp_scan_running = false;
+    g_arp_task_active = false;
+    g_arp_scan_done = true;
+    vTaskDeleteWithCaps(NULL);
+}
+
+esp_err_t arp_scan_start_async(void) {
+    // g_arp_task_active also covers a cancelled scan that is still winding down.
+    if (g_arp_scan_running || g_arp_task_active) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    arp_scan_clear_results();
+    g_arp_scan_running = true;
+    g_arp_task_active = true;
+    g_arp_scan_done = false;
+    arp_scan_reset_progress();
     BaseType_t ret = xTaskCreate_psram(arp_scan_task, "arp_scan", 8192, NULL, 5, NULL);
     if (ret != pdPASS) {
         g_arp_scan_running = false;
+        g_arp_task_active = false;
         return ESP_FAIL;
     }
     return ESP_OK;
@@ -679,213 +714,22 @@ static volatile bool g_passive_poll_pending = false;
 static volatile bool g_passive_poll_ready = false;
 static volatile int g_passive_poll_count = 0;
 
-// Simple OUI vendor lookup table (top vendors)
-typedef struct {
-    uint8_t prefix[3];
-    const char *vendor;
-} oui_entry_t;
-
-static const oui_entry_t oui_table[] = {
-    {{0x00, 0x50, 0x56}, "VMware"},
-    {{0x00, 0x0C, 0x29}, "VMware"},
-    {{0x08, 0x00, 0x27}, "VirtualBox"},
-    {{0x0A, 0x00, 0x27}, "VirtualBox"},
-    {{0xB8, 0x27, 0xEB}, "Raspberry Pi"},
-    {{0xDC, 0xA6, 0x32}, "Raspberry Pi"},
-    {{0xE4, 0x5F, 0x01}, "Raspberry Pi"},
-    {{0x28, 0xCD, 0xC1}, "Raspberry Pi"},
-    {{0x00, 0x1A, 0x79}, "Dell"},
-    {{0x00, 0x14, 0x22}, "Dell"},
-    {{0xF8, 0xBC, 0x12}, "Dell"},
-    {{0x00, 0x25, 0xB5}, "Dell"},
-    {{0x00, 0x1E, 0x67}, "Intel"},
-    {{0x00, 0x1B, 0x21}, "Intel"},
-    {{0x68, 0x05, 0xCA}, "Intel"},
-    {{0xA4, 0x34, 0xD9}, "Intel"},
-    {{0x3C, 0x22, 0xFB}, "Apple"},
-    {{0x00, 0x1C, 0xB3}, "Apple"},
-    {{0xF0, 0x18, 0x98}, "Apple"},
-    {{0xAC, 0xDE, 0x48}, "Apple"},
-    {{0x00, 0x26, 0xBB}, "Apple"},
-    {{0x78, 0x7B, 0x8A}, "Apple"},
-    {{0x00, 0x03, 0x93}, "Apple"},
-    {{0x94, 0xE9, 0x79}, "Apple"},
-    {{0x00, 0x17, 0x88}, "Philips Hue"},
-    {{0x00, 0x12, 0x47}, "TP-Link"},
-    {{0x50, 0xC7, 0xBF}, "TP-Link"},
-    {{0xE8, 0xDE, 0x27}, "TP-Link"},
-    {{0x30, 0xB5, 0xC2}, "TP-Link"},
-    {{0x00, 0x0E, 0x8F}, "Netgear"},
-    {{0x20, 0xE5, 0x2A}, "Netgear"},
-    {{0x44, 0x94, 0xFC}, "Netgear"},
-    {{0x00, 0x1F, 0x33}, "Netgear"},
-    {{0x00, 0x24, 0xD4}, "ASUS"},
-    {{0xF4, 0x6D, 0x04}, "ASUS"},
-    {{0x2C, 0x56, 0xDC}, "ASUS"},
-    {{0x00, 0x13, 0x02}, "Samsung"},
-    {{0x00, 0x1A, 0x8A}, "Samsung"},
-    {{0x5C, 0x3C, 0x27}, "Samsung"},
-    {{0x00, 0x21, 0xD1}, "Samsung"},
-    {{0x00, 0x16, 0x32}, "Samsung"},
-    {{0x00, 0x0D, 0xB9}, "Samsung"},
-    {{0x00, 0x07, 0xAB}, "Samsung"},
-    {{0x00, 0x02, 0x78}, "Samsung"},
-    {{0x34, 0x23, 0xBA}, "Samsung"},
-    {{0xF0, 0x5B, 0x7B}, "Samsung"},
-    {{0xFC, 0xF1, 0x36}, "Samsung"},
-    {{0x00, 0x0E, 0x6D}, "D-Link"},
-    {{0x00, 0x1B, 0x11}, "D-Link"},
-    {{0x1C, 0x7E, 0xE5}, "D-Link"},
-    {{0x00, 0x15, 0xE9}, "D-Link"},
-    {{0x00, 0x1C, 0xF0}, "D-Link"},
-    {{0x30, 0x23, 0x03}, "Belkin"},
-    {{0x00, 0x11, 0x50}, "Belkin"},
-    {{0x00, 0x1D, 0xD8}, "HP"},
-    {{0x00, 0x0D, 0x9D}, "HP"},
-    {{0x00, 0x08, 0x02}, "HP"},
-    {{0x00, 0x1A, 0x4B}, "HP"},
-    {{0x00, 0x0B, 0xCD}, "HP"},
-    {{0x00, 0x13, 0x21}, "HP"},
-    {{0x00, 0x08, 0x22}, "Xiaomi"},
-    {{0x28, 0x6C, 0x07}, "Xiaomi"},
-    {{0x7C, 0x1D, 0xD9}, "Xiaomi"},
-    {{0x64, 0x09, 0x80}, "Xiaomi"},
-    {{0x78, 0x11, 0xDC}, "Xiaomi"},
-    {{0xF8, 0xA4, 0x5F}, "Xiaomi"},
-    {{0x00, 0x0E, 0x58}, "Sony"},
-    {{0x00, 0x04, 0x1B}, "Sony"},
-    {{0x00, 0x1A, 0x80}, "Sony"},
-    {{0x00, 0x1E, 0x45}, "Sony"},
-    {{0x00, 0x0A, 0x95}, "Cisco"},
-    {{0x00, 0x01, 0x42}, "Cisco"},
-    {{0x00, 0x01, 0x63}, "Cisco"},
-    {{0x00, 0x01, 0x96}, "Cisco"},
-    {{0x00, 0x01, 0xC7}, "Cisco"},
-    {{0x00, 0x02, 0x16}, "Cisco"},
-    {{0x00, 0x02, 0x4A}, "Cisco"},
-    {{0x00, 0x02, 0xB9}, "Cisco"},
-    {{0x00, 0x03, 0x6B}, "Cisco"},
-    {{0x00, 0x03, 0xE3}, "Cisco"},
-    {{0x00, 0x04, 0x9D}, "Cisco"},
-    {{0x00, 0x04, 0xC1}, "Cisco"},
-    {{0x00, 0x05, 0x9B}, "Cisco"},
-    {{0x00, 0x06, 0x28}, "Cisco"},
-    {{0x00, 0x07, 0x0D}, "Cisco"},
-    {{0x00, 0x07, 0x85}, "Cisco"},
-    {{0x00, 0x08, 0x20}, "Cisco"},
-    {{0x00, 0x08, 0x7C}, "Cisco"},
-    {{0x00, 0x09, 0x43}, "Cisco"},
-    {{0x00, 0x09, 0x44}, "Cisco"},
-    {{0x00, 0x09, 0x7C}, "Cisco"},
-    {{0x00, 0x09, 0xB6}, "Cisco"},
-    {{0x00, 0x0A, 0x41}, "Cisco"},
-    {{0x00, 0x0A, 0x8A}, "Cisco"},
-    {{0x00, 0x0A, 0xB8}, "Cisco"},
-    {{0x00, 0x0A, 0xB6}, "Cisco"},
-    {{0x00, 0x0B, 0x46}, "Cisco"},
-    {{0x00, 0x0B, 0x5F}, "Cisco"},
-    {{0x00, 0x0B, 0x85}, "Cisco"},
-    {{0x00, 0x0B, 0xBE}, "Cisco"},
-    {{0x00, 0x0B, 0xFC}, "Cisco"},
-    {{0x00, 0x0C, 0x30}, "Cisco"},
-    {{0x00, 0x0C, 0x85}, "Cisco"},
-    {{0x00, 0x0C, 0x86}, "Cisco"},
-    {{0x00, 0x0C, 0xDB}, "Cisco"},
-    {{0x00, 0x0D, 0x29}, "Cisco"},
-    {{0x00, 0x0D, 0x65}, "Cisco"},
-    {{0x00, 0x0D, 0xBC}, "Cisco"},
-    {{0x00, 0x0D, 0xEC}, "Cisco"},
-    {{0x00, 0x0E, 0x38}, "Cisco"},
-    {{0x00, 0x0E, 0xD7}, "Cisco"},
-    {{0x00, 0x0F, 0x24}, "Cisco"},
-    {{0x00, 0x0F, 0x34}, "Cisco"},
-    {{0x00, 0x0F, 0x8F}, "Cisco"},
-    {{0x00, 0x12, 0x00}, "Cisco"},
-    {{0x00, 0x12, 0x43}, "Cisco"},
-    {{0x00, 0x12, 0x7F}, "Cisco"},
-    {{0x00, 0x12, 0xD9}, "Cisco"},
-    {{0x00, 0x13, 0x19}, "Cisco"},
-    {{0x00, 0x13, 0x7F}, "Cisco"},
-    {{0x00, 0x13, 0x80}, "Cisco"},
-    {{0x00, 0x14, 0x6A}, "Cisco"},
-    {{0x00, 0x14, 0xA8}, "Cisco"},
-    {{0x00, 0x16, 0x46}, "Cisco"},
-    {{0x00, 0x16, 0x47}, "Cisco"},
-    {{0x00, 0x17, 0x0E}, "Cisco"},
-    {{0x00, 0x17, 0x3B}, "Cisco"},
-    {{0x00, 0x17, 0x94}, "Cisco"},
-    {{0x00, 0x17, 0x95}, "Cisco"},
-    {{0x00, 0x18, 0x73}, "Cisco"},
-    {{0x00, 0x19, 0x2F}, "Cisco"},
-    {{0x00, 0x19, 0xAA}, "Cisco"},
-    {{0x00, 0x19, 0xE7}, "Cisco"},
-    {{0x00, 0x1A, 0x2F}, "Cisco"},
-    {{0x00, 0x1A, 0x6D}, "Cisco"},
-    {{0x00, 0x1A, 0xA1}, "Cisco"},
-    {{0x00, 0x1A, 0xA2}, "Cisco"},
-    {{0x00, 0x1B, 0x0C}, "Cisco"},
-    {{0x00, 0x1B, 0x53}, "Cisco"},
-    {{0x00, 0x1B, 0x54}, "Cisco"},
-    {{0x00, 0x1B, 0xD4}, "Cisco"},
-    {{0x00, 0x1C, 0x0E}, "Cisco"},
-    {{0x00, 0x1C, 0x0F}, "Cisco"},
-    {{0x00, 0x1C, 0x10}, "Cisco"},
-    {{0x00, 0x1C, 0x11}, "Cisco"},
-    {{0x00, 0x1E, 0x13}, "Cisco"},
-    {{0x00, 0x1E, 0x14}, "Cisco"},
-    {{0x00, 0x1E, 0x49}, "Cisco"},
-    {{0x00, 0x1E, 0x4A}, "Cisco"},
-    {{0x00, 0x1E, 0xBE}, "Cisco"},
-    {{0x00, 0x1E, 0xF7}, "Cisco"},
-    {{0x00, 0x20, 0x3F}, "Cisco"},
-    {{0x00, 0x21, 0x55}, "Cisco"},
-    {{0x00, 0x21, 0x56}, "Cisco"},
-    {{0x00, 0x22, 0x55}, "Cisco"},
-    {{0x00, 0x22, 0x56}, "Cisco"},
-    {{0x00, 0x23, 0x04}, "Cisco"},
-    {{0x00, 0x23, 0x33}, "Cisco"},
-    {{0x00, 0x23, 0x5D}, "Cisco"},
-    {{0x00, 0x24, 0x13}, "Cisco"},
-    {{0x00, 0x24, 0x14}, "Cisco"},
-    {{0x00, 0x24, 0x50}, "Cisco"},
-    {{0x00, 0x24, 0xC3}, "Cisco"},
-    {{0x00, 0x25, 0x45}, "Cisco"},
-    {{0x00, 0x25, 0x83}, "Cisco"},
-    {{0x00, 0x25, 0x84}, "Cisco"},
-    {{0x00, 0x26, 0x0A}, "Cisco"},
-    {{0x00, 0x26, 0x51}, "Cisco"},
-    {{0x00, 0x26, 0x98}, "Cisco"},
-    {{0x00, 0x26, 0x99}, "Cisco"},
-    {{0x00, 0x26, 0x9A}, "Cisco"},
-    {{0x00, 0x26, 0xB0}, "Cisco"},
-    {{0x00, 0x26, 0xB1}, "Cisco"},
-    {{0x00, 0x26, 0xF2}, "Cisco"},
-    {{0x00, 0x27, 0x0C}, "Cisco"},
-    {{0x00, 0x50, 0x56}, "VMware"},
-    {{0x00, 0x50, 0x57}, "VMware"},
-    {{0x00, 0x50, 0x58}, "VMware"},
-    {{0x00, 0x0C, 0x29}, "VMware"},
-    {{0x00, 0x05, 0x69}, "VMware"},
-};
-
-static const int oui_table_size = sizeof(oui_table) / sizeof(oui_table[0]);
-
-static const char *lookup_oui_vendor(const uint8_t *mac) {
-    for (int i = 0; i < oui_table_size; i++) {
-        if (mac[0] == oui_table[i].prefix[0] &&
-            mac[1] == oui_table[i].prefix[1] &&
-            mac[2] == oui_table[i].prefix[2]) {
-            return oui_table[i].vendor;
-        }
-    }
-    return NULL;
+// Full IEEE OUI registry from core/ouis.c (ouis.bin). The hand-written
+// "top vendors" table that used to live here drifted out of sync with the
+// GUI, which already used the full list.
+bool arp_scan_get_vendor_buf(const uint8_t *mac, char *out_vendor, size_t out_sz) {
+    if (!mac || !out_vendor || out_sz == 0) return false;
+    return ouis_lookup_vendor_bytes(mac, out_vendor, out_sz);
 }
 
 const char *arp_scan_get_vendor(const uint8_t *mac) {
-    if (!mac) {
+    // Deprecated: kept for callers that cannot pass a buffer. Not reentrant.
+    static char s_vendor[64];
+    s_vendor[0] = '\0';
+    if (!arp_scan_get_vendor_buf(mac, s_vendor, sizeof(s_vendor))) {
         return NULL;
     }
-    return lookup_oui_vendor(mac);
+    return s_vendor;
 }
 
 static void format_short_mac(const uint8_t *mac, char out[7]) {
@@ -940,28 +784,37 @@ static void format_compact_packet(const wifi_promiscuous_pkt_t *pkt,
 
     const char *name = packet_type_name(type, subtype);
     if (packet_type == WIFI_PKT_DATA && len >= 24) {
-        bool to_ds = (fc & 0x0100) != 0;
-        bool from_ds = (fc & 0x0200) != 0;
-        size_t header_len = (to_ds && from_ds) ? 30 : 24;
-        if (subtype & 0x08) {
-            header_len += 2;
-            if (fc & 0x8000) header_len += 4;
-        }
-        if (len >= header_len + 8) {
-            const uint8_t *llc = frame + header_len;
-            if (llc[0] == 0xAA && llc[1] == 0xAA && llc[2] == 0x03) {
-                uint16_t ether_type = ((uint16_t)llc[6] << 8) | llc[7];
-                if (ether_type == 0x0806 && len >= header_len + 8 + 28) {
-                    const uint8_t *arp = llc + 8;
+        /* Shared header geometry plus 802.1Q/802.1ad tag peeling. The old
+         * inline version only allowed for the HT Control field on QoS frames,
+         * and treated a VLAN tag as the ethertype, so tagged traffic fell
+         * through as "DAT" instead of ARP/EAP/IP. */
+        wifi_l2_info_t l2;
+        if (wifi_l2_parse(frame, len, &l2)) {
+            const uint8_t *payload = frame + l2.payload_offset;
+            if (l2.ethertype == WIFI_L2_ETHERTYPE_ARP) {
+                /* ARP: htype(2) ptype(2) hlen(1) plen(1) oper(2) sha(6) spa(4)
+                 * tha(6) tpa(4). Sender protocol address is at +14. */
+                if (l2.payload_offset + 28 <= len) {
+                    const uint8_t *arp = payload;
                     snprintf(out, out_size, "%02u %4d ARP %u.%u>%u.%u %s",
                              (unsigned int)pkt->rx_ctrl.channel, pkt->rx_ctrl.rssi,
                              (unsigned int)arp[16], (unsigned int)arp[17],
                              (unsigned int)arp[26], (unsigned int)arp[27], src);
                     return;
                 }
-                if (ether_type == 0x888E) name = "EAP";
-                else if (ether_type == 0x0800) name = "IP4";
-                else if (ether_type == 0x86DD) name = "IP6";
+            } else if (l2.ethertype == WIFI_L2_ETHERTYPE_EAPOL) {
+                name = "EAP";
+            } else if (l2.ethertype == WIFI_L2_ETHERTYPE_IPV4) {
+                name = "IP4";
+            } else if (l2.ethertype == WIFI_L2_ETHERTYPE_IPV6) {
+                name = "IP6";
+            }
+            if (l2.vlan_depth > 0) {
+                /* Flag the frame so a tagged line is distinguishable from an
+                 * untagged one carrying the same protocol. */
+                if (flag_pos < 2) {
+                    flags[flag_pos++] = 'V';
+                }
             }
         }
     }
@@ -1001,8 +854,9 @@ static void passive_arp_table_poll_callback(void *ctx) {
         const uint8_t *ip_bytes = (const uint8_t *)&ip->addr;
         char short_mac[7];
         format_short_mac(eth->addr, short_mac);
-        const char *vendor = lookup_oui_vendor(eth->addr);
-        if (vendor) {
+        char vendor[64] = {0};
+        bool has_vendor = ouis_lookup_vendor_bytes(eth->addr, vendor, sizeof(vendor));
+        if (has_vendor) {
             snprintf(g_passive_new_lines[new_count].line, sizeof(g_passive_new_lines[0].line),
                      "NBR %u.%u %s %.16s",
                      (unsigned int)ip_bytes[2], (unsigned int)ip_bytes[3],

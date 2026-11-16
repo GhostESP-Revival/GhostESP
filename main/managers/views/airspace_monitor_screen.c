@@ -1,6 +1,7 @@
 #include "managers/views/airspace_monitor_screen.h"
 #include "core/callbacks.h"
 #include "core/ouis.h"
+#include "core/utils.h"
 #include "esp_timer.h"
 #include "gui/lvgl_safe.h"
 #include "gui/screen_layout.h"
@@ -10,12 +11,14 @@
 #include "managers/views/main_menu_screen.h"
 #include "managers/wifi_manager.h"
 #include "scans/wifi/airspace_monitor.h"
+#include "vendor/pcap.h"
 #include "lvgl.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 static lv_obj_t *root_container = NULL;
+static bool airspace_pcap_owned;
 static lv_timer_t *update_timer = NULL;
 static lv_obj_t *lbl_status = NULL;
 static lv_obj_t *lbl_reason = NULL;
@@ -105,6 +108,7 @@ static lv_obj_t *create_card_title(lv_obj_t *card, const char *text) {
 static void format_mac(const uint8_t mac[6], char *out, size_t out_size) {
     snprintf(out, out_size, "%02X:%02X:%02X:%02X:%02X:%02X",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    privacy_redact_mac(out);  /* display only; OUI retained for vendor lookup */
 }
 
 static uint32_t color_for_level(airspace_threat_level_t level) {
@@ -124,6 +128,10 @@ static void scroll_airspace(int dir) {
     lv_obj_scroll_by_bounded(content_scroller, 0, dir > 0 ? -step : step, LV_ANIM_OFF);
 }
 
+static void set_label_if_changed(lv_obj_t *label, const char *text) {
+    if (label && strcmp(lv_label_get_text(label), text) != 0) lv_label_set_text(label, text);
+}
+
 static void update_display_cb(lv_timer_t *timer) {
     (void)timer;
 
@@ -137,16 +145,19 @@ static void update_display_cb(lv_timer_t *timer) {
     if (lbl_reason) lv_label_set_text(lbl_reason, snap.reason);
     const char *band = snap.current_channel > 14 ? "5G" : "2G";
     if (lbl_channel) {
-        lv_label_set_text_fmt(lbl_channel, "Ch %u %s  plan %u  hop %lu/%lu",
+        lv_label_set_text_fmt(lbl_channel, "Ch%u %s obs%u %s %lu/%lu %s",
                               (unsigned)snap.current_channel,
                               band,
-                              (unsigned)snap.channel_count,
+                              (unsigned)snap.sample_channel,
+                              snap.dwelling ? "hold" : "hop",
                               (unsigned long)snap.hop_success,
-                              (unsigned long)snap.hop_fail);
+                              (unsigned long)snap.hop_fail,
+                              airspace_pcap_owned && pcap_is_capturing() ? "PCAP" : "no PCAP");
     }
-    if (lbl_pps) lv_label_set_text_fmt(lbl_pps, "Pkt %lu/s  Tx %u",
+    if (lbl_pps) lv_label_set_text_fmt(lbl_pps, "%lu/s T%u%s",
                                        (unsigned long)snap.packets_per_sec,
-                                       (unsigned)snap.unique_devices);
+                                       (unsigned)snap.unique_devices,
+                                       snap.coverage_flags & 1U ? "+" : "");
     if (lbl_deauth) {
         lv_label_set_text_fmt(lbl_deauth, "Kick %lu/s",
                               (unsigned long)(snap.deauth_per_sec + snap.disassoc_per_sec));
@@ -188,8 +199,8 @@ static void update_display_cb(lv_timer_t *timer) {
         if (i >= snap.suspect_count) {
             if (i == 0 && snap.suspect_count == 0) {
                 lv_obj_clear_flag(suspect_cards[i], LV_OBJ_FLAG_HIDDEN);
-                if (lbl_suspect[i]) lv_label_set_text(lbl_suspect[i], "No suspected device");
-                if (lbl_suspect_vendor[i]) lv_label_set_text(lbl_suspect_vendor[i], "Passive channel hopping");
+                set_label_if_changed(lbl_suspect[i], "No suspected device");
+                set_label_if_changed(lbl_suspect_vendor[i], "Passive channel hopping");
             } else {
                 lv_obj_add_flag(suspect_cards[i], LV_OBJ_FLAG_HIDDEN);
             }
@@ -201,22 +212,25 @@ static void update_display_cb(lv_timer_t *timer) {
         uint32_t kick_total = suspect->deauth_total + suspect->disassoc_total;
         char mac[18] = {0};
         char vendor[64] = "Unknown";
+        char text[128];
         format_mac(suspect->mac, mac, sizeof(mac));
         (void)ouis_lookup_vendor(mac, vendor, sizeof(vendor));
 
         lv_obj_clear_flag(suspect_cards[i], LV_OBJ_FLAG_HIDDEN);
         if (lbl_suspect[i]) {
-            lv_label_set_text_fmt(lbl_suspect[i], "%u. %s  ch%u  %ddBm",
+            snprintf(text, sizeof(text), "%u. %s  ch%u  %ddBm",
                                   (unsigned)(i + 1),
                                   mac,
                                   (unsigned)suspect->channel,
                                   (int)suspect->rssi);
+            set_label_if_changed(lbl_suspect[i], text);
         }
         if (lbl_suspect_vendor[i]) {
-            lv_label_set_text_fmt(lbl_suspect_vendor[i], "%s | kick %lu/s | %lu kick frames",
+            snprintf(text, sizeof(text), "%s | kick %lu/s | %lu kick frames",
                                   vendor,
                                   (unsigned long)kick_rate,
                                   (unsigned long)kick_total);
+            set_label_if_changed(lbl_suspect_vendor[i], text);
         }
     }
 
@@ -233,6 +247,11 @@ static void update_display_cb(lv_timer_t *timer) {
                               (unsigned long)snap.auth_packets,
                               (unsigned long)(snap.deauth_packets + snap.disassoc_packets));
     }
+}
+
+static void airspace_raw_observer(const wifi_promiscuous_pkt_t *pkt,
+                                  wifi_promiscuous_pkt_type_t type) {
+    wifi_airspace_monitor_callback((void *)pkt, type);
 }
 
 static void airspace_input_callback(InputEvent *event) {
@@ -304,8 +323,22 @@ void airspace_monitor_view_create(void) {
     dim_color = theme_palette_get_text_muted(theme);
 
     airspace_monitor_reset();
-    wifi_manager_start_monitor_mode(wifi_airspace_monitor_callback);
-    (void)airspace_monitor_start();
+    airspace_pcap_owned = !pcap_is_capturing() &&
+                          pcap_file_open("airspace", PCAP_CAPTURE_WIFI) == ESP_OK;
+    if (airspace_pcap_owned) {
+        pcap_set_write_frames_verbatim(true);
+        wifi_raw_set_observer(airspace_raw_observer);
+        wifi_manager_start_monitor_mode(wifi_raw_scan_callback);
+    } else {
+        wifi_manager_start_monitor_mode(wifi_airspace_monitor_callback);
+    }
+    if (airspace_monitor_start() != ESP_OK && airspace_pcap_owned) {
+        wifi_manager_stop_monitor_mode();
+        wifi_raw_set_observer(NULL);
+        (void)pcap_drain_queue();
+        pcap_file_close();
+        airspace_pcap_owned = false;
+    }
 
     display_manager_fill_screen(lv_color_hex(bg_color));
     root_container = gui_screen_create_root(NULL, "Airspace", lv_color_hex(bg_color), LV_OPA_COVER);
@@ -442,7 +475,13 @@ void airspace_monitor_view_destroy(void) {
     }
 
     wifi_manager_stop_monitor_mode();
+    wifi_raw_set_observer(NULL);
     airspace_monitor_stop();
+    if (airspace_pcap_owned && pcap_is_capturing()) {
+        if (!pcap_drain_queue()) printf("Airspace PCAP queue drain failed\n");
+        pcap_file_close();
+    }
+    airspace_pcap_owned = false;
 
     if (root_container) {
         lv_obj_del(root_container);

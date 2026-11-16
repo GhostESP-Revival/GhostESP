@@ -156,12 +156,14 @@ The firmware extracts it on first load to:
 /mnt/ghostesp/themes/.cache/my_pack/
 ```
 
+`.gtheme` archives store each entry uncompressed (stored method) - the current `gbt asset pack --archive` writes them this way. The extractor also enforces two hard limits: **256 KB maximum per file** and **128 files per archive**; archives that exceed either are rejected.
+
 Subsequent boots and pack switches reuse that cached extraction if the archive size and modified time haven't changed. Updating `my_pack.gtheme` automatically invalidates the cached copy and extracts it again.
 
 ## Selecting a Pack
 
 1. Insert SD card with your pack
-2. Go to **Settings → Display & Brightness → Appearance → Asset Pack**
+2. Go to **Settings → Display & Text → Theme → Asset Pack**
 3. Press **left/right** to cycle through installed packs
 4. The pack loads immediately and the selection is saved
 
@@ -177,7 +179,7 @@ Missing icons fall back to the compiled-in defaults. You don't need to include e
 
 The `rgb565a8` format stores RGB565 and alpha as separate planes (not interleaved). The `gbt asset pack` tool handles this automatically. GIMG files store standard RGB565; firmware adapts the in-memory byte order for boards built with `LV_COLOR_16_SWAP`.
 
-The `indexed_4bpp` format quantizes source PNGs to a 16-color palette at build time and packs two pixels per byte in the payload. A 32x32 indexed icon uses ~576 bytes (64-byte palette + 512 bytes of packed indices) — roughly 1/5 the size of the equivalent `rgb565a8` image and ideal for internal-only devices where every kilobyte of icon cache counts. A 120x160 indexed background uses ~9.5 KB. The 16-color limit is enough for most line-art and flat-color menu icons; smooth gradients show visible banding. The firmware renders indexed icons natively through LVGL and renders scaled indexed backgrounds with a custom line scaler, avoiding full-image RGB expansion. Packs can mix formats per image source via the manifest's `icon_format` and per-background `format` fields.
+The `indexed_4bpp` format quantizes source PNGs to a 16-color palette at build time and packs two pixels per byte in the payload. A 32x32 indexed icon uses ~576 bytes (64-byte palette + 512 bytes of packed indices) - roughly 1/5 the size of the equivalent `rgb565a8` image and ideal for internal-only devices where every kilobyte of icon cache counts. A 120x160 indexed background uses ~9.5 KB. The 16-color limit is enough for most line-art and flat-color menu icons; smooth gradients show visible banding. The firmware renders indexed icons natively through LVGL and renders scaled indexed backgrounds with a custom line scaler, avoiding full-image RGB expansion. Packs can mix formats per image source via the manifest's `icon_format` and per-background `format` fields.
 
 ## PSRAM vs Internal RAM
 
@@ -192,9 +194,9 @@ The `indexed_4bpp` format quantizes source PNGs to a 16-color palette at build t
 **Internal-only devices** (ESP32-C5, some S2):
 - 2 icons cached in internal RAM
 - Scaled `half`/`tiny` indexed backgrounds are supported without full RGB expansion; 32x32 tiled background remains the last fallback
-- Icon size is capped at 32x32 RGB565A8 (3 KB) per slot — anything bigger is rejected
+- Icon size is capped at 32x32 RGB565A8 (3 KB) per slot - anything bigger is rejected
 - Deflate-compressed payloads are rejected; only uncompressed `.gimg` files load
-- Use `indexed_4bpp` for icons and low-RAM background variants. A 32x32 indexed icon is 576 bytes vs 3,072 bytes for RGB565A8
+- Use `indexed_4bpp` for icons and low-RAM background variants
 - Colors and icon mappings still work; icons fall back to compiled-in artwork when the cache is full
 
 ## Converting a Single Image

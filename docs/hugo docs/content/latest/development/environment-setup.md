@@ -1,13 +1,10 @@
 ---
 title: "Environment Setup"
-description: "Install ESP-IDF and configure your development environment for GhostESP."
+description: "Install ESP-IDF and configure your development environment for GhostESP"
 weight: 5
 ---
 
-## Prerequisites
-
-- **Hardware**: ESP32-based board (S3, S2, C3, C6, C5, or original ESP32), USB cable
-- **Software**: Python 3.8+, Git
+With Python 3.8+, Git, and an ESP32-based board (S3, S2, C3, C6, C5, or original ESP32) plus a USB cable, you can build GhostESP from source. Start by installing ESP-IDF.
 
 ## Install ESP-IDF
 
@@ -32,7 +29,7 @@ GhostESP requires **ESP-IDF v6.1**. The version in use is tracked by the badge i
    install.bat
    ```
 
-3. Or use `build.py` — it can auto-detect common install locations or download ESP-IDF for you. See [Adjusting build options](/development/build-py-kconfig/).
+3. Or use `build.py` - it can auto-detect common install locations or download ESP-IDF for you. See [Adjusting build options](/development/build-py-kconfig/).
 
 ## Activate the Environment
 
@@ -53,13 +50,13 @@ Each new terminal session needs ESP-IDF exported:
 source $IDF_PATH/export.sh
 ```
 
-## Verify Installation
+Confirm the install with:
 
 ```
 idf.py --version
 ```
 
-Should output `ESP-IDF v6.1.x`.
+It should output `ESP-IDF v6.1.x`.
 
 ## Clone GhostESP
 
@@ -80,7 +77,4 @@ cd GhostESP
 | `idf.py -p COM3 flash monitor` | Flash and monitor |
 | `idf.py fullclean` | Clean build artifacts |
 
-## Next Steps
-
-- [Adjust build options](/development/build-py-kconfig/) - Configure features via menuconfig
-- [Create custom board configs](/development/custom-board-configs/) - Add support for new hardware
+To add support for new hardware, see [Create custom board configs](/development/custom-board-configs/).

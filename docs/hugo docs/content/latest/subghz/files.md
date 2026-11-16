@@ -4,11 +4,11 @@ description: "SubGHz file format and signal management"
 weight: 60
 ---
 
-GhostESP uses the Flipper SubGhz Key File format for storing captured signals. This format is compatible with Flipper Zero devices, allowing signal interchange.
+The **on-device UI** stores captured signals as Flipper SubGhz Key File `.sub` files, compatible with Flipper Zero devices. The **`subghz` CLI** writes a different file with the same `.sub` extension: a `ghostesp_subghz_snapshot` RSSI spectrum snapshot, which is not a Flipper file and cannot be transmitted. Both live in `/mnt/ghostesp/subghz/` on the SD card.
 
-## File format
+## File Format
 
-SubGHz signals are saved as `.sub` text files with the following structure:
+On-device signals are saved as Flipper `.sub` text files with the following structure:
 
 ```
 Filetype: Flipper SubGhz Key File
@@ -35,7 +35,7 @@ Manufacture: Unknown
 - **Manufacture**: Manufacturer information (optional)
 - **RAW_Data**: Raw timing sequence (for raw captures only)
 
-## Raw signal format
+## Raw Signal Format
 
 For undecoded signals, the file uses the RAW_Data field:
 
@@ -50,35 +50,55 @@ RAW_Data: 100 -200 100 -200 100 -400 100 -200 ...
 
 RAW_Data contains timing values in microseconds, alternating between positive (HIGH) and negative (LOW) periods.
 
-## Storage location
+## CLI Snapshot Format
 
-All SubGHz files are stored in `/mnt/ghostesp/subghz/` on the SD card.
+`subghz save` writes the scanner's RSSI level buffer as a spectrum snapshot under the same `.sub` extension:
 
-## Managing saved signals
+```
+ghostesp_subghz_snapshot=1
+name=snapshot_1A2B3C4D
+base_mhz=43392
+step_khz=200
+cursor=37
+levels=12,14,11,9,...
+```
 
-### On-device UI
+- **name**: snapshot name (sanitized from the name hint, or `snapshot_%08X`)
+- **base_mhz / step_khz**: scan band and channel spacing
+- **cursor**: scanner position when captured
+- **levels**: 64 RSSI display levels (0-100), comma-separated
+
+A snapshot is a picture of RF activity; it cannot be replayed or transmitted. Signals you can transmit are Flipper `.sub` files written by the on-device UI.
+
+## Managing Saved Signals
+
+### On-Device UI
 
 1. Open **SubGHz → Saved** to browse captured signals.
 2. Navigate through the list using the arrow keys.
 3. Select a file to view details or replay.
 4. Use **Delete** to remove unwanted signals.
 
-### Command line
+### CLI
+
+The CLI works on **spectrum snapshots**, not decodable signals:
 
 ```bash
-# List all saved signals
+# List saved spectrum snapshots
 subghz list
 
-# Load a specific signal
+# Restore a snapshot into the scanner display (does not transmit)
 subghz load <name>
 
-# Load the last captured signal
+# Restore the last captured/loaded snapshot
 subghz load last
 ```
 
-## Manual file creation
+To view or replay an on-device `.sub` signal, use the on-device **Saved** list instead.
 
-You can manually create `.sub` files if you know the protocol details:
+## Manual File Creation
+
+You can manually create Flipper `.sub` files for the on-device **Saved** list if you know the protocol details:
 
 1. Create a text file with the `.sub` extension.
 2. Add the required fields in the correct format.
@@ -99,9 +119,9 @@ TE: 390
 Manufacture: Unknown
 ```
 
-## Flipper Zero compatibility
+## Flipper Zero Compatibility
 
-GhostESP uses the same file format as Flipper Zero, enabling:
+On-device signal files use the same format as Flipper Zero, enabling:
 
 - Import signals from Flipper Zero devices
 - Export signals to Flipper Zero devices
@@ -110,13 +130,10 @@ GhostESP uses the same file format as Flipper Zero, enabling:
 
 Simply copy `.sub` files between devices using the SD card.
 
-## File naming
+## File Naming
 
-GhostESP auto-generates file names based on:
-
-- **Decoded signals**: Protocol name + decoded code (e.g., `Princeton_A1B2C3.sub`)
-- **Raw signals**: Timestamp (e.g., `capture_12345678.sub`)
-- **Custom names**: You can provide a name hint during capture
+- **CLI snapshots**: auto-generated as `snapshot_%08X` (tick-based), or the sanitized name hint you pass to `subghz save`.
+- **On-device signals**: the UI names the file from the decoded protocol/code, or a raw timestamp, when you save.
 
 ## Notes
 

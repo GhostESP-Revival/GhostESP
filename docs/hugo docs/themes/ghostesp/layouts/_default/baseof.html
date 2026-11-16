@@ -3,13 +3,17 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ block "title" . }}{{ if and .Title (not .IsHome) }}{{ .Title }} · {{ end }}{{ .Site.Title }}{{ end }}</title>
+  <title>{{ block "title" . }}{{ if and .Title (not .IsHome) }}{{ .Title }} Ã‚Â· {{ end }}{{ .Site.Title }}{{ end }}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   {{ $styles := resources.Get "css/main.css" | resources.Minify | fingerprint }}
   <link rel="stylesheet" href="{{ $styles.RelPermalink }}">
+  {{/* Opt-in neon skin. Loaded after main.css so its token overrides win; it
+       only takes effect when <html data-skin="neon"> is set. */}}
+  {{ $skinStyles := resources.Get "css/skin-neon.css" | resources.Minify | fingerprint }}
+  <link rel="stylesheet" href="{{ $skinStyles.RelPermalink }}">
   {{ $meta := newScratch }}
   {{ $meta.Set "title" .Site.Title }}
   {{ if and .Title (not .IsHome) }}{{ $meta.Set "title" .Title }}{{ end }}
@@ -76,7 +80,7 @@
     window.dataLayer = window.dataLayer || [];
     function gtag(){dataLayer.push(arguments);}
     gtag('js', new Date());
-    {{ $gaTitle := cond (and .Title (not .IsHome)) (printf "%s · %s" .Title .Site.Title) .Site.Title }}
+    {{ $gaTitle := cond (and .Title (not .IsHome)) (printf "%s Ã‚Â· %s" .Title .Site.Title) .Site.Title }}
     gtag('config', 'G-Q9CNW8QW7K', { 'page_title': {{ $gaTitle | jsonify | safeJS }} });
   </script>
   <script type="application/ld+json">
@@ -98,6 +102,33 @@
     (function() {
       const theme = localStorage.getItem('ghostesp-theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
       document.documentElement.setAttribute('data-theme', theme);
+
+      // Opt-in neon skin. Applied before first paint to avoid a flash; the font
+      // is fetched only when the skin is actually on.
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const urlSkin = params.get('skin');
+        let skin = localStorage.getItem('ghostesp-skin') === 'neon' ? 'neon' : 'default';
+        if (urlSkin === 'neon') {
+          skin = 'neon';
+        } else if (urlSkin === 'default') {
+          skin = 'default';
+        }
+        if (urlSkin === 'neon' || urlSkin === 'default') {
+          localStorage.setItem('ghostesp-skin', skin);
+        }
+        if (skin === 'neon') {
+          document.documentElement.setAttribute('data-skin', 'neon');
+          // Neon is always a dark look; force it so light-specific rules
+          // (logo invert, light syntax palette) never leak in.
+          document.documentElement.setAttribute('data-theme', 'dark');
+          const font = document.createElement('link');
+          font.id = 'ghostesp-skin-font';
+          font.rel = 'stylesheet';
+          font.href = 'https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&display=swap';
+          document.head.appendChild(font);
+        }
+      } catch (e) {}
 
       if (window.innerWidth >= 992) {
         if (localStorage.getItem('sidebarState') === 'open') {
@@ -176,6 +207,12 @@
       <a href="https://ghostesp.net/">Website</a>
     </nav>
     <div class="topbar__actions">
+      <button class="topbar__skin" type="button" data-skin-toggle aria-label="Try the new style" aria-pressed="false">
+        <span class="topbar__skin-label topbar__skin-label--off">Try the new style</span>
+        <span class="topbar__skin-label topbar__skin-label--on">Switch to original style</span>
+        <span class="topbar__skin-label topbar__skin-label--short" aria-hidden="true">Style</span>
+        <span class="topbar__skin-badge" aria-hidden="true">beta</span>
+      </button>
       <button class="topbar__theme" type="button" data-theme-toggle aria-label="Toggle theme">
         <svg class="icon icon-theme" viewBox="0 0 24 24" data-theme-icon aria-hidden="true">
           <g class="icon-theme__sun">
@@ -224,35 +261,101 @@
       </div>
       <nav class="sidebar__nav">
         {{ $currentPage := . }}
-        {{ $currentPath := strings.TrimSuffix $currentPage.RelPermalink "/" }}
-        {{ $homePath := strings.TrimSuffix ($homeLink | relURL) "/" }}
+        {{ $currentPath := strings.TrimSuffix "/" $currentPage.RelPermalink }}
+        {{ $homePath := strings.TrimSuffix "/" ($homeLink | relURL) }}
         <a href="{{ $homeLink | relURL }}" class="sidebar__link{{ if eq $currentPath $homePath }} sidebar__link--active{{ end }}">Home</a>
         {{ if $versionRoot }}
-          {{ $categories := slice
-            (dict "label" "" "min" 1 "max" 99)
-            (dict "label" "Wireless" "min" 100 "max" 199)
-            (dict "label" "Sensors" "min" 200 "max" 399)
-            (dict "label" "Apps & I/O" "min" 400 "max" 599)
-            (dict "label" "Developer" "min" 600 "max" 999)
-          }}
-          {{ range $categories }}
-            {{ $cat := . }}
-            {{ $catSections := slice }}
-            {{ range $versionRoot.Sections.ByWeight }}
-              {{ $w := .Weight }}
-              {{ if and (ge $w $cat.min) (le $w $cat.max) }}
-                {{ $catSections = $catSections | append . }}
+          <div class="sidebar__nav--classic">
+            {{ $categories := slice
+              (dict "label" "" "min" 1 "max" 99)
+              (dict "label" "Wireless" "min" 100 "max" 199)
+              (dict "label" "Sensors" "min" 200 "max" 399)
+              (dict "label" "Apps & I/O" "min" 400 "max" 599)
+              (dict "label" "Developer" "min" 600 "max" 999)
+            }}
+            {{ range $categories }}
+              {{ $cat := . }}
+              {{ $catSections := slice }}
+              {{ range $versionRoot.Sections.ByWeight }}
+                {{ $w := .Weight }}
+                {{ if and (ge $w $cat.min) (le $w $cat.max) }}
+                  {{ $catSections = $catSections | append . }}
+                {{ end }}
+              {{ end }}
+              {{ if gt (len $catSections) 0 }}
+                {{ with $cat.label }}<div class="sidebar__category">{{ . }}</div>{{ end }}
+                {{ range $catSections }}
+                  {{ $section := . }}
+                  {{ $sectionRel := $section.RelPermalink }}
+                  {{ $pages := where $section.Pages "Draft" false }}
+                  {{ if gt (len $pages) 0 }}
+                    {{ $isActive := or (eq $currentPage $section) ($currentPage.IsDescendant $section) }}
+                    {{ $groupID := printf "collapse-%s" (anchorize (strings.TrimPrefix "/" $sectionRel)) }}
+                    <div class="sidebar__group{{ if $isActive }} group--open{{ end }}">
+                      <button class="sidebar__group-toggle{{ if $isActive }} sidebar__group-toggle--active{{ end }}{{ if not $isActive }} collapsed{{ end }}" type="button" data-bs-toggle="collapse" data-bs-target="#{{ $groupID }}" aria-expanded="{{ if $isActive }}true{{ else }}false{{ end }}" aria-controls="{{ $groupID }}">
+                        <span>{{ $section.LinkTitle }}</span>
+                        <span class="sidebar__group-icon" aria-hidden="true"></span>
+                      </button>
+                      <div class="collapse{{ if $isActive }} show{{ end }} sidebar__group-items" id="{{ $groupID }}">
+                        <a href="{{ $section.RelPermalink }}" class="sidebar__sublink{{ if eq $currentPage $section }} sidebar__sublink--active{{ end }}">Overview</a>
+                        {{ range (where $pages "File" "!=" nil).ByWeight }}
+                          <a href="{{ .RelPermalink }}" class="sidebar__sublink{{ if eq . $currentPage }} sidebar__sublink--active{{ end }}">{{ .LinkTitle }}</a>
+                        {{ end }}
+                      </div>
+                    </div>
+                  {{ end }}
+                {{ end }}
               {{ end }}
             {{ end }}
-            {{ if gt (len $catSections) 0 }}
-              {{ with $cat.label }}<div class="sidebar__category">{{ . }}</div>{{ end }}
-              {{ range $catSections }}
-                {{ $section := . }}
-                {{ $sectionRel := $section.RelPermalink }}
-                {{ $pages := where $section.Pages "Draft" false }}
-                {{ if gt (len $pages) 0 }}
+            {{ range $versionRoot.RegularPages.ByWeight }}
+              <a href="{{ .RelPermalink }}" class="sidebar__link{{ if eq . $currentPage }} sidebar__link--active{{ end }}">{{ .LinkTitle }}</a>
+            {{ end }}
+          </div>
+          <div class="sidebar__nav--new">
+          {{/* Curated sidebar groups, ordered by what readers need rather than
+               by folder weight. Each item is either a section id (rendered as a
+               collapsible group) or a page path (rendered as a direct link), so
+               closely related guides can sit together instead of all landing in
+               "Getting Started". `weight` still orders pages within a section. */}}
+          {{ $groups := slice
+            (dict "label" "Start Here" "items" (slice
+              "getting-started/supported-hardware"
+              "getting-started/installation-guide"
+              "getting-started/manual-flashing"
+              "getting-started/flipper-flashing"
+              "getting-started/first-scan"
+              "getting-started/control-methods"
+              "hardware"
+            ))
+            (dict "label" "Device & Connection" "items" (slice
+              "getting-started/webui-guide"
+              "getting-started/command-line-reference"
+              "getting-started/dual-communication"
+              "getting-started/ble-bridge"
+              "getting-started/peripheral-wiring"
+              "getting-started/sd-card"
+              "getting-started/storage-layout"
+            ))
+            (dict "label" "Wireless" "items" (slice "wifi" "ble" "subghz" "lora" "nrf24"))
+            (dict "label" "Radios & Sensors" "items" (slice "gps" "nfc" "infrared" "camera" "audio"))
+            (dict "label" "Apps & Tools" "items" (slice "apps" "flipper-app" "companion-tools" "usb" "ethernet"))
+            (dict "label" "Developer" "items" (slice "development" "customization" "ghostscript"))
+            (dict "label" "Updates & Help" "items" (slice
+              "getting-started/firmware-updates"
+              "getting-started/faq"
+            ))
+          }}
+          {{ range $groups }}
+            {{ $group := . }}
+            <div class="sidebar__category">{{ $group.label }}</div>
+            {{ range $group.items }}
+              {{ $item := . }}
+              {{ with $versionRoot.GetPage $item }}
+                {{ if .IsSection }}
+                  {{ $section := . }}
+                  {{ $pages := where $section.Pages "Draft" false }}
                   {{ $isActive := or (eq $currentPage $section) ($currentPage.IsDescendant $section) }}
-                  {{ $groupID := printf "collapse-%s" (anchorize (strings.TrimPrefix "/" $sectionRel)) }}
+                  {{ $groupID := printf "collapse-new-%s" (anchorize (strings.TrimPrefix "/" $section.RelPermalink)) }}
                   <div class="sidebar__group{{ if $isActive }} group--open{{ end }}">
                     <button class="sidebar__group-toggle{{ if $isActive }} sidebar__group-toggle--active{{ end }}{{ if not $isActive }} collapsed{{ end }}" type="button" data-bs-toggle="collapse" data-bs-target="#{{ $groupID }}" aria-expanded="{{ if $isActive }}true{{ else }}false{{ end }}" aria-controls="{{ $groupID }}">
                       <span>{{ $section.LinkTitle }}</span>
@@ -265,13 +368,13 @@
                       {{ end }}
                     </div>
                   </div>
+                {{ else }}
+                  <a href="{{ .RelPermalink }}" class="sidebar__link{{ if eq . $currentPage }} sidebar__link--active{{ end }}">{{ .LinkTitle }}</a>
                 {{ end }}
               {{ end }}
             {{ end }}
           {{ end }}
-          {{ range $versionRoot.RegularPages.ByWeight }}
-            <a href="{{ .RelPermalink }}" class="sidebar__link{{ if eq . $currentPage }} sidebar__link--active{{ end }}">{{ .LinkTitle }}</a>
-          {{ end }}
+          </div>
         {{ else }}
           {{ range .Site.Sections.ByWeight }}
             {{ $section := . }}
@@ -335,6 +438,10 @@
     <script src="{{ $asset.RelPermalink }}" defer></script>
   {{ end }}
   {{ with resources.Get "js/theme.js" }}
+    {{ $asset := . | minify | fingerprint }}
+    <script src="{{ $asset.RelPermalink }}" defer></script>
+  {{ end }}
+  {{ with resources.Get "js/skin.js" }}
     {{ $asset := . | minify | fingerprint }}
     <script src="{{ $asset.RelPermalink }}" defer></script>
   {{ end }}

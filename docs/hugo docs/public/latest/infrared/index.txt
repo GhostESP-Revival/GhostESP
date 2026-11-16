@@ -12,12 +12,12 @@ Search index: /search-index.json
 
 ## On this page
 
-- [Supported protocols](#supported-protocols)
+- [Supported Protocols](#supported-protocols)
 
 ---
 
 GhostESP lets you learn IR signals, store them on the SD card, and retransmit them using the onboard LED.
-## Supported protocols
+## Supported Protocols
 - NEC / NECext / NEC42 / NEC42ext
 - Kaseikyo
 - Pioneer

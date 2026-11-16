@@ -5,6 +5,7 @@
 
 #if defined(CONFIG_WITH_SCREEN) && defined(CONFIG_HAS_LORA)
 
+#include "core/utils.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "gui/gui_router.h"
@@ -537,6 +538,27 @@ static lv_obj_t *add_row(const char *label, int action) {
     return row;
 }
 
+/* An on/off row, drawn as an iOS switch pinned to the right edge instead of an
+ * "ON - tap to stop" suffix, so the state reads at a glance. The switch is not
+ * clickable itself: taps bubble to the row, whose action handler applies the
+ * change and rebuilds the page with the new value. */
+static lv_obj_t *add_toggle_row(const char *label, int action, bool value) {
+    lv_obj_t *row = add_row(label, action);
+    if (!row) return NULL;
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_t *lbl = lv_obj_get_child(row, 0);
+    if (lbl) {
+        lv_obj_set_flex_grow(lbl, 1);
+        lv_obj_set_width(lbl, LV_SIZE_CONTENT);
+    }
+    lv_obj_t *toggle = ios_toggle_create(row);
+    lv_obj_update_layout(row);
+    ios_toggle_set_value(toggle, value, false);
+    return row;
+}
+
 static void style_message_bubble(lv_obj_t *bubble, lv_obj_t *list,
                                  const char *text, bool outgoing) {
     if (!bubble || !list) return;
@@ -820,6 +842,22 @@ static void add_protocol_toggle(void) {
 }
 #endif // CONFIG_HAS_MESHCORE
 
+/* Start or stop Meshtastic. Used by the Meshtastic Settings radio switch,
+ * which always drives the Meshtastic radio even when the protocol toggle is
+ * pointed at MeshCore. */
+static void meshtastic_radio_toggle(void) {
+    bool stopping = lora_manager_is_running();
+    bool ok = true;
+    if (stopping) lora_manager_stop();
+    else if (lora_manager_needs_setup()) ok = false;
+    else ok = start_meshtastic_backend();
+    notice(ok ? (stopping ? "Meshtastic stopped" : "Meshtastic started")
+              : (lora_manager_needs_setup() ? "Set Meshtastic region first"
+                                             : lora_manager_last_error()),
+           ok ? TOAST_SUCCESS : TOAST_ERROR);
+    rebuild_page();
+}
+
 /* Start or stop the protocol selected by the toggle. Shared by the Radio row
  * and the HUD encoder double-press. */
 static void toggle_radio(void) {
@@ -835,38 +873,20 @@ static void toggle_radio(void) {
         return;
     }
 #endif
-    bool stopping = lora_manager_is_running();
-    bool ok = true;
-    if (stopping) lora_manager_stop();
-    else if (lora_manager_needs_setup()) ok = false;
-    else ok = start_meshtastic_backend();
-    notice(ok ? (stopping ? "Meshtastic stopped" : "Meshtastic started")
-              : (lora_manager_needs_setup() ? "Set Meshtastic region first"
-                                             : lora_manager_last_error()),
-           ok ? TOAST_SUCCESS : TOAST_ERROR);
-    rebuild_page();
+    meshtastic_radio_toggle();
 }
 
 static void build_settings(void) {
     options_view_set_title(s_ov, "Radio Settings");
-    char line[96];
 #ifdef CONFIG_HAS_MESHCORE
     add_protocol_toggle();
     bool running = proto_is_meshcore() ? mc_manager_is_running() : lora_manager_is_running();
-    snprintf(line, sizeof(line), "Radio: %s - tap to %s", running ? "ON" : "OFF",
-             running ? "stop" : "start");
 #else
-    snprintf(line, sizeof(line), "Radio: %s - tap to %s", lora_manager_is_running() ? "ON" : "OFF",
-             lora_manager_is_running() ? "stop" : "start");
+    bool running = lora_manager_is_running();
 #endif
-    add_row(line, ACT_RADIO);
-    const char *boot_backend = "Meshtastic";
-#ifdef CONFIG_HAS_MESHCORE
-    if (mc_manager_default_backend_meshcore()) boot_backend = "MeshCore";
-#endif
-    snprintf(line, sizeof(line), "Auto-start %s on boot: %s - tap to toggle",
-             boot_backend, lora_manager_auto_start_enabled() ? "yes" : "no");
-    add_row(line, ACT_AUTOSTART);
+    add_toggle_row("Radio", ACT_RADIO, running);
+    /* The protocol row above already names the backend that boots. */
+    add_toggle_row("Auto-start on boot", ACT_AUTOSTART, lora_manager_auto_start_enabled());
     add_row("Meshtastic settings", ACT_MESHTASTIC_SETTINGS);
 #ifdef CONFIG_HAS_MESHCORE
     add_row("MeshCore settings", ACT_MESHCORE_SETTINGS);
@@ -880,9 +900,7 @@ static void build_meshtastic_settings(void) {
     options_view_set_title(s_ov, "Meshtastic Settings");
     char line[96];
     const char *stop_first = st.running ? " (stop radio first)" : "";
-    snprintf(line, sizeof(line), "Radio: %s - tap to %s", st.running ? "ON" : "OFF",
-             st.running ? "stop" : "start");
-    add_row(line, ACT_MT_RADIO);
+    add_toggle_row("Radio", ACT_MT_RADIO, st.running);
     snprintf(line, sizeof(line), "Region: %s%s%s - tap to change",
              lora_region_name((int)st.region),
              lora_manager_region_saved() ? "" : " *", stop_first);
@@ -906,12 +924,14 @@ static void build_meshcore_settings(void) {
     mc_manager_get_status(&st);
     options_view_set_title(s_ov, "MeshCore Settings");
     char line[104];
-    snprintf(line, sizeof(line), "Radio: %s - tap to %s", st.running ? "ON" : "OFF",
-             st.running ? "stop" : "start");
-    add_row(line, ACT_MC_RADIO);
+    add_toggle_row("Radio", ACT_MC_RADIO, st.running);
     const char *node_name_mc = mc_mesh_node_name();
-    snprintf(line, sizeof(line), "Node name: %.24s - tap to edit",
-             (node_name_mc && node_name_mc[0]) ? node_name_mc : "unnamed");
+    char mc_name_disp[32];
+    if (node_name_mc && node_name_mc[0]) {
+        snprintf(mc_name_disp, sizeof(mc_name_disp), "%s", node_name_mc);
+        privacy_redact_text(mc_name_disp);
+    } else snprintf(mc_name_disp, sizeof(mc_name_disp), "unnamed");
+    snprintf(line, sizeof(line), "Node name: %.24s - tap to edit", mc_name_disp);
     add_row(line, ACT_MC_NAME);
     snprintf(line, sizeof(line), "Frequency: %.3f MHz", (double)p->freq_mhz);
     add_row(line, 0);
@@ -1022,9 +1042,17 @@ static void build_info(void) {
     add_row(line, ACT_INFO);
     if (ui_meshcore()) {
         const char *name = mc_mesh_node_name();
-        snprintf(line, sizeof(line), "Node: %s", (name && name[0]) ? name : "unnamed");
+        char node_disp[32];
+        if (name && name[0]) {
+            snprintf(node_disp, sizeof(node_disp), "%s", name);
+            privacy_redact_text(node_disp);
+        } else snprintf(node_disp, sizeof(node_disp), "unnamed");
+        snprintf(line, sizeof(line), "Node: %s", node_disp);
     } else {
-        snprintf(line, sizeof(line), "Node ID: !%08X", (unsigned)lora_mesh_node_num());
+        char id[16];
+        snprintf(id, sizeof(id), "!%08X", (unsigned)lora_mesh_node_num());
+        privacy_redact_text(id);
+        snprintf(line, sizeof(line), "Node ID: %s", id);
     }
     add_row(line, ACT_INFO);
     snprintf(line, sizeof(line), "Radio: %s  %lu.%03lu MHz",
@@ -1047,15 +1075,25 @@ static void build_info(void) {
 }
 
 static void node_row_label(const ui_node_t *node, char *out, size_t cap) {
-    if (node->has_rssi)
-        snprintf(out, cap, "%s  !%08X  %d dBm%s%s", node->name, (unsigned)node->id,
-                 (int)node->rssi, node->has_pubkey ? "" : "  key needed",
+    /* Privacy mode is a display-time transform: mask a copy of the node name
+     * and of the id token, never the node record used for lookups. */
+    char name[32];
+    char id[16];
+    snprintf(name, sizeof(name), "%s", node->name);
+    privacy_redact_text(name);
+    if (node->has_rssi) {
+        snprintf(id, sizeof(id), "!%08X", (unsigned)node->id);
+        privacy_redact_text(id);
+        snprintf(out, cap, "%s  %s  %d dBm%s%s", name, id, (int)node->rssi,
+                 node->has_pubkey ? "" : "  key needed",
                  s_node_picker ? "  select" : "");
-    else
-        snprintf(out, cap, "%s  !%02X%02X%02X%02X%s", node->name,
-                 (unsigned)node->peer_key[0], (unsigned)node->peer_key[1],
-                 (unsigned)node->peer_key[2], (unsigned)node->peer_key[3],
-                 s_node_picker ? "  select" : "");
+    } else {
+        snprintf(id, sizeof(id), "!%02X%02X%02X%02X", (unsigned)node->peer_key[0],
+                 (unsigned)node->peer_key[1], (unsigned)node->peer_key[2],
+                 (unsigned)node->peer_key[3]);
+        privacy_redact_text(id);
+        snprintf(out, cap, "%s  %s%s", name, id, s_node_picker ? "  select" : "");
+    }
 }
 
 static void build_nodes(void) {
@@ -1132,12 +1170,19 @@ static void build_node(void) {
     }
     char name[32];
     node_name(&node, name, sizeof(name));
+    privacy_redact_text(name);
     options_view_set_title(s_ov, name);
     char line[104];
-    snprintf(line, sizeof(line), "Node ID: !%08X", (unsigned)node.node_num);
+    char id[16];
+    snprintf(id, sizeof(id), "!%08X", (unsigned)node.node_num);
+    privacy_redact_text(id);
+    snprintf(line, sizeof(line), "Node ID: %s", id);
     add_row(line, ACT_NODE_INFO);
     if (node.has_user && node.short_name[0]) {
-        snprintf(line, sizeof(line), "Short name: %s", node.short_name);
+        char short_name[16];
+        snprintf(short_name, sizeof(short_name), "%s", node.short_name);
+        privacy_redact_text(short_name);
+        snprintf(line, sizeof(line), "Short name: %s", short_name);
         add_row(line, ACT_NODE_INFO);
     }
     seen_text(&node, line, sizeof(line));
@@ -1235,6 +1280,7 @@ static void build_messages(void) {
             if (!belongs) continue;
             char name[24], age[12];
             message_name(&m, name, sizeof(name));
+            privacy_redact_text(name);
             message_age(&m, age, sizeof(age));
             if (unread) {
                 snprintf(line, sizeof(line), "%.20s  %.8s  %u new  %.28s",
@@ -1257,6 +1303,7 @@ static void build_message(void) {
         ui_msg_t peer = {.direct = true, .outgoing = true, .node_num = s_conversation};
         if (ui_meshcore()) memcpy(peer.peer_key, s_conversation_key, sizeof(peer.peer_key));
         message_name(&peer, title, sizeof(title));
+        privacy_redact_text(title);
 #ifdef CONFIG_HAS_MESHCORE
     } else if (ui_meshcore() && s_conversation_channel != 0) {
         snprintf(title, sizeof(title), "Channel %u", (unsigned)s_conversation_channel);
@@ -1275,6 +1322,7 @@ static void build_message(void) {
         if (!ui_msg_at(i, &m) || !in_conversation(&m)) continue;
         char name[24], age[12], text[224];
         message_name(&m, name, sizeof(name));
+        privacy_redact_text(name);
         message_age(&m, age, sizeof(age));
         const char *state = !m.outgoing ? "" : m.delivery == 1 ? "Sending" :
                             m.delivery == 2 ? "Delivered" : m.delivery == 3 ? "Failed" : "Sent";
@@ -1531,6 +1579,9 @@ static void action_click(lv_event_t *e) {
     switch ((lora_action_t)action) {
     case ACT_RADIO:
         toggle_radio();
+        break;
+    case ACT_MT_RADIO:
+        meshtastic_radio_toggle();
         break;
 #ifdef CONFIG_HAS_MESHCORE
     case ACT_MC_RADIO: {
@@ -1866,15 +1917,27 @@ static void action_click(lv_event_t *e) {
  * active backend changes so a switch cannot surface a phantom "new message". */
 static bool s_backend_meshcore;
 
+/* HUD preview line "<sender>: <text>". The sender is built in a stack buffer
+ * and redacted in place: privacy mode hides identities on screen without ever
+ * mutating the stored message. */
+static void chat_preview(const ui_msg_t *message, char *out, size_t cap) {
+    char who[24];
+    if (message->outgoing) snprintf(who, sizeof(who), "you");
+    else if (message->who[0]) {
+        snprintf(who, sizeof(who), "%.20s", message->who);
+        privacy_redact_text(who);
+    } else snprintf(who, sizeof(who), "unknown");
+    snprintf(out, cap, "%.20s: %.32s", who,
+             message->text[0] ? message->text : "(empty message)");
+}
+
 /* Keep the HUD line meaningful even before a new message arrives: seed it from
  * the most recent stored message (history survives stop/start and reopen). */
 static void refresh_last_preview(void) {
     ui_msg_t last;
     uint32_t seq = 0;
     if (!ui_latest_message(&last, &seq)) return;
-    snprintf(s_chat_preview, sizeof(s_chat_preview), "%.20s: %.32s",
-             last.outgoing ? "you" : (last.who[0] ? last.who : "unknown"),
-             last.text[0] ? last.text : "(empty message)");
+    chat_preview(&last, s_chat_preview, sizeof(s_chat_preview));
 }
 
 static void poll_messages(bool rebuild_messages) {
@@ -1898,14 +1961,13 @@ static void poll_messages(bool rebuild_messages) {
         s_unread_count++;
     }
     s_chat_seq = seq;
-    snprintf(s_chat_preview, sizeof(s_chat_preview), "%.20s: %.32s",
-             last.outgoing ? "you" : (last.who[0] ? last.who : "unknown"),
-             last.text[0] ? last.text : "(empty message)");
+    chat_preview(&last, s_chat_preview, sizeof(s_chat_preview));
     if (previous != 0 && !last.outgoing && s_page != PAGE_MESSAGES &&
         s_page != PAGE_MESSAGE) {
         char who[24];
         char toast[64];
         message_name(&last, who, sizeof(who));
+        privacy_redact_text(who);
         snprintf(toast, sizeof(toast), "New %s from %.16s: %.24s",
                  last.direct ? "DM" : "message", who,
                  last.text[0] ? last.text : "(empty message)");

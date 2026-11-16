@@ -11,14 +11,15 @@ Search index: /search-index.json
 
 ## On this page
 
-- [Quick links](#quick-links)
+- [Quick Links](#quick-links)
 
 ---
 
-GhostESP provides Ethernet connectivity with network scanning, device fingerprinting, and service discovery tools. Here you can find help on how to use these features.
-## Quick links
-- [Connection Management](/latest/ethernet/connection/) — bring the interface up, configure IP and MAC
-- [Scanning](/latest/ethernet/scanning/) — ping sweeps, port scans, and traceroute
-- [Fingerprinting](/latest/ethernet/fingerprinting/) — identify devices on the network
-- [HTTP](/latest/ethernet/http/) — web requests and service checks
-- [ARP Poisoning](/latest/ethernet/arp-poisoning/) — man-in-the-middle testing
+GhostESP provides Ethernet connectivity with network scanning, device fingerprinting, and service discovery tools.
+Note: Ethernet is available only on the Banshee S3 build (CONFIG_WITH_ETHERNET). It is not present on other boards. If ethup reports an initialization failure, your build does not include Ethernet.
+## Quick Links
+- [Connection Management](/latest/ethernet/connection/) - bring the interface up, configure IP and MAC
+- [Scanning](/latest/ethernet/scanning/) - ping sweeps, port scans, and traceroute
+- [Fingerprinting](/latest/ethernet/fingerprinting/) - identify devices on the network
+- [HTTP](/latest/ethernet/http/) - web requests and service checks
+- [ARP Poisoning](/latest/ethernet/arp-poisoning/) - man-in-the-middle testing

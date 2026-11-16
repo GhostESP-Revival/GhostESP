@@ -12,10 +12,10 @@ Search index: /search-index.json
 
 ## On this page
 
-- [Where to go next](#where-to-go-next)
-- [How you&amp;rsquo;ll use it](#how-youll-use-it)
-- [On the device](#on-the-device)
-- [Keep it running](#keep-it-running)
+- [Where to Go Next](#where-to-go-next)
+- [How You&amp;rsquo;ll Use It](#how-youll-use-it)
+- [On the Device](#on-the-device)
+- [Keep It Running](#keep-it-running)
 
 ---
 
@@ -30,13 +30,13 @@ MeshCore |
 MeshCore nodes and its companion app |
 meshcore |
 Interop is the point: GhostESP uses the same sync word, channels and wire encryption as Meshtastic firmware, so it joins an existing mesh without anything being reflashed.
-## Where to go next
+## Where to Go Next
 - [First run](/latest/lora/getting-started/): set a region, start the radio, send your first message
 - [MeshCore mode](/latest/lora/meshcore/): use MeshCore instead of Meshtastic
 - [Command reference](/latest/lora/commands/): every lora, mesh and meshcore command
 - [Phone app](/latest/lora/ble-app/): pair the official Meshtastic app
 - [Hardware](/latest/lora/hardware/): supported boards and wiring
-## How you’ll use it
+## How You’ll Use It
 Where |
 What you do |
 On the device |
@@ -45,7 +45,7 @@ Phone app |
 The usual Meshtastic/MeshCore app experience over BLE |
 CLI or WebUI |
 First-time setup, boot auto-start, diagnostics, scripting |
-## On the device
+## On the Device
 Open LoRa from the main menu. It opens on a status screen without starting the radio; the first row starts the selected protocol when the radio is off.
 Action |
 Touch |
@@ -63,8 +63,7 @@ Esc or left |
 - Outgoing messages show Sending, Delivered, Sent or Failed. Tap a failed one to reopen it in the composer and retry.
 - Encoder boards: double-press on the status screen toggles the radio.
 - Heltec OLED: press PRG to cycle pages. On the LoRa page a double-press toggles the radio, and with the radio off the page shows PRESS 2X TO START.
-## Keep it running
+## Keep It Running
 Auto-start is opt in. The protocol is remembered, so you set it once:
 lora autostart meshtastic # or: lora autostart meshcore
 The radio starts a few seconds after the interface, once boot has finished. Meshtastic needs a saved region before it can transmit; MeshCore does not.
-See [First run](/latest/lora/getting-started/) for the step-by-step version and [Command reference](/latest/lora/commands/) for the full syntax.

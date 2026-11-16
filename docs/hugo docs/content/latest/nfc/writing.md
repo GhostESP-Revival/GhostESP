@@ -8,11 +8,11 @@ weight: 30
 
 - An NTAG `.nfc` file on the SD card under `/mnt/ghostesp/nfc/`.
 - NTAG21x or Ultralight tag compatible with the captured image size (NTAG213/215/216 page counts).
-- A PN532 or ST25R3916 enabled build with a connected reader module. (Chameleon Ultra cannot write tags; see below.)
+- A PN532 or ST25R3916 enabled build with a connected reader module. The Chameleon Ultra cannot write tags.
 
 ## Steps
 
-1. **Open NFC → Write.** From the NFC menu, choose **Write**.
+1. **Open NFC → Tools → Write.** From the NFC menu, open **Tools** and choose **Write**.
    You should see a list of `.nfc` files detected on the SD card.
 
 2. **Select an image.** Tap the file you want to program.
@@ -24,11 +24,7 @@ weight: 30
 4. **Present the blank tag.** Hold the target NTAG on the antenna until the title updates.
    You should see “Writing… X%” as each page is written, finishing at “Write complete”.
 
-## Chameleon Ultra Writing
-
-- **No remote writes.** GhostESP cannot program tags through the Chameleon Ultra; use the PN532 workflow above.
-
-## Verify
+## Expected result
 
 - Re-scan the card using the [Scanning]({{< relref "scanning.md" >}}) guide to confirm the UID (if applicable) and data match the source image.
 - Check the popup for success messages; any failed page write will trigger an error log with the page number.

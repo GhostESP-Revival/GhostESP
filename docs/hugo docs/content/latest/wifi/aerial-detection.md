@@ -1,27 +1,27 @@
 ---
 title: "Aerial Detection"
-description: "Detect drones, controllers, and OpenDroneID broadcasts with sequential Wi-Fi/BLE sweeps."
+description: "Detect drones, controllers, and OpenDroneID broadcasts with sequential Wi-Fi/BLE sweeps"
 weight: 60
 ---
 
-GhostESP’s aerial detector watches both Wi-Fi and BLE airspace to find Remote ID beacons, DJI links, and drone-branded networks. It alternates radios so scans run reliably on every ESP32 board.
+GhostESP's aerial detector watches both Wi-Fi and BLE airspace to find Remote ID beacons, DJI links, and drone-branded networks. It alternates radios so scans run reliably on every ESP32 board. You need a board with both Wi-Fi and BLE (ESP32-S2 can only run the Wi-Fi phase) and serial, GhostLink display, or WebUI terminal access; a GPS module is optional for pairing detections with coordinates.
 
-## Overview
+## How it works
 
-- **Phase 1 – Wi-Fi sniffing**: Promiscuous capture with channel hopping looks for OpenDroneID NAN frames, DJI OUIs, and drone SSIDs.
-- **Phase 2 – BLE scanning**: Wi-Fi is suspended so BLE can search for OpenDroneID (UUID `0xFFFA`) and DJI advertisements (UUID `0xFFE0`).
+- **Phase 1 - Wi-Fi sniffing**: Promiscuous capture with channel hopping looks for OpenDroneID NAN frames, DJI OUIs, and drone SSIDs.
+- **Phase 2 - BLE scanning**: Wi-Fi is suspended so BLE can search for OpenDroneID (UUID `0xFFFA`) and DJI advertisements (UUID `0xFFE0`).
 - **Automatic recovery**: When BLE stops, GhostNet AP and STA sessions return without user interaction.
 
-## Prerequisites
+{{< flow title="Order of an aerial sweep" caption="The radios take turns; Wi-Fi comes back automatically after the BLE phase." >}}
+Wi-Fi phase: promiscuous sniff + channel hop | Looks for OpenDroneID NAN frames, DJI OUIs, and drone SSIDs
+Suspend Wi-Fi, start the BLE scan | Frees the radio for BLE
+BLE phase: listen for Remote ID adverts | OpenDroneID (`0xFFFA`) and DJI (`0xFFE0`)
+Restore AP and STA | GhostNet and any STA session return automatically
+{{< /flow >}}
 
-- ESP32 board with both Wi-Fi and BLE (ESP32-S2 can only run Wi-Fi phase).
-- Latest GhostESP firmware with aerial detector enabled.
-- Serial, GhostLink display, or WebUI terminal access.
-- Optional GPS for pairing detections with coordinates.
+## How to use
 
-## How to Use
-
-### Via Terminal
+### Via terminal
 
 1. **Scan** for aerial devices (default 30 seconds):
    ```
@@ -40,7 +40,7 @@ GhostESP’s aerial detector watches both Wi-Fi and BLE airspace to find Remote 
    aerialstop
    ```
 
-### Via Display
+### Via display
 
 1. **Open** the on-device **BLE** menu.
 2. **Select** **Aerial Detector**.
@@ -49,16 +49,15 @@ GhostESP’s aerial detector watches both Wi-Fi and BLE airspace to find Remote 
 
 > **Note for Flipper app:** The Aerial Detector submenu is under the **Wi-Fi** category (not BLE) in the Flipper UI. On-device displays keep it under BLE.
 
-## What Gets Detected
+## What gets detected
 
-- **OpenDroneID Remote ID (ASTM F3411)** — Wi-Fi NAN frames and BLE service `0xFFFA` decode BasicID, Location, System, SelfID, and OperatorID messages.
-- **DJI protocols** — MAC OUI matching and BLE service `0xFFE0` flag Mavic, Phantom, Inspire, and other DJI links.
-- **Drone SSIDs** — Pattern matching for DJI, Parrot, Autel, Skydio, and FPV networks.
-- **Telemetry frameworks** — Optional MAVLink, FrSky Sport, and CRSF signatures when UART monitoring is enabled.
+- **OpenDroneID Remote ID (ASTM F3411)** - Wi-Fi NAN frames and BLE service `0xFFFA` decode BasicID, Location, System, SelfID, and OperatorID messages.
+- **DJI protocols** - MAC OUI matching and BLE service `0xFFE0` flag Mavic, Phantom, Inspire, and other DJI links.
+- **Drone SSIDs** - Pattern matching for DJI, Parrot, Autel, Skydio, and FPV networks.
 
 Each device record stores MAC, vendor, RSSI, GPS/altitude (if broadcast), operator position, and flight status so you can triage real aircraft versus test spoofers.
 
-## Spoofing Remote ID for Testing
+## Spoofing Remote ID for testing
 
 Use the spoof workflow to broadcast a test drone and confirm your detector (or another receiver) reacts:
 

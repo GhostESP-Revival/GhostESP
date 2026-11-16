@@ -2,18 +2,9 @@
 title: "Installation Guide"
 description: "Flash GhostESP with the recommended web flasher"
 weight: 20
-toc: true
 ---
 
-## What this does
-
-The web flasher installs the GhostESP firmware on a compatible ESP32 board directly from your browser. It is the recommended method for most users.
-
-## Before you start
-
-- A compatible ESP32 board (see [Supported Hardware]({{< relref "supported-hardware.md" >}}))
-- A USB cable (Micro USB or USB-C; must be a data cable, not charge-only)
-- A modern web browser (Chrome, Brave, or Edge; Firefox doesn't support WebSerial)
+The web flasher installs GhostESP firmware on a compatible ESP32 board directly from your browser, and is the recommended method for most users. You need a compatible ESP32 board (see [Supported Hardware]({{< relref "supported-hardware.md" >}})), a USB data cable (Micro USB or USB-C; must be a data cable, not charge-only), and Chrome, Brave, or Edge - Firefox doesn't support WebSerial.
 
 ## Which variant do I pick?
 
@@ -29,7 +20,7 @@ The flasher asks for your **chip family**, not your board name. Look your board 
 | CrowPanel Advanced P4 | **ESP32-P4** |
 | GhostLink P1 Peer | **ESP32-C3** |
 
-> Getting this wrong is the most common cause of a board that flashes successfully but never boots. If you are unsure, check the table before flashing — don't guess.
+> Getting this wrong is the most common cause of a board that flashes successfully but never boots. If you are unsure, check the table before flashing - don't guess.
 
 ## Flash with the web flasher
 
@@ -40,9 +31,7 @@ The flasher asks for your **chip family**, not your board name. Look your board 
 5. Select the chip family from the table above, click **Connect**, and follow the browser prompts.
 6. When flashing finishes, unplug and reconnect the board.
 
-## Expected result
-
-GhostESP boots and creates a Wi-Fi access point named `GhostNet` with password `GhostNet`.
+GhostESP then boots and creates a Wi-Fi access point named `GhostNet` with password `GhostNet`.
 
 ## Troubleshooting
 

@@ -36,6 +36,7 @@ jobs:
     strategy:
       matrix:
         target:
+          - { name: "Hosyond E32R35T", idf_target: "esp32", sdkconfig_file: "configs/sdkconfig.Hosyond_E32R35T_3.5inch_88.9mm", zip_name: "Hosyond_E32R35T.zip" }
           - { name: "esp32-generic",          idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.default.esp32",                   zip_name: "esp32-generic.zip" }
           - { name: "esp32s2-generic",         idf_target: "esp32s2", sdkconfig_file: "configs/sdkconfig.default.esp32s2",                 zip_name: "esp32s2-generic.zip" }
           - { name: "esp32s3-generic",         idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.default.esp32s3",                 zip_name: "esp32s3-generic.zip" }
@@ -86,6 +87,8 @@ jobs:
           - { name: "Cardputer ADV",           idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.cardputeradv",                   zip_name: "CardputerADV.zip", ota: true, board_key: "Cardputer ADV" }
           - { name: "Rabbit-Labs Poltergeist", idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.poltergeist",                    zip_name: "Poltergeist.zip" }
           - { name: "Banshee C5",              idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.somethingsomething",             zip_name: "Banshee_C5.zip", board_key: "somethingsomething" }
+          - { name: "Banshee Lite C5",         idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.banshee_lite_c5",              zip_name: "Banshee_Lite_C5.zip", board_key: "somethingsomething" }
+          - { name: "Banshee Lite S3",         idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.Banshee_lite_s3",              zip_name: "Banshee_Lite_S3.zip", board_key: "somethingsomething2" }
           - { name: "Banshee S3",              idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.somethingsomething2",            zip_name: "Banshee_S3.zip", ota: true, board_key: "somethingsomething2" }
           - { name: "FeberisPro",              idf_target: "esp32",   sdkconfig_file: "configs/sdkconfig.feberispro",                     zip_name: "FeberisPro.zip" }
           - { name: "ACE C5",                  idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.ACE_C5",                         zip_name: "ACE_C5.zip" }
@@ -98,6 +101,8 @@ jobs:
           - { name: "XIAO_C5",                 idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.xiao_esp32c5",                    zip_name: "XIAO_C5.zip" }
           - { name: "Marauder V8",             idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.MarauderV8",                      zip_name: "MarauderV8.zip" }
           - { name: "Marauder Pancake",        idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.Pancake",                         zip_name: "MarauderPancake.zip" }
+          - { name: "Waveshare C5 3.5",        idf_target: "esp32c5", sdkconfig_file: "configs/sdkconfig.WaveshareC5_35",                  zip_name: "Waveshare_C5_35.zip" }
+          - { name: "XIAO ESP32S3 Wio-SX1262", idf_target: "esp32s3", sdkconfig_file: "configs/sdkconfig.xiao_esp32s3_wio_sx1262",         zip_name: "XIAO_S3_WIO_SX1262.zip", ota: true, board_key: "xiao_esp32s3_wio_sx1262" }
 
     steps:
       - uses: actions/checkout@v4

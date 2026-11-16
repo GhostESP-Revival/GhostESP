@@ -4,7 +4,7 @@ description: "Send captured or universal IR commands"
 weight: 20
 ---
 
-## Send a saved command
+## Send a Saved Command
 
 1. Open **Infrared** and browse **Remotes** to see saved `.ir` files.
 2. Pick a Flipper-compatible `.ir` file. GhostESP parses the sections inside the file and lists every named button.
@@ -12,14 +12,21 @@ weight: 20
 
 > **Tip:** If you see “No .ir files” in the Remotes or Universals lists, try reinserting your SD card and rebooting the device. Ensure the `/mnt/ghostesp/infrared/remotes` and `/mnt/ghostesp/infrared/universals` folders exist on the card.
 
-### Universal libraries
+{{< flow title="What happens when you send" >}}
+Parse the `.ir` file | Protocol fields, or raw timing data plus its carrier and duty cycle
+Select the signal | By named button, or by index from `ir list`
+Transmit over RMT | Carrier frequency and duty come from the file for raw signals
+LED feedback | Flashes purple unless stealth mode is on
+{{< /flow >}}
+
+### Universal Libraries
 
 - Universal `.ir` packs live under `/mnt/ghostesp/infrared/universals` and contain large collections of commands grouped by device.
 - When you open a universal file, GhostESP scans the command list and prompts you to pick a specific button to send.
 - Parsing very large libraries (for example, community dumps) can take several seconds; wait for the list to finish populating before selecting.
 - You can find supported universals at [Momentum Flipper Firmware](https://github.com/Next-Flip/Momentum-Firmware/tree/dev/applications/main/infrared/resources/infrared/assets). Download and place the files under `infrared/universals`.
 
-GhostESP also includes a built-in Universal IR file with popular TV POWER signals — see [Infrared Files]({{< relref "files.md" >}}) for details.
+GhostESP also includes a built-in Universal IR file with popular TV POWER signals - see [Infrared Files]({{< relref "files.md" >}}) for details.
 
 ### Tips
 
@@ -29,11 +36,24 @@ GhostESP also includes a built-in Universal IR file with popular TV POWER signal
 
 ## CLI Support
 
-You can transmit signals using the command line interface, which is useful for scripting or automation.
+You can list, inspect and transmit signals using the CLI, which is useful for scripting or automation.
 
-### Sending from file
+### Listing and Inspecting
 
-Use `ir send` to transmit a signal from an existing `.ir` file:
+```bash
+# List .ir/.json files in the remote directory (or a given path)
+ir list [path]
+
+# Show the buttons in a file, or use a remote index printed by `ir list`
+ir show <path|remote_index>
+
+# List universal library files; -all also dumps the built-in signals
+ir universals list [-all]
+```
+
+### Sending from File
+
+Use `ir send` to transmit a signal from an existing `.ir` file. The first argument may be a path or a remote index from `ir list` (indices are only valid right after `ir list`):
 
 ```
 # Send the first signal in the file
@@ -41,6 +61,31 @@ ir send /mnt/ghostesp/infrared/remotes/TV.ir
 
 # Send the 3rd signal (index 2)
 ir send /mnt/ghostesp/infrared/remotes/TV.ir 2
+
+# Using a remote index from `ir list`, then a button index
+ir list
+ir send 0 1
+```
+
+### Universal Libraries
+
+```
+# Send a built-in universal signal by index
+ir universals send <index>
+```
+
+### Receiving and Pin Override
+
+```
+# Capture incoming IR into the log for inspection (timeout in seconds, default 60)
+ir rx [timeout]
+
+# Show the current TX/RX pins and whether they are overridden
+irpin
+
+# Override a pin; -1 clears the override and uses the board default
+irpin tx <pin|-1>
+irpin rx <pin|-1>
 ```
 
 ### Inline Sending

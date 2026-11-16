@@ -7,6 +7,7 @@
 #include "gui/theme_palette_api.h"
 #include "gui/design_tokens.h"
 #include "managers/settings_manager.h"
+#include "core/utils.h"
 #include "gui/accessibility_fonts.h"
 #include "lvgl.h"
 #include "driver/i2c_master.h"
@@ -420,8 +421,12 @@ static void accel_timer_cb(lv_timer_t *timer) {
         int mph10 = (int)(mph * 10);
         if (kmh10 != last_kmh10 || mph10 != last_mph10 || gps_active != last_gps_state) {
             const char *prefix = gps_active ? "GPS" : "NO GPS";
-            lv_label_set_text_fmt(speed_label, "%s: %d.%d km/h | %d.%d mph",
-                prefix, kmh10 / 10, kmh10 % 10, mph10 / 10, mph10 % 10);
+            char speed_disp[48];
+            snprintf(speed_disp, sizeof(speed_disp), "%d.%d km/h | %d.%d mph",
+                     kmh10 / 10, kmh10 % 10, mph10 / 10, mph10 % 10);
+            /* GPS-derived speed is location data; hide it in privacy mode. */
+            if (gps_active) privacy_redact_text(speed_disp);
+            lv_label_set_text_fmt(speed_label, "%s: %s", prefix, speed_disp);
             lv_obj_set_style_text_color(speed_label,
                 lv_color_hex(gps_active ? 0x00FF88 : 0x00CCFF), 0);
             last_kmh10 = kmh10; last_mph10 = mph10;

@@ -1,5 +1,5 @@
 Title: Connect to a Wi-Fi Network
-Description: Connect GhostESP to a network you own or are authorized to use.
+Description: Connect GhostESP to a network you own or are authorized to use
 URL: /latest/wifi/connect/
 Version: latest
 Section: Wi-Fi
@@ -7,37 +7,20 @@ Search index: /search-index.json
 
 # Connect to a Wi-Fi Network
 
-> Connect GhostESP to a network you own or are authorized to use.
+> Connect GhostESP to a network you own or are authorized to use
 
 ## On this page
 
-- [What this does](#what-this-does)
-- [Before you start](#before-you-start)
-- [On-device steps](#on-device-steps)
-- [CLI steps](#cli-steps)
-- [Expected result](#expected-result)
+- [Connecting](#connecting)
 - [Troubleshooting](#troubleshooting)
 - [Related tasks](#related-tasks)
 
 ---
 
-## What this does
-Connect GhostESP to a Wi-Fi network so it can use network-dependent features. Connecting changes the board’s Wi-Fi mode and disconnects devices using the GhostNet access point.
-## Before you start
-- The network name and password.
-- Permission to connect GhostESP to that network.
-- A serial or on-device control method. The WebUI connection drops when the board changes Wi-Fi mode.
-## On-device steps
-- Open Menu → WiFi → Connection → Connect to WiFi.
-- Enter the network name and password.
-- Wait for the connection status to confirm success.
-- To disconnect later, open Menu → WiFi → Connection → Disconnect.
-## CLI steps
-- Run connect &#34;SSID&#34; &#34;password&#34;. Keep the quotes when either value contains spaces.
-- Wait for the connection status.
-- Run connect without arguments to reconnect to the saved network.
-- Run disconnect to leave the network.
-## Expected result
+Connect GhostESP to a Wi-Fi network so it can use network-dependent features. You need the network name and password and permission to connect. Connecting changes the board’s Wi-Fi mode and disconnects devices using the GhostNet access point - and drops the WebUI - so keep serial or on-device control available.
+## Connecting
+On-device, open Menu → Wi-Fi → Connection → Connect to Wi-Fi (or Connect to saved Wi-Fi to rejoin a previously saved network), enter the network name and password, and wait for the connection status to confirm success.
+From the CLI, run connect &#34;SSID&#34; &#34;password&#34; and keep the quotes when either value contains spaces. Wait for the connection status. Run connect without arguments to reconnect to the saved network. Run disconnect to leave the network, or autoreconnect &lt;on|off&gt; to control whether the board automatically rejoins a dropped network.
 GhostESP reports that it is connected. The GhostNet access point is unavailable while the board uses its Wi-Fi radio as a client.
 ## Troubleshooting
 - Connection fails: Recheck the network name and password, then move closer to the access point.

@@ -1,6 +1,6 @@
 ---
 title: "Storage Layout"
-description: "Where GhostESP saves captures, reports, applications, and settings on the SD card."
+description: "Where GhostESP saves captures, reports, applications, and settings on the SD card"
 weight: 91
 ---
 
@@ -19,7 +19,7 @@ rely on it.
 | Wardriving/GPS data | `ghostesp/gps/` | WiGLE-compatible CSV |
 | Motion snapshot | `ghostesp/captures/` | `motion_N.jpg` |
 | Ghostchi capture/history | `ghostesp/ghostchi/pcaps/`, `ghostesp/ghostchi/sessions/` | `.pcap`, `.log` |
-| NFC, IR, or SubGHz save | `ghostesp/nfc/`, `ghostesp/infrared/`, `ghostesp/subghz/` | `.nfc`, `.ir`, `.sub` |
+| NFC, IR, or SubGHz save | `ghostesp/nfc/`, `ghostesp/infrared/` (`remotes/`, `universals/`), `ghostesp/subghz/` | `.nfc`, `.ir`, `.sub` |
 | Settings backup | `ghostesp/settings_backup.json` | Versioned JSON |
 
 The folders for NFC, IR, SubGHz, audio, and BadUSB are created only when the
@@ -35,12 +35,25 @@ installed build supports the matching feature.
 | Theme packages | `ghostesp/themes/` |
 | SNMP community strings (one per line, `#` comments) | `ghostesp/snmp_communities.txt` |
 
+## Mounting
+
+Most boards keep the SD card mounted for the whole session. On boards where the
+SD card shares an SPI bus with the display (like Wired Hatters Banshee),
+GhostESP uses **Just-In-Time (JIT) mounting**: it suspends display SPI, mounts
+the card, performs the read or write, unmounts the card, then resumes display
+SPI. This prevents display freezes during SD access. Boards with dedicated SPI
+buses leave the card mounted during the operation.
+
 ## Internal Folders
 
 Do not rely on `app_cache/` or `downloads/` for backups; firmware can replace
 their contents. `appdata/<app_id>/` and `scriptdata/` contain persistent data
-owned by an app or script. Ghostchi's `learn.bin` and `state.bin` are also
-firmware-private state rather than portable exports.
+owned by an app or script. Firmware also manages `debug/` (debug dumps),
+`dns_sinkhole/` (sinkhole blocklist data), and `logs/` (diagnostics and
+coredumps), and keeps the selected theme under `themes/active/`. The `games/`
+and `comics/` folders hold content managed by the Games and Reader apps.
+Ghostchi's `learn.bin` and `state.bin` are also firmware-private state rather
+than portable exports.
 
 ## Privacy
 

@@ -7,13 +7,13 @@ weight: 10
 
 The short path: one region, one radio start, one message. Full syntax lives in the [command reference]({{< relref "commands.md" >}}).
 
-## Before you start
+## Before You Start
 
 - A LoRa board: Heltec V3/V3.2, a CrowPanel Advance, or a wired SX1262 ([hardware]({{< relref "hardware.md" >}})).
 - Something to talk to: a second node, or the phone app.
 - A way to type commands: serial console or the WebUI.
 
-## 1. Set your region
+## 1. Set Your Region
 
 Meshtastic will not transmit on an unknown band plan, so pick yours first:
 
@@ -31,17 +31,17 @@ The [command reference]({{< relref "commands.md" >}}) lists the frequency band a
 
 MeshCore skips this step: it uses the frequency you configure instead.
 
-## 2. Start the radio
+## 2. Start the Radio
 
 ```text
 lora start
 ```
 
-You should see `SX1262 ready` and `chash 0x08`. A `SX1262 not detected` line means the radio is not wired, or the wrong board profile is flashed. See [Hardware]({{< relref "hardware.md" >}}).
+You should see `SX1262 ready` and `chash 0x08`. If init fails, the log names the stage that failed - for example `params`, `vext`, `gpio-in`, `spi-bus`, `spi-device`, `syncword-readback`, or `rx-continuous` - which points at the wiring or the flashed board profile. See [Hardware]({{< relref "hardware.md" >}}).
 
 You can start it from the device too: open **LoRa** and pick the first row, or double-press on the Heltec LoRa page.
 
-## 3. See who is around
+## 3. See Who Is Around
 
 ```text
 lora nodes
@@ -49,17 +49,17 @@ lora nodes
 
 Neighbouring nodes appear within 30-60 seconds with name, signal and hop count. A node with no name, or showing **Key unavailable**, has not sent its NodeInfo yet. Run `lora nodeinfo <node>` and wait for the reply.
 
-## 4. Send a message
+## 4. Send a Message
 
 From the device: **LoRa → Messages → Public chat → Write**.
 
-From the command line:
+From the CLI:
 
 ```text
 lora chat hello mesh
 ```
 
-## 5. Message one person
+## 5. Message One Person
 
 Direct messages are encrypted to the peer's public key, which arrives with NodeInfo:
 
@@ -74,7 +74,7 @@ lora nodeinfo !e026f431
 lora pkinfo !e026f431
 ```
 
-## 6. Keep it on between reboots
+## 6. Keep It on Between Reboots
 
 ```text
 lora autostart meshtastic     # or: lora autostart meshcore
@@ -82,28 +82,21 @@ lora autostart meshtastic     # or: lora autostart meshcore
 
 The radio starts a few seconds after the interface. Check what came up after a reboot with `mesh`.
 
-## Use the phone app
-
-Pair the official Meshtastic app over BLE so the mesh shows up like any other node. See [BLE App Link]({{< relref "ble-app.md" >}}).
-
-## Prefer MeshCore?
-
-Switch protocols and follow [MeshCore mode]({{< relref "meshcore.md" >}}):
-
-```text
-mesh switch meshcore
-```
-
-Only one protocol runs at a time.
-
-## If something is off
+## Troubleshooting
 
 | Symptom | Fix |
 | --- | --- |
 | `region is not set` | `lora set region <code>` |
-| `SX1262 not detected` | Check the board profile and wiring ([hardware]({{< relref "hardware.md" >}})) |
+| Radio init fails at a stage (`params`, `spi-bus`, …) | Check the board profile and wiring ([hardware]({{< relref "hardware.md" >}})) |
 | No nodes after a minute | Both ends need the same region, antennas fitted, and range |
 | A node shows **Key unavailable** | `lora nodeinfo <node>`, wait, then `lora pkinfo <node>` |
 | Messages stay on **Sending** | The peer is not acknowledging. Check it is powered and in range |
 
-Next: [Command reference]({{< relref "commands.md" >}}) · [MeshCore mode]({{< relref "meshcore.md" >}}) · [Phone app]({{< relref "ble-app.md" >}})
+## Related tasks
+
+- Pair the official Meshtastic app over BLE so the mesh shows up like any other node: [BLE App Link]({{< relref "ble-app.md" >}}).
+- Prefer MeshCore? Only one protocol runs at a time. Switch and follow [MeshCore mode]({{< relref "meshcore.md" >}}):
+
+  ```text
+  mesh switch meshcore
+  ```

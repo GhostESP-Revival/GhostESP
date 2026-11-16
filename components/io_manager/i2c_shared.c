@@ -1,6 +1,9 @@
 #include "i2c_shared.h"
 #include "i2c_bus_lock.h"
 #include <esp_log.h>
+#include "esp_bit_defs.h"
+#include "driver/gpio.h"
+#include "sdkconfig.h"
 #include <string.h>
 
 static const char *TAG = "i2c_shared";
@@ -21,6 +24,31 @@ static int bus_to_port(i2c_master_bus_handle_t bus)
     }
     return -1;
 }
+
+bool i2c_shared_is_board_i2c_pin(gpio_num_t pin)
+{
+#if defined(CONFIG_BANSHEE_LITE_C5) && \
+    defined(CONFIG_I2C_MANAGER_0_SDA) && defined(CONFIG_I2C_MANAGER_0_SCL)
+    return pin == (gpio_num_t)CONFIG_I2C_MANAGER_0_SDA ||
+           pin == (gpio_num_t)CONFIG_I2C_MANAGER_0_SCL;
+#else
+    (void)pin;
+    return false;
+#endif
+}
+
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+static void dump_c5_i2c_pins(const char *phase, gpio_num_t sda, gpio_num_t scl)
+{
+    if (sda < 0 || sda >= 64 || scl < 0 || scl >= 64) {
+        return;
+    }
+
+    ESP_LOGI(TAG, "C5 GPIO state %s I2C bus creation (SDA=%d, SCL=%d)",
+             phase, (int)sda, (int)scl);
+    (void)gpio_dump_io_configuration(stdout, BIT64(sda) | BIT64(scl));
+}
+#endif
 
 /* --------------------------------------------------------------------------
  * Device cache. Persistent handles keyed by (addr, scl_speed_hz).
@@ -123,6 +151,13 @@ esp_err_t i2c_shared_get_or_create_bus(i2c_port_num_t port,
         .flags.enable_internal_pullup = enable_internal_pullup,
     };
 
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+    dump_c5_i2c_pins("before", sda, scl);
+    if (i2c_shared_is_board_i2c_pin(sda) || i2c_shared_is_board_i2c_pin(scl)) {
+        ESP_LOGI(TAG, "C5 shared-I2C pad levels before bus creation: SDA=%d SCL=%d",
+                 gpio_get_level(sda), gpio_get_level(scl));
+    }
+#endif
     ret = i2c_new_master_bus(&bus_config, out_bus);
     if (ret == ESP_OK) {
         s_bus_handles[port] = *out_bus;
@@ -130,6 +165,13 @@ esp_err_t i2c_shared_get_or_create_bus(i2c_port_num_t port,
             *out_created = true;
         }
         ESP_LOGI(TAG, "I2C master bus created on port %d", (int)port);
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+        dump_c5_i2c_pins("after", sda, scl);
+        if (i2c_shared_is_board_i2c_pin(sda) || i2c_shared_is_board_i2c_pin(scl)) {
+            ESP_LOGI(TAG, "C5 shared-I2C pad levels after bus creation: SDA=%d SCL=%d",
+                     gpio_get_level(sda), gpio_get_level(scl));
+        }
+#endif
     } else {
         ESP_LOGE(TAG, "i2c_new_master_bus port %d (SDA=%d, SCL=%d) failed: %s",
                  (int)port, (int)sda, (int)scl, esp_err_to_name(ret));

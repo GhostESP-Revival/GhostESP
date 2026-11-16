@@ -8,7 +8,7 @@ USB Keyboard Mode turns your ESP32-S3 into a live USB HID keyboard. Instead of e
 
 ## How It Works
 
-1. The S3 installs as a USB HID keyboard (composite device with keyboard + mouse interfaces)
+1. The S3 installs as a USB HID keyboard (composite device with keyboard, mouse, and Consumer Control interfaces)
 2. The C5 on-screen keyboard sends each pressed key as a `badusb type_char` command over GhostLink
 3. The S3 receives the command and sends it as a USB HID keyboard report to the host PC
 
@@ -52,7 +52,7 @@ Send a single keypress (HID modifier + keycode):
 badusb keysend <modifier> <keycode>
 ```
 
-Example — send Ctrl+C:
+Example - send Ctrl+C:
 ```
 badusb keysend 1 6
 ```
@@ -99,7 +99,7 @@ Full reference: [USB HID Usage Tables](https://usb.org/document-library/hid-usag
 ## Notes
 
 - **USB required**: The S3 must be plugged into the host PC. If VSENSE is configured, it waits for USB connection automatically.
-- **Mutually exclusive**: USB Keyboard Mode cannot run at the same time as BadUSB scripts or Mouse Jiggler — they share the same USB HID device.
-- **Composite device**: When active, the S3 presents as both a keyboard and mouse (composite HID). The mouse interface is idle unless the Mouse Jiggler is used.
+- **Mutually exclusive**: USB Keyboard Mode cannot run at the same time as BadUSB scripts or Mouse Jiggler - they share the same USB HID device.
+- **Composite device**: When active, the S3 presents a composite HID device with keyboard, mouse, and Consumer Control (media key) interfaces. The mouse interface also supports trackpad mode (`badusb trackpad_start`, `badusb trackpad_move`, `badusb trackpad_button`, `badusb trackpad_wheel`) and is idle unless the Mouse Jiggler or trackpad is used.
 - **Immediate display typing**: The C5 on-screen keyboard sends each key as it is pressed; **Done** only exits the keyboard screen.
 - **CDC Console unavailable**: The USB serial console is not available while HID mode is active.

@@ -1,5 +1,8 @@
 #include "managers/display_manager.h"
 #include "driver/gpio.h"
+#ifdef CONFIG_IS_S3TWATCH
+#include "driver/usb_serial_jtag.h"
+#endif
 #include <time.h>
 #include "esp_sleep.h"
 #include "esp_timer.h"
@@ -10,6 +13,15 @@
 #include "lvgl_helpers.h"
 #ifdef CONFIG_USE_C5_PARLIO_DISPLAY
 #include "lvgl_tft/banshee_c5_parlio.h"
+#endif
+#ifdef CONFIG_WAVESHARE_C5_35_LCD
+#include "lvgl_tft/ws_c5_exio.h"
+#endif
+#ifdef CONFIG_BANSHEE_LITE_C5
+#include "lvgl_touch/touch_driver.h"
+#if defined(CONFIG_HAS_ACCELEROMETER) && defined(CONFIG_ACCEL_USE_BMI270)
+#include "managers/bmi270_driver.h"
+#endif
 #endif
 #include "managers/sd_card_manager.h"
 #include "managers/plugin_api.h"
@@ -48,6 +60,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#ifdef CONFIG_BANSHEE_LITE_C5
+#include <math.h>
+#endif
 #include "esp_wifi.h"
 #include "esp_pm.h"
 #include "driver/ledc.h"
@@ -120,6 +135,10 @@ static i2c_master_bus_handle_t s_touch_i2c_bus = NULL;
 
 #ifdef CONFIG_HAS_FUEL_GAUGE
 #include "managers/fuel_gauge_manager.h"
+#endif
+
+#ifdef CONFIG_USE_IP5306_POWER_MANAGER
+#include "managers/ip5306_manager.h"
 #endif
 
 QueueHandle_tt input_queue = NULL;
@@ -240,6 +259,25 @@ static esp_err_t crowpanel_advance_small_factory_reset(void) {
 #define CROWPANEL_ADVANCE43_FACTORY_OUTPUTS     0x16 /* P1=H, P2=H, P3=L, P4=H */
 #define CROWPANEL_ADVANCE43_FACTORY_OUTPUT_MASK 0x1e /* P1..P4 */
 #define CROWPANEL_ADVANCE43_RESET_BIT           0x04 /* TCA9534 P2 */
+
+/* V1.1 backlight compatibility: older CrowPanel boards accept a single-byte
+ * brightness command (0x10 = on) at I2C address 0x30. This is an additional
+ * best-effort write; keep the factory TCA9534 sequence for other revisions. */
+#define CROWPANEL_ADVANCE43_V11_BL_ADDR       0x30
+#define CROWPANEL_ADVANCE43_V11_BL_ON         0x10
+
+static void crowpanel_advance43_v11_backlight_on(void) {
+    uint8_t command = CROWPANEL_ADVANCE43_V11_BL_ON;
+    esp_err_t err = lvgl_i2c_write(CONFIG_LV_I2C_TOUCH_PORT,
+                                   CROWPANEL_ADVANCE43_V11_BL_ADDR,
+                                   I2C_NO_REG, &command, 1);
+    if (err == ESP_OK) {
+        ESP_LOGI("DisplayManager", "CrowPanel Advance 4.3 V1.1 backlight ON (0x30 <- 0x10)");
+    } else {
+        ESP_LOGW("DisplayManager", "CrowPanel Advance 4.3 V1.1 backlight command not acknowledged: %s",
+                 esp_err_to_name(err));
+    }
+}
 
 static esp_err_t crowpanel_advance43_tca9534_read(uint8_t reg, uint8_t *value) {
     return lvgl_i2c_read(CONFIG_LV_I2C_TOUCH_PORT,
@@ -513,6 +551,17 @@ static SemaphoreHandle_t s_lvgl_call_mutex = NULL;
 static lv_timer_t *status_update_timer = NULL;
 static lv_timer_t *rainbow_timer = NULL;
 static uint16_t rainbow_hue = 0;
+
+#ifdef CONFIG_BANSHEE_LITE_C5
+static volatile bool s_auto_flip_enabled = false;
+static volatile lv_disp_rot_t s_auto_flip_rotation = LV_DISP_ROT_NONE;
+static volatile lv_disp_rot_t s_auto_flip_requested_rotation = LV_DISP_ROT_NONE;
+static volatile lv_disp_rot_t s_auto_flip_candidate_rotation = LV_DISP_ROT_NONE;
+static volatile uint32_t s_auto_flip_generation = 0;
+static TaskHandle_t s_auto_flip_task_handle = NULL;
+static int s_c5_joystick_logical_index[5] = {0, 1, 2, 3, 4};
+static int dm_transform_c5_joystick_index(int physical_index, bool pressed);
+#endif
 /* Avoid redrawing a static status bar. Repeating the same update is expensive
  * on the CrowPanel's PSRAM scanout framebuffer. */
 static bool status_snapshot_valid = false;
@@ -876,9 +925,25 @@ static const tdeck_soc_point_t s_tdeck_soc_table[TDECK_SOC_TABLE_SIZE] = {
     {3900, 70},
     {4000, 82},
     {4100, 92},
-    {4200, 98},
-    {4300, 100},
+    {4150, 96},
+    {4200, 100},
 };
+
+// No charger-status pin is routed to the MCU (LilyGo reference only exposes
+// BOARD_BAT_ADC=GPIO4 behind a 1/2 divider), so charging is inferred from the
+// time-based voltage trend. Sample sparsely and average so noise doesn't flip it.
+#define TDECK_SAMPLE_PERIOD_MS   2000
+#define TDECK_TREND_PERIOD_MS    8000
+#define TDECK_TREND_HISTORY      12      // ~96 s window
+#define TDECK_TREND_MV           10
+#define TDECK_ADC_OVERSAMPLE     16
+#define TDECK_CHARGE_OFFSET_MV   90      // terminal-voltage rise while charger is active
+static int s_tdeck_trend[TDECK_TREND_HISTORY];
+static int s_tdeck_trend_count = 0;
+static int s_tdeck_trend_head = 0;
+static int64_t s_tdeck_last_sample_ms = 0;
+static int64_t s_tdeck_last_trend_ms = 0;
+static int s_tdeck_last_result = -1;
 
 static uint8_t tdeck_voltage_to_percent(int mv) {
     if (mv <= s_tdeck_soc_table[0].mv) {
@@ -924,6 +989,15 @@ int getBattery() {
     static adc_oneshot_unit_handle_t handle = NULL;
     static adc_cali_handle_t cali_handle = NULL;
 
+#ifdef CONFIG_USE_TDECK
+    // Status redraws call this at an arbitrary rate; keep the filters time-based.
+    int64_t now_ms = esp_timer_get_time() / 1000;
+    if (s_tdeck_last_result >= 0 && (now_ms - s_tdeck_last_sample_ms) < TDECK_SAMPLE_PERIOD_MS) {
+        return s_tdeck_last_result;
+    }
+    s_tdeck_last_sample_ms = now_ms;
+#endif
+
     if (!init_done) {
         const adc_oneshot_unit_init_cfg_t init_config = {
             .unit_id = _batAdcUnit,
@@ -950,7 +1024,19 @@ int getBattery() {
 
     // raw ADC → calibrated millivolt
     int raw = 0;
-    esp_err_t ret = adc_oneshot_read(handle, _batAdcCh, &raw);
+    esp_err_t ret = ESP_OK;
+#ifdef CONFIG_USE_TDECK
+    int raw_sum = 0;
+    for (int i = 0; i < TDECK_ADC_OVERSAMPLE; i++) {
+        int r = 0;
+        ret = adc_oneshot_read(handle, _batAdcCh, &r);
+        if (ret != ESP_OK) break;
+        raw_sum += r;
+    }
+    raw = raw_sum / TDECK_ADC_OVERSAMPLE;
+#else
+    ret = adc_oneshot_read(handle, _batAdcCh, &raw);
+#endif
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "ADC read failed: %s", esp_err_to_name(ret));
         return -1;
@@ -1000,20 +1086,29 @@ int getBattery() {
         }
     }
 #elif CONFIG_USE_TDECK
-    // T-Deck: use rolling window like Cardputer for stable charging detection
-    s_charge_samples[s_charge_sample_idx] = mv;
-    s_charge_sample_idx = (s_charge_sample_idx + 1) % 5;
-    if (s_charge_sample_idx == 0) s_charge_samples_filled = true;
-    
-    if (s_charge_samples_filled) {
-        int oldest_mv = s_charge_samples[s_charge_sample_idx];
-        int trend = mv - oldest_mv;
-        
-        // Use higher threshold for T-Deck to avoid false charging detection
-        if (trend > (CHARGE_THRESH_MV * 2)) {
+    // T-Deck: compare the smoothed voltage against ~96 s ago (time-based, so
+    // redraw rate doesn't matter). Plug-in shows as a step up, unplug as a step
+    // down, and the CC phase as a slow steady climb; plateaus keep prior state.
+    {
+        int smoothed = (s_filtered_mv < 0) ? mv : (s_filtered_mv * 6 + mv * 2) / 8;
+        if (s_tdeck_trend_count == 0 || (now_ms - s_tdeck_last_trend_ms) >= TDECK_TREND_PERIOD_MS) {
+            s_tdeck_last_trend_ms = now_ms;
+            if (s_tdeck_trend_count == TDECK_TREND_HISTORY) {
+                int oldest = s_tdeck_trend[s_tdeck_trend_head];
+                int trend = smoothed - oldest;
+                if (trend >= TDECK_TREND_MV) {
+                    _isCharging = true;
+                } else if (trend <= -TDECK_TREND_MV) {
+                    _isCharging = false;
+                }
+            }
+            s_tdeck_trend[s_tdeck_trend_head] = smoothed;
+            s_tdeck_trend_head = (s_tdeck_trend_head + 1) % TDECK_TREND_HISTORY;
+            if (s_tdeck_trend_count < TDECK_TREND_HISTORY) s_tdeck_trend_count++;
+        }
+        // Resting Li-ion never exceeds ~4.2 V; anything above is charger-driven.
+        if (smoothed >= 4230) {
             _isCharging = true;
-        } else if (trend < -(CHARGE_THRESH_MV * 2)) {
-            _isCharging = false;
         }
     }
 #else
@@ -1053,6 +1148,11 @@ int getBattery() {
         s_filtered_mv = (s_filtered_mv * 6 + mv * 2) / 8;
     }
     mv_for_percent = s_filtered_mv;
+    // Charger lifts terminal voltage above the open-circuit value; compensate
+    // so plugging in doesn't jump the percentage.
+    if (_isCharging && mv_for_percent < 4150) {
+        mv_for_percent -= TDECK_CHARGE_OFFSET_MV;
+    }
 #endif
 
     // Map measured voltage to a percentage
@@ -1092,17 +1192,20 @@ int getBattery() {
     if (s_display_percent < 0) {
         s_display_percent = percent;
     } else {
+        // Percentage only moves in the direction the charge state allows;
+        // one point per ~2 s sample.
         int diff = percent - s_display_percent;
-        int threshold = _isCharging ? 5 : 3;
-        if (diff >= threshold) {
-            s_display_percent++;
-        } else if (diff <= -threshold) {
-            s_display_percent--;
+        if (_isCharging) {
+            if (diff >= 1) s_display_percent++;
+        } else {
+            if (diff <= -1) s_display_percent--;
+            else if (diff >= 4) s_display_percent++;  // genuine recovery after load sag
         }
         if (s_display_percent < 0) s_display_percent = 0;
         if (s_display_percent > 100) s_display_percent = 100;
     }
     percent = (uint8_t)s_display_percent;
+    s_tdeck_last_result = percent;
 #endif
 
     ESP_LOGD(TAG, "Battery percentage: %d%%", percent);
@@ -1167,10 +1270,22 @@ static bool get_battery_info(uint8_t *percentage, bool *is_charging) {
         result = true;
     }
 #elif defined(CONFIG_HAS_BATTERY)
-    // Fallback to AXP2101
-    axp2101_get_power_level(percentage);
-    *is_charging = axp202_is_charging();
-    result = true;
+    // Poll on a fixed interval even after failure; UI redraws must not flood
+    // the console or publish an uninitialized percentage when the PMU is absent.
+    static int64_t last_axp_poll_ms = -5000;
+    int64_t now_ms = esp_timer_get_time() / 1000;
+    if (now_ms - last_axp_poll_ms >= 5000) {
+        last_axp_poll_ms = now_ms;
+        if (axp2101_get_power_level(percentage) == ESP_OK) {
+            *is_charging = axp202_is_charging();
+            result = true;
+        }
+    }
+    if (!result && last_valid_cache) {
+        *percentage = last_pct_cache;
+        *is_charging = last_chg_cache;
+        result = true;
+    }
 #elif defined(CONFIG_HAS_BATTERY_ADC)
     // Fallback to ADC
     int battery_percent = getBattery();
@@ -2177,6 +2292,8 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
 #ifdef CONFIG_CROWPANEL_ADVANCE_43_LCD
   else {
     crowpanel_advance43_factory_power_sequence();
+    /* V1.1 needs an explicit backlight-on command after the power sequence. */
+    crowpanel_advance43_v11_backlight_on();
   }
 #else
   else if (crowpanel_advance_stc8_prepare() == ESP_OK) {
@@ -2252,6 +2369,11 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
    * display helper out of this branch; only initialize GT911 touch here. */
   touch_driver_init();
 #else
+#if defined(CONFIG_WAVESHARE_C5_35_LCD)
+  /* Panel power, LCD reset and touch reset are on the 0x24 I/O expander;
+   * bring it up once before the ST7796 and FT6336 are initialized. */
+  ws_c5_exio_init();
+#endif
   lvgl_driver_init();
 #endif
   ESP_LOGI(TAG, "display_manager: display driver init done, free internal RAM: %d bytes", 
@@ -2443,6 +2565,12 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
   lv_disp_drv_init(&disp_drv);
   disp_drv.hor_res = width;
   disp_drv.ver_res = height;
+#ifdef CONFIG_BANSHEE_LITE_C5
+  /* Keep the panel in its native portrait scan order. LVGL rotates the
+   * rendered pixels so the layout can switch between portrait and landscape
+   * without changing the ST7796 register orientation. */
+  disp_drv.sw_rotate = 1;
+#endif
 #ifdef CONFIG_CROWPANEL_ADVANCED_P4
   disp_drv.direct_mode = 1;
 #endif
@@ -2464,6 +2592,13 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
   }
 #endif
   lv_disp_t *registered_disp = lv_disp_drv_register(&disp_drv);
+#ifdef CONFIG_BANSHEE_LITE_C5
+  /* The device always boots in the native portrait orientation. Auto Flip is
+   * deliberately applied later, after the sensor has reported a stable pose. */
+  if (registered_disp) lv_disp_set_rotation(registered_disp, LV_DISP_ROT_NONE);
+  s_auto_flip_rotation = LV_DISP_ROT_NONE;
+  s_auto_flip_requested_rotation = LV_DISP_ROT_NONE;
+#endif
 #ifdef CONFIG_CROWPANEL_ADVANCED_P4
   if (registered_disp && registered_disp->driver && registered_disp->driver->draw_ctx &&
       registered_disp->driver->draw_ctx->buffer_copy) {
@@ -3560,6 +3695,252 @@ lv_res_t display_manager_lvgl_async_call_nowait(lv_async_cb_t cb, void *user_dat
     return display_manager_lvgl_async_call_with_timeout(cb, user_data, 0);
 }
 
+#ifdef CONFIG_BANSHEE_LITE_C5
+typedef struct {
+  lv_disp_rot_t rotation;
+  uint32_t generation;
+} dm_auto_flip_rotation_call_t;
+
+static const char *dm_auto_flip_rotation_name(lv_disp_rot_t rotation) {
+  switch (rotation) {
+    case LV_DISP_ROT_90: return "left landscape";
+    case LV_DISP_ROT_270: return "right landscape";
+    default: return "portrait";
+  }
+}
+
+static int dm_auto_flip_classify(float ax, float ay, float az,
+                                 lv_disp_rot_t current_rotation) {
+  float magnitude = sqrtf(ax * ax + ay * ay + az * az);
+  if (magnitude < 0.70f || magnitude > 1.30f) return -1;
+
+  ax /= magnitude;
+  ay /= magnitude;
+  az /= magnitude;
+
+  bool in_landscape = current_rotation == LV_DISP_ROT_90 ||
+                      current_rotation == LV_DISP_ROT_270;
+  float axis_margin = in_landscape ? 0.35f : 0.18f;
+  float axis_threshold = in_landscape ? 0.70f : 0.55f;
+
+  /* Ignore face-up/face-down positions. While already in landscape, hold the
+   * current state for ambiguous/flat readings instead of falling to portrait. */
+  if (fabsf(az) > 0.70f) return in_landscape ? -1 : LV_DISP_ROT_NONE;
+  if (fabsf(ax) >= fabsf(ay) + axis_margin && fabsf(ax) > axis_threshold) {
+    /* The C5 panel's native scan direction makes the previous mapping
+     * appear upside-down in both landscape positions. Swap the two landscape
+     * rotations; touch coordinates follow the resulting LVGL rotation. */
+    return ax > 0.0f ? LV_DISP_ROT_270 : LV_DISP_ROT_90;
+  }
+  if (fabsf(ay) >= fabsf(ax) + axis_margin && fabsf(ay) > axis_threshold) {
+    return LV_DISP_ROT_NONE;
+  }
+  return -1;
+}
+
+static void dm_auto_flip_request_rotation(lv_disp_rot_t rotation);
+
+static void dm_auto_flip_delete_status_bar(char *title, size_t title_size) {
+  const char *current_title = display_manager_get_status_title();
+  if (title && title_size > 0) {
+    strncpy(title, current_title ? current_title : "", title_size - 1);
+    title[title_size - 1] = '\0';
+  }
+
+  lv_obj_t *old_bar = status_bar;
+  status_bar = NULL;
+  status_snapshot_valid = false;
+  mainlabel = NULL;
+  wifi_label = NULL;
+  bt_label = NULL;
+  sd_label = NULL;
+  battery_label = NULL;
+  level_label = NULL;
+  if (old_bar) lvgl_obj_del_safe(&old_bar);
+}
+
+static void dm_auto_flip_apply_rotation(lv_disp_rot_t rotation, uint32_t generation) {
+  if (generation != s_auto_flip_generation) return;
+  if (rotation != LV_DISP_ROT_NONE && rotation != LV_DISP_ROT_90 &&
+      rotation != LV_DISP_ROT_270) {
+    return;
+  }
+  if (!s_auto_flip_enabled && rotation != LV_DISP_ROT_NONE) return;
+  if (s_lockscreen_overlay_active) {
+    /* Rebuilding dm.current_view here would stop an active capture underneath
+     * the lockscreen. Leave the request pending until the overlay is gone. */
+    s_auto_flip_requested_rotation = s_auto_flip_rotation;
+    return;
+  }
+
+  lv_disp_t *display = lv_disp_get_default();
+  if (!display || lv_disp_get_rotation(display) == rotation) {
+    s_auto_flip_rotation = rotation;
+    return;
+  }
+
+  char status_title[48];
+  dm_auto_flip_delete_status_bar(status_title, sizeof(status_title));
+  lv_disp_set_rotation(display, rotation);
+  s_auto_flip_rotation = rotation;
+
+  /* Views calculate dimensions from LV_HOR_RES/LV_VER_RES during create(), so
+   * recreate the current view without changing router history. */
+  View *current_view = dm.current_view;
+  if (current_view) display_manager_render_view(current_view);
+  if (status_title[0] != '\0') display_manager_add_status_bar(status_title);
+  lv_obj_invalidate(lv_scr_act());
+  ESP_LOGI(TAG, "C5 Auto Flip: %s", dm_auto_flip_rotation_name(rotation));
+}
+
+static void dm_auto_flip_apply_rotation_async(void *arg) {
+  dm_auto_flip_rotation_call_t *call = (dm_auto_flip_rotation_call_t *)arg;
+  if (!call) return;
+  dm_auto_flip_apply_rotation(call->rotation, call->generation);
+  free(call);
+}
+
+static void dm_auto_flip_request_rotation(lv_disp_rot_t rotation) {
+  if (rotation != LV_DISP_ROT_NONE && rotation != LV_DISP_ROT_90 &&
+      rotation != LV_DISP_ROT_270) {
+    rotation = LV_DISP_ROT_NONE;
+  }
+  if (rotation == s_auto_flip_requested_rotation) return;
+
+  dm_auto_flip_rotation_call_t *call = malloc(sizeof(*call));
+  if (!call) return;
+  call->rotation = rotation;
+  call->generation = ++s_auto_flip_generation;
+  s_auto_flip_requested_rotation = rotation;
+  if (display_manager_lvgl_async_call_nowait(dm_auto_flip_apply_rotation_async, call) != LV_RES_OK) {
+    s_auto_flip_requested_rotation = s_auto_flip_rotation;
+    free(call);
+  }
+}
+
+#if defined(CONFIG_HAS_ACCELEROMETER) && defined(CONFIG_ACCEL_USE_BMI270)
+static void dm_auto_flip_task(void *arg) {
+  (void)arg;
+  bool sensor_ready = false;
+  bool first_sample = true;
+  int stable_candidate = -1;
+  int stable_samples = 0;
+  float filtered_x = 0.0f;
+  float filtered_y = 0.0f;
+  float filtered_z = 0.0f;
+
+  for (;;) {
+    if (!s_auto_flip_enabled) {
+      sensor_ready = false;
+      first_sample = true;
+      stable_candidate = -1;
+      stable_samples = 0;
+      s_auto_flip_candidate_rotation = LV_DISP_ROT_NONE;
+      vTaskDelay(pdMS_TO_TICKS(250));
+      continue;
+    }
+
+    if (!sensor_ready) {
+      if (bmi270_init() == ESP_OK) {
+        sensor_ready = true;
+        ESP_LOGI(TAG, "C5 Auto Flip: BMI270 orientation sensor ready");
+      } else {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        continue;
+      }
+    }
+
+    int16_t raw_x, raw_y, raw_z;
+    if (bmi270_read_accel(&raw_x, &raw_y, &raw_z) != ESP_OK) {
+      sensor_ready = false;
+      vTaskDelay(pdMS_TO_TICKS(250));
+      continue;
+    }
+
+    int16_t gyro_x, gyro_y, gyro_z;
+    bool moving = false;
+    if (bmi270_read_gyro(&gyro_x, &gyro_y, &gyro_z) == ESP_OK) {
+      moving = abs(gyro_x) + abs(gyro_y) + abs(gyro_z) > 1200;
+    }
+    if (moving) {
+      stable_candidate = -1;
+      stable_samples = 0;
+      vTaskDelay(pdMS_TO_TICKS(50));
+      continue;
+    }
+
+    float ax = (float)raw_x;
+    float ay = (float)raw_y;
+    float az = (float)raw_z;
+    float magnitude = sqrtf(ax * ax + ay * ay + az * az);
+    if (magnitude < 1.0f) {
+      stable_candidate = -1;
+      stable_samples = 0;
+      vTaskDelay(pdMS_TO_TICKS(50));
+      continue;
+    }
+    ax /= magnitude;
+    ay /= magnitude;
+    az /= magnitude;
+
+    if (first_sample) {
+      filtered_x = ax;
+      filtered_y = ay;
+      filtered_z = az;
+      first_sample = false;
+    } else {
+      filtered_x = filtered_x * 0.75f + ax * 0.25f;
+      filtered_y = filtered_y * 0.75f + ay * 0.25f;
+      filtered_z = filtered_z * 0.75f + az * 0.25f;
+    }
+
+    int candidate = dm_auto_flip_classify(filtered_x, filtered_y, filtered_z,
+                                          s_auto_flip_rotation);
+    if (candidate < 0) {
+      stable_candidate = -1;
+      stable_samples = 0;
+    } else if (candidate == stable_candidate) {
+      stable_samples++;
+    } else {
+      stable_candidate = candidate;
+      stable_samples = 1;
+    }
+
+    int required_stable_samples =
+        (s_auto_flip_rotation != LV_DISP_ROT_NONE &&
+         stable_candidate == LV_DISP_ROT_NONE) ? 16 : 8;
+    if (stable_samples >= required_stable_samples) {
+      lv_disp_rot_t rotation = (lv_disp_rot_t)stable_candidate;
+      if (rotation != s_auto_flip_candidate_rotation) {
+        s_auto_flip_candidate_rotation = rotation;
+        if (!s_lockscreen_overlay_active) dm_auto_flip_request_rotation(rotation);
+      }
+    }
+    vTaskDelay(pdMS_TO_TICKS(50));
+  }
+}
+#else
+static void dm_auto_flip_task(void *arg) {
+  (void)arg;
+  for (;;) {
+    ESP_LOGW(TAG, "C5 Auto Flip enabled but BMI270 support is not configured");
+    vTaskDelay(pdMS_TO_TICKS(5000));
+  }
+}
+#endif
+
+void display_manager_set_auto_flip_enabled(bool enabled) {
+  s_auto_flip_enabled = enabled;
+  if (!enabled) {
+    s_auto_flip_candidate_rotation = LV_DISP_ROT_NONE;
+    s_auto_flip_requested_rotation = s_auto_flip_rotation;
+    dm_auto_flip_request_rotation(LV_DISP_ROT_NONE);
+  } else {
+    s_auto_flip_requested_rotation = s_auto_flip_rotation;
+  }
+}
+#endif
+
 typedef struct {
   void (*fn)(void *);
   void *arg;
@@ -3685,6 +4066,23 @@ void display_manager_init_deferred_peripherals(void) {
     ESP_LOGW(TAG, "Failed to initialize fuel gauge manager");
   }
 #endif
+
+#ifdef CONFIG_USE_IP5306_POWER_MANAGER
+  if (ip5306_manager_init()) {
+    ESP_LOGI(TAG, "IP5306 power manager initialized successfully");
+  } else {
+    ESP_LOGW(TAG, "Failed to initialize IP5306 power manager");
+  }
+#endif
+
+#ifdef CONFIG_BANSHEE_LITE_C5
+  if (!s_auto_flip_task_handle &&
+      xTaskCreate(dm_auto_flip_task, "C5 Auto Flip", 3072, NULL,
+                  tskIDLE_PRIORITY + 2, &s_auto_flip_task_handle) != pdPASS) {
+    ESP_LOGE(TAG, "Failed to create C5 Auto Flip task");
+  }
+  display_manager_set_auto_flip_enabled(settings_get_auto_flip_enabled(&G_Settings));
+#endif
 }
 
 /* While an overlay lock is up, the shared status bar (normally on lv_scr_act)
@@ -3764,6 +4162,11 @@ void display_manager_clear_lockscreen_overlay(void) {
   dm_restore_status_bar_after_overlay();
   s_lockscreen_overlay_active = false;
   s_lockscreen_return_view = NULL;
+#ifdef CONFIG_BANSHEE_LITE_C5
+  if (s_auto_flip_enabled && s_auto_flip_candidate_rotation != s_auto_flip_rotation) {
+    dm_auto_flip_request_rotation(s_auto_flip_candidate_rotation);
+  }
+#endif
 }
 
 View *display_manager_get_lockscreen_return_view(void) {
@@ -3796,6 +4199,8 @@ static bool touch_move_events_enabled_for_view_name(const char *view_name) {
           strcmp(view_name, "LoRa") == 0 ||
           strcmp(view_name, "Ethernet") == 0 ||
           strcmp(view_name, "AirspaceMonitorView") == 0 ||
+          strcmp(view_name, "SentryView") == 0 ||
+          strcmp(view_name, "SentryOptionsView") == 0 ||
           strcmp(view_name, "Audio Player") == 0 ||
           strcmp(view_name, "Camera") == 0 ||
           strcmp(view_name, "Main Menu") == 0 ||
@@ -3811,10 +4216,15 @@ static bool touch_move_events_enabled_for_view_name(const char *view_name) {
           strcmp(view_name, "ENV-III") == 0 ||
           strcmp(view_name, "Favorites Manager") == 0 ||
           strcmp(view_name, "Menu Editor") == 0 ||
+          strcmp(view_name, "Setup Wizard") == 0 ||
           strcmp(view_name, "Lockscreen") == 0);
 }
 
 static bool touch_move_events_enabled_for_current_view(void) {
+  /* The lockscreen overlay leaves the underlying view as dm.current_view, but
+   * input belongs to the lockscreen: its slide-to-unlock needs drag samples
+   * whatever view is underneath. */
+  if (s_lockscreen_overlay_active) return true;
   if (!dm.mutex) return false;
 
   bool enabled = false;
@@ -3913,6 +4323,12 @@ static void display_manager_set_backlight_raw(uint8_t percentage) {
     esp_err_t err = crowpanel_p4_display_set_backlight(percentage);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "CrowPanel 5-inch backlight update failed: %s", esp_err_to_name(err));
+    }
+#elif defined(CONFIG_WAVESHARE_C5_35_LCD)
+    /* Backlight PWM lives on the 0x24 I/O expander (reg 0x05), 0..255. */
+    esp_err_t err = ws_c5_exio_set_backlight((uint8_t)((percentage * 255u) / 100u));
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Waveshare C5 3.5 backlight update failed: %s", esp_err_to_name(err));
     }
 #elif defined(CONFIG_CROWPANEL_ADVANCE_43_LCD)
     /* Factory firmware leaves TCA9534 P1 high and exposes no dimming control. */
@@ -4023,20 +4439,21 @@ void set_backlight_brightness(uint8_t percentage) {
         esp_sleep_disable_wifi_beacon_wakeup();
 
 #ifdef CONFIG_IS_S3TWATCH
-        // 2a) On S3T-Watch: only GPIO button can wake us
-        gpio_wakeup_enable(WAKE_UP_PIN, GPIO_INTR_LOW_LEVEL);
-        esp_sleep_enable_gpio_wakeup();
+        // Explicit light sleep ignores PM locks. Keep the USB console and UI
+        // tasks running while a host is attached, even with the panel dark.
+        if (!usb_serial_jtag_is_connected()) {
+            gpio_wakeup_enable(WAKE_UP_PIN, GPIO_INTR_LOW_LEVEL);
+            esp_sleep_enable_gpio_wakeup();
 
-        // 3a) Pause all UI and drop into light-sleep until that button is pressed
-        if (status_update_timer)   lv_timer_pause(status_update_timer);
-        if (status_update_timer)   lv_timer_set_period(status_update_timer, 5000);
+            // Pause UI and sleep until the button is pressed.
+            if (status_update_timer)   lv_timer_pause(status_update_timer);
+            if (status_update_timer)   lv_timer_set_period(status_update_timer, 5000);
 #ifndef CONFIG_USE_CARDPUTER
-        if (lvgl_task_handle)      vTaskSuspend(lvgl_task_handle);
+            if (lvgl_task_handle)      vTaskSuspend(lvgl_task_handle);
 #endif
-        if (rainbow_timer)         lv_timer_pause(rainbow_timer);
-        if (terminal_update_timer) lv_timer_pause(terminal_update_timer);
-        if (clock_timer)           lv_timer_pause(clock_timer);
-        {
+            if (rainbow_timer)         lv_timer_pause(rainbow_timer);
+            if (terminal_update_timer) lv_timer_pause(terminal_update_timer);
+            if (clock_timer)           lv_timer_pause(clock_timer);
             if (!wifi_manager_is_evil_portal_active()) {
                 wifi_config_t cfg;
                 if (esp_wifi_get_config(WIFI_IF_AP, &cfg) == ESP_OK) {
@@ -4046,8 +4463,8 @@ void set_backlight_brightness(uint8_t percentage) {
                 }
                 esp_wifi_set_ps(WIFI_PS_MAX_MODEM);
             }
+            esp_light_sleep_start();
         }
-        esp_light_sleep_start();
 
 #else
         // 2b) On Cardputer (or other devices without real GPIO wake):
@@ -4786,6 +5203,9 @@ void hardware_input_task(void *pvParameters) {
             InputEvent event;
             event.type = INPUT_TYPE_JOYSTICK;
             event.data.joystick_index = direction;
+#ifdef CONFIG_BANSHEE_LITE_C5
+            event.data.joystick_index = dm_transform_c5_joystick_index(direction, true);
+#endif
             event.data.joystick_pressed = true;
             xQueueSend(input_queue, &event, pdMS_TO_TICKS(10));
           }
@@ -4869,6 +5289,8 @@ void hardware_input_task(void *pvParameters) {
         event.data.joystick_index =
 #ifdef CONFIG_CROWPANEL_EPAPER_42
             crowpanel_epaper_logical_joystick_index(i);
+#elif defined(CONFIG_BANSHEE_LITE_C5)
+            dm_transform_c5_joystick_index(i, pressed_now);
 #else
             i;
 #endif
@@ -4911,6 +5333,11 @@ void hardware_input_task(void *pvParameters) {
         event.data.joystick_index =
 #ifdef CONFIG_CROWPANEL_EPAPER_42
             crowpanel_epaper_logical_joystick_index(i);
+#elif defined(CONFIG_BANSHEE_LITE_C5)
+            /* Keep a held direction on the same logical slot as its press;
+             * this also keeps the press-owner/release tracking consistent if
+             * the device rotates while a button is held. */
+            dm_transform_c5_joystick_index(i, false);
 #else
             i;
 #endif
@@ -4951,7 +5378,9 @@ void hardware_input_task(void *pvParameters) {
                             SelectedMenuType = OT_GPS;
                             display_manager_switch_view(&options_menu_view);
                         } else if (strcmp(cmd, "view:compass") == 0) {
+#if !defined(CONFIG_BANSHEE_LITE_C5) || defined(CONFIG_HAS_COMPASS)
                             display_manager_switch_view(&compass_view);
+#endif
                         } else if (strcmp(cmd, "view:enviii") == 0) {
                             display_manager_switch_view(&enviii_view);
                         } else if (strcmp(cmd, "view:accel") == 0) {
@@ -5005,7 +5434,9 @@ void hardware_input_task(void *pvParameters) {
                             SelectedMenuType = OT_GPS;
                             display_manager_switch_view(&options_menu_view);
                         } else if (strcmp(cmd, "view:compass") == 0) {
+#if !defined(CONFIG_BANSHEE_LITE_C5) || defined(CONFIG_HAS_COMPASS)
                             display_manager_switch_view(&compass_view);
+#endif
                         } else if (strcmp(cmd, "view:enviii") == 0) {
                             display_manager_switch_view(&enviii_view);
                         } else if (strcmp(cmd, "view:accel") == 0) {
@@ -5059,7 +5490,9 @@ void hardware_input_task(void *pvParameters) {
                             SelectedMenuType = OT_GPS;
                             display_manager_switch_view(&options_menu_view);
                         } else if (strcmp(cmd, "view:compass") == 0) {
+#if !defined(CONFIG_BANSHEE_LITE_C5) || defined(CONFIG_HAS_COMPASS)
                             display_manager_switch_view(&compass_view);
+#endif
                         } else if (strcmp(cmd, "view:enviii") == 0) {
                             display_manager_switch_view(&enviii_view);
                         } else if (strcmp(cmd, "view:accel") == 0) {
@@ -5455,10 +5888,67 @@ static bool dm_handle_crowpanel_home_event(const InputEvent *event) {
 }
 #endif
 
+
+#ifdef CONFIG_BANSHEE_LITE_C5
+static void dm_transform_c5_touch_event(InputEvent *event) {
+  if (!event || event->type != INPUT_TYPE_TOUCH) return;
+
+  const int32_t raw_x = event->data.touch_data.point.x;
+  const int32_t raw_y = event->data.touch_data.point.y;
+  switch (s_auto_flip_rotation) {
+    case LV_DISP_ROT_90:
+      event->data.touch_data.point.x = CONFIG_TFT_HEIGHT - raw_y - 1;
+      event->data.touch_data.point.y = raw_x;
+      break;
+    case LV_DISP_ROT_270:
+      event->data.touch_data.point.x = raw_y;
+      event->data.touch_data.point.y = CONFIG_TFT_WIDTH - raw_x - 1;
+      break;
+    default:
+      break;
+  }
+}
+
+static int dm_transform_c5_joystick_index(int physical_index, bool pressed) {
+  if (physical_index < 0 || physical_index >= 5) return physical_index;
+  if (physical_index == 1 || s_auto_flip_rotation == LV_DISP_ROT_NONE) {
+    if (pressed) s_c5_joystick_logical_index[physical_index] = physical_index;
+    return s_c5_joystick_logical_index[physical_index];
+  }
+
+  if (!pressed) return s_c5_joystick_logical_index[physical_index];
+
+  int logical_index = physical_index;
+  if (s_auto_flip_rotation == LV_DISP_ROT_90) {
+    /* Physical vectors map through the same transform as touch input:
+     * left->up, up->right, right->down, down->left. */
+    switch (physical_index) {
+      case 0: logical_index = 2; break;
+      case 2: logical_index = 3; break;
+      case 3: logical_index = 4; break;
+      case 4: logical_index = 0; break;
+      default: break;
+    }
+  } else if (s_auto_flip_rotation == LV_DISP_ROT_270) {
+    /* left->down, up->left, right->up, down->right. */
+    switch (physical_index) {
+      case 0: logical_index = 4; break;
+      case 2: logical_index = 0; break;
+      case 3: logical_index = 2; break;
+      case 4: logical_index = 3; break;
+      default: break;
+    }
+  }
+  s_c5_joystick_logical_index[physical_index] = logical_index;
+  return logical_index;
+}
+#endif
+
 void display_manager_flush_input_queue(void) {
     if (!input_queue) return;
     xQueueReset(input_queue);
 }
+
 
 void processEvent() {  // do not process events until the display manager is up
   if (!display_manager_init_success) {
@@ -5481,6 +5971,9 @@ void processEvent() {  // do not process events until the display manager is up
         xQueueReceive(input_queue, &event, 0);
       }
     }
+#ifdef CONFIG_BANSHEE_LITE_C5
+    dm_transform_c5_touch_event(&event);
+#endif
     last_touch_time = xTaskGetTickCount();
     if (is_backlight_dimmed || is_backlight_off) {
       set_backlight_brightness(100);
@@ -5575,6 +6068,9 @@ void processEvent() {  // do not process events until the display manager is up
           xQueueReceive(input_queue, &event, 0);
         }
       }
+#ifdef CONFIG_BANSHEE_LITE_C5
+      dm_transform_c5_touch_event(&event);
+#endif
       last_touch_time = xTaskGetTickCount();
       if (is_backlight_dimmed || is_backlight_off) {
         set_backlight_brightness(100);

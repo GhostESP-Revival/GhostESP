@@ -1,6 +1,6 @@
 ---
 title: "GPS Features"
-description: "GPS tracking and wardriving capabilities in the Flipper Zero companion app."
+description: "GPS tracking and wardriving capabilities in the Flipper Zero companion app"
 weight: 50
 keywords: ["gps", "wardriving", "location", "tracking", "coordinates"]
 ---
@@ -20,18 +20,4 @@ keywords: ["gps", "wardriving", "location", "tracking", "coordinates"]
 - **BLE Wardriving**: Log BLE devices with GPS coordinates (CSV export)
 - **Combined Mapping**: Map both networks and devices on a single view
 
-## Common Workflow: GPS Wardriving
-
-1. Ensure GPS module is connected and receiving signal
-2. Navigate to **GPS** → **Wardriving** → **Start Wardriving**
-3. Start wardriving session
-4. Drive around to collect data
-5. Stop and export CSV file with GPS coordinates
-
-## GPS Troubleshooting
-
-**GPS not working**
-- Verify GPS module is connected and powered
-- Ensure GPS has clear view of sky
-- Wait for GPS to acquire satellite lock (may take 1-2 minutes)
-- Check GPS module wiring and configuration
+Start a session from **GPS** → **Wardriving** → **Start Wardriving**; see the [Usage Guide]({{< relref "usage.md" >}}) for the full walkthrough. If GPS isn't reporting, see [Troubleshooting]({{< relref "troubleshooting.md" >}}).

@@ -1,6 +1,6 @@
 ---
 title: "Custom Board Configurations"
-description: "Create and customize board profiles for GhostESP."
+description: "Create and customize board profiles for GhostESP"
 weight: 20
 ---
 
@@ -19,7 +19,7 @@ Board configurations are stored in `configs/sdkconfig.*` files. Each file contai
 
 ## Creating a New Board Profile
 
-### 1. Copy a base config
+### 1. Copy a Base Config
 
 Choose the closest matching chip family:
 
@@ -27,26 +27,26 @@ Choose the closest matching chip family:
 cp "configs/sdkconfig.default.esp32s3" "configs/sdkconfig.myboard"
 ```
 
-### 2. Clean previous build
+### 2. Clean Previous Build
 
 ```
 idf.py fullclean
 ```
 
-### 3. Apply the config
+### 3. Apply the Config
 
 ```
 cp "configs/sdkconfig.myboard" "sdkconfig"
 cp "configs/sdkconfig.myboard" "sdkconfig.defaults"
 ```
 
-### 4. Set the target
+### 4. Set the Target
 
 ```
 idf.py set-target esp32s3
 ```
 
-### 5. Open menuconfig
+### 5. Open Menuconfig
 
 ```
 idf.py menuconfig
@@ -54,13 +54,13 @@ idf.py menuconfig
 
 Configure your hardware settings (see sections below).
 
-### 6. Build and test
+### 6. Build and Test
 
 ```
 idf.py -p COM3 flash monitor
 ```
 
-### 7. Save your config
+### 7. Save Your Config
 
 After verifying everything works, copy back to your profile:
 
@@ -74,14 +74,14 @@ cp "sdkconfig" "configs/sdkconfig.myboard"
 
 Navigate to **Ghost ESP Options** in menuconfig:
 
-- **Device Details** → `BUILD_CONFIG_TEMPLATE` — Set your board name (e.g., "myboard")
-- **LED Options** — Enable Neopixel or RGB LED, set data pins
-- **Display Options** — Enable screen, set resolution, touchscreen
-- **SPI and MMC Configuration** — SD card pins (SPI or 1-bit SDIO)
-- **GPS Configuration** — UART RX pin and baud rate
-- **NFC Options** — PN532 or Chameleon Ultra
-- **NRF24 Options** — SPI pins for NRF24L01 module
-- **Misc Options** — Joystick, battery ADC, BadUSB, ethernet, infrared, NRF24
+- **Device Details** → `BUILD_CONFIG_TEMPLATE` - Set your board name (e.g., "myboard")
+- **LED Options** - Enable Neopixel or RGB LED, set data pins
+- **Display Options** - Enable screen, set resolution, touchscreen
+- **SPI and MMC Configuration** - SD card pins (SPI or 1-bit SDIO)
+- **GPS Configuration** - UART RX pin and baud rate
+- **NFC Options** - PN532 or Chameleon Ultra
+- **NRF24 Options** - SPI pins for NRF24L01 module
+- **Misc Options** - Joystick, battery ADC, BadUSB, ethernet, infrared, NRF24
 
 ### LVGL Display Driver
 
@@ -98,9 +98,9 @@ For touchscreens, configure under **LVGL Touch Input**.
 Navigate to **Component config → Log output**:
 
 Set **Default log verbosity** to:
-- **Info** (recommended for debugging) — Standard operational messages
-- **Warning** (default) — Minimal output
-- **Error** — Only errors
+- **Info** (recommended for debugging) - Standard operational messages
+- **Warning** (default) - Minimal output
+- **Error** - Only errors
 
 ### Console Baud Rate
 
@@ -125,30 +125,15 @@ Set **UART console baud rate** (default: 115200)
 
 ## Example: Adding a New ESP32-S3 Board
 
-1. Start with the S3 default:
-   ```
-   idf.py fullclean
-   cp "configs/sdkconfig.default.esp32s3" "sdkconfig"
-   cp "configs/sdkconfig.default.esp32s3" "sdkconfig.defaults"
-   idf.py set-target esp32s3
-   ```
+Starting from the S3 default, open menuconfig (step 5) and configure:
 
-2. Open menuconfig and configure:
-   - Set `BUILD_CONFIG_TEMPLATE` to "my_awesome_board"
-   - Enable `WITH_SCREEN` and set `TFT_WIDTH`/`TFT_HEIGHT`
-   - Configure display driver under LVGL settings
-   - Set SD card SPI pins
-   - Enable any extra features (GPS, NFC, etc.)
+- Set `BUILD_CONFIG_TEMPLATE` to "my_awesome_board"
+- Enable `WITH_SCREEN` and set `TFT_WIDTH`/`TFT_HEIGHT`
+- Configure display driver under LVGL settings
+- Set SD card SPI pins
+- Enable any extra features (GPS, NFC, etc.)
 
-3. Build and test:
-   ```
-   idf.py -p COM3 flash monitor
-   ```
-
-4. Save when working:
-   ```
-   cp "sdkconfig" "configs/sdkconfig.my_awesome_board"
-   ```
+Then test with `idf.py -p COM3 flash monitor` and save the profile with `cp "sdkconfig" "configs/sdkconfig.my_awesome_board"`.
 
 ## Troubleshooting
 

@@ -6,6 +6,7 @@
 #include "scans/wifi/ap_scan.h"
 #include "scans/wifi/wifi_channels.h"
 #include "core/glog.h"
+#include "core/ouis.h"
 #include "core/system_manager.h"
 #include "esp_wifi.h"
 #include "esp_random.h"
@@ -101,11 +102,14 @@ static void csa_attack_task(void *param) {
         } else {
             snprintf(sanitized_ssid, sizeof(sanitized_ssid), "%s", ssid);
         }
-        glog("  [%d] %s (Ch:%d) %02X:%02X:%02X:%02X:%02X:%02X\n",
+        char vendor[64] = {0};
+        bool has_vendor = ouis_lookup_vendor_bytes(selected_aps[i].bssid, vendor, sizeof(vendor));
+        glog("  [%d] %s (Ch:%d) %02X:%02X:%02X:%02X:%02X:%02X%s%s\n",
              i, sanitized_ssid, selected_aps[i].primary,
              selected_aps[i].bssid[0], selected_aps[i].bssid[1],
              selected_aps[i].bssid[2], selected_aps[i].bssid[3],
-             selected_aps[i].bssid[4], selected_aps[i].bssid[5]);
+             selected_aps[i].bssid[4], selected_aps[i].bssid[5],
+             has_vendor ? " " : "", has_vendor ? vendor : "");
     }
     
     while (!csa_stop_requested) {

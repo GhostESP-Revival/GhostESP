@@ -1,4 +1,6 @@
 #include "core/callbacks.h"
+#include "core/pcap_pool.h"
+#include "scans/wifi/wardrive_observation.h"
 #include "core/system_manager.h"
 #include "esp_wifi.h"
 #include "managers/gps_manager.h"
@@ -11,6 +13,7 @@
 #include "core/utils.h"
 #include "vendor/GPS/gps_logger.h"
 #include "vendor/pcap.h"
+#include "vendor/wifi_l2.h"
 #include "core/glog.h"
 #include "core/esp_comm_manager.h"
 #include "scans/wifi/wifi_channels.h"
@@ -97,15 +100,28 @@ static void *mon_tbl_calloc(size_t n, size_t size) {
 #define WARDRIVE_HELPER_REFRESH_MS 2000
 #define WARDRIVE_OBS_QUEUE_PSRAM_LEN 64
 #define WARDRIVE_OBS_QUEUE_INTERNAL_LEN 32
+/* Reservations track queued observations, so the table only needs the capacity of the
+ * queue that can exist: the PSRAM-sized queue is only attempted when PSRAM is configured. */
+#ifdef CONFIG_SPIRAM
+#define WARDRIVE_PENDING_LEN WARDRIVE_OBS_QUEUE_PSRAM_LEN
+#else
+#define WARDRIVE_PENDING_LEN WARDRIVE_OBS_QUEUE_INTERNAL_LEN
+#endif
 #define WARDRIVE_OBS_TASK_STACK_BYTES 8192
 #define PEER_GPS_STREAM_INTERVAL_MS 1000
 #define PEER_GPS_INIT_RETRY_MS 5000
+// This worker can initialize GPS on the S3 peer, including UART/NMEA setup
+// and libc logging. Its former 3 KB stack overflowed on that startup path.
+#define PEER_GPS_STREAM_STACK_BYTES 6144
 #define RECENT_SSID_COUNT 5
 #define LOG_DELAY_MS 5000
 #define PROBE_DEDUPE_TIMEOUT_MS 1000
 #define MIN_RSSI_THRESHOLD -90  // Drop packets weaker than -90 dBm
-#define MIN_PACKET_LENGTH 24    // Minimum 802.11 header size
+#define MIN_PACKET_LENGTH 24    // Minimum 802.11 header size for mgmt/data
 #define MAX_IE_LEN 255
+
+/* ACK and CTS are the shortest control frames: FC + Duration + RA, without FCS. */
+#define MIN_CONTROL_PACKET_LENGTH 10
 static const uint8_t pineapple_ouis[][3] = {
     {0x00, 0x13, 0x37},
 };
@@ -139,8 +155,8 @@ static uint32_t peer_gps_stream_tx_fail = 0;
 static uint32_t peer_gps_stream_rx_packets = 0;
 static uint32_t peer_gps_stream_rx_fix_packets = 0;
 static TaskHandle_t peer_gps_stream_task_handle = NULL;
-static StackType_t *peer_gps_stream_stack = NULL;
-static StaticTask_t *peer_gps_stream_tcb = NULL;
+static StaticSemaphore_t peer_gps_stream_mutex_storage;
+static SemaphoreHandle_t peer_gps_stream_mutex;
 
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 #define BLE_WD_SEEN_SIZE 64
@@ -219,8 +235,8 @@ typedef struct {
     uint32_t pending_token;
     bool has_gps_snapshot;
     bool using_peer_gps;
-    gps_t gps_snapshot;
-    wardriving_data_t data;
+    wardrive_gps_record_t gps_snapshot;
+    wardrive_wifi_record_t data;
 } wardrive_obs_item_t;
 
 typedef struct {
@@ -231,7 +247,7 @@ typedef struct {
 } wardrive_pending_t;
 // Reservations only cover queued observations, never successfully logged APs.
 // A failed queue insertion or completed dequeue releases the reservation.
-static wardrive_pending_t wardrive_pending[WARDRIVE_OBS_QUEUE_PSRAM_LEN];
+static wardrive_pending_t wardrive_pending[WARDRIVE_PENDING_LEN];
 static uint32_t wardrive_pending_token;
 static uint32_t wardrive_pending_suppressed;
 static StaticSemaphore_t wardrive_ack_storage;
@@ -304,7 +320,7 @@ static inline int16_t wardrive_get_i16le(const uint8_t *src);
 static bool wardrive_is_valid_date(const gps_date_t *date);
 static bool wardrive_is_valid_time(const gps_time_t *tim);
 static inline uint32_t now_ms_u32(void);
-static bool wardrive_send_peer_gps_stream(void);
+static bool wardrive_send_peer_gps_stream(const gps_t *gps_local);
 static bool wardrive_send_helper_status(void);
 static void peer_gps_stream_task(void *arg);
 static uint32_t wardrive_get_hop_interval_ms(void);
@@ -338,7 +354,7 @@ static void wardrive_obs_task(void *arg) {
             continue;
         }
         portENTER_CRITICAL(&wardrive_obs_mux);
-        for (size_t i = 0; i < WARDRIVE_OBS_QUEUE_PSRAM_LEN; ++i) {
+        for (size_t i = 0; i < WARDRIVE_PENDING_LEN; ++i) {
             if (wardrive_pending[i].used && wardrive_pending[i].token == item.pending_token) {
                 wardrive_pending[i].used = false;
                 break;
@@ -346,8 +362,10 @@ static void wardrive_obs_task(void *arg) {
         }
         portEXIT_CRITICAL(&wardrive_obs_mux);
 
+        wardriving_data_t data;
+        wardrive_wifi_record_restore(&data, &item.data);
         if (item.source == WARDRIVE_OBS_HELPER_TX) {
-            wardrive_process_helper_tx(&item.data);
+            wardrive_process_helper_tx(&data);
             continue;
         }
         // This may take the CSV mutex, so it belongs in the worker, never in
@@ -360,8 +378,10 @@ static void wardrive_obs_task(void *arg) {
         wardrive_log_attempts++;
         esp_err_t err = ESP_ERR_INVALID_STATE;
         if (item.has_gps_snapshot) {
+            gps_t gps_snapshot;
+            wardrive_gps_record_restore(&gps_snapshot, &item.gps_snapshot);
             for (uint8_t attempt = 0; attempt < 5; attempt++) {
-                err = gps_manager_log_wardriving_data_with_snapshot(&item.data, &item.gps_snapshot,
+                err = gps_manager_log_wardriving_data_with_snapshot(&data, &gps_snapshot,
                                                                     item.using_peer_gps);
                 if (err != ESP_ERR_TIMEOUT && err != ESP_ERR_NO_MEM) break;
                 vTaskDelay(pdMS_TO_TICKS(10));
@@ -401,6 +421,28 @@ static bool wardrive_obs_queue_ensure(void) {
         vTaskDelay(1);
     }
 
+    // Reserve the largest mandatory block first. Allocating queue storage
+    // first can split the last block large enough for the worker stack.
+    StackType_t *stack = NULL;
+#if defined(CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY)
+    stack = heap_caps_malloc(WARDRIVE_OBS_TASK_STACK_BYTES,
+                             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+#endif
+    if (!stack) {
+        stack = heap_caps_malloc(WARDRIVE_OBS_TASK_STACK_BYTES,
+                                 MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    }
+    StaticTask_t *tcb = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (!stack || !tcb) {
+        heap_caps_free(stack);
+        heap_caps_free(tcb);
+        ESP_LOGE(TAG, "Wardrive worker allocation failed: stack=%u, largest internal block=%u",
+                 (unsigned)WARDRIVE_OBS_TASK_STACK_BYTES,
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+        wardrive_obs_init_done();
+        return false;
+    }
+
     UBaseType_t capacity = WARDRIVE_OBS_QUEUE_PSRAM_LEN;
     size_t storage_size = capacity * sizeof(wardrive_obs_item_t);
     uint8_t *storage = heap_caps_malloc(storage_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -412,8 +454,13 @@ static bool wardrive_obs_queue_ensure(void) {
     }
     StaticQueue_t *control = heap_caps_calloc(1, sizeof(StaticQueue_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (!storage || !control) {
+        ESP_LOGE(TAG, "Wardrive queue allocation failed: storage=%u, largest internal block=%u",
+                 (unsigned)storage_size,
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
         if (storage) heap_caps_free(storage);
         if (control) heap_caps_free(control);
+        heap_caps_free(stack);
+        heap_caps_free(tcb);
         wardrive_obs_init_done();
         return false;
     }
@@ -422,6 +469,8 @@ static bool wardrive_obs_queue_ensure(void) {
     if (!queue) {
         heap_caps_free(storage);
         heap_caps_free(control);
+        heap_caps_free(stack);
+        heap_caps_free(tcb);
         wardrive_obs_init_done();
         return false;
     }
@@ -434,28 +483,8 @@ static bool wardrive_obs_queue_ensure(void) {
         vQueueDelete(queue);
         heap_caps_free(storage);
         heap_caps_free(control);
-        wardrive_obs_init_done();
-        return false;
-    }
-
-    StackType_t *stack = NULL;
-#if defined(CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY)
-    stack = heap_caps_malloc(WARDRIVE_OBS_TASK_STACK_BYTES,
-                             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-#endif
-    if (!stack) {
-        stack = heap_caps_malloc(WARDRIVE_OBS_TASK_STACK_BYTES,
-                                 MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    }
-    StaticTask_t *tcb = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    if (!stack || !tcb) {
-        if (stack) heap_caps_free(stack);
-        if (tcb) heap_caps_free(tcb);
-        vSemaphoreDelete(drain_sem);
-        vSemaphoreDelete(lifecycle_mutex);
-        vQueueDelete(queue);
-        heap_caps_free(storage);
-        heap_caps_free(control);
+        heap_caps_free(stack);
+        heap_caps_free(tcb);
         wardrive_obs_init_done();
         return false;
     }
@@ -507,12 +536,15 @@ static bool wardrive_obs_submit(const wardriving_data_t *data, wardrive_obs_sour
     portEXIT_CRITICAL(&wardrive_obs_mux);
     if (!accepted) return false;
 
-    wardrive_obs_item_t item = {.source = source, .data = *data};
-    item.has_gps_snapshot = gps_manager_get_wardrive_snapshot(&item.gps_snapshot,
-                                                                       &item.using_peer_gps);
+    wardrive_obs_item_t item = {.source = source};
+    wardrive_wifi_record_store(&item.data, data);
+    gps_t gps_snapshot;
+    item.has_gps_snapshot = gps_manager_get_wardrive_snapshot(&gps_snapshot,
+                                                             &item.using_peer_gps);
+    if (item.has_gps_snapshot) wardrive_gps_record_store(&item.gps_snapshot, &gps_snapshot);
     int slot = -1;
     portENTER_CRITICAL(&wardrive_obs_mux);
-    for (size_t i = 0; i < WARDRIVE_OBS_QUEUE_PSRAM_LEN; ++i) {
+    for (size_t i = 0; i < WARDRIVE_PENDING_LEN; ++i) {
         wardrive_pending_t *p = &wardrive_pending[i];
         if (!p->used) { if (slot < 0) slot = (int)i; continue; }
         if (strcmp(p->bssid, data->bssid) != 0) continue;
@@ -924,7 +956,7 @@ static bool wardrive_send_helper_observation(const uint8_t *bssid,
     return false;
 }
 
-static bool wardrive_send_peer_gps_stream(void) {
+static bool wardrive_send_peer_gps_stream(const gps_t *gps_local) {
     if (!esp_comm_manager_is_connected()) {
         return false;
     }
@@ -932,8 +964,7 @@ static bool wardrive_send_peer_gps_stream(void) {
         return false;
     }
 
-    gps_t gps_local = {0};
-    if (!gps_manager_get_local_gps_snapshot(&gps_local)) {
+    if (!gps_local) {
         return false;
     }
 
@@ -942,25 +973,25 @@ static bool wardrive_send_peer_gps_stream(void) {
     payload[pos++] = GPS_STREAM_VERSION;
 
     uint8_t flags = GPS_STREAM_FLAG_PRESENT;
-    bool has_fix = gps_local.valid &&
-                   gps_local.fix >= GPS_FIX_GPS &&
-                   gps_local.fix_mode >= GPS_MODE_2D &&
-                   gps_local.latitude >= -90.0f && gps_local.latitude <= 90.0f &&
-                   gps_local.longitude >= -180.0f && gps_local.longitude <= 180.0f;
+    bool has_fix = gps_local->valid &&
+                   gps_local->fix >= GPS_FIX_GPS &&
+                   gps_local->fix_mode >= GPS_MODE_2D &&
+                   gps_local->latitude >= -90.0f && gps_local->latitude <= 90.0f &&
+                   gps_local->longitude >= -180.0f && gps_local->longitude <= 180.0f;
     if (has_fix) {
         flags |= GPS_STREAM_FLAG_FIX;
     }
-    if (wardrive_is_valid_date(&gps_local.date)) {
+    if (wardrive_is_valid_date(&gps_local->date)) {
         flags |= GPS_STREAM_FLAG_DATE_VALID;
     }
-    if (wardrive_is_valid_time(&gps_local.tim)) {
+    if (wardrive_is_valid_time(&gps_local->tim)) {
         flags |= GPS_STREAM_FLAG_TIME_VALID;
     }
     payload[pos++] = flags;
 
-    int32_t lat_e7 = has_fix ? (int32_t)(gps_local.latitude * 10000000.0f) : 0;
-    int32_t lon_e7 = has_fix ? (int32_t)(gps_local.longitude * 10000000.0f) : 0;
-    float alt_dm_f = gps_local.altitude * 10.0f;
+    int32_t lat_e7 = has_fix ? (int32_t)(gps_local->latitude * 10000000.0f) : 0;
+    int32_t lon_e7 = has_fix ? (int32_t)(gps_local->longitude * 10000000.0f) : 0;
+    float alt_dm_f = gps_local->altitude * 10.0f;
     if (alt_dm_f > 32767.0f) {
         alt_dm_f = 32767.0f;
     }
@@ -970,11 +1001,11 @@ static bool wardrive_send_peer_gps_stream(void) {
     int16_t alt_dm = (int16_t)alt_dm_f;
 
     uint16_t hdop_x10 = 0;
-    if (isfinite(gps_local.dop_h) && gps_local.dop_h >= 0.0f && gps_local.dop_h <= 6553.5f) {
-        hdop_x10 = (uint16_t)(gps_local.dop_h * 10.0f);
+    if (isfinite(gps_local->dop_h) && gps_local->dop_h >= 0.0f && gps_local->dop_h <= 6553.5f) {
+        hdop_x10 = (uint16_t)(gps_local->dop_h * 10.0f);
     }
 
-    float speed_x100_f = gps_local.speed * 100.0f;
+    float speed_x100_f = gps_local->speed * 100.0f;
     if (!isfinite(speed_x100_f)) {
         speed_x100_f = 0.0f;
     }
@@ -986,7 +1017,7 @@ static bool wardrive_send_peer_gps_stream(void) {
     }
     int16_t speed_x100 = (int16_t)speed_x100_f;
 
-    float course_x100_f = gps_local.cog * 100.0f;
+    float course_x100_f = gps_local->cog * 100.0f;
     if (!isfinite(course_x100_f)) {
         course_x100_f = 0.0f;
     }
@@ -1004,25 +1035,25 @@ static bool wardrive_send_peer_gps_stream(void) {
     pos += 4;
     wardrive_put_i16le(payload + pos, alt_dm);
     pos += 2;
-    payload[pos++] = gps_local.sats_in_use;
-    payload[pos++] = gps_local.sats_in_view;
-    payload[pos++] = (uint8_t)gps_local.fix;
-    payload[pos++] = (uint8_t)gps_local.fix_mode;
+    payload[pos++] = gps_local->sats_in_use;
+    payload[pos++] = gps_local->sats_in_view;
+    payload[pos++] = (uint8_t)gps_local->fix;
+    payload[pos++] = (uint8_t)gps_local->fix_mode;
     wardrive_put_i16le(payload + pos, (int16_t)hdop_x10);
     pos += 2;
     wardrive_put_i16le(payload + pos, speed_x100);
     pos += 2;
     wardrive_put_i16le(payload + pos, course_x100);
     pos += 2;
-    payload[pos++] = gps_local.date.day;
-    payload[pos++] = gps_local.date.month;
-    wardrive_put_i16le(payload + pos, (int16_t)gps_local.date.year);
+    payload[pos++] = gps_local->date.day;
+    payload[pos++] = gps_local->date.month;
+    wardrive_put_i16le(payload + pos, (int16_t)gps_local->date.year);
     pos += 2;
-    payload[pos++] = gps_local.tim.hour;
-    payload[pos++] = gps_local.tim.minute;
-    payload[pos++] = gps_local.tim.second;
+    payload[pos++] = gps_local->tim.hour;
+    payload[pos++] = gps_local->tim.minute;
+    payload[pos++] = gps_local->tim.second;
 
-    return esp_comm_manager_send_stream(COMM_STREAM_CHANNEL_GPS, payload, pos);
+    return esp_comm_manager_send_stream_wait(COMM_STREAM_CHANNEL_GPS, payload, pos, 5);
 }
 
 static void peer_gps_stream_task(void *arg) {
@@ -1031,6 +1062,14 @@ static void peer_gps_stream_task(void *arg) {
     gps_t gps_local = {0};
 
     while (1) {
+        xSemaphoreTake(peer_gps_stream_mutex, portMAX_DELAY);
+        if (!esp_comm_manager_is_connected()) {
+            peer_gps_stream_task_handle = NULL;
+            xSemaphoreGive(peer_gps_stream_mutex);
+            vTaskDeleteWithCaps(NULL);
+            return;
+        }
+        xSemaphoreGive(peer_gps_stream_mutex);
         if (esp_comm_manager_is_connected()) {
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
             if (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething2") == 0 &&
@@ -1044,7 +1083,7 @@ static void peer_gps_stream_task(void *arg) {
 #endif
 
             if (gps_manager_has_recent_update() && gps_manager_get_local_gps_snapshot(&gps_local)) {
-                if (wardrive_send_peer_gps_stream()) {
+                if (wardrive_send_peer_gps_stream(&gps_local)) {
                     peer_gps_stream_tx_ok++;
                 } else {
                     peer_gps_stream_tx_fail++;
@@ -1055,7 +1094,7 @@ static void peer_gps_stream_task(void *arg) {
             }
         }
 
-        vTaskDelay(pdMS_TO_TICKS(PEER_GPS_STREAM_INTERVAL_MS));
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(PEER_GPS_STREAM_INTERVAL_MS));
     }
 }
 
@@ -1098,8 +1137,8 @@ static bool wardrive_send_helper_status(void) {
             payload[8 + count++] = wardrive_channels[i];
     portEXIT_CRITICAL(&wardrive_ch_mux);
     payload[3] = count;
-    return esp_comm_manager_send_stream(COMM_STREAM_CHANNEL_WARDRIVE, payload,
-                                       wardrive_primary_channel_count ? 8 + count : 7);
+    return esp_comm_manager_send_stream_wait(COMM_STREAM_CHANNEL_WARDRIVE, payload,
+                                            wardrive_primary_channel_count ? 8 + count : 7, 5);
 }
 
 static void wardrive_apply_hop_interval(void) {
@@ -1446,29 +1485,25 @@ static bool beacon_should_emit_limited(const uint8_t *bssid, bool ssid_has_text)
     return true;
 }
 
-// queued writer to avoid heavy work in promiscuous callback
-typedef struct {
-    uint16_t length;
-    uint8_t data[768];
-    bool in_use;
-} pcap_pool_slot_t;
+/* Variable-length frame reservations share the former 6 x 2048-byte-slot
+ * budget. Descriptors and wrap padding are included in that same allocation.
+ * Small frames no longer each consume a full 2 KB slot; frames up to 4 KB fit.
+ */
+_Static_assert(PCAP_MAX_FRAME_LEN + RADIOTAP_MAX_LEN + PCAP_PACKET_HEADER_SIZE <= PCAP_BUFFER_SIZE,
+               "Maximum queued frame must fit in the PCAP sink buffer");
 
 typedef struct {
     uint8_t slot_idx;
     pcap_capture_type_t cap_type;
 } pcap_q_item_t;
 
-#define EAPOL_Q_LEN 64
-#if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(GHOSTESP_NO_NATIVE_BLE)
-#define PCAP_POOL_SLOTS_DEFAULT 10
-#define PCAP_POOL_SLOTS_MIN 4
-#else
-#define PCAP_POOL_SLOTS_DEFAULT 4
-#define PCAP_POOL_SLOTS_MIN 4
-#endif
+#define EAPOL_Q_LEN PCAP_POOL_DESCRIPTOR_COUNT
+#define PCAP_POOL_SLOTS_DEFAULT 6
+#define PCAP_POOL_SLOTS_MIN 3
 static QueueHandle_t s_pcap_q = NULL;
 static TaskHandle_t s_pcap_writer_task = NULL;
-static pcap_pool_slot_t *s_pcap_pool = NULL;
+static SemaphoreHandle_t s_pcap_drain_sem = NULL;
+static pcap_pool_t *s_pcap_pool = NULL;
 static size_t s_pcap_pool_slots = 0;
 static portMUX_TYPE s_pcap_pool_lock = portMUX_INITIALIZER_UNLOCKED;
 
@@ -1479,16 +1514,17 @@ static bool pcap_pool_init(void) {
 
     size_t slots = PCAP_POOL_SLOTS_DEFAULT;
     while (slots >= PCAP_POOL_SLOTS_MIN) {
-        pcap_pool_slot_t *pool = (pcap_pool_slot_t *)heap_caps_calloc(slots, sizeof(pcap_pool_slot_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        size_t bytes = slots * sizeof(pcap_pool_legacy_layout_t);
+        pcap_pool_t *pool = heap_caps_calloc(1, bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (!pool) {
-            pool = (pcap_pool_slot_t *)heap_caps_calloc(slots, sizeof(pcap_pool_slot_t), MALLOC_CAP_8BIT);
+            pool = heap_caps_calloc(1, bytes, MALLOC_CAP_8BIT);
         }
         if (pool != NULL) {
+            if (!pcap_arena_init(pool, bytes)) { heap_caps_free(pool); return false; }
             s_pcap_pool = pool;
-            s_pcap_pool_slots = slots;
-            ESP_LOGI(TAG, "PCAP pool allocated: %lu slots (%lu bytes)",
-                     (unsigned long)s_pcap_pool_slots,
-                     (unsigned long)(s_pcap_pool_slots * sizeof(pcap_pool_slot_t)));
+            s_pcap_pool_slots = PCAP_POOL_DESCRIPTOR_COUNT;
+            ESP_LOGI(TAG, "PCAP arena allocated: %lu bytes, max frame %u bytes",
+                     (unsigned long)bytes, PCAP_MAX_FRAME_LEN);
             return true;
         }
         if (slots == PCAP_POOL_SLOTS_MIN) {
@@ -1504,36 +1540,16 @@ static bool pcap_pool_init(void) {
     return false;
 }
 
-bool pcap_pool_preinit(void) {
-    return pcap_pool_init();
-}
-
-static int pcap_pool_acquire_slot(void) {
-    if (s_pcap_pool == NULL || s_pcap_pool_slots == 0) {
-        return -1;
-    }
-
-    int slot = -1;
+static int pcap_pool_acquire_slot(uint16_t length) {
     taskENTER_CRITICAL(&s_pcap_pool_lock);
-    for (size_t i = 0; i < s_pcap_pool_slots; i++) {
-        if (!s_pcap_pool[i].in_use) {
-            s_pcap_pool[i].in_use = true;
-            slot = (int)i;
-            break;
-        }
-    }
+    int slot = pcap_arena_reserve(s_pcap_pool, length);
     taskEXIT_CRITICAL(&s_pcap_pool_lock);
     return slot;
 }
 
 static void pcap_pool_release_slot(uint8_t slot_idx) {
-    if (s_pcap_pool == NULL || s_pcap_pool_slots == 0 || slot_idx >= s_pcap_pool_slots) {
-        return;
-    }
-
     taskENTER_CRITICAL(&s_pcap_pool_lock);
-    s_pcap_pool[slot_idx].in_use = false;
-    s_pcap_pool[slot_idx].length = 0;
+    pcap_arena_release(s_pcap_pool, slot_idx);
     taskEXIT_CRITICAL(&s_pcap_pool_lock);
 }
 
@@ -1543,10 +1559,15 @@ static void pcap_writer_task(void *arg) {
     uint32_t processed = 0;
     for (;;) {
         if (xQueueReceive(s_pcap_q, &item, pdMS_TO_TICKS(500)) == pdTRUE) {
+            if (item.slot_idx == UINT8_MAX) {
+                if (s_pcap_drain_sem) xSemaphoreGive(s_pcap_drain_sem);
+                continue;
+            }
             if (s_pcap_pool != NULL && item.slot_idx < s_pcap_pool_slots) {
-                pcap_pool_slot_t *slot = &s_pcap_pool[item.slot_idx];
+                pcap_pool_slot_t *slot = &s_pcap_pool->slots[item.slot_idx];
                 if (slot->length > 0) {
-                    pcap_write_packet_to_buffer(slot->data, slot->length, item.cap_type);
+                    pcap_write_packet_to_buffer_meta(s_pcap_pool->data + slot->offset, slot->length,
+                                                    item.cap_type, &slot->meta);
                 }
                 pcap_pool_release_slot(item.slot_idx);
             }
@@ -1582,7 +1603,66 @@ static inline void ensure_pcap_queue_started(void) {
     }
 }
 
+/* rssi, rate and channel are the only rx_ctrl fields present on every target
+ * variant (HE and non-HE). sig_mode, ant and noise_floor are not, so they are
+ * deliberately not read here; see esp_wifi_types_native.h and
+ * esp_wifi_he_types.h.
+ *
+ * The band is left as RADIOTAP_BAND_UNKNOWN so it is resolved from the channel
+ * number: 2.4 GHz (1-14) and 5 GHz (32-177) never overlap, and the C5's MAC v3
+ * layout carries an 8-bit channel so 5 GHz arrives intact. A channel outside
+ * both ranges is dropped by radiotap_build rather than written as a wrong
+ * frequency. */
+static void pcap_meta_from_rx_ctrl(const wifi_pkt_rx_ctrl_t *rc, radiotap_meta_t *out) {
+    memset(out, 0, sizeof(*out));
+    if (rc == NULL) {
+        return;
+    }
+    out->rssi = rc->rssi;
+    out->has_rssi = true;
+    out->rate = rc->rate;
+    out->has_rate = true;
+    out->channel = rc->channel;
+    out->has_channel = true;
+    out->band = RADIOTAP_BAND_UNKNOWN;
+}
+
+/* Frames the capture queue could not take. Counted rather than dropped
+ * silently, so a capture that is losing traffic says so in its summary
+ * instead of quietly looking complete. */
+static volatile uint32_t s_pcap_queue_dropped_too_big = 0;
+static volatile uint32_t s_pcap_queue_dropped_no_slot = 0;
+static volatile uint32_t s_pcap_queue_dropped_queue_full = 0;
+
+void pcap_get_queue_drop_stats(uint32_t *too_big, uint32_t *no_slot,
+                               uint32_t *queue_full) {
+    if (too_big) *too_big = s_pcap_queue_dropped_too_big;
+    if (no_slot) *no_slot = s_pcap_queue_dropped_no_slot;
+    if (queue_full) *queue_full = s_pcap_queue_dropped_queue_full;
+}
+
+void pcap_reset_queue_drop_stats(void) {
+    taskENTER_CRITICAL(&s_pcap_pool_lock);
+    s_pcap_queue_dropped_too_big = 0;
+    s_pcap_queue_dropped_no_slot = 0;
+    s_pcap_queue_dropped_queue_full = 0;
+    taskEXIT_CRITICAL(&s_pcap_pool_lock);
+}
+
+/* Defined below; declared here so the typed wrapper can forward to it. */
+static inline void enqueue_pcap_write_rx(const uint8_t *payload, uint16_t len,
+                                         pcap_capture_type_t cap_type,
+                                         const wifi_pkt_rx_ctrl_t *rc);
+
 static inline void enqueue_pcap_write_typed(const uint8_t *payload, uint16_t len, pcap_capture_type_t cap_type) {
+    enqueue_pcap_write_rx(payload, len, cap_type, NULL);
+}
+
+/* Queues a frame for the writer task. When rc is non-NULL its radio metadata
+ * rides along so the writer can emit a populated radiotap header. */
+static inline void enqueue_pcap_write_rx(const uint8_t *payload, uint16_t len,
+                                         pcap_capture_type_t cap_type,
+                                         const wifi_pkt_rx_ctrl_t *rc) {
     if (!payload || len == 0) return;
     ensure_pcap_queue_started();
     if (!s_pcap_q) return;
@@ -1591,18 +1671,24 @@ static inline void enqueue_pcap_write_typed(const uint8_t *payload, uint16_t len
         return;
     }
 
-    if (len > sizeof(s_pcap_pool[0].data)) {
+    /* Too big for the arena's frame limit. Counted, never truncated: a half-written frame is
+     * worse than a missing one. */
+    if (len > PCAP_MAX_FRAME_LEN || len > s_pcap_pool->capacity) {
+        s_pcap_queue_dropped_too_big++;
         return;
     }
 
-    int slot = pcap_pool_acquire_slot();
+    int slot = pcap_pool_acquire_slot(len);
     if (slot < 0) {
+        /* No descriptor or contiguous arena space available, normally because
+         * storage or UART output is holding the writer up. */
+        s_pcap_queue_dropped_no_slot++;
         return;
     }
 
-    pcap_pool_slot_t *pool_slot = &s_pcap_pool[slot];
-    pool_slot->length = len;
-    memcpy(pool_slot->data, payload, len);
+    pcap_pool_slot_t *pool_slot = &s_pcap_pool->slots[slot];
+    memcpy(s_pcap_pool->data + pool_slot->offset, payload, len);
+    pcap_meta_from_rx_ctrl(rc, &pool_slot->meta);
 
     pcap_q_item_t item = {0};
     item.cap_type = cap_type;
@@ -1610,12 +1696,16 @@ static inline void enqueue_pcap_write_typed(const uint8_t *payload, uint16_t len
 
     if (xQueueSend(s_pcap_q, &item, 0) != pdTRUE) {
         pcap_pool_release_slot((uint8_t)slot);
+        s_pcap_queue_dropped_queue_full++;
     }
 }
 
-static inline void enqueue_pcap_write(const uint8_t *payload, uint16_t len) {
+/* WiFi capture enqueue that carries the radio metadata so the writer can emit a
+ * populated radiotap header. */
+static inline void enqueue_pcap_write_meta(const uint8_t *payload, uint16_t len,
+                                           const wifi_pkt_rx_ctrl_t *rc) {
     if (!s_pcap_enabled) return;
-    enqueue_pcap_write_typed(payload, len, PCAP_CAPTURE_WIFI);
+    enqueue_pcap_write_rx(payload, len, PCAP_CAPTURE_WIFI, rc);
 }
 
 static wifi_raw_observer_t s_wifi_raw_observer = NULL;
@@ -1625,6 +1715,21 @@ void wifi_raw_set_observer(wifi_raw_observer_t observer) {
 }
 
 // cleanup function to free pcap queue and task when not capturing
+bool pcap_drain_queue(void) {
+    if (!s_pcap_q) return true;
+    if (!s_pcap_writer_task || s_pcap_drain_sem) return false;
+    SemaphoreHandle_t sem = xSemaphoreCreateBinary();
+    if (!sem) return false;
+    s_pcap_drain_sem = sem;
+    pcap_q_item_t marker = {0};
+    marker.slot_idx = UINT8_MAX;
+    bool ok = xQueueSend(s_pcap_q, &marker, portMAX_DELAY) == pdTRUE &&
+              xSemaphoreTake(sem, portMAX_DELAY) == pdTRUE;
+    s_pcap_drain_sem = NULL;
+    vSemaphoreDelete(sem);
+    return ok;
+}
+
 void cleanup_pcap_queue(void) {
     if (s_pcap_writer_task != NULL) {
         vTaskDeleteWithCaps(s_pcap_writer_task);
@@ -1641,7 +1746,7 @@ void cleanup_pcap_queue(void) {
     }
 
     if (s_pcap_pool != NULL) {
-        pcap_pool_slot_t *pool_to_free = NULL;
+        pcap_pool_t *pool_to_free = NULL;
         taskENTER_CRITICAL(&s_pcap_pool_lock);
         pool_to_free = s_pcap_pool;
         s_pcap_pool = NULL;
@@ -2039,15 +2144,20 @@ static void wardrive_hop_timer_callback(void *arg) {
         wardrive_peer_assist_active = false;
         wardrive_peer_assist_pending = false;
         wardrive_peer_status_ms = 0;
+#ifndef CONFIG_BANSHEE_LITE_C5
         gps_manager_set_peer_gps_preferred(false);
         gps_manager_clear_peer_fix();
+#else
+        if (!esp_comm_manager_is_connected()) gps_manager_clear_peer_fix();
+#endif
         wardrive_build_channel_list();
         wardrive_channel_idx = 0;
         if (wardrive_channel_count > 0) {
             wardrive_channel = wardrive_channels[0];
             (void)esp_wifi_set_channel(wardrive_channel, WIFI_SECOND_CHAN_NONE);
         }
-        glog("Wardrive: peer helper unavailable, continuing local scan only\n");
+        glog("Wardrive: peer helper unavailable (%s), continuing local scan only\n",
+             esp_comm_manager_is_connected() ? "helper status timed out" : "GhostLink disconnected");
         wardrive_apply_hop_interval();
     }
 
@@ -2146,13 +2256,18 @@ static void wardrive_heartbeat_cb(void *arg) {
         wardrive_peer_channel_count = 0;
         wardrive_peer_status_ms = 0;
         wardriving_set_peer_assist(false);
+#ifndef CONFIG_BANSHEE_LITE_C5
         gps_manager_clear_peer_fix();
-        glog("Wardrive: peer unavailable; restored all locally supported channels\n");
+#else
+        if (!esp_comm_manager_is_connected()) gps_manager_clear_peer_fix();
+#endif
+        glog("Wardrive: peer unavailable (%s); restored all locally supported channels\n",
+             esp_comm_manager_is_connected() ? "helper status timed out" : "GhostLink disconnected");
     }
 
     wardrive_scan_stats_t scan = {0};
     wardrive_scan_get_stats(&scan);
-    glog("Wardrive discovery: backend=%s scans=%lu results=%lu scanfail=%lu drainfail=%lu duration=%lu/%lums channel=%u parsefail=%lu tune/probefail=%lu/%lu suppressed=%lu pending_coalesced=%lu\n",
+    ESP_LOGD(TAG, "Wardrive discovery: backend=%s scans=%lu results=%lu scanfail=%lu drainfail=%lu duration=%lu/%lums channel=%u parsefail=%lu tune/probefail=%lu/%lu suppressed=%lu pending_coalesced=%lu",
          wardrive_active_scan_enabled ? "active" : "monitor", (unsigned long)scan.completed,
          (unsigned long)scan.results, (unsigned long)scan.failures, (unsigned long)scan.drain_errors,
          (unsigned long)scan.last_ms, (unsigned long)scan.max_ms, scan.channel,
@@ -2187,9 +2302,9 @@ static void wardrive_heartbeat_cb(void *arg) {
         if (!gps_local->valid || gps_local->fix < GPS_FIX_GPS || gps_local->fix_mode < GPS_MODE_2D) {
             fix_status = using_peer_gps ? "Peer No Fix" : "No Fix";
         } else if (gps_local->fix_mode == GPS_MODE_2D) {
-            fix_status = using_peer_gps ? "Peer 2D" : "2D";
+            fix_status = using_peer_gps ? "Peer Basic" : "Basic";
         } else if (gps_local->fix_mode == GPS_MODE_3D) {
-            fix_status = using_peer_gps ? "Peer 3D" : "3D";
+            fix_status = using_peer_gps ? "Peer Locked" : "Locked";
         } else {
             fix_status = using_peer_gps ? "Peer Fix" : "Fix";
         }
@@ -2222,7 +2337,7 @@ static void wardrive_heartbeat_cb(void *arg) {
     portEXIT_CRITICAL(&wardrive_obs_mux);
 
     if (wardrive_role == WARDRIVE_ROLE_HELPER) {
-        glog("Wardrive: ap=%lu logged=%lu/%lu gpsrej=%lu helper=%lu/%lu tx(n/p/r/t/s)=%lu/%lu/%lu/%lu/%lu send(ok/fail)=%lu/%lu peergps(rx/fix tx_ok/fail)=%lu/%lu %lu/%lu ch=%u up=%lum%02lus gps=%s/%u q=%u/%u hi=%u drop=%lu/%lu/%lu pending=%uB heap=%u/%uB\n",
+        ESP_LOGD(TAG, "Wardrive: ap=%lu logged=%lu/%lu gpsrej=%lu helper=%lu/%lu tx(n/p/r/t/s)=%lu/%lu/%lu/%lu/%lu send(ok/fail)=%lu/%lu peergps(rx/fix tx_ok/fail)=%lu/%lu %lu/%lu ch=%u up=%lum%02lus gps=%s/%u q=%u/%u hi=%u drop=%lu/%lu/%lu pending=%uB heap=%u/%uB",
              (unsigned long)wardrive_wifi_frames_seen,
              (unsigned long)wardrive_log_ok,
              (unsigned long)wardrive_log_attempts,
@@ -2255,7 +2370,7 @@ static void wardrive_heartbeat_cb(void *arg) {
              (unsigned)heap_free,
              (unsigned)heap_largest);
     } else {
-        glog("Wardrive: ap=%lu logged=%lu/%lu gpsrej=%lu helper=%lu/%lu peergps(rx/fix tx_ok/fail)=%lu/%lu %lu/%lu ch=%u up=%lum%02lus gps=%s/%u q=%u/%u hi=%u drop=%lu/%lu/%lu pending=%uB heap=%u/%uB\n",
+        ESP_LOGD(TAG, "Wardrive: ap=%lu logged=%lu/%lu gpsrej=%lu helper=%lu/%lu peergps(rx/fix tx_ok/fail)=%lu/%lu %lu/%lu ch=%u up=%lum%02lus gps=%s/%u q=%u/%u hi=%u drop=%lu/%lu/%lu pending=%uB heap=%u/%uB",
              (unsigned long)wardrive_wifi_frames_seen,
              (unsigned long)wardrive_log_ok,
              (unsigned long)wardrive_log_attempts,
@@ -2280,6 +2395,27 @@ static void wardrive_heartbeat_cb(void *arg) {
              (unsigned)pending,
              (unsigned)heap_free,
              (unsigned)heap_largest);
+    }
+
+    // Keep the serial terminal readable on the Flipper. Emit status even
+    // before the first accepted row; detailed counters remain debug logs.
+    if (wardrive_role == WARDRIVE_ROLE_HELPER) {
+        glog("Wardrive helper\nAP frames: %lu\nSent: %lu\nChannel: %u\n",
+             (unsigned long)wardrive_wifi_frames_seen,
+             (unsigned long)wardrive_helper_stream_send_ok, (unsigned)wardrive_channel);
+    } else {
+        wardriving_data_t quality = {0};
+        quality.gps_quality.has_valid_fix = have_active_gps;
+        quality.gps_quality.hdop = gps_local ? gps_local->dop_h : 0;
+        float speed = have_active_gps && gps_local->speed >= 0.1f &&
+                      gps_local->speed <= 340.0f ? gps_local->speed * 3.6f : 0;
+        glog("GPS: %s\nAPs: %lu\nSats: %u/%u\nSpeed: %.1f km/h\nAccuracy: %s\nRows: %lu\n",
+             fix_status, (unsigned long)csv_get_unique_wifi_ap_count_including_hidden(),
+             (unsigned)sats, gps_local ? (unsigned)gps_local->sats_in_view : 0,
+             speed, get_gps_quality_string(&quality), (unsigned long)wardrive_log_ok);
+        if (wardrive_ble_advs_seen) {
+            glog("BLE: %lu\n", (unsigned long)csv_get_unique_ble_device_count());
+        }
     }
 }
 
@@ -2488,10 +2624,16 @@ static void wardrive_stream_rx_cb(uint8_t channel, const uint8_t *data, size_t l
     }
     if (length >= 7 && data[0] == WARDRIVE_CONTROL_MARKER) {
         bool modern = data[1] == WARDRIVE_CONTROL_VERSION_PLAN;
+        bool accept_helper_status = wardrive_peer_assist_pending || wardrive_peer_assist_active;
+#ifdef CONFIG_BANSHEE_LITE_C5
+        /* A late status must be able to restore the GPS-dependent primary
+         * after a helper timeout. The active-session/role checks still apply. */
+        accept_helper_status = true;
+#endif
         if ((!modern && data[1] != WARDRIVE_CONTROL_VERSION) ||
             data[2] != WARDRIVE_CONTROL_HELPER_READY || !wardriving_hopping_active ||
             wardrive_role != WARDRIVE_ROLE_PRIMARY ||
-            (!wardrive_peer_assist_pending && !wardrive_peer_assist_active)) return;
+            !accept_helper_status) return;
         if (modern) {
             uint8_t count = data[3];
             if (count > WIFI_CHANNELS_MAX || length != (size_t)8 + count) return;
@@ -2504,7 +2646,7 @@ static void wardrive_stream_rx_cb(uint8_t channel, const uint8_t *data, size_t l
             if (changed && wardrive_peer_assist_active) wardrive_build_channel_list();
         }
         wardrive_peer_status_ms = now_ms_u32();
-        if (data[3] > 0 && wardrive_peer_assist_pending) {
+        if (data[3] > 0 && !wardrive_peer_assist_active) {
             wardrive_peer_assist_pending = false;
             wardriving_set_peer_assist(true);
             glog("Wardrive helper ready: channels=%u plan=%s GPS=%s (independent of scanning)\n",
@@ -2738,33 +2880,27 @@ void wardriving_register_stream_handler(void) {
     ESP_LOGI(TAG, "Wardrive stream handler: %s", ok ? "OK" : "FAIL");
     ESP_LOGI(TAG, "Peer GPS stream handler: %s", gps_ok ? "OK" : "FAIL");
 
-    if (peer_gps_stream_task_handle == NULL) {
-        peer_gps_stream_stack = heap_caps_malloc(3072 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
-        peer_gps_stream_tcb = malloc(sizeof(StaticTask_t));
-        if (peer_gps_stream_stack && peer_gps_stream_tcb) {
-            peer_gps_stream_task_handle = xTaskCreateStatic(
-                peer_gps_stream_task,
-                "peer_gps_stream",
-                3072,
-                NULL,
-                3,
-                peer_gps_stream_stack,
-                peer_gps_stream_tcb);
-            ESP_LOGI(TAG, "Peer GPS stream task stack allocated from PSRAM: %d bytes", 
-                     (int)(3072 * sizeof(StackType_t)));
-        }
-        if (!peer_gps_stream_task_handle) {
-            if (peer_gps_stream_stack) {
-                free(peer_gps_stream_stack);
-                peer_gps_stream_stack = NULL;
-            }
-            if (peer_gps_stream_tcb) {
-                free(peer_gps_stream_tcb);
-                peer_gps_stream_tcb = NULL;
-            }
-            ESP_LOGW(TAG, "Peer GPS stream task create failed");
-        }
+    peer_gps_stream_mutex = xSemaphoreCreateMutexStatic(&peer_gps_stream_mutex_storage);
+    wardriving_peer_connected();
+}
+
+void wardriving_peer_connected(void) {
+    if (!peer_gps_stream_mutex) return;
+    xSemaphoreTake(peer_gps_stream_mutex, portMAX_DELAY);
+    if (esp_comm_manager_is_connected() && !peer_gps_stream_task_handle) {
+        BaseType_t rc = xTaskCreate_psram(peer_gps_stream_task, "peer_gps_stream",
+                                         PEER_GPS_STREAM_STACK_BYTES, NULL, 3,
+                                         &peer_gps_stream_task_handle);
+        if (rc != pdPASS) ESP_LOGW(TAG, "Peer GPS stream task create failed");
     }
+    xSemaphoreGive(peer_gps_stream_mutex);
+}
+
+void wardriving_peer_disconnected(void) {
+    if (!peer_gps_stream_mutex) return;
+    xSemaphoreTake(peer_gps_stream_mutex, portMAX_DELAY);
+    if (peer_gps_stream_task_handle) xTaskNotifyGive(peer_gps_stream_task_handle);
+    xSemaphoreGive(peer_gps_stream_mutex);
 }
 
 bool wardriving_get_helper_channel_plan_csv(char *out, size_t out_len) {
@@ -3237,7 +3373,7 @@ void wifi_pineap_detector_callback(void *buf, wifi_promiscuous_pkt_type_t type) 
 
             // Write to PCAP if capture is active
             if (pcap_is_capturing()) {
-                enqueue_pcap_write(ppkt->payload, ppkt->rx_ctrl.sig_len);
+                enqueue_pcap_write_meta(ppkt->payload, ppkt->rx_ctrl.sig_len, &ppkt->rx_ctrl);
             }
         }
     }
@@ -3382,19 +3518,52 @@ bool is_pwn_response(const wifi_promiscuous_pkt_t *pkt) {
     return false;
 }
 
+/* Length of the received MPDU excluding the 4-byte FCS.
+ *
+ * sig_len counts the FCS, so passing it straight to the writer left a 4-byte
+ * CRC on the end of every data frame that Wireshark then tried to interpret as
+ * payload, while management frames were trimmed back to their last information
+ * element and arrived without one. The two disagreed about what the file
+ * contained, which is the opposite of what a raw capture should do.
+ *
+ * HE targets report the FCS-free length directly in dump_len. Older targets
+ * only have sig_len, so the FCS is subtracted here. Some HE receptions leave
+ * dump_len unset; use sig_len in that case for capture and wardriving alike.
+ */
+static inline size_t wifi_frame_len_without_fcs(const wifi_pkt_rx_ctrl_t *rc) {
+#if CONFIG_SOC_WIFI_HE_SUPPORT
+    if (rc->dump_len > 0 && rc->dump_len <= rc->sig_len) {
+        return rc->dump_len;
+    }
+    return rc->sig_len > 4 ? rc->sig_len - 4 : rc->sig_len;
+#else
+    return rc->sig_len > 4 ? rc->sig_len - 4 : rc->sig_len;
+#endif
+}
+
 void wifi_raw_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
+    if (!buf || type == WIFI_PKT_MISC) return;
     wifi_promiscuous_pkt_t *pkt = (wifi_promiscuous_pkt_t *)buf;
-    
-    // Early filtering - raw captures everything but still filter junk
-    if (type == WIFI_PKT_MISC || pkt->rx_ctrl.sig_len < MIN_PACKET_LENGTH) {
+
+    /* Control frames are as short as 10 bytes (ACK, CTS), so the 24-byte
+     * minimum used for management and data frames would discard every one of
+     * them before they reached the file. */
+    const size_t min_len = (type == WIFI_PKT_CTRL) ? MIN_CONTROL_PACKET_LENGTH
+                                                   : MIN_PACKET_LENGTH;
+    const size_t len = wifi_frame_len_without_fcs(&pkt->rx_ctrl);
+    if (len < min_len) {
         return;
     }
 
     wifi_raw_observer_t observer = s_wifi_raw_observer;
     if (observer) observer(pkt, type);
-    
-    if (pkt->rx_ctrl.sig_len > 0) {
-        enqueue_pcap_write(pkt->payload, pkt->rx_ctrl.sig_len);
+
+    /* Write the frame exactly as received. The pcap writer's length calculation
+     * trims management frames back to their last valid information element,
+     * which is right for a beacon capture but wrong here: a raw capture has to
+     * be byte-exact or the trailing elements of a frame go missing. */
+    if (len > 0) {
+        enqueue_pcap_write_meta(pkt->payload, (uint16_t)len, &pkt->rx_ctrl);
     }
 }
 
@@ -3485,15 +3654,7 @@ void wardriving_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     if (!buf || type != WIFI_PKT_MGMT || wardrive_active_scan_enabled) return;
     const wifi_promiscuous_pkt_t *pkt = buf;
     if (pkt->rx_ctrl.rx_state != 0) return;
-    size_t len;
-#if CONFIG_SOC_WIFI_HE_SUPPORT
-    // HE targets supply the captured MPDU length without FCS.
-    len = pkt->rx_ctrl.dump_len;
-    if (len > pkt->rx_ctrl.sig_len) return;
-#else
-    if (pkt->rx_ctrl.sig_len < 4) return;
-    len = pkt->rx_ctrl.sig_len - 4;
-#endif
+    size_t len = wifi_frame_len_without_fcs(&pkt->rx_ctrl);
     if (len < 36 || (pkt->payload[0] != 0x80 && pkt->payload[0] != 0x50)) return;
     wardrive_wifi_frames_seen++;
     wd_ap_t ap;
@@ -3514,7 +3675,7 @@ void wifi_probe_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     if (!is_packet_valid(pkt, type)) return;
     
     if (pkt->rx_ctrl.sig_len > 0) {
-        enqueue_pcap_write(pkt->payload, pkt->rx_ctrl.sig_len);
+        enqueue_pcap_write_meta(pkt->payload, pkt->rx_ctrl.sig_len, &pkt->rx_ctrl);
     }
 }
 
@@ -3532,7 +3693,7 @@ void wifi_beacon_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     if (frame_subtype != WIFI_PKT_BEACON) return;
     
     if (pkt->rx_ctrl.sig_len > 0) {
-        enqueue_pcap_write(pkt->payload, pkt->rx_ctrl.sig_len);
+        enqueue_pcap_write_meta(pkt->payload, pkt->rx_ctrl.sig_len, &pkt->rx_ctrl);
     }
 }
 
@@ -3550,7 +3711,7 @@ void wifi_deauth_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     if (frame_subtype != WIFI_PKT_DEAUTH && frame_subtype != 0x0A) return; // 0x0A = disassoc
     
     if (pkt->rx_ctrl.sig_len > 0) {
-        enqueue_pcap_write(pkt->payload, pkt->rx_ctrl.sig_len);
+        enqueue_pcap_write_meta(pkt->payload, pkt->rx_ctrl.sig_len, &pkt->rx_ctrl);
     }
 }
 
@@ -3560,7 +3721,7 @@ void wifi_pwn_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     wifi_promiscuous_pkt_t *pkt = (wifi_promiscuous_pkt_t *)buf;
     if (!is_packet_valid(pkt, type)) return;
     if (pkt->rx_ctrl.sig_len > 0) {
-        enqueue_pcap_write(pkt->payload, pkt->rx_ctrl.sig_len);
+        enqueue_pcap_write_meta(pkt->payload, pkt->rx_ctrl.sig_len, &pkt->rx_ctrl);
     }
 }
 
@@ -3570,32 +3731,32 @@ void wifi_eapol_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     if (type == WIFI_PKT_MISC) return;
     if (pkt->rx_ctrl.sig_len < 24) return;
 
+    /* Control frames carry no EAPOL, but the promiscuous filter explicitly
+     * enables them and the surrounding captures want them for inter-frame
+     * spacing, RTS/CTS/ACK density and A-MPDU structure. Write them straight
+     * through instead of receiving and discarding them. */
+    if (type == WIFI_PKT_CTRL) {
+        enqueue_pcap_write_meta(pkt->payload, pkt->rx_ctrl.sig_len, &pkt->rx_ctrl);
+        return;
+    }
+
     if (type == WIFI_PKT_DATA) {
         const uint8_t *frame = pkt->payload;
         int len = pkt->rx_ctrl.sig_len;
 
-        uint16_t fc = frame[0] | (frame[1] << 8);
-        uint8_t dsub = (fc >> 4) & 0xF;
-        bool qos = (dsub & 0x8) != 0;
-        bool to_ds = (fc >> 8) & 0x1;
-        bool from_ds = (fc >> 9) & 0x1;
-
-        size_t hdr_len = 24;
-        if (to_ds && from_ds) hdr_len = 30;
-        if (qos) hdr_len += 2;
-
         // always write data frames to pcap first, then check for EAPOL
-        enqueue_pcap_write(pkt->payload, pkt->rx_ctrl.sig_len);
+        enqueue_pcap_write_meta(pkt->payload, pkt->rx_ctrl.sig_len, &pkt->rx_ctrl);
 
-        // check if this is an EAPOL frame for handshake tracking
-        if (len < (int)(hdr_len + 8)) return;
-        const uint8_t *llc = frame + hdr_len;
-        if (llc[0] != 0xAA || llc[1] != 0xAA || llc[2] != 0x03) return;
-        uint16_t ethertype = (llc[6] << 8) | llc[7];
-        if (ethertype != 0x888E) return;
+        /* Derive the header geometry and the encapsulated ethertype in one
+         * place. This accounts for the four-address header, the QoS Control
+         * field, the HT Control field, and peels any 802.1Q/802.1ad tags, which
+         * previously hid handshakes carried over a tagged link. */
+        wifi_l2_info_t l2;
+        if (!wifi_l2_parse(frame, (size_t)len, &l2)) return;
+        if (l2.ethertype != WIFI_L2_ETHERTYPE_EAPOL) return;
 
-        const uint8_t *eapol = llc + 8;
-        if (len < (int)(hdr_len + 8 + 17)) return;
+        const uint8_t *eapol = frame + l2.payload_offset;
+        if (len < (int)(l2.payload_offset + 17)) return;
 
         uint8_t key_desc_type = eapol[4];
         if (key_desc_type != 2) return;
@@ -3638,13 +3799,13 @@ void wifi_eapol_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
 
         // assoc/reassoc frames
         if (subtype == 0x0 || subtype == 0x1 || subtype == 0x2 || subtype == 0x3) {
-            enqueue_pcap_write(pkt->payload, pkt->rx_ctrl.sig_len);
+            enqueue_pcap_write_meta(pkt->payload, pkt->rx_ctrl.sig_len, &pkt->rx_ctrl);
             return;
         }
 
         // authentication frames (useful for context/sae)
         if (subtype == 0x0B) {
-            enqueue_pcap_write(pkt->payload, pkt->rx_ctrl.sig_len);
+            enqueue_pcap_write_meta(pkt->payload, pkt->rx_ctrl.sig_len, &pkt->rx_ctrl);
             return;
         }
 
@@ -3674,7 +3835,7 @@ void wifi_eapol_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
             uint32_t h = hash_ssid(ssid);
             uint64_t now_ms = esp_timer_get_time() / 1000ULL;
             if (probe_should_emit(src, h, now_ms)) {
-                enqueue_pcap_write(pkt->payload, pkt->rx_ctrl.sig_len);
+                enqueue_pcap_write_meta(pkt->payload, pkt->rx_ctrl.sig_len, &pkt->rx_ctrl);
             }
             return;
         }
@@ -3686,7 +3847,7 @@ void wifi_eapol_scan_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
                 uint8_t ssid_len = frame[37];
                 bool ssid_nonempty = ssid_len > 0;
                 if (beacon_should_emit_limited(bssid, ssid_nonempty)) {
-                    enqueue_pcap_write(pkt->payload, pkt->rx_ctrl.sig_len);
+                    enqueue_pcap_write_meta(pkt->payload, pkt->rx_ctrl.sig_len, &pkt->rx_ctrl);
                 }
             }
             return;
@@ -3786,7 +3947,7 @@ void wifi_wps_detection_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
                                 detected_wps_networks[detected_network_count++] = new_network;
                             }
                         } else {
-                            enqueue_pcap_write(pkt->payload, pkt->rx_ctrl.sig_len);
+                            enqueue_pcap_write_meta(pkt->payload, pkt->rx_ctrl.sig_len, &pkt->rx_ctrl);
                         }
 
                         if (detected_network_count >= MAX_WPS_NETWORKS) {

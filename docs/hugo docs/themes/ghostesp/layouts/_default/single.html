@@ -5,11 +5,21 @@
     {{ with .Params.description }}<p>{{ . }}</p>{{ end }}
   </header>
   {{ with .TableOfContents }}
-    <aside class="doc__toc">
-      <h2>On this page</h2>
-      {{ . }}
-    </aside>
-  {{ end }}
+  {{ $toc := . }}
+  {{/* Classic TOC (default) and the neon-skin collapsible TOC. Both are
+       rendered; CSS shows one based on the active skin. Distinct ids avoid
+       duplicate "TableOfContents" elements. */}}
+  {{ $classicToc := replace $toc "id=\"TableOfContents\"" "id=\"TableOfContentsClassic\"" }}
+  <aside class="doc__toc doc__toc--classic">
+    <h2>On this page</h2>
+    {{ $classicToc | safeHTML }}
+  </aside>
+  {{ $items := len (findRE "<li>" $toc) }}
+  <details class="doc__toc doc__toc--new"{{ if lt $items 8 }} open{{ end }}>
+    <summary>On this page</summary>
+    {{ $toc | safeHTML }}
+  </details>
+{{ end }}
   {{ .Content }}
   {{ if or .PrevInSection .NextInSection }}
     <nav class="doc__nav" aria-label="Document navigation">

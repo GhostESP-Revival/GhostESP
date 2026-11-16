@@ -1,37 +1,17 @@
 ---
 title: "SD Card"
-description: "Using SD card storage with GhostESP for file management, captures, and configuration."
+description: "Using SD card storage with GhostESP for file management, captures, and configuration"
 weight: 90
 ---
 
-GhostESP uses SD cards to store captures, logs, and files. Learn how to manage files and configure pins.
+GhostESP uses an SD card to store captures, logs, and files, and its SD pins can be reconfigured at runtime without recompiling.
 
 ## Storage Structure
 
-When initialized, GhostESP creates the following directory structure. Result
-locations are part of the public storage layout; see
-[Storage Layout]({{< relref "storage-layout.md" >}}) for formats, app data,
-and folders that should not be used as backups.
-
-```
-/mnt/ghostesp/
-├── captures/       # Motion JPEG snapshots
-├── pcaps/          # Standard packet captures
-├── scans/          # Saved scan reports
-├── sweeps/         # sweep_N.csv radio reports
-├── gps/            # WiGLE-compatible wardriving CSV
-├── ghostchi/       # Autonomous captures, logs, and state
-├── logs/           # Diagnostics and coredumps
-├── evil_portal/
-│   └── portals/    # Custom portal HTML files
-├── infrared/
-│   ├── remotes/    # Learned IR signals
-│   └── universals/ # Universal IR databases
-├── nfc/            # NFC card data (if enabled)
-├── apps/           # Native SD app packages
-├── scripts/        # GhostScript packages
-└── themes/          # Theme packages
-```
+When initialized, GhostESP creates its folder structure under `/mnt/ghostesp/`.
+Result locations are part of the public storage layout; see
+[Storage Layout]({{< relref "storage-layout.md" >}}) for the full directory
+listing, formats, app data, and folders that should not be used as backups.
 
 ## Web Serial Interface
 
@@ -41,28 +21,28 @@ For the easiest file management experience, use the **Web Serial Interface** at:
 
 This browser-based tool connects directly to your GhostESP via USB and provides:
 
-- **File Browser** — Browse, upload, and download files using the SD CLI
-- **Serial Console** — Full terminal access to all CLI commands
-- **Screen Mirror** — View your device's display in real-time
+- **File Browser** - Browse, upload, and download files using the SD CLI
+- **Serial Console** - Full terminal access to all CLI commands
+- **Screen Mirror** - View your device's display in real-time
 
-> **Note**: Requires a Chromium-based browser (Chrome, Edge, Brave) with Web Serial API support.
+> **Note:** Requires a Chromium-based browser (Chrome, Edge, Brave) with Web Serial API support.
 
 ## WebUI File Manager
 
-Access the SD card through the WebUI's **SD Card** tab:
+Access the SD card through the WebUI's **SD card** tab:
 
 1. Connect to **GhostNet** and open `192.168.4.1` or `ghostesp.local`
-2. Navigate to the **SD Card** tab
+2. Navigate to the **SD card** tab
 3. Browse the `/mnt/ghostesp/` directory structure
 
 ### Capabilities
 
-- **Navigate** — Click folders to browse
-- **Download** — Download PCAP captures, logs, and other files
-- **Upload** — Add custom portal HTML files or IR remotes
-- **Delete** — Remove files to free space
+- **Navigate** - Click folders to browse
+- **Download** - Download PCAP captures, logs, and other files
+- **Upload** - Add custom portal HTML files or IR remotes
+- **Delete** - Remove files to free space
 
-> **Tip**: For large file transfers (>1MB), use a USB card reader for faster speeds.
+> **Tip:** For large file transfers (>1MB), use a USB card reader for faster speeds.
 
 ## CLI Commands
 
@@ -101,11 +81,11 @@ SD:FILE:[3] log.csv 8192
 SD:OK:listed 4 entries
 ```
 
-Use indices in subsequent commands:
+The index map from `sd list` is only valid for that single command - it is freed at the end of each `sd` invocation, so indices cannot be reused by a later command. Pass a path instead, or run `sd list` again and use the fresh index:
 
 ```
-sd info 2         # Get info for config.txt
-sd read 3 0 1000  # Read first 1000 bytes of log.csv
+sd info pcaps/capture.pcap
+sd read pcaps/capture.pcap 0 1000  # Read first 1000 bytes
 ```
 
 ### File Info
@@ -126,7 +106,7 @@ SD:OK
 ### Read File
 
 ```
-sd read <index|path> [offset] [length]
+sd read <index|path> [offset] [length] [--base64|--raw]
 ```
 
 Reads file contents with optional offset and length for chunked downloads. No size limit:
@@ -138,6 +118,21 @@ SD:READ:OFFSET:0
 SD:READ:LENGTH:65536
 ... binary file contents ...
 SD:READ:END:bytes=65536
+SD:OK
+```
+
+By default `sd read` emits the raw bytes. Pass `--base64` to emit base64-encoded chunks (safer over serial), or `--raw` to force raw output. The `sd cat <path>` alias is shorthand for a raw dump.
+
+Base64 output adds an encoding marker and data chunks:
+
+```
+SD:READ:BEGIN:/mnt/ghostesp/myfile.txt
+SD:READ:SIZE:12
+SD:READ:OFFSET:0
+SD:READ:LENGTH:12
+SD:READ:ENCODING:base64
+SD:READ:DATA:SGVsbG8gV29ybGQh
+SD:READ:END:bytes=12
 SD:OK
 ```
 
@@ -264,9 +259,11 @@ sd_pins_mmc <CLK> <CMD> <D0> <D1> <D2> <D3>
 
 Example (4-bit):
 ```
-sd_pins_mmc 39 38 40 41 42 2
+sd_pins_mmc 19 18 20 21 22 23
 sd_save_config
 ```
+
+> **Note:** All six pins must be between 0 and 40.
 
 ### View Current Config
 
@@ -313,7 +310,12 @@ All `sd` command responses use a consistent format for scripting:
 | `SD:FILE:[n] name size` | File entry with index and size |
 | `SD:INFO:key=value` | File info key-value pair |
 | `SD:READ:BEGIN:path` | File content start marker |
+| `SD:READ:ENCODING:base64` | Read output is base64-encoded |
+| `SD:READ:DATA:<base64>` | Base64-encoded chunk of file content |
 | `SD:READ:END:bytes=n` | File content end marker |
+| `SD:WRITE:bytes=n` | Bytes written by `sd write` |
+| `SD:APPEND:bytes=n` | Bytes appended by `sd append` |
+| `SD:SIZE:n` | File size in bytes |
 | `SD:TREE:path` | Tree listing header |
 | `SD:EMPTY` | Empty directory |
 
@@ -342,8 +344,8 @@ SD:STATUS:mounted=false
 - For large files, use a USB card reader instead of WebUI
 - Reduce concurrent operations
 
-## Next Steps
+## Related tasks
 
-- [WebUI Guide]({{< relref "webui-guide.md" >}}) — File manager and settings
-- [Command Line Reference]({{< relref "command-line-reference.md" >}}) — Full CLI documentation
-- [Infrared]({{< relref "../infrared/_index.md" >}}) — Store IR remotes on SD card
+- [WebUI Guide]({{< relref "webui-guide.md" >}}) - File manager and settings
+- [CLI Reference]({{< relref "command-line-reference.md" >}}) - Full CLI documentation
+- [Infrared]({{< relref "../infrared/_index.md" >}}) - Store IR remotes on SD card

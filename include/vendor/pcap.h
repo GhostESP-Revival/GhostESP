@@ -4,6 +4,7 @@
 #include "esp_vfs_fat.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "vendor/radiotap.h"
 #include <stdint.h>
 #include <stdio.h>
 
@@ -60,6 +61,11 @@ typedef struct {
 } pcap_capture_stats_t;
 
 esp_err_t pcap_init(void);
+/* Write each WiFi frame exactly as received instead of trimming it to its last
+ * valid information element. Correct for a raw capture, wrong for beacon and
+ * probe captures, so it is set per capture rather than left on. */
+void pcap_set_write_frames_verbatim(bool enabled);
+
 esp_err_t pcap_write_global_header(FILE *f, pcap_capture_type_t capture_type);
 esp_err_t pcap_file_open(const char *base_file_name,
                          pcap_capture_type_t capture_type);
@@ -69,6 +75,13 @@ esp_err_t pcap_file_open_in_dir(const char *base_file_name,
 esp_err_t pcap_wireshark_start(pcap_capture_type_t capture_type);
 esp_err_t pcap_write_packet_to_buffer(const void *packet, size_t length,
                                       pcap_capture_type_t capture_type);
+/* As above, but attaches per-frame radio metadata to the radiotap header of a
+ * WiFi capture so Wireshark can show signal, channel and rate. Pass NULL for
+ * meta to get the previous behaviour (an 8 byte radiotap with no fields).
+ * Ignored for Bluetooth and 802.15.4 captures, which carry no radiotap. */
+esp_err_t pcap_write_packet_to_buffer_meta(const void *packet, size_t length,
+                                           pcap_capture_type_t capture_type,
+                                           const radiotap_meta_t *meta);
 esp_err_t pcap_flush_buffer_to_file();
 bool pcap_is_capturing(void);
 bool pcap_is_wireshark_mode(void);

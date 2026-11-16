@@ -4,9 +4,9 @@ description: "Visualize signal strength across SubGHz bands to find active frequ
 weight: 40
 ---
 
-The Frequency Analyzer scans across all supported SubGHz bands to visualize signal activity and help identify the frequency used by target devices.
+The Frequency Analyzer scans across all supported SubGHz bands to visualize signal activity and help identify the frequency used by target devices. It gives a quick overview of each band; for precise frequency identification, use the 64-channel scanner on that band.
 
-## Use cases
+## Use Cases
 
 - **Unknown frequency**: When you don't know which band a device uses
 - **Multi-band environments**: Areas with devices on different frequencies
@@ -15,7 +15,7 @@ The Frequency Analyzer scans across all supported SubGHz bands to visualize sign
 
 ## Using the Frequency Analyzer
 
-### On-device UI
+### On-Device UI
 
 1. Open **Menu → SubGHz → Freq Analyzer**.
 2. The device will scan across all five bands (315, 390, 433.92, 868.35, 915 MHz).
@@ -23,7 +23,7 @@ The Frequency Analyzer scans across all supported SubGHz bands to visualize sign
 4. The analyzer updates in real-time to show current activity.
 5. Press **Back** to stop the analyzer.
 
-### Command line
+### CLI
 
 The Frequency Analyzer is primarily a UI tool. Use the standard scanner with frequency cycling for CLI-based frequency detection:
 
@@ -35,7 +35,7 @@ subghz start
 subghz cycle_freq
 ```
 
-## Band visualization
+## Band Visualization
 
 The analyzer displays five bands, each showing signal strength levels:
 
@@ -47,7 +47,7 @@ The analyzer displays five bands, each showing signal strength levels:
 
 Higher bars indicate stronger signals on that band.
 
-## Signal detection workflow
+## Signal Detection Workflow
 
 1. **Start the analyzer** and let it run for 30-60 seconds to establish a baseline.
 2. **Activate the target device** (press the remote button, trigger the sensor, etc.).
@@ -61,12 +61,6 @@ Higher bars indicate stronger signals on that band.
 - **Distance**: Start closer to the target device for clearer signal detection.
 - **Multiple activations**: Some devices transmit intermittently; activate the target multiple times while watching the analyzer.
 - **Baseline comparison**: Note the baseline noise levels before activating the target to distinguish its signal from background.
-
-## Notes
-
-- The Frequency Analyzer provides a quick overview but is less precise than the detailed 64-channel scanner.
-- For precise frequency identification within a band, use the scanner on that band.
-- Some devices transmit very briefly; you may need to activate them repeatedly to see the signal.
 
 ## Troubleshooting
 

@@ -11,38 +11,37 @@ Search index: /search-index.json
 
 ## On this page
 
-- [Use cases](#use-cases)
+- [Use Cases](#use-cases)
 - [Using the Frequency Analyzer](#using-the-frequency-analyzer)
-- [On-device UI](#on-device-ui)
-- [Command line](#command-line)
-- [Band visualization](#band-visualization)
-- [Signal detection workflow](#signal-detection-workflow)
+- [On-Device UI](#on-device-ui)
+- [CLI](#cli)
+- [Band Visualization](#band-visualization)
+- [Signal Detection Workflow](#signal-detection-workflow)
 - [Tips](#tips)
-- [Notes](#notes)
 - [Troubleshooting](#troubleshooting)
 
 ---
 
-The Frequency Analyzer scans across all supported SubGHz bands to visualize signal activity and help identify the frequency used by target devices.
-## Use cases
+The Frequency Analyzer scans across all supported SubGHz bands to visualize signal activity and help identify the frequency used by target devices. It gives a quick overview of each band; for precise frequency identification, use the 64-channel scanner on that band.
+## Use Cases
 - Unknown frequency: When you don’t know which band a device uses
 - Multi-band environments: Areas with devices on different frequencies
 - Signal hunting: Locating active transmitters in the area
 - Verification: Confirming a device’s transmission frequency before capture
 ## Using the Frequency Analyzer
-### On-device UI
+### On-Device UI
 - Open Menu → SubGHz → Freq Analyzer.
 - The device will scan across all five bands (315, 390, 433.92, 868.35, 915 MHz).
 - Signal strength is displayed as bar graphs for each band.
 - The analyzer updates in real-time to show current activity.
 - Press Back to stop the analyzer.
-### Command line
+### CLI
 The Frequency Analyzer is primarily a UI tool. Use the standard scanner with frequency cycling for CLI-based frequency detection:
 # Start scanner
 subghz start
 # Cycle through frequencies while watching signal strength
 subghz cycle_freq
-## Band visualization
+## Band Visualization
 The analyzer displays five bands, each showing signal strength levels:
 - 315 - North American garage doors and remotes
 - 390 - Security systems and remote controls
@@ -50,7 +49,7 @@ The analyzer displays five bands, each showing signal strength levels:
 - 868 - European remotes and alarm systems
 - 915 - North America ISM band devices
 Higher bars indicate stronger signals on that band.
-## Signal detection workflow
+## Signal Detection Workflow
 - Start the analyzer and let it run for 30-60 seconds to establish a baseline.
 - Activate the target device (press the remote button, trigger the sensor, etc.).
 - Watch for spikes in the band visualization when the device transmits.
@@ -61,10 +60,6 @@ Higher bars indicate stronger signals on that band.
 - Distance: Start closer to the target device for clearer signal detection.
 - Multiple activations: Some devices transmit intermittently; activate the target multiple times while watching the analyzer.
 - Baseline comparison: Note the baseline noise levels before activating the target to distinguish its signal from background.
-## Notes
-- The Frequency Analyzer provides a quick overview but is less precise than the detailed 64-channel scanner.
-- For precise frequency identification within a band, use the scanner on that band.
-- Some devices transmit very briefly; you may need to activate them repeatedly to see the signal.
 ## Troubleshooting
 - No bands show activity: Ensure the target device is transmitting. Check antenna connection. Try moving closer to the device.
 - All bands show high activity: You may be in an area with high RF interference. Try moving to a different location or testing at a different time.

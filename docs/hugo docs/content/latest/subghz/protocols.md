@@ -4,9 +4,9 @@ description: "Reference for SubGHz protocols decoded by GhostESP"
 weight: 50
 ---
 
-GhostESP automatically attempts to decode captured signals using 30+ common SubGHz protocols. When a signal is successfully decoded, it can be reconstructed and transmitted reliably.
+GhostESP automatically attempts to decode captured signals using 30+ common SubGHz protocols, testing a capture against all supported decoders simultaneously. When a protocol matches with sufficient confidence, the signal is decoded and its protocol name, bit count, and decoded code are displayed; it can then be reconstructed and transmitted reliably.
 
-## Decoded protocols
+## Decoded Protocols
 
 ### Princeton
 - **Common use**: Garage door remotes, wireless sensors
@@ -40,7 +40,7 @@ GhostESP automatically attempts to decode captured signals using 30+ common SubG
 - **Common use**: Chamberlain garage door openers
 - **Frequency**: 315 MHz, 390 MHz
 - **Bit length**: 7-9 bits
-- **Note**: Some models use rolling codes
+- **Note:** Some models use rolling codes
 
 ### Linear
 - **Common use**: Linear brand gate operators
@@ -52,7 +52,7 @@ GhostESP automatically attempts to decode captured signals using 30+ common SubG
 - **Common use**: Secure garage door and vehicle remotes
 - **Frequency**: 315 MHz, 433.92 MHz, 868 MHz
 - **Bit length**: 64 bits
-- **Note**: Uses rolling code encryption; replay may fail
+- **Note:** Uses rolling code encryption; replay may fail
 
 ### Holtek
 - **Common use**: Holtek-based remote controls
@@ -165,19 +165,15 @@ GhostESP automatically attempts to decode captured signals using 30+ common SubG
 - **Bit length**: 33 bits
 - **Decoded fields**: Serial number and button
 
-> **Note**: The newer fixed-code protocols above (Ansonic through Nord ICE) are decoded on any supported band, so a single fixed frequency is not listed.
+> **Note:** The newer fixed-code protocols above (Ansonic through Nord ICE) are decoded on any supported band, so a single fixed frequency is not listed.
 
-## Raw signal fallback
+## Raw Signal Fallback
 
 If a signal cannot be decoded with any known protocol, GhostESP saves it as raw timing data. Raw captures can still be transmitted but:
 
 - Require cleaner captures for reliable replay
 - Are more sensitive to timing and environmental factors
 - Cannot be edited or modified as easily as decoded signals
-
-## Protocol detection
-
-GhostESP uses a stream decoder engine that tests captured signals against all supported protocols simultaneously. When a protocol matches with sufficient confidence, the signal is decoded and the protocol name, bit count, and decoded code are displayed.
 
 ## Notes
 

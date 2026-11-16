@@ -4,42 +4,21 @@ description: "Connect GhostESP to a Chameleon Ultra reader"
 weight: 5
 ---
 
-## Overview
-
-GhostESP can control a Chameleon Ultra over BLE. Once paired, use the NFC scan/save flows — note that the Chameleon Ultra uses a different backend (BLE GATT protocol) than the PN532 (SPI/I2C), so some behavior differs.
-
-## Prerequisites
-
-- **Firmware:** GhostESP build with BLE and Chameleon Ultra features enabled.
-- **Hardware:** A powered Chameleon Ultra advertising over BLE.
+GhostESP can control a Chameleon Ultra over BLE, then use the normal NFC scan/save flows. The Chameleon Ultra uses a different backend (BLE GATT protocol) than the PN532 (SPI/I2C), so some behavior differs. You need a GhostESP build with BLE and Chameleon Ultra features enabled, plus a powered Chameleon Ultra advertising over BLE.
 
 ## Supported Devices
 
-Chameleon Ultra support is available on the following GhostESP builds:
+Chameleon Ultra support is enabled on most BLE-capable GhostESP builds (the feature is on unless explicitly disabled). Confirmed builds include:
 
-- esp32-generic.zip
-- esp32s3-generic.zip
-- esp32c3-generic.zip
-- esp32c5-generic-v01.zip
-- esp32c6-generic.zip
-- MarauderV4_FlipperHub.zip
-- MarauderV6_AwokDual.zip
-- ghostboard.zip
-- ESP32-S3-Cardputer.zip
-- CYD2USB.zip
-- CYDMicroUSB.zip
-- CYDDualUSB.zip
-- CYD2USB2.4Inch.zip
-- CYD2USB2.4Inch_C.zip
-- CYD2432S028R.zip
-- LilyGo-T-Deck.zip
-- LilyGo-TEmbedC1101.zip
-- LilyGo-S3TWatch-2020.zip
-- LilyGo-TDisplayS3-Touch.zip
-- JCMK_DevBoardPro.zip
-- RabbitLabs_Minion.zip
-- Lolin_S3_Pro.zip
-- CardputerADV.zip
+- **CrowPanel:** CrowPanel Advance 2.4 / 2.8 / 3.5 / 4.3 / 5 / 7; CrowPanel 4.2 E-paper and 5.79 E-paper
+- **Waveshare / Crowtech / Sunton:** 7″
+- **Wired Hatters Banshee:** Banshee C5, Banshee S3
+- **M5Stack:** M5 CoreS3-SE, AtomS3R
+- **LilyGo:** T-Dongle S3, T-Dongle C5, T-Deck, T-Embed C1101, S3TWatch-2020, T-Display S3 Touch
+- **Seeed XIAO:** XIAO S3, XIAO C5, XIAO S3 Sense
+- **Others:** Heltec V3, Poltergeist, NM-CYD-C5, JC3248W535EN, Feberis Pro, Sputnik_SCR, GhostLink P1
+- **Generic builds:** esp32-generic, esp32s3-generic, esp32c3-generic, esp32c5-generic-v01, esp32c6-generic
+- **Marauder / dev boards / CYD:** MarauderV4_FlipperHub, MarauderV6_AwokDual, ghostboard, Cardputer, CardputerADV, CYD2USB, CYDMicroUSB, CYDDualUSB, CYD2USB2.4Inch, CYD2USB2.4Inch_C, CYD2432S028R, JCMK_DevBoardPro, RabbitLabs_Minion, Lolin_S3_Pro
 
 ## Connecting to Chameleon Ultra
 
@@ -47,20 +26,21 @@ Chameleon Ultra support is available on the following GhostESP builds:
 
 ### On-Device UI
 
-1. Open **Main Menu → NFC → Chameleon Ultra → Connect**.
+1. Open **Main Menu → NFC → Tools → Chameleon Ultra → Connect**.
    The device scans for nearby Chameleon Ultra devices.
 2. Wait for the connection popup to show "Connected".
    Battery voltage and percentage appear below the status.
 3. Use **Disconnect** from the same menu when finished.
    Wi-Fi services resume automatically after disconnecting.
 
-### Command Line
+### CLI
 
 1. Run `chameleon connect` to start pairing.
    Optional arguments:
    - `timeout` in seconds (default 10) if you need more time for discovery.
-   - `pin` if your Chameleon Ultra requires a 4–6 digit security code.
+   - `pin` if your Chameleon Ultra requires a 4-6 digit security code.
    Example: `chameleon connect 15 1234`
+   Argument parsing: a 1-2 character positive value is treated as a timeout; anything else is treated as a PIN.
 2. Wait for pairing confirmation in the terminal.
    The CLI announces when the link succeeds.
 3. Check status with `chameleon status` or battery with `chameleon battery`.
@@ -68,11 +48,13 @@ Chameleon Ultra support is available on the following GhostESP builds:
 4. Run `chameleon disconnect` when finished.
    BLE releases and the Wi-Fi services will restore automatically.
 
-### Saving Dumps
+### Other Chameleon Subcommands
 
-- **Save HF scans:** After `chameleon scanhf` completes, run `chameleon savehf <name>` to write the dump to `/mnt/ghostesp/nfc/`.
-- **Name files clearly:** Use short descriptive names without spaces, for example `office_door`.
+The `chameleon` command also supports:
 
+- `firmware`, `devicemode`, `activeslot`, `setslot <1-8>`, `slotinfo <1-8>`, `battery`
+- `scanhidprox`, `mfdetect`, `mfprng`, `ntagdetect`, `ntagdump`, `saventag [file]`
+- `savelf [file]`, `readhf`, `savedump [file]`, `emulator`
 
 ## Troubleshooting
 
@@ -80,7 +62,7 @@ Chameleon Ultra support is available on the following GhostESP builds:
 - **PIN failures:** Verify the configured code on the Chameleon Ultra; three failed attempts may force a power cycle.
 - **No BLE advertisements:** Check the Chameleon Ultra’s BLE settings or reboot it; GhostESP only connects to active broadcasts.
 
-## Next Steps
+## Related tasks
 
 - **Scanning:** Continue with [PN532-based scanning guide]({{< relref "scanning.md" >}}).
 - **Saving:** Store remote dumps using [Saving Tags]({{< relref "saving.md" >}}).

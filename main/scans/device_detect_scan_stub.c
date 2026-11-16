@@ -18,6 +18,8 @@ int ble_device_detect_get_count(void) {
     return 0;
 }
 
+uint32_t ble_device_detect_get_rx_count(void) { return 0; }
+
 int ble_device_detect_get_device(int index, BLEDetectDeviceInfo *out_info) {
     (void)index;
     (void)out_info;

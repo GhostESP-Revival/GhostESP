@@ -145,7 +145,7 @@ static Command *command_list_head = NULL;
 static Command *command_pool = NULL;
 static Command *command_free_list = NULL;
 
-#define COMMAND_REGISTRY_MAX 192
+#define COMMAND_REGISTRY_MAX 256
 TaskHandle_t VisualizerHandle = NULL;
 TaskHandle_t gps_info_task_handle = NULL;
 
@@ -426,10 +426,13 @@ void register_commands() {
     register_command("capture", handle_capture_scan);
     register_command("startportal", handle_start_portal);
     register_command("disconnect", handle_wifi_disconnect);
+    register_command("forgetwifi", handle_wifi_forget);
     register_command("wifistatus", handle_wifi_status);
     register_command("autoreconnect", handle_wifi_autoreconnect_cmd);
     register_command("stopportal", stop_portal);
     register_command("sinkhole", handle_sinkhole_cmd);
+  register_command("certscan", handle_certscan_cmd);
+  register_command("trustscan", handle_certscan_cmd); // old name, kept as an alias
     register_command("connect", handle_wifi_connection);
     register_command("dialconnect", handle_dial_command);
     register_command("powerprinter", handle_printer_command);
@@ -538,6 +541,7 @@ void register_commands() {
     register_command("setcountry", handle_setcountry);
     register_command("webauth", handle_web_auth_cmd);
     register_command("webuiap", handle_webuiap_cmd);
+    register_command("privacy", handle_privacy_cmd);
     register_command("clockstyle", handle_clockstyle_cmd);
     register_command("statusbarclock", handle_statusbarclock_cmd);
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)

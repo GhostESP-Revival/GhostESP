@@ -9,6 +9,7 @@
 #include "managers/status_display_manager.h"
 #include "managers/wifi_manager.h"
 #include "scans/wifi/hop_profile.h"
+#include "scans/wifi/local_scan.h"
 #include "scans/wifi/wifi_channels.h"
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 #include "managers/ble_manager.h"
@@ -501,78 +502,14 @@ void handle_wifi_connection(int argc, char **argv) {
         }
         glog("Connecting using saved credentials: %s\n", ssid);
     } else {
-        char ssid_buffer[128] = {0};
-        char password_buffer[128] = {0};
-        int i = 1;
-        // SSID parsing
-        if (argv[1][0] == '"') {
-            char *dest = ssid_buffer;
-            bool found_end = false;
-            strncpy(dest, &argv[1][1], sizeof(ssid_buffer) - 1);
-            dest += strlen(&argv[1][1]);
-            if (argv[1][strlen(argv[1]) - 1] == '"') {
-                ssid_buffer[strlen(ssid_buffer) - 1] = '\0';
-                found_end = true;
-            }
-            i = 2;
-            while (!found_end && i < argc) {
-                *dest++ = ' ';
-                if (strchr(argv[i], '"')) {
-                    size_t len = strchr(argv[i], '"') - argv[i];
-                    strncpy(dest, argv[i], len);
-                    dest[len] = '\0';
-                    found_end = true;
-                } else {
-                    strncpy(dest, argv[i], sizeof(ssid_buffer) - (dest - ssid_buffer) - 1);
-                    dest += strlen(argv[i]);
-                }
-                i++;
-            }
-            if (!found_end) {
-                glog("Error: Missing closing quote for SSID\n");
-                return;
-            }
-            ssid = ssid_buffer;
-        } else {
-            ssid = argv[1];
-            i = 2;
+        if (argc > 3) {
+            glog("Usage: connect <SSID> [PASSWORD] (quote arguments containing spaces)\n");
+            return;
         }
-        // Password parsing
-        if (i < argc) {
-            if (argv[i][0] == '"') {
-                char *dest = password_buffer;
-                bool found_end = false;
-                strncpy(dest, &argv[i][1], sizeof(password_buffer) - 1);
-                dest += strlen(&argv[i][1]);
-                if (argv[i][strlen(argv[i]) - 1] == '"') {
-                    password_buffer[strlen(password_buffer) - 1] = '\0';
-                    found_end = true;
-                }
-                i++;
-                while (!found_end && i < argc) {
-                    *dest++ = ' ';
-                    if (strchr(argv[i], '"')) {
-                        size_t len = strchr(argv[i], '"') - argv[i];
-                        strncpy(dest, argv[i], len);
-                        dest[len] = '\0';
-                        found_end = true;
-                    } else {
-                        strncpy(dest, argv[i], sizeof(password_buffer) - (dest - password_buffer) - 1);
-                        dest += strlen(argv[i]);
-                    }
-                    i++;
-                }
-                if (!found_end) {
-                    glog("Error: Missing closing quote for password\n");
-                    return;
-                }
-                password = password_buffer;
-            } else {
-                password = argv[i];
-            }
-        } else {
-            password = "";
-        }
+        // handle_serial_command already removed quote delimiters. Parse once;
+        // literal quotes inside a credential are data, not another quoting layer.
+        ssid = argv[1];
+        password = argc > 2 ? argv[2] : "";
         // Save provided credentials to NVS
         settings_set_sta_ssid(&G_Settings, ssid);
         settings_set_sta_password(&G_Settings, password);
@@ -604,6 +541,34 @@ void handle_wifi_disconnect(int argc, char **argv) {
     if (VisualizerHandle != NULL) {
         wifi_manager_stop_visualizer();
     }
+}
+
+void handle_wifi_forget(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    const char *saved_ssid = settings_get_sta_ssid(&G_Settings);
+    if (saved_ssid == NULL || saved_ssid[0] == '\0') {
+        glog("No saved WiFi network.\n");
+        return;
+    }
+
+    char forgotten[sizeof(G_Settings.sta_ssid)];
+    strlcpy(forgotten, saved_ssid, sizeof(forgotten));
+
+    // Stop auto-reconnect first, or the drop below would just rejoin it.
+    wifi_manager_stop_reconnect();
+    wifi_manager_set_manual_disconnect(true);
+    wifi_ap_record_t ap_info;
+    if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+        esp_wifi_disconnect();
+    }
+
+    settings_set_sta_ssid(&G_Settings, "");
+    settings_set_sta_password(&G_Settings, "");
+    settings_save_sta_credentials(&G_Settings);
+
+    glog("Forgot saved WiFi network: %s\n", forgotten);
+    status_display_show_status("WiFi Forgotten");
 }
 
 void handle_wifi_status(int argc, char **argv) {
@@ -642,11 +607,29 @@ void handle_wifi_status(int argc, char **argv) {
 }
 
 void handle_ip_lookup(int argc, char **argv) {
-    (void)argc;
-    (void)argv;
-    glog("Starting IP lookup...\n");
-    wifi_manager_start_ip_lookup();
-    status_display_show_status("IP Lookup");
+    if (argc >= 2 && strcmp(argv[1], "stop") == 0) {
+        if (!local_scan_is_running()) {
+            glog("Local scan is not running.\n");
+            return;
+        }
+        local_scan_cancel();
+        status_display_show_status("Local Stop");
+        return;
+    }
+
+    glog("Starting local network scan...\n");
+    esp_err_t err = local_scan_start_async();
+    if (err == ESP_ERR_INVALID_STATE) {
+        glog("A local scan is already running. Use 'scanlocal stop' to cancel it.\n");
+        status_display_show_status("Local Busy");
+        return;
+    }
+    if (err != ESP_OK) {
+        glog("Error: Could not start local scan.\n");
+        status_display_show_status("Local Failed");
+        return;
+    }
+    status_display_show_status("Local Scan");
 }
 
 void handle_wifi_autoreconnect_cmd(int argc, char **argv) {

@@ -21,6 +21,11 @@ typedef struct dns_server_handle *dns_server_handle_t;
 typedef struct {
   uint8_t station_mac[6]; // MAC address of the station (client)
   uint8_t ap_bssid[6];    // BSSID (MAC address) of the access point
+  /* Security type of the AP this station was seen on, as a wifi_auth_mode_t.
+   * Filled in when the station is selected, by looking the parent BSSID up in
+   * the AP scan results. Left as WIFI_AUTH_UNKNOWN when the AP was not in the
+   * scan, which is why callers must treat it as advisory. */
+  uint8_t ap_authmode;
 } station_ap_pair_t;
 
 extern station_ap_pair_t station_ap_list[MAX_STATIONS];
@@ -177,29 +182,6 @@ void wifi_manager_start_sntp(void);
 // when necessary.
 bool wifi_manager_wait_for_valid_time(uint32_t timeout_ms);
 
-void wifi_manager_start_ip_lookup();
-
-#ifdef CONFIG_SPIRAM
-#define MDNS_MAX_DEVICES 128
-#else
-#define MDNS_MAX_DEVICES 48
-#endif
-
-typedef struct {
-    char hostname[64];
-    char ip[16];
-    uint16_t port;
-    char service_type[32];
-} mdns_device_t;
-
-esp_err_t wifi_manager_start_ip_lookup_async(void);
-bool wifi_manager_ip_lookup_check_done(void);
-void wifi_manager_ip_lookup_finish_async(void);
-bool wifi_manager_ip_lookup_is_running(void);
-int wifi_manager_ip_lookup_get_count(void);
-const mdns_device_t* wifi_manager_ip_lookup_get_device(int index);
-void wifi_manager_ip_lookup_clear(void);
-
 void wifi_manager_connect_wifi(const char *ssid, const char *password);
 
 void wifi_manager_cancel_connect(void);
@@ -353,6 +335,11 @@ void wifi_manager_set_karma_portal_file(const char *path);
 void wifi_manager_track_ap(void);
 void wifi_manager_track_sta(void);
 void wifi_manager_stop_tracking(void);
+
+// Track an arbitrary BSSID directly, with no ap_scan entry required -- used to
+// track surveillance-camera/sniffer hits found by promiscuous scanning. The
+// label is only shown; channel is the channel to sit on while tracking.
+void wifi_manager_track_bssid(const uint8_t bssid[6], uint8_t channel, const char *label);
 
 // Reports the latest tracking RSSI for the live RSSI meter view. Returns false
 // when neither AP nor STA tracking is active. When active, *out_rssi receives the

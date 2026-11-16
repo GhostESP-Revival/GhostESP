@@ -151,8 +151,29 @@ void handle_scan_arp(int argc, char **argv) {
         return;
     }
 
+    if (argc >= 2 && strcmp(argv[1], "stop") == 0) {
+        if (!arp_scan_is_running()) {
+            glog("ARP scan is not running.\n");
+            return;
+        }
+        arp_scan_cancel();
+        status_display_show_status("ARP Stop");
+        return;
+    }
+
+    // Same async path as the UI: keeps the CLI responsive and stoppable.
     glog("Starting ARP scan on local network...\n");
-    wifi_manager_arp_scan_subnet();
+    esp_err_t err = arp_scan_start_async();
+    if (err == ESP_ERR_INVALID_STATE) {
+        glog("An ARP scan is already running. Use 'scanarp stop' to cancel it.\n");
+        status_display_show_status("ARP Busy");
+        return;
+    }
+    if (err != ESP_OK) {
+        glog("Error: Could not start ARP scan.\n");
+        status_display_show_status("ARP Failed");
+        return;
+    }
     status_display_show_status("ARP Scan");
 }
 

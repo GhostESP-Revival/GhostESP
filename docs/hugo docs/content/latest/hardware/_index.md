@@ -3,7 +3,6 @@ title: "Hardware"
 description: "GhostESP's own open-source hardware devices"
 keywords: ["GhostLink P1", "hardware", "CYD", "18650", "handheld"]
 weight: 2
-toc: false
 ---
 
 GhostESP sells and maintains its own open-source hardware line, built around off-the-shelf ESP32 modules and open 3D-printed enclosures.

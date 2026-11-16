@@ -1,12 +1,12 @@
 ---
 title: "GTK Abuse Test"
-description: "Test if Wi-Fi client isolation can be bypassed using the Group Temporal Key."
+description: "Test if Wi-Fi client isolation can be bypassed using the Group Temporal Key"
 weight: 45
 ---
 
 The GTK Abuse Test checks whether a Wi-Fi network's client isolation can be bypassed by exploiting the shared Group Temporal Key (GTK). This is based on the AirSnitch research (Vanhoef, NDSS 2026).
 
-> **Note**: Only use this on networks you own or have explicit permission to test.
+> **Note:** Only use this on networks you own or have permission to test. See [Legal and ethical rules]({{< relref "basics.md#legal-and-ethical-rules" >}}).
 
 ## How it works
 
@@ -22,14 +22,16 @@ The test exploits this gap by:
 
 If client isolation is properly implemented, the frame should be blocked. If the target responds, isolation is broken.
 
-```
-WiFi dst: FF:FF:FF:FF:FF:FF (broadcast) → encrypted with shared GTK
-  → IP dst: target's IP (unicast, only target processes it)
-```
+{{< seq title="How the GTK test works" caption="Client isolation sees a broadcast frame, but only the target's IP processes the unicast payload inside it." >}}
+participant GhostESP
+participant AP
+participant Target
+GhostESP -> AP : associate as a normal client | WPA2-PSK; the GTK is read from the supplicant's WPA state
+GhostESP -> Target : broadcast frame, GTK-encrypted | 802.11 data frame, CCMP-protected with the GTK;; LLC/SNAP → IPv4 → ICMP echo request (type 8);; Addr1: AP BSSID, Addr2: our STA, Addr3: `FF:FF:FF:FF:FF:FF`
+Target -> GhostESP : ICMP echo reply | Echo reply (type 0) matching the random ICMP id/seq;; Any reply means isolation did not block the frame
+{{< /seq >}}
 
-Client isolation sees "broadcast" and may let it through, but only the target IP actually processes the payload.
-
-## Requirements
+## Prerequisites
 
 - The target network must use **WPA2-PSK** (not WPA3-SAE or open)
 - You must know the **network password**
@@ -37,9 +39,9 @@ Client isolation sees "broadcast" and may let it through, but only the target IP
 
 ## Usage
 
-### Display (Touchscreen)
+### Display (touchscreen)
 
-1. Navigate to **Menu → WiFi → Attacks → Start GTK Abuse**
+1. Navigate to **Menu → Wi-Fi → Attacks → GTK Isolation Bypass Test**
 2. Enter the **network SSID** when prompted
 3. Enter the **network password** when prompted
 4. The test will connect, extract the GTK, inject a test frame, and check for a reply
@@ -57,10 +59,10 @@ For networks with spaces in the name:
 attack -g "My Home Network" "mypassword"
 ```
 
-To stop the test:
+To stop the test, run `stopdeauth` (which halts all running Wi-Fi attacks), or back out of the detail view on-device:
 
 ```
-stop
+stopdeauth
 ```
 
 ## Results

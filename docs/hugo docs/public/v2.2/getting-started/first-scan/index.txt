@@ -1,0 +1,39 @@
+Title: Try Your First Scan
+Description: Confirm GhostESP is working with a passive Wi-Fi scan
+URL: /v2.2/getting-started/first-scan/
+Version: v2.2
+Section: Getting Started
+Search index: /search-index.json
+
+# Try Your First Scan
+
+> Confirm GhostESP is working with a passive Wi-Fi scan
+
+## On this page
+
+- [On-device](#on-device)
+- [CLI](#cli)
+- [Troubleshooting](#troubleshooting)
+- [Related tasks](#related-tasks)
+
+---
+
+This first task passively lists nearby Wi-Fi access points without connecting to a network or transmitting anything. Run it from the on-device UI or a serial CLI, not the WebUI on a single-board setup, where the Wi-Fi radio is already hosting GhostNet. Attach the board’s supported Wi-Fi antenna if it has an external antenna connector.
+## On-device
+- Open Menu → Wi-Fi → Scanning.
+- Choose Scan Access Points.
+- Wait for the scan to complete.
+- Choose List Access Points to review the results.
+## CLI
+- Open the GhostESP serial terminal.
+- Run scanap.
+- Wait for the scan to finish.
+- Run list -a to view the saved access-point list.
+GhostESP lists nearby networks with their name, channel, signal strength, and manufacturer when available. If no networks appear, move closer to a known access point and try again.
+## Troubleshooting
+- No networks found: Confirm the board supports Wi-Fi, attach its antenna if applicable, move closer to an access point, and scan again.
+- The scan stops immediately: Stop any active Wi-Fi task or portal, then retry.
+## Related tasks
+- [Scan nearby Wi-Fi networks](/v2.2/wifi/survey/)
+- [Connect GhostESP to a Wi-Fi network](/v2.2/wifi/connect/)
+- [Connect to GhostESP](/v2.2/getting-started/control-methods/)

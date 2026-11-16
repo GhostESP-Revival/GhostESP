@@ -17,6 +17,7 @@
 #include "managers/ghostscript_runtime.h"
 #include "core/system_manager.h"
 #include "core/glog.h"
+#include "core/ouis.h"
 #include "scans/wifi/wifi_channels.h"
 #include "esp_wifi.h"
 #include "esp_random.h"
@@ -171,11 +172,14 @@ void probe_request_flood_start(void) {
         for (int i = 0; i < selected_ap_count; i++) {
             char sanitized_ssid[33];
             sanitize_ssid(selected_aps[i].ssid, sanitized_ssid, sizeof(sanitized_ssid));
-            glog("  [%d] %s (%02X:%02X:%02X:%02X:%02X:%02X) ch %d\n",
+            char vendor[64] = {0};
+            bool has_vendor = ouis_lookup_vendor_bytes(selected_aps[i].bssid, vendor, sizeof(vendor));
+            glog("  [%d] %s (%02X:%02X:%02X:%02X:%02X:%02X) ch %d%s%s\n",
                  i, sanitized_ssid,
                  selected_aps[i].bssid[0], selected_aps[i].bssid[1], selected_aps[i].bssid[2],
                  selected_aps[i].bssid[3], selected_aps[i].bssid[4], selected_aps[i].bssid[5],
-                 selected_aps[i].primary);
+                 selected_aps[i].primary,
+                 has_vendor ? " " : "", has_vendor ? vendor : "");
         }
     } else {
         char sanitized_ssid[33];

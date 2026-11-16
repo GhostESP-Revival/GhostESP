@@ -16,7 +16,7 @@ meshcore status            # confirm it is running
 
 You can also switch with the protocol toggle in the on-device app. The remembered choice is what `mesh on` and boot auto-start use.
 
-## First run
+## First Run
 
 **1. Name your node.** This is what neighbours see:
 
@@ -51,7 +51,7 @@ meshcore messages                        # show received messages
 
 Direct messages are encrypted to the contact's full key and tracked with an ACK. On the device a DM shows **Sending → Delivered**, or **Failed** with a tap-to-retry. When the CLI picks a contact, prefer the name from `meshcore contacts`. A one-byte `!hex` prefix still works, but it is ambiguous when several contacts share a first byte.
 
-## On the device
+## On the Device
 
 Open **LoRa** from the main menu. With the radio off, the first row starts the selected protocol.
 
@@ -60,7 +60,7 @@ Open **LoRa** from the main menu. With the radio off, the first row starts the s
 - **MeshCore Settings** holds the radio toggle, node name, frequency, modem, TX power and the two advert buttons.
 - On encoder boards, double-press on the status screen toggles the radio.
 
-## Heltec OLED page
+## Heltec OLED Page
 
 Press **PRG** to cycle pages; the compact page is reachable whether the radio is running or not.
 
@@ -68,7 +68,7 @@ Press **PRG** to cycle pages; the compact page is reachable whether the radio is
 - Stopped, it shows `MC OFF` and `PRESS 2X TO START`.
 - Running, it shows `MESHCORE`, frequency/SF, contacts/messages, TX/RX, app-link state and the last received message.
 
-## Start on boot
+## Start on Boot
 
 ```text
 meshcore autostart on      # boot into MeshCore (also selects it as the boot protocol)
@@ -94,24 +94,15 @@ Equivalent: `lora autostart meshcore`, `mesh autostart meshcore`.
 | `meshcore messages` | Drain received messages |
 | `meshcore set freq <mhz>` | Centre frequency, e.g. `869.525` |
 | `meshcore set bw <khz>` / `sf <5-12>` / `cr <5-8>` | Modem settings |
-| `meshcore set tx <dbm>` | TX power, clamped to the board limit |
+| `meshcore set tx <dbm>` | TX power, hard range check `-9..22` (not a board-limit clamp) |
 | `meshcore set repeat <on\|off>` | Forward group and advert floods (default off) |
 | `meshcore set latlon <lat> <lon>` / `loc <0\|1>` | Position sharing |
 | `meshcore ble [on\|off\|status]` | Companion BLE link for the MeshCore app |
 | `meshcore selftest` | Crypto known-answer tests |
 
-The on-device page mirrors the settings: frequency, modem, TX power (tap to cycle) and the advert buttons. Changing frequency or modem re-tunes the radio in place. Every node in a group needs the same frequency, bandwidth, spreading factor and coding rate.
+The on-device page mirrors the settings: frequency, modem, TX power (tap to cycle) and the advert buttons. Changing frequency or modem re-tunes the radio in place. Every node in a group needs the same frequency, bandwidth, spreading factor and coding rate. For the MeshCore companion app, run `meshcore ble on`; only one protocol's BLE service runs at a time, because one radio owns the SX1262.
 
-## Companion app
-
-```text
-meshcore ble on            # MeshCore app link (Nordic-UART-style GATT)
-meshcore ble status        # link state and MTU
-```
-
-Only one protocol's BLE service runs at a time, because one radio owns the SX1262.
-
-## If something is off
+## Troubleshooting
 
 | Symptom | Fix |
 | --- | --- |

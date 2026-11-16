@@ -21,22 +21,22 @@ MeshCore runs its own companion service under `meshcore ble on` (Nordic-UART-sty
 2. Scan, then select `Ghost-XXXX` when it appears.
 3. Wait for configuration sync to complete. The app should then show the LongFast channel, node list, and chat.
 
-## Text flow
+## Text Flow
 
 - **App → mesh:** type in the app; GhostESP encrypts as AES-CTR with the channel PSK and transmits via SX1262.
 - **Mesh → app:** received frames are forwarded once by packet ID. Reliable repeats are still acknowledged without creating duplicate messages.
 - **Direct messages:** DMs use the recipient's NodeInfo public key. Public-channel access alone is not enough.
 - Other nodes see GhostESP as a regular peer (NodeInfo, routing, ACKs all interop).
 
-Messages received while the phone is disconnected are queued for the next connection. The newest eight mesh packets are retained.
+Messages received while the phone is disconnected are queued for the next connection. The pending queue depth is 8 (32 on PSRAM builds); the oldest packet is dropped when it fills.
 
-## Drop and link semantics
+## Drop and Link Semantics
 
 - **Drop:** app disconnect, BLE timeout, or `lora ble off` tears down GATT and clears the session nonce. Reconnect triggers fresh nonce reads.
 - **Link:** `lora ble status` reports `linked` vs `advertising`; `lora companion ble` keeps the bridge tied to BLE, while `lora companion wifi` keeps BLE free for scans.
 - Only one phone link at a time. A second connect preempts the first.
 
-## Quick troubleshooting
+## Troubleshooting
 
 - **Key unavailable:** wait for NodeInfo, or run `lora nodeinfo <node-id>` and check `lora pkinfo <node-id>`.
 - **Blank or old node name:** chat packets do not carry names. Request NodeInfo and let the app sync again.

@@ -4,13 +4,13 @@ description: "Configure NRF24 hardware pins and GhostLink remote analyzer contro
 weight: 20
 ---
 
-This page covers local NRF24 wiring/configuration and remote control mode over GhostLink.
+Configure the NRF24 analyzer locally on a board wired to an NRF24L01 module, or set up a display/controller build that drives a peer's analyzer over GhostLink.
 
-## Local NRF24 setup
+## Local NRF24 Setup
 
 Enable the analyzer in project config:
 
-- `CONFIG_HAS_NRF24`
+- `CONFIG_HAS_NRF24` (shipped builds: **Banshee S3 only**)
 - `CONFIG_NRF24_SPI_HOST` (`2` or `3`)
 - `CONFIG_NRF24_SPI_MOSI_PIN`
 - `CONFIG_NRF24_SPI_MISO_PIN`
@@ -27,11 +27,11 @@ Analyzer behavior tuning:
 
 Pin defaults depend on your selected board config. In `menuconfig`, these options are under **Ghost ESP Options → Misc Options → NRF24 Options**.
 
-## GhostLink remote mode
+## GhostLink Remote Mode
 
 Remote mode is for display/controller builds that do not have local NRF24 hardware.
 
-- Enable `CONFIG_HAS_NRF24_REMOTE` on the controller/display build.
+- Enable `CONFIG_HAS_NRF24_REMOTE` on the controller/display build (shipped builds: **Banshee C5 only**).
 - Pair to a peer device that is built with `CONFIG_HAS_NRF24` and physically connected to an NRF24 module.
 - Start the analyzer from the controller UI; commands are forwarded over GhostLink.
 

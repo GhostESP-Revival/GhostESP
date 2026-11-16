@@ -11,55 +11,46 @@ Search index: /search-index.json
 
 ## On this page
 
-- [Before you start](#before-you-start)
-- [Transmitting a saved signal](#transmitting-a-saved-signal)
-- [On-device UI](#on-device-ui)
-- [Command line](#command-line)
-- [Frequency matching](#frequency-matching)
-- [Protocol considerations](#protocol-considerations)
-- [Decoded signals](#decoded-signals)
-- [Raw signals](#raw-signals)
-- [Tips for successful transmission](#tips-for-successful-transmission)
+- [Before You Start](#before-you-start)
+- [Replaying a Saved Signal](#replaying-a-saved-signal)
+- [Frequency Matching](#frequency-matching)
+- [Protocol Considerations](#protocol-considerations)
+- [Decoded Signals](#decoded-signals)
+- [Raw Signals](#raw-signals)
+- [Tips for Successful Transmission](#tips-for-successful-transmission)
 - [Notes](#notes)
 - [Troubleshooting](#troubleshooting)
 
 ---
 
 Replay captured signals to control garage doors, gates, alarms, and other SubGHz devices.
-## Before you start
+Transmission is an on-device UI feature: it plays back Flipper .sub files from the SD card. The subghz CLI cannot transmit - subghz list, subghz load, and subghz replay only work with RSSI spectrum snapshots (see [Files and Management](/latest/subghz/files/)).
+## Before You Start
 - Hardware: Board with CC1101 SubGHz support (see [Hardware Support](/latest/subghz/hardware/)).
-- Captured signals: Saved .sub files in /mnt/ghostesp/subghz/ (see [Capturing](/latest/subghz/capturing/)).
+- Captured signals: Flipper .sub files in /mnt/ghostesp/subghz/ (see [Capturing](/latest/subghz/capturing/)).
 - Frequency matching: Ensure the transmission frequency matches the target device’s expected frequency.
-## Transmitting a saved signal
-### On-device UI
+## Replaying a Saved Signal
 - Open SubGHz → Saved to browse captured signals.
 - Select a .sub file from the list.
 - Review the signal details (protocol, frequency, code).
 - Choose Replay to transmit the signal.
 - The device will transmit on the frequency stored in the file.
-### Command line
-# List all saved signals
-subghz list
-# Load and replay a specific signal (load and replay are aliases — only call one)
-subghz load &lt;name&gt;
-# Load the last captured signal
-subghz load last
-## Frequency matching
+## Frequency Matching
 Signals are transmitted at the frequency stored in the .sub file. If the target device expects a different frequency:
 - Edit the .sub file to change the Frequency field (see [Files](/latest/subghz/files/)).
 - Or use the [Frequency Analyzer](/latest/subghz/freq-analyzer/) to determine the correct frequency before capturing.
-## Protocol considerations
-### Decoded signals
+## Protocol Considerations
+### Decoded Signals
 For signals with decoded protocols (Princeton, CAME, KeeLoq, etc.):
 - GhostESP reconstructs the signal from the decoded code and protocol parameters.
 - Transmission should be reliable if the protocol was correctly identified.
 - Some protocols use rolling codes; replay may fail if the target device expects a new code.
-### Raw signals
+### Raw Signals
 For raw captures (unknown protocol):
 - GhostESP transmits the exact timing sequence that was captured.
 - Ensure the capture was clean and complete for reliable replay.
 - Raw signals are more sensitive to timing and environmental factors.
-## Tips for successful transmission
+## Tips for Successful Transmission
 - Distance: Start within 5-10 meters of the target device.
 - Antenna orientation: Point the antenna toward the target receiver.
 - Multiple attempts: Some devices require multiple transmissions to respond.

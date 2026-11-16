@@ -1,4 +1,8 @@
+#include "sdkconfig.h"
 #include "boot_banner_text.h"
+#if defined(CONFIG_IDF_TARGET_ESP32) && defined(CONFIG_BT_ENABLED)
+#include "esp_bt.h"
+#endif
 #include "core/shell.h"
 #include "core/commandline.h"
 #include "core/callbacks.h"
@@ -44,9 +48,6 @@
 #include <esp_log.h>
 #include "esp_random.h"
 #include "esp_sleep.h"
-#if defined(CONFIG_BT_ENABLED) && !defined(CONFIG_IDF_TARGET_ESP32P4)
-#include "esp_bt.h"
-#endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
 #include "freertos/task.h"
@@ -714,24 +715,17 @@ static void deferred_sd_init_task(void *arg) {
     vTaskDelete(NULL);
 }
 
-extern bool pcap_pool_preinit(void);
-
 void app_main(void) {
+#if defined(CONFIG_IDF_TARGET_ESP32) && defined(CONFIG_BT_ENABLED)
+    /* BLE is only used on demand, but the Classic BT controller's ~15KB DRAM
+     * is otherwise held until the first ble_init(). Nothing uses Classic BT
+     * (ble_manager releases it anyway), so return it to the heap now. */
+    (void)esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT);
+#endif
     memory_debug_init();
     memory_debug_start_boot_trace();
     MEASURE_INIT_RAM("Ghostchi Mood init", ghostchi_mood_init());
     ghostchi_mood_record_event(GHOSTCHI_MOOD_EVENT_BOOT, 3);
-
-#if defined(CONFIG_BT_ENABLED) && defined(CONFIG_BTDM_CTRL_MODE_BLE_ONLY) && \
-    !defined(CONFIG_IDF_TARGET_ESP32P4)
-    /* BLE-only build never uses the Classic BT controller, which otherwise
-     * keeps ~19 KB of internal RAM reserved for the whole session. ble_manager
-     * releases it, but only during lazy BLE init, which may never run and never
-     * runs before the display/SD boot crunch. Reclaim it here at boot so SD
-     * mount and the rest of init have the headroom; BLE stays fully functional
-     * because only the Classic BT region is freed. Safe to call again later. */
-    (void)esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT);
-#endif
 
 #ifdef CONFIG_CROWPANEL_EPAPER_42
     /* Factory firmware enables both board rails before touching the panel or
@@ -1020,6 +1014,12 @@ void app_main(void) {
             comm_rx = UART_PIN_NO_CHANGE;
         }
 #endif
+#ifdef CONFIG_WAVESHARE_C5_35_LCD
+        /* The default comm pins (6/7) are this board's display SPI SCLK/MOSI
+         * and 11/12 are the UART0 console; there is no peer-comm header. */
+        comm_tx = UART_PIN_NO_CHANGE;
+        comm_rx = UART_PIN_NO_CHANGE;
+#endif
 #ifdef CONFIG_CROWPANEL_EPAPER_42
         /* GPIO7 is the factory display-power enable, not a UART input. This
          * board has no wired peer-comm header, so leave the optional manager
@@ -1089,9 +1089,6 @@ void app_main(void) {
     subghz_remote_manager_register_stream_handler();
 #endif
 
-    ESP_LOGI(TAG, "Pre-allocating PCAP pool");
-    pcap_pool_preinit();
-
     ESP_LOGI(TAG, "Initializing AP Manager");
     MEASURE_INIT_RAM("AP Manager", ap_manager_init());
 
@@ -1115,21 +1112,42 @@ void app_main(void) {
     esp_err_t io_ret;
     MEASURE_INIT_RAM("Joystick IO Expander init", io_ret = joystick_io_expander_init());
     if (io_ret == ESP_OK) {
-        printf("Joystick: IO expander\n");
-        // Map to display manager expectations: [0]=Left, [1]=Select, [2]=Up, [3]=Right, [4]=Down
-        joystick_init(&joysticks[0], 3, HOLD_LIMIT, true);  // Left button (P03) -> joysticks[0]
-        joystick_init(&joysticks[1], 2, HOLD_LIMIT, true);  // Select button (P02) -> joysticks[1]
-        joystick_init(&joysticks[2], 0, HOLD_LIMIT, true);  // Up button (P00) -> joysticks[2]
-        joystick_init(&joysticks[3], 4, HOLD_LIMIT, true);  // Right button (P04) -> joysticks[3]
-        joystick_init(&joysticks[4], 1, HOLD_LIMIT, true);  // Down button (P01) -> joysticks[4]
-    } else {
-        printf("IO Expander initialization failed, falling back to GPIO mode\n");
-        // Fallback to GPIO mode - map to display manager expectations: [0]=Left, [1]=Select, [2]=Up, [3]=Right, [4]=Down
+        printf("IO Expander initialized successfully for joystick input\n");
+#ifdef CONFIG_BANSHEE_LITE_C5
+        // Map to display manager expectations: [0]=Left, [1]=Select, [2]=Up, [3]=Right, [4]=Down.
         joystick_init(&joysticks[0], CONFIG_L_BTN, HOLD_LIMIT, true);  // Left
         joystick_init(&joysticks[1], CONFIG_C_BTN, HOLD_LIMIT, true);  // Select
         joystick_init(&joysticks[2], CONFIG_U_BTN, HOLD_LIMIT, true);  // Up
         joystick_init(&joysticks[3], CONFIG_R_BTN, HOLD_LIMIT, true);  // Right
         joystick_init(&joysticks[4], CONFIG_D_BTN, HOLD_LIMIT, true);  // Down
+#else
+        // Preserve the legacy IO-expander mapping for existing board profiles.
+        joystick_init(&joysticks[0], 3, HOLD_LIMIT, true);  // Left (P03)
+        joystick_init(&joysticks[1], 2, HOLD_LIMIT, true);  // Select (P02)
+        joystick_init(&joysticks[2], 0, HOLD_LIMIT, true);  // Up (P00)
+        joystick_init(&joysticks[3], 4, HOLD_LIMIT, true);  // Right (P04)
+        joystick_init(&joysticks[4], 1, HOLD_LIMIT, true);  // Down (P01)
+#endif
+    } else {
+#ifdef CONFIG_BANSHEE_LITE_C5
+        printf("IO Expander initialization failed; C5 joystick input unavailable\n");
+#else
+        printf("IO Expander initialization failed, falling back to GPIO mode\n");
+#endif
+        // Fallback to GPIO mode - map to display manager expectations: [0]=Left, [1]=Select, [2]=Up, [3]=Right, [4]=Down
+#ifdef CONFIG_BANSHEE_LITE_C5
+        joystick_init(&joysticks[0], CONFIG_L_BTN, HOLD_LIMIT, true);  // Left
+        joystick_init(&joysticks[1], CONFIG_C_BTN, HOLD_LIMIT, true);  // Select
+        joystick_init(&joysticks[2], CONFIG_U_BTN, HOLD_LIMIT, true);  // Up
+        joystick_init(&joysticks[3], CONFIG_R_BTN, HOLD_LIMIT, true);  // Right
+        joystick_init(&joysticks[4], CONFIG_D_BTN, HOLD_LIMIT, true);  // Down
+#else
+        joystick_init(&joysticks[0], 3, HOLD_LIMIT, true);  // Left
+        joystick_init(&joysticks[1], 2, HOLD_LIMIT, true);  // Select
+        joystick_init(&joysticks[2], 0, HOLD_LIMIT, true);  // Up
+        joystick_init(&joysticks[3], 4, HOLD_LIMIT, true);  // Right
+        joystick_init(&joysticks[4], 1, HOLD_LIMIT, true);  // Down
+#endif
     }
 #else
     // Standard GPIO joystick mode - map to display manager expectations.
@@ -1179,6 +1197,11 @@ void app_main(void) {
 #endif
     MEASURE_INIT_RAM("Switch to startup view", startup_ready = display_manager_switch_view_and_wait_for_refresh(startup_view));
     if (startup_ready) {
+#if defined(CONFIG_WAVESHARE_C5_35_LCD)
+        /* The glass lags panel memory by a few frames; let the first frame
+         * appear before the backlight comes on. */
+        vTaskDelay(pdMS_TO_TICKS(150));
+#endif
         set_backlight_brightness(100);
     } else {
         ESP_LOGW(TAG, "Startup view first refresh did not complete; leaving backlight off");

@@ -68,6 +68,10 @@ typedef struct {
     uint32_t stream_ignored_packets;
     size_t   rx_buffer_high_watermark;
     uint32_t rx_high_water_alerts;
+    size_t   rx_stack_min_free_bytes;
+    size_t   rx_stack_size_bytes;
+    size_t   rx_buffer_size_bytes;
+    bool     rx_task_ready;
     unsigned tx_queue_waiting;
     unsigned rx_queue_free;
     uint32_t baud;

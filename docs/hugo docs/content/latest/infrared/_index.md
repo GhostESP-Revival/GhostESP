@@ -9,7 +9,7 @@ aliases:
 
 GhostESP lets you learn IR signals, store them on the SD card, and retransmit them using the onboard LED.
 
-## Supported protocols
+## Supported Protocols
 
 - NEC / NECext / NEC42 / NEC42ext
 - Kaseikyo

@@ -1,5 +1,5 @@
 Title: Installation
-Description: Install the GhostESP companion app on your Flipper Zero device.
+Description: Install the GhostESP companion app on your Flipper Zero device
 URL: /latest/flipper-app/installation/
 Version: latest
 Section: Flipper Zero App
@@ -8,7 +8,7 @@ Search index: /search-index.json
 
 # Installation
 
-> Install the GhostESP companion app on your Flipper Zero device.
+> Install the GhostESP companion app on your Flipper Zero device
 
 ## On this page
 
@@ -16,7 +16,6 @@ Search index: /search-index.json
 - [Method 1: Flipper App Catalog (Recommended)](#method-1-flipper-app-catalog-recommended)
 - [Method 2: Manual Installation](#method-2-manual-installation)
 - [Version Compatibility](#version-compatibility)
-- [Next Steps](#next-steps)
 
 ---
 
@@ -27,7 +26,7 @@ Search index: /search-index.json
 ## Method 1: Flipper App Catalog (Recommended)
 - Connect your Flipper Zero to your computer (or pair it with the Flipper Mobile App) and open the [Flipper app catalog](https://lab.flipper.net/apps/ghost_esp) in a browser
 - Search for “Ghost ESP” and open the entry (category: GPIO)
-- Click Install — the app is uploaded to your Flipper Zero automatically
+- Click Install - the app is uploaded to your Flipper Zero automatically
 - Launch it from Applications → GPIO on your Flipper Zero
 ## Method 2: Manual Installation
 -
@@ -47,5 +46,4 @@ The companion app is regularly updated to support new GhostESP firmware features
 - GhostESP Firmware: Latest release from main repository
 - Companion App: Latest .fap from [releases](https://github.com/GhostESP-Revival/GhostESP-FlipperCompanion/releases)
 Note: Older app versions may not support newer firmware features. Check the [changelog](https://github.com/GhostESP-Revival/GhostESP-FlipperCompanion/blob/main/CHANGELOG.md) for compatibility information.
-## Next Steps
 After installing the app, proceed to [Connection Setup](/latest/flipper-app/connection/) to configure the serial connection between your Flipper Zero and GhostESP device.

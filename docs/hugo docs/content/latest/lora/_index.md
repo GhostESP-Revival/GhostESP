@@ -16,7 +16,7 @@ GhostESP turns an SX1262 radio into a mesh node. Only one of two protocols runs 
 
 Interop is the point: GhostESP uses the same sync word, channels and wire encryption as Meshtastic firmware, so it joins an existing mesh without anything being reflashed.
 
-## Where to go next
+## Where to Go Next
 
 - **[First run]({{< relref "getting-started.md" >}})**: set a region, start the radio, send your first message
 - **[MeshCore mode]({{< relref "meshcore.md" >}})**: use MeshCore instead of Meshtastic
@@ -24,7 +24,7 @@ Interop is the point: GhostESP uses the same sync word, channels and wire encryp
 - **[Phone app]({{< relref "ble-app.md" >}})**: pair the official Meshtastic app
 - **[Hardware]({{< relref "hardware.md" >}})**: supported boards and wiring
 
-## How you'll use it
+## How You'll Use It
 
 | Where | What you do |
 | --- | --- |
@@ -32,7 +32,7 @@ Interop is the point: GhostESP uses the same sync word, channels and wire encryp
 | **Phone app** | The usual Meshtastic/MeshCore app experience over BLE |
 | **CLI or WebUI** | First-time setup, boot auto-start, diagnostics, scripting |
 
-## On the device
+## On the Device
 
 Open **LoRa** from the main menu. It opens on a status screen without starting the radio; the first row starts the selected protocol when the radio is off.
 
@@ -47,7 +47,7 @@ Open **LoRa** from the main menu. It opens on a status screen without starting t
 - **Encoder boards:** double-press on the status screen toggles the radio.
 - **Heltec OLED:** press **PRG** to cycle pages. On the LoRa page a double-press toggles the radio, and with the radio off the page shows `PRESS 2X TO START`.
 
-## Keep it running
+## Keep It Running
 
 Auto-start is opt in. The protocol is remembered, so you set it once:
 
@@ -56,5 +56,3 @@ lora autostart meshtastic     # or: lora autostart meshcore
 ```
 
 The radio starts a few seconds after the interface, once boot has finished. Meshtastic needs a saved region before it can transmit; MeshCore does not.
-
-See [First run]({{< relref "getting-started.md" >}}) for the step-by-step version and [Command reference]({{< relref "commands.md" >}}) for the full syntax.

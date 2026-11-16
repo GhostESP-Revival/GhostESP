@@ -1,12 +1,12 @@
 ---
 title: "Deauthentication Attacks"
-description: "Force devices to disconnect from a Wi-Fi network."
+description: "Force devices to disconnect from a Wi-Fi network"
 weight: 25
 ---
 
 Deauthentication (deauth) attacks force devices to disconnect from a Wi-Fi network. This is useful for testing network resilience or capturing authentication handshakes when devices reconnect.
 
-> **Note**: Only perform deauth attacks on networks you own or have explicit permission to test. Disrupting networks without authorization is illegal.
+> **Note:** Only perform deauth attacks on networks you own or have permission to test. See [Legal and ethical rules]({{< relref "basics.md#legal-and-ethical-rules" >}}).
 
 ## How it works
 
@@ -16,6 +16,16 @@ Wi-Fi networks use management frames to coordinate connections. Two of these fra
 - **Disassociation frame**: Ends the association relationship
 
 GhostESP sends both frame types. Since these frames are part of the original Wi-Fi standard (802.11), most devices have no way to verify if the message is legitimate.
+
+{{< seq title="How a deauth disconnects a client" caption="GhostESP forges the frames in both directions, so the client and the AP each believe the other ended the connection." >}}
+participant Client
+participant AP
+participant Attacker
+Client -> AP : authenticated and associated | Frame: Association;; Addr1 (AP): the BSSID;; Addr2 (client): station MAC
+Attacker -> Client : forged Deauth (from the AP) | Deauthentication (subtype 0x0C);; Reason 7 (class 3 frame from nonassociated STA);; Addr1 (dest): client;; Addr2 (src): AP BSSID
+Attacker -> AP : forged Deauth (from the client) | Deauthentication (subtype 0x0C);; Reason 7;; Also sends a Disassociation frame (subtype 0x0A);; Addr1 (dest): AP BSSID;; Addr2 (src): client MAC
+Client -> AP : reconnection attempt | Broadcast deauths (dest `FF:FF:FF:FF:FF:FF`) hit every client on the AP
+{{< /seq >}}
 
 ### Broadcast and targeted attacks
 
@@ -39,9 +49,9 @@ This makes the attack more reliable since both sides think the connection ended.
 
 Most ESP32 boards (ESP32, ESP32-S2, ESP32-S3, ESP32-C3, ESP32-C6) only support **2.4 GHz Wi-Fi**. This means:
 
-- You can only deauth networks on channels 1–14
+- You can only deauth networks on channels 1-14
 - 5 GHz networks are invisible and unaffected
-- Many modern routers use both bands—devices on the 5 GHz band will stay connected
+- Many modern routers use both bands-devices on the 5 GHz band will stay connected
 
 ### 5 GHz support (ESP32-C5)
 
@@ -52,7 +62,7 @@ The **ESP32-C5** supports both 2.4 GHz and 5 GHz bands, allowing you to:
 
 If your target network uses 5 GHz, you need an ESP32-C5 based device.
 
-## Protected Management Frames (PMF)
+## Protected management frames (PMF)
 
 **PMF** (also called MFP or 802.11w) is a security feature that cryptographically signs management frames. When enabled, devices can verify that deauth frames actually came from the real access point.
 
@@ -85,13 +95,13 @@ If you see `PMF: Required`, deauth attacks will have no effect on that network.
 
 ### On-device UI
 
-1. Open **Menu → WiFi → Scanning** and wait for the scan to complete.
+1. Open **Menu → Wi-Fi → Scanning** and wait for the scan to complete.
 2. Select your target with **Select AP**.
-3. Open **Menu → WiFi → Attacks → Deauth**.
+3. Open **Menu → Wi-Fi → Attacks → Deauth Attack**.
 4. The device will continuously send deauth frames to all clients on that network.
-5. To stop, navigate to **Menu → WiFi → Attacks → Stop Attack** or run `stopdeauth`.
+5. To stop, run `stopdeauth` in the terminal.
 
-### Command line
+### CLI
 
 1. Scan for networks:
    ```
@@ -123,29 +133,29 @@ select -a 1,3,5
 attack -d
 ```
 
-GhostESP groups APs by channel to minimize channel-switching overhead. APs on the same channel are attacked together before moving to the next channel.
+GhostESP iterates the selected APs in selection order, tuning to each AP's channel as it goes. Order your selection with this in mind if you want to reduce channel switching.
 
 ## Troubleshooting
 
 ### ESP_ERR_INVALID_ARG when deauthing
 
-This error occurs when attempting to deauth a network on a channel not allowed by your current country code setting. By default, GhostESP uses "World Safe" mode (`01`) which only permits channels 1–11.
+This error occurs when attempting to deauth a network on a channel not allowed by your current country code setting. The default country is **US** (index `0`), which permits channels 1-11. (The `01` "World Safe" entry is only the fallback used when a settings slot is out of range, not the boot default.)
 
 If your target network is on channel 12, 13, or 14, you must set the correct country code first.
 
 **Fix via on-device UI**:
 
-1. Open **Menu → Settings → WiFi Country**.
+1. Open **Menu → Settings → Wi-Fi Country**.
 2. Select your region.
 3. Restart the device.
 
-**Fix via CLI** (ESP32-C5 only):
+**Fix via CLI** (all targets):
 
 ```
 setcountry <CC>
 ```
 
-Replace `<CC>` with one of the supported country codes:
+Replace `<CC>` with one of the supported country codes (the `setcountry` command is documented in the [CLI Reference]({{< relref "../getting-started/command-line-reference.md" >}})):
 
 | Code | Region | Code | Region | Code | Region |
 |------|--------|------|--------|------|--------|
@@ -166,9 +176,9 @@ Replace `<CC>` with one of the supported country codes:
 | `SK` | Slovakia | `TW` | Taiwan | `US` | United States |
 
 **Channel availability by region**:
-- **US, Canada** (`US`, `CA`): Channels 1–11
-- **Europe, Australia** (`GB`, `DE`, `AU`, etc.): Channels 1–13
-- **Japan** (`JP`): Channels 1–14
+- **US, Canada** (`US`, `CA`): Channels 1-11
+- **Europe, Australia** (`GB`, `DE`, `AU`, etc.): Channels 1-13
+- **Japan** (`JP`): Channels 1-14
 
 ### Attack has no effect
 
@@ -185,11 +195,8 @@ Devices reconnect immediately after being kicked. If they keep getting back on:
 - Move closer to the access point
 - Check for other interference
 
-### Cannot see 5 GHz networks
-
-Your board only supports 2.4 GHz. Use an ESP32-C5 based device to access 5 GHz networks.
-
 ## Related attacks
 
-- **EAPOL Logoff** (`attack -e`): Sends logoff frames instead of deauth frames. Works similarly but uses a different frame type.
-- **SAE Flood** (`attack -s <password>`): Floods WPA3 networks with authentication requests. Only available on ESP32-C5/C6. Requires the target network's password.
+The `attack` command selects from several management-frame attacks. See [Other attack modes]({{< relref "basics.md#other-attack-modes" >}}) in Wi-Fi Basics for what each one does, and the [CLI Reference]({{< relref "../getting-started/command-line-reference.md" >}}) for the exact flags.
+
+All of these stop with `stopdeauth`, which halts every running Wi-Fi attack.

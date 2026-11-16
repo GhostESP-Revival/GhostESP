@@ -173,6 +173,8 @@ esp_err_t plugin_loader_load(const char *id, plugin_loaded_app_t **out_app) {
     }
 
 #if CONFIG_ENABLE_NATIVE_SD_APPS
+    ESP_LOGI(TAG, "App %s version=%s target=%s entry=%s",
+             manifest->id, manifest->version, manifest->target, manifest->entry_path);
     struct stat entry_st;
     if (stat(manifest->entry_path, &entry_st) == 0) {
         size_t largest_8bit = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);

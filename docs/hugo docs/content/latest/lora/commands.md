@@ -7,18 +7,18 @@ weight: 20
 
 Reference for the `lora`, `mesh` and `meshcore` commands. Setting up for the first time? Start with [First run]({{< relref "getting-started.md" >}}). Run `lora help` or `help all` for the live list on the device.
 
-## Start, stop, status
+## Start, Stop, Status
 
 | Command | What it does |
 | --- | --- |
 | `lora status` | Radio state, region, frequency, modem, TX power, companion mode, last error |
 | `lora start` / `lora on` | Power Vext (Heltec), init the SX1262, join LongFast, begin RX/TX |
 | `lora stop` / `lora off` | Stop RX, release the radio and Vext |
-| `lora setup` | Interactive first-run wizard: region, channel, companion, start |
+| `lora setup` | Print first-run guidance (fixed text): region is required, current defaults, then `lora start` |
 | `mesh` | Show what owns the radio, and the remembered boot choice |
 | `mesh off` | Stop the active protocol |
 
-## Protocol switching
+## Protocol Switching
 
 One radio, one protocol at a time.
 
@@ -30,7 +30,7 @@ One radio, one protocol at a time.
 
 The remembered choice only changes after a protocol starts successfully, so a failed switch never leaves boot pointed at a dead radio.
 
-## Boot auto-start
+## Boot Auto-Start
 
 Auto-start is opt-in and remembers *whether* to start and *which* protocol.
 
@@ -45,19 +45,19 @@ Auto-start is opt-in and remembers *whether* to start and *which* protocol.
 
 The radio starts late in boot, after the display and storage init, so it never starves system memory. Confirm what came up with `mesh` after a reboot.
 
-## Messages and peers
+## Messages and Peers
 
 | Command | What it does |
 | --- | --- |
 | `lora chat <text>` | Broadcast on the LongFast channel (default-key encrypted) |
 | `lora chat` | List recent messages (aliases: `lora send`, `lora messages`) |
-| `lora nodes` | List known nodes: ID, names, last heard, SNR/RSSI, hops |
+| `lora nodes` | List known nodes as `!node short rssi snr [pki][+]` (no hops or last-heard fields) |
 | `lora nodeinfo [node]` | Advertise our name/key and request a reply |
 | `lora dm <node> <text>` | Encrypted direct message; the peer key must be known |
 | `lora pkinfo <node>` | Show the stored peer key and our own key |
 | `lora channels` | Show the 8 channel slots, their roles and hashes |
 
-## Radio settings
+## Radio Settings
 
 Changes apply on the next `lora start` unless noted.
 
@@ -65,30 +65,29 @@ Changes apply on the next `lora start` unless noted.
 | --- | --- |
 | `lora set region <code>` | Legal band plan; see [Regions](#regions) for all 24 codes |
 | `lora region <code>` | Shorthand for `lora set region` |
-| `lora set sf <5..12>` | Spreading factor; higher means longer range, lower rate |
+| `lora set sf <5..12>` | Spreading factor; higher means longer range, lower rate. SF6 is rejected (it needs an implicit header) and BW500 needs SF7 or higher |
 | `lora set bw <125\|250\|500>` | Bandwidth in kHz; must match peers |
 | `lora set cr <5..8>` | Coding rate, CR4/5 to CR4/8 |
-| `lora set tx <dBm>` | TX power, clamped to the region limit |
+| `lora set tx <dBm>` | TX power; minimum 2 dBm, values above the board/region cap are rejected |
 | `lora set preset <0..16>` | Use a named Meshtastic preset instead of a custom modem |
 | `lora set hop <1..7>` | Hop limit: how many relays a packet may cross |
 | `lora set role <0..12>` | Device role: 0 client, 1 client mute, 2 router, 5 tracker, 6 sensor, 8 client hidden, 10 TAK tracker, 11 router late, 12 client base |
-| `lora set offset <MHz>` | Frequency offset correction for a drifting crystal |
+| `lora set offset <MHz>` | Frequency offset correction for a drifting crystal (±2.0 MHz) |
 | `lora set ovrfreq <MHz>` | Hard frequency override, ignoring the region plan |
-| `lora set chnum <n>` | Select the region frequency slot directly |
-| `lora set txen <on\|off>` | Enable or disable transmit (listen-only) |
-| `lora set owner <long> <short>` | Advertised names (24 / 4 bytes), then send NodeInfo again |
+| `lora set chnum <n>` | Select the region frequency slot directly (`0` uses the channel hash, `1..512`) |
+| `lora set txen <n>` | Enable or disable transmit (listen-only): a nonzero number enables TX, `0` disables. The argument is numeric - `on` parses as `0` and disables TX |
+| `lora set owner <long> <short>` | Advertised names (long under 40 chars, short under 8 chars), then send NodeInfo again |
 | `lora set companion <wifi\|ble>` | Transport for the companion app bridge |
 
-## Phone app and companion
+## Phone App and Companion
 
 | Command | What it does |
 | --- | --- |
 | `lora ble on` / `off` | Start or stop the Meshtastic BLE service (`Ghost-XXXX`) |
-| `lora ble status` | Link state, MTU, connected phone, nonce sync |
-| `lora app` | Pairing hint: advertised name and channel hash |
+| `lora ble status` | Advertising/connected/linked flags only |
+| `lora app` | App FIFO push/pop/drop counters, linked state and pending-data flag |
 | `lora companion wifi` | Bridge over Wi-Fi (keeps BLE free for scans) |
 | `lora companion ble` | Bridge over BLE (shares the radio) |
-| `lora setup` | Interactive first-run wizard |
 
 Pairing steps are in [BLE App Link]({{< relref "ble-app.md" >}}).
 
@@ -105,9 +104,9 @@ Pairing steps are in [BLE App Link]({{< relref "ble-app.md" >}}).
 | `lora pktry <hex>` | Probe a captured frame against the PKI decrypt variants |
 | `lora pki-regen` | Generate a new identity keypair |
 
-Avoid `lora pki-regen` in normal troubleshooting: it replaces the identity key peers already stored, and they need a fresh NodeInfo before direct messages work again. The `mesh selftest` verb runs the crypto self test for whichever protocol is active.
+Avoid `lora pki-regen` in normal troubleshooting: it replaces the identity key peers already stored, and they need a fresh NodeInfo before direct messages work again.
 
-## Active mesh verbs
+## Active Mesh Verbs
 
 The same actions without naming a protocol, applied to whichever one is running:
 
@@ -119,7 +118,7 @@ The same actions without naming a protocol, applied to whichever one is running:
 | `mesh peers` | Nodes (Meshtastic) or contacts (MeshCore) |
 | `mesh channels` | List channels |
 | `mesh app [on\|off]` | BLE app link |
-| `mesh selftest` | Crypto self test for the active protocol |
+| `mesh selftest` | Crypto self test for MeshCore; under Meshtastic it points you to `lora pkselftest` |
 | `mesh meshtastic <args>` / `mesh meshcore <args>` | Run a protocol-specific command |
 
 ## Regions

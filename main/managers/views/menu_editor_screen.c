@@ -28,7 +28,7 @@ static menu_catalog_item_t *collect_menu_items(int *count) {
     if (s_menu == MENU_PLACE_APPS && items) {
         int visible = 0;
         for (int i = 0; i < *count; ++i) {
-            if (!menu_catalog_is_grouped_plugin(&items[i])) items[visible++] = items[i];
+            if (!menu_catalog_is_grouped(&items[i])) items[visible++] = items[i];
         }
         *count = visible;
     }
@@ -142,7 +142,7 @@ static void build_page(editor_page_t page, int selected) {
             int count = 0;
             for (int i = 0; i < s_count; ++i) {
                 uint8_t placement = menu_config_placement(&G_Settings.menu_config, s_items[i].id, s_items[i].default_placement);
-                bool grouped = s_menu == MENU_PLACE_APPS && menu_catalog_is_grouped_plugin(&s_items[i]);
+                bool grouped = s_menu == MENU_PLACE_APPS && menu_catalog_is_grouped(&s_items[i]);
                 if ((placement & s_menu) && !grouped) continue;
                 if (strcmp(s_items[i].id, "apps") == 0) continue;
                 s_items[count++] = s_items[i];

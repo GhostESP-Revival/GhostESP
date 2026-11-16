@@ -1,5 +1,6 @@
 #include "managers/views/ghostchi_screen.h"
 #include "core/ghostchi_identity.h"
+#include "core/utils.h"
 #include "gui/design_tokens.h"
 
 #include "gui/lvgl_safe.h"
@@ -1084,7 +1085,9 @@ static void update_ui(lv_timer_t *timer) {
         set_stat(1, "CH", snap.current_channel ? buf : "--");
         snprintf(buf, sizeof(buf), "%u", (unsigned)snap.aps_visible);
         set_stat(2, "APS", buf);
-        set_stat(3, "TARGET", snap.target_ssid[0] ? snap.target_ssid : "None");
+        char target_disp[sizeof(snap.target_ssid)];
+        privacy_redact_ssid_copy(snap.target_ssid, target_disp, sizeof(target_disp));
+        set_stat(3, "TARGET", snap.target_ssid[0] ? target_disp : "None");
         snprintf(buf, sizeof(buf), "%u", (unsigned)snap.handshakes);
         set_stat(4, "PWND", buf);
         snprintf(buf, sizeof(buf), "%u%%", (unsigned)snap.confidence);

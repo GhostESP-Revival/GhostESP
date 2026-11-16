@@ -1,6 +1,6 @@
 ---
 title: "Connection Setup"
-description: "Configure the serial connection between your Flipper Zero and GhostESP device."
+description: "Configure the serial connection between your Flipper Zero and GhostESP device"
 weight: 20
 keywords: ["connection", "uart", "serial", "gpio", "wiring"]
 ---
@@ -16,7 +16,7 @@ Connect your ESP32 device to your Flipper Zero via UART:
 | GND | GND |
 | VCC | 3.3V (if needed, check your board's power requirements) |
 
-> **Note**: Pin configurations may vary depending on your Flipper Zero setup. Refer to your specific hardware documentation or the companion app's connection guide.
+> **Note:** Pin configurations may vary depending on your Flipper Zero setup. Refer to your specific hardware documentation or the companion app's connection guide.
 
 ## Software Connection
 
@@ -24,21 +24,9 @@ Connect your ESP32 device to your Flipper Zero via UART:
 2. Launch the GhostESP app on your Flipper Zero
 3. The app will automatically attempt to connect via serial
 
-## Connection Troubleshooting
+If the app can't connect or the connection drops during use, see [Troubleshooting]({{< relref "troubleshooting.md" >}}) for the full checklist.
 
-**App can't connect to GhostESP**
-- Verify serial wiring (TX, RX, GND)
-- Check that GhostESP device is powered on
-- Try restarting both devices
-- Check serial port configuration in app settings
-
-**Connection drops during use**
-- Check wiring connections for loose connections
-- Verify power supply is stable
-- Move away from sources of electrical interference
-- Try reducing baud rate if using high-speed connection
-
-## Next Steps
+## Related Tasks
 
 Once connected, explore the available features:
 

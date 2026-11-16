@@ -1,15 +1,14 @@
 ---
 title: "Motion Detector"
-description: "On-device motion detection using the onboard camera, with optional SD snapshots and Discord alerts."
+description: "On-device motion detection using the onboard camera, with optional SD snapshots and Discord alerts"
 weight: 10
-toc: true
 ---
 
 GhostESP can use an onboard camera as a lightweight motion detector. The current implementation is tuned for small ESP32 devices and runs entirely on-device using grayscale frame comparison.
 
 ## Supported Boards
 
-- **Seeed Studio XIAO ESP32-S3 Sense** (`xiao_esp32s3_sense`) — the only camera-enabled build currently available.
+- **Seeed Studio XIAO ESP32-S3 Sense** (`xiao_esp32s3_sense`) - the only camera-enabled build currently available.
 - Other boards need an enabled `CONFIG_HAS_CAMERA` build plus compatible camera pin mapping.
 
 ## How It Works
@@ -24,7 +23,7 @@ This design keeps RAM use low while still being fast enough for continuous monit
 
 ## Quick Start
 
-### Basic detection
+### Basic Detection
 
 ```text
 motion start
@@ -42,11 +41,7 @@ Stop detection with:
 motion stop
 ```
 
-### Test without SD
-
-The detector does **not** require an SD card for motion detection itself. SD is only used when snapshot saving is enabled or when Discord image alerts are being auto-saved.
-
-### Enable Discord alerts
+### Enable Discord Alerts
 
 ```text
 motion discord https://discord.com/api/webhooks/...
@@ -62,22 +57,22 @@ motion image off
 
 ## CLI Commands
 
-- `motion start` — Start motion detection.
-- `motion stop` — Stop motion detection.
-- `motion status` — Show current detector state.
-- `motion threshold <1-255>` — Set per-pixel difference threshold.
-- `motion interval <100-10000>` — Set frame interval in milliseconds.
-- `motion percent <1-100>` — Set trigger percentage.
-- `motion sample <1-32>` — Compare every Nth pixel.
-- `motion snap <on|off>` — Save motion snapshots to SD card.
-- `motion image <on|off>` — Attach images to Discord alerts.
-- `motion discord <url|off>` — Configure or disable the Discord webhook.
-- `motion webhook <url|off>` — Alias for `motion discord`.
-- `motion cooldown <ms>` — Minimum time between webhook alerts.
+- `motion start` - Start motion detection.
+- `motion stop` - Stop motion detection.
+- `motion status` - Show current detector state.
+- `motion threshold <1-255>` - Set per-pixel difference threshold.
+- `motion interval <100-10000>` - Set frame interval in milliseconds.
+- `motion percent <1-100>` - Set trigger percentage.
+- `motion sample <1-32>` - Compare every Nth pixel.
+- `motion snap <on|off>` - Save motion snapshots to SD card.
+- `motion image <on|off>` - Attach images to Discord alerts.
+- `motion discord <url|off>` - Configure or disable the Discord webhook.
+- `motion webhook <url|off>` - Alias for `motion discord`.
+- `motion cooldown <ms>` - Minimum time between webhook alerts.
 
 ## Recommended Settings
 
-### Fast local testing
+### Fast Local Testing
 
 ```text
 motion threshold 30
@@ -86,7 +81,7 @@ motion interval 500
 motion sample 4
 ```
 
-### More sensitive detection
+### More Sensitive Detection
 
 ```text
 motion threshold 20
@@ -105,8 +100,8 @@ Lower values detect smaller changes, but also increase false positives from ligh
 
 ## Troubleshooting
 
-- **`Camera init failed: ESP_ERR_NOT_FOUND`** — Camera ribbon cable or pin mapping issue.
-- **Detector starts but does not trigger** — Lower `motion threshold` or `motion percent`.
-- **Too many triggers** — Raise `motion percent`, raise `motion threshold`, or increase `motion cooldown` for webhooks.
-- **Discord TLS/certificate errors** — Ensure the device has Wi-Fi access and a valid time sync before the webhook attempt.
-- **Frame buffer overflow logs (`FB-OVF`)** — Usually indicates the camera or processing path is under pressure; reduce extra work such as image uploads while testing.
+- **`Camera init failed: ESP_ERR_NOT_FOUND`** - Camera ribbon cable or pin mapping issue.
+- **Detector starts but does not trigger** - Lower `motion threshold` or `motion percent`.
+- **Too many triggers** - Raise `motion percent`, raise `motion threshold`, or increase `motion cooldown` for webhooks.
+- **Discord TLS/certificate errors** - Ensure the device has Wi-Fi access and a valid time sync before the webhook attempt.
+- **Frame buffer overflow logs (`FB-OVF`)** - Usually indicates the camera or processing path is under pressure; reduce extra work such as image uploads while testing.

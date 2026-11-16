@@ -2416,7 +2416,9 @@ static const ghostesp_api_t s_dead_api = {
     .log = plugin_api_dead_log,
 };
 
-static ghostesp_api_t s_api_live_backup;
+// Only needed while an app is being swapped out, so it is allocated lazily
+// instead of reserving 1.5 KB of .bss for the whole session.
+static ghostesp_api_t *s_api_live_backup = NULL;
 static bool s_api_swapped = false;
 
 static ghostesp_api_t s_api = {
@@ -2864,8 +2866,8 @@ const ghostesp_api_t *plugin_api_get(const char *app_id,
         plugin_api_direct_index_load(s_app_base_path);
     }
 
-    if (s_api_swapped) {
-        memcpy(&s_api, &s_api_live_backup, sizeof(s_api));
+    if (s_api_swapped && s_api_live_backup) {
+        memcpy(&s_api, s_api_live_backup, sizeof(s_api));
         s_api_swapped = false;
     }
     s_api.flags = GHOSTESP_APP_FLAG_PERMISSIONS_ENFORCED;
@@ -2941,9 +2943,18 @@ void plugin_api_release(void) {
     portEXIT_CRITICAL(&s_input_snapshot_mux);
 
     if (!s_api_swapped) {
-        memcpy(&s_api_live_backup, &s_api, sizeof(s_api));
-        memcpy(&s_api, &s_dead_api, sizeof(s_dead_api));
-        s_api_swapped = true;
+        if (!s_api_live_backup) {
+            s_api_live_backup = heap_caps_malloc(sizeof(*s_api_live_backup),
+                                                 MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            if (!s_api_live_backup) {
+                s_api_live_backup = malloc(sizeof(*s_api_live_backup));
+            }
+        }
+        if (s_api_live_backup) {
+            memcpy(s_api_live_backup, &s_api, sizeof(s_api));
+            memcpy(&s_api, &s_dead_api, sizeof(s_dead_api));
+            s_api_swapped = true;
+        }
     }
 
     plugin_api_unlock();

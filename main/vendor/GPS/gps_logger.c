@@ -946,6 +946,8 @@ esp_err_t csv_write_data_to_buffer(wardriving_data_t *data) {
         int frequency = (data->channel == 14) ? 2484 :
                         (data->channel > 14) ? 5000 + (data->channel * 5) :
                                                2407 + (data->channel * 5);
+        /* Wardrive CSVs always store the raw BSSID/SSID: privacy mode is an
+         * on-screen display transform only and must never affect saved data. */
         const char *ssid_for_csv = name_empty ? "<hidden>" : data->ssid;
         int o = snprintf(data_line, CSV_GPS_BUFFER_SIZE, "%s,", data->bssid);
         o = csv_escape_append(data_line, o, CSV_GPS_BUFFER_SIZE, ssid_for_csv);
@@ -1051,7 +1053,11 @@ static esp_err_t csv_write_chunk_to_sink(const char *data, size_t len) {
             }
         }
 
-        glog_set_defer(1);
+        /* Hold the console for the whole framed write. printf-based glog text
+         * goes straight to the UART FIFO and would otherwise interleave with
+         * the still-draining chunk, corrupting CSV rows and the
+         * [BUF/BEGIN]/[BUF/CLOSE] framing host tools rely on. */
+        glog_console_hold();
         const char *mark_begin = "[BUF/BEGIN]";
         const char *mark_close = "[BUF/CLOSE]";
         size_t mark_begin_len = strlen(mark_begin);
@@ -1085,8 +1091,11 @@ static esp_err_t csv_write_chunk_to_sink(const char *data, size_t len) {
             uart_write_bytes(UART_NUM_0, mark_close, mark_close_len);
             uart_write_bytes(UART_NUM_0, "\n", 1);
         }
-        glog_set_defer(0);
-        glog_flush_deferred();
+        /* uart_write_bytes() only enqueues; the chunk is still draining onto
+         * the wire when it returns. Wait it out before releasing the console
+         * so queued glog text lands after the frame, not inside it. */
+        uart_wait_tx_done(UART_NUM_0, portMAX_DELAY);
+        glog_console_release();
 
         return ESP_OK;
     }

@@ -12,6 +12,7 @@ typedef enum {
     UART_SHARE_OWNER_PLUGIN,
 } uart_share_owner_t;
 
+// event_queue_size: 0 uses the default 16 events; negative omits the queue.
 esp_err_t uart_share_ensure_installed(uart_port_t uart_num, int rx_buffer_size, int tx_buffer_size, int event_queue_size);
 
 // Fully tears down the shared UART driver so another subsystem can install its

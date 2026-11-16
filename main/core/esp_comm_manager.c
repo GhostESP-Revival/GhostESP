@@ -4,6 +4,7 @@
  */
 
 #include "core/esp_comm_manager.h"
+#include "core/callbacks.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -44,6 +45,7 @@
  * from this value, so it scales automatically.
  * Costs ~1.5 KB of internal RAM. */
 #define UART_RX_BUFFER_SIZE 2048
+#define COMM_RX_TASK_STACK_BYTES 4096
 
 /* comm_rx_task priority. Must sit above RENDERING_TASK_PRIORITY (15) and
  * HARDWARE_INPUT_TASK_PRIORITY (14) so a long frame cannot overflow the ring
@@ -725,15 +727,19 @@ static void rx_task(void* arg) {
         while (len > 0) {
             size_t buffered_len = 0;
             if (uart_get_buffered_data_len(s_uart_num, &buffered_len) == ESP_OK) {
-                if (buffered_len > comm->rx_buffer_high_watermark) {
-                    comm->rx_buffer_high_watermark = buffered_len;
+                // uart_read_bytes() has already removed len bytes from the ring.
+                // Include those bytes so short bursts do not misleadingly
+                // report a zero-byte high-water mark.
+                size_t burst_len = (size_t)len + buffered_len;
+                if (burst_len > comm->rx_buffer_high_watermark) {
+                    comm->rx_buffer_high_watermark = burst_len;
                 }
                 size_t alert_threshold = UART_RX_BUFFER_SIZE * 3 / 4;
-                if (buffered_len > alert_threshold) {
+                if (burst_len > alert_threshold) {
                     comm->rx_high_water_alerts++;
                     if ((comm->rx_high_water_alerts & 0x0F) == 1) {
-                        printf("UART RX buffered %u bytes (alerts=%lu)\n",
-                               (unsigned)buffered_len, (unsigned long)comm->rx_high_water_alerts);
+                        printf("UART RX burst %u bytes (alerts=%lu)\n",
+                               (unsigned)burst_len, (unsigned long)comm->rx_high_water_alerts);
                     }
                 }
             }
@@ -901,7 +907,7 @@ static void send_handshake_ack(void) {
 
 static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t* packet) {
     if (!comm || !packet) return;
-    static char log_buffer[128];
+    static char log_buffer[sizeof(comm->response_assembly) + 8];
 
     switch(packet->type) {
         case PACKET_TYPE_DISCOVERY:
@@ -995,6 +1001,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                         comm->protocol_task_handle = t;
                     }
                     unlock_state(comm);
+                    wardriving_peer_connected();
                     printf("Handshake completed!\n");
                     terminal_view_add_text("Handshake completed!\n");
 #ifdef CONFIG_HAS_MIC
@@ -1068,6 +1075,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                     comm->protocol_task_handle = t;
                 }
                 unlock_state(comm);
+                wardriving_peer_connected();
                 printf("Handshake completed!\n");
                 terminal_view_add_text("Handshake completed!\n");
 #ifdef CONFIG_HAS_MIC
@@ -1238,8 +1246,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                         // force flush oldest buffered data if no newline present
                         size_t line_len = comm->response_assembly_len;
                         if (line_len > 0) {
-                            if (line_len > 255) line_len = 255;
-                            char line[256];
+                            char line[sizeof(comm->response_assembly) + 1];
                             memcpy(line, comm->response_assembly, line_len);
                             line[line_len] = '\0';
                             printf("ESP Comm Response: %s\n", line);
@@ -1268,8 +1275,7 @@ static void handle_received_packet(esp_comm_manager_t* comm, const comm_packet_t
                             if (c == '\n' && line_len > 0 && comm->response_assembly[i - 1] == '\r') {
                                 line_len -= 1;
                             }
-                            if (line_len > 255) line_len = 255;
-                            char line[256];
+                            char line[sizeof(comm->response_assembly) + 1];
                             memcpy(line, comm->response_assembly + start, line_len);
                             line[line_len] = '\0';
                             printf("ESP Comm Response: %s\n", line);
@@ -1467,6 +1473,17 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
     desired_uart = UART_NUM_1;
 #endif
 
+#if (defined(CONFIG_BANSHEE_LITE_C5) || defined(CONFIG_BANSHEE_LITE_S3)) && \
+    defined(CONFIG_GHOSTLINK_TX_PIN) && defined(CONFIG_GHOSTLINK_RX_PIN)
+#if CONFIG_GHOSTLINK_TX_PIN >= 0 && CONFIG_GHOSTLINK_RX_PIN >= 0
+    /* A profile pin map is more specific than the legacy template defaults. */
+    if ((int)tx_pin == (int)DEFAULT_TX_PIN && (int)rx_pin == (int)DEFAULT_RX_PIN) {
+        resolved_tx = (gpio_num_t)CONFIG_GHOSTLINK_TX_PIN;
+        resolved_rx = (gpio_num_t)CONFIG_GHOSTLINK_RX_PIN;
+    }
+#endif
+#endif
+
     if (comm_pins_conflict_with_rgb_display(resolved_tx, resolved_rx)) {
         return;
     }
@@ -1552,7 +1569,15 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
     }
 #endif
 
-    if (uart_share_ensure_installed(s_uart_num, UART_RX_BUFFER_SIZE, 0, 0) == ESP_OK) {
+    // ESP32 no-PSRAM boards use UART2 for GPS. GhostLink on UART1 reads bytes
+    // directly and never consumes the driver's 16-entry UART event queue.
+#if defined(CONFIG_IDF_TARGET_ESP32) && !defined(CONFIG_SPIRAM)
+    const int comm_uart_event_queue_size = -1;
+#else
+    const int comm_uart_event_queue_size = 0;
+#endif
+    if (uart_share_ensure_installed(s_uart_num, UART_RX_BUFFER_SIZE, 0,
+                                    comm_uart_event_queue_size) == ESP_OK) {
         if (uart_share_acquire(s_uart_num, UART_SHARE_OWNER_DUALCOMM, pdMS_TO_TICKS(2000)) == ESP_OK) {
             s_comm_manager->uart_driver_installed = true;
         }
@@ -1584,7 +1609,7 @@ void esp_comm_manager_init(gpio_num_t tx_pin, gpio_num_t rx_pin, uint32_t baud_r
 
     s_comm_manager->initialized = true;
 
-    const uint32_t rx_stack_bytes = 4096;
+    const uint32_t rx_stack_bytes = COMM_RX_TASK_STACK_BYTES;
     s_comm_manager->rx_task_res.stack = alloc_task_stack(rx_stack_bytes);
     s_comm_manager->rx_task_res.tcb = alloc_task_tcb();
     if (s_comm_manager->rx_task_res.stack && s_comm_manager->rx_task_res.tcb) {
@@ -1857,7 +1882,8 @@ bool esp_comm_manager_send_command(const char* command, const char* data) {
 
     size_t cmd_len = strlen(command);
     if (cmd_len > MAX_CMD_LEN) {
-        cmd_len = MAX_CMD_LEN;
+        printf("Command name too long; use command line transport\n");
+        return false;
     }
 
     strncpy((char*)packet.data, command, cmd_len);
@@ -2027,6 +2053,13 @@ bool esp_comm_manager_get_stats(esp_comm_manager_stats_t* out) {
     out->stream_ignored_packets = comm->stream_ignored_packets;
     out->rx_buffer_high_watermark = comm->rx_buffer_high_watermark;
     out->rx_high_water_alerts = comm->rx_high_water_alerts;
+    out->rx_stack_size_bytes = COMM_RX_TASK_STACK_BYTES;
+    out->rx_buffer_size_bytes = UART_RX_BUFFER_SIZE;
+    if (comm->rx_task_handle) {
+        out->rx_task_ready = true;
+        // ESP-IDF reports the stack high-water mark in bytes.
+        out->rx_stack_min_free_bytes = uxTaskGetStackHighWaterMark(comm->rx_task_handle);
+    }
     out->baud = comm->baud_rate;
 
     if (comm->tx_queue) {
@@ -2056,6 +2089,7 @@ void esp_comm_manager_disconnect(void) {
             s_comm_manager->ping_timer = NULL;
         }
         unlock_state(s_comm_manager);
+        wardriving_peer_disconnected();
         if (previous_state == COMM_STATE_SCANNING) {
             printf("Stopped discovery\n");
         } else if (previous_state == COMM_STATE_CONNECTED || previous_state == COMM_STATE_HANDSHAKE) {
@@ -2096,6 +2130,7 @@ void esp_comm_manager_deinit(void) {
     } else {
         s_comm_manager->state = COMM_STATE_IDLE;
     }
+    wardriving_peer_disconnected();
 
     if (s_comm_manager->rx_task_handle) {
         vTaskDelete(s_comm_manager->rx_task_handle);
@@ -2228,4 +2263,5 @@ static void handle_connection_loss(esp_comm_manager_t* comm, const char* reason)
         xTimerStart(comm->discovery_timer, 0);
     }
     unlock_state(comm);
+    wardriving_peer_disconnected();
 }

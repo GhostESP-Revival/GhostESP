@@ -1,5 +1,5 @@
 Title: HTTP Requests
-Description: Perform HTTP GET requests from the command line.
+Description: Perform HTTP GET requests from the CLI
 URL: /latest/ethernet/http/
 Version: latest
 Section: Ethernet
@@ -7,23 +7,23 @@ Search index: /search-index.json
 
 # HTTP Requests
 
-> Perform HTTP GET requests from the command line.
+> Perform HTTP GET requests from the CLI
 
 ## On this page
 
-- [Basic HTTP GET](#basic-http-get)
 - [Troubleshooting](#troubleshooting)
 
 ---
 
-Make HTTP requests to web servers and APIs.
-## Basic HTTP GET
+Make HTTP requests to web servers and APIs from the CLI.
 Fetch content from a URL:
-ethhttp &lt;url&gt; &lt;lines_to_show|all&gt;
+ethhttp &lt;url&gt; [lines_to_show|all]
 Parameters:
-- &lt;url&gt; — The full URL (supports http:// and https://)
-- &lt;lines_to_show&gt; — Number of response lines to display, or all for complete response
+- &lt;url&gt; - The full URL (supports http:// and https://)
+- &lt;lines_to_show&gt; - Number of response lines to display, or all for the complete response. Optional; if omitted, the first 25 lines are shown.
 Examples:
+Fetch the first 25 lines (default):
+ethhttp https://example.com
 Fetch the first 10 lines of a webpage:
 ethhttp https://example.com 10
 Fetch the entire response:
@@ -31,11 +31,11 @@ ethhttp https://example.com all
 Fetch from a specific path:
 ethhttp https://api.example.com/status 5
 Use Cases:
-- API Testing — Query REST APIs
-- Web Scraping — Retrieve website content
-- Service Verification — Check if a service is responding
-- Configuration — Fetch remote config files
+- API Testing - Query REST APIs
+- Web Scraping - Retrieve website content
+- Service Verification - Check if a service is responding
+- Configuration - Fetch remote config files
 ## Troubleshooting
-- Connection refused — Ensure the server is running and accessible from your network
-- Timeout — The server may be unreachable or slow to respond
-- SSL/TLS errors — Some servers may require specific certificates; try http:// instead of https://
+- Connection refused - Ensure the server is running and accessible from your network
+- Timeout - The server may be unreachable or slow to respond
+- SSL/TLS errors - Some servers may require specific certificates; try http:// instead of https://

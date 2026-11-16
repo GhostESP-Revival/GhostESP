@@ -1,16 +1,12 @@
 ---
 title: "Control App"
-description: "Use the Control App desktop application to control your device via serial connection."
+description: "Use the Control App desktop application to control your device via serial connection"
 weight: 10
 aliases:
   - "/getting-started/control-app/"
 ---
 
-The **Control App** is a desktop GUI application that provides comprehensive control over your GhostESP device through a serial connection. It offers Wi-Fi/BLE scanning, packet capture, custom commands, firmware flashing, and more—all from an intuitive graphical interface.
-
-## Overview
-
-The Control App is a Python-based application built with PyQt6 that connects to your GhostESP device via USB serial. It provides a user-friendly alternative to the command-line interface, with organized tabs for different operations and real-time feedback.
+The **Control App** is a Python desktop GUI built with PyQt6 that controls your GhostESP device over a USB serial connection. It offers Wi-Fi/BLE scanning, packet capture, custom commands, firmware flashing, and more through organized tabs with real-time feedback - a friendlier alternative to the command line.
 
 ## Prerequisites
 
@@ -26,9 +22,7 @@ The Control App is a Python-based application built with PyQt6 that connects to 
 
 ## Installation
 
-The Control App is located in the `scripts/control app/` directory of the GhostESP repository.
-
-### First-Time Setup
+The Control App is located in the `scripts/control app/` directory of the GhostESP repository. To run it:
 
 1. **Navigate to the control app directory**:
    ```bash
@@ -45,33 +39,24 @@ The application will automatically:
 - Install all required dependencies from `requirements.txt`
 - Launch the GUI
 
-**Note**: On first run, the setup process may take a few minutes as dependencies are downloaded and installed.
+**Note:** On first run, the setup process may take a few minutes as dependencies are downloaded and installed.
 
 ## Connecting to Your Device
-
-### Initial Connection
 
 1. **Connect your GhostESP device** via USB to your computer
 2. **Select the serial port** from the dropdown in the **Serial Connection** section
 3. **Click Refresh Ports** if your device doesn't appear in the list
 4. **Click Connect** to establish the serial connection
 
-Once connected:
-- The UI overlay will disappear, enabling all controls
-- Connection status will appear in the log area
-- You can now use all features of the application
-
-### Connection Status
-
-- **Connected**: All controls are enabled and the overlay is hidden
-- **Disconnected**: A visual overlay appears with "No serial connection. Connect to enable controls."
-- **Auto-reconnect**: Enable this option in settings to automatically reconnect if the connection drops
+When connected, the UI overlay disappears and controls are enabled, and the log area shows connection status. When disconnected, an overlay reads "No serial connection. Connect to enable controls." Enable **Auto-reconnect** in settings to reconnect automatically if the connection drops.
 
 ## Main Features
 
+The command panel is organized into five top-level tabs: **WiFi Operations**, **Network Operations**, **BLE Operations**, **Evil Portal**, and **Settings**.
+
 ### Wi-Fi Operations
 
-The **Wi-Fi** tab provides access to wireless network operations:
+The **Wi-Fi Operations** tab groups its controls into **Scanning**, **Attacks**, **Beacons**, and **Capture** sub-tabs:
 
 - **Scan Access Points**: Discover nearby Wi-Fi networks
 - **List APs/Stations**: View currently stored access points and stations
@@ -80,6 +65,14 @@ The **Wi-Fi** tab provides access to wireless network operations:
   - Random SSIDs
   - Rickroll SSIDs
   - AP list (uses stored access points)
+
+### Network Operations
+
+The **Network Operations** tab provides:
+
+- **WiFi Connection**: Join a network by SSID and password
+- **Network Tools**: Cast a random YouTube video or print to a network printer
+- **Port Scanner**: Scan a target IP (or `local`) with common-port, all-port, or range arguments
 
 ### BLE Operations
 
@@ -92,15 +85,18 @@ The **BLE** tab handles Bluetooth Low Energy scanning:
 
 ### Packet Capture
 
-The **Capture** tab enables Wi-Fi packet monitoring:
+The **Capture** sub-tab under Wi-Fi Operations enables Wi-Fi packet monitoring. The Capture Type combo offers:
 
-- **Capture Probes**: Monitor Wi-Fi probe requests
-- **Capture Deauth**: Track deauthentication packets
-- **Capture WPS**: Log WPS (Wi-Fi Protected Setup) packets
+- **Probes**: Monitor Wi-Fi probe requests
+- **Beacons**: Log beacon frames
+- **Deauth**: Track deauthentication packets
+- **Raw**: Capture raw Wi-Fi frames
+- **WPS**: Log WPS (Wi-Fi Protected Setup) packets
+- **Pwnagotchi**: Capture for Pwnagotchi-style handshake collection
 
 ### Portal Management
 
-The **Portal Files** tab handles evil portal operations:
+The **Evil Portal** tab handles evil portal operations:
 
 - **Upload Custom HTML**: Send a local HTML file to use as a custom portal
 - **Progress Indicator**: Visual feedback during file upload
@@ -171,7 +167,7 @@ Build and flash your own firmware using ESP-IDF:
 
 6. **Exit Flash Mode**: Return to the main UI when done
 
-**Note**: Custom builds are unsupported. Use at your own risk.
+**Note:** Custom builds are unsupported. Use at your own risk.
 
 **Panel Instructions**: The Flasher Output window displays step-by-step instructions for each flashing panel when you switch between them.
 
@@ -208,20 +204,12 @@ Both areas support ANSI color codes for better readability of terminal output.
 
 ## UI Features
 
-### Resizable Panes
-
-The command and display areas can be resized by dragging the splitter between them, allowing you to customize the layout to your preference.
-
-### Visual Feedback
+Drag the splitter between the command and display areas to resize them.
 
 - **Connection overlay**: When disconnected, a semi-transparent overlay covers the main UI with a message
 - **Status indicators**: Color-coded indicators show connection status and flashing panel status
 - **Progress indicators**: Visual feedback for file uploads and long-running operations
-
-### Keyboard Shortcuts
-
-- **Enter**: Send custom command
-- Standard text editing shortcuts work in all text fields
+- **Keyboard**: Press **Enter** to send a custom command; standard text editing shortcuts work in all text fields
 
 ## Troubleshooting
 
@@ -247,7 +235,7 @@ The command and display areas can be resized by dragging the splitter between th
 ### Command Errors
 
 - **Verify firmware version**: Ensure your device firmware supports the commands you're trying to use
-- **Check command syntax**: Refer to the [Command Line Reference]({{< relref "../getting-started/command-line-reference.md" >}}) for correct syntax
+- **Check command syntax**: Refer to the [CLI Reference]({{< relref "../getting-started/command-line-reference.md" >}}) for correct syntax
 - **View error messages**: Check the log area for detailed error information
 
 ### UI Overlay Covers Controls
@@ -283,15 +271,15 @@ The command and display areas can be resized by dragging the splitter between th
 - **Check virtual environment**: The app should create it automatically, but you can delete `ghost-control-venv` and restart to recreate it
 - **View error messages**: Check the terminal output for specific error messages
 
-## Next Steps
+## Related Tasks
 
-- Explore the [Command Line Reference]({{< relref "../getting-started/command-line-reference.md" >}}) to learn about all available commands
+- Explore the [CLI Reference]({{< relref "../getting-started/command-line-reference.md" >}}) to learn about all available commands
 - Set up [GhostLink]({{< relref "../getting-started/dual-communication.md" >}}) for dual-device operations
 - Review [Wi-Fi Basics]({{< relref "../wifi/basics.md" >}}) to understand wireless attacks
 - Check out [BLE Scanning]({{< relref "../ble/scanning.md" >}}) for Bluetooth operations
 
 ## Notes
 
-- **Responsible use**: This is a development and diagnostics tool — always comply with local regulations when using network diagnostic tools.
-- **Cross-platform**: Works on Windows, macOS, and Linux. On first run it auto-creates its own Python virtual environment and installs dependencies.
+- **Responsible use**: This is a development and diagnostics tool - always comply with local regulations when using network diagnostic tools.
+- **Cross-platform**: Works on Windows, macOS, and Linux.
 

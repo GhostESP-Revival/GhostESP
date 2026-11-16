@@ -1,0 +1,25 @@
+Title: Wi-Fi
+Description: Overview of GhostESP&#39;s Wi-Fi capabilities
+URL: /v2.2/wifi/
+Version: v2.2
+Section: GhostESP: Revival
+Keywords: WiFi, scanning, monitoring, portal, wireless networks
+Search index: /search-index.json
+
+# Wi-Fi
+
+> Overview of GhostESP&#39;s Wi-Fi capabilities
+
+## On this page
+
+- [Quick links](#quick-links)
+
+---
+
+GhostESP’s Wi-Fi tools scan, monitor, connect, capture, and attack from the device itself.
+## Quick links
+- [Wi-Fi Basics](/v2.2/wifi/basics/) - how the Wi-Fi radio is used
+- [Scanning networks](/v2.2/wifi/survey/) - network scans and AP lists
+- [Connect to a Wi-Fi Network](/v2.2/wifi/connect/) - join a network you own
+- [Capturing packets](/v2.2/wifi/capture/) and [handshakes](/v2.2/wifi/handshakes/)
+- [Attacks](/v2.2/wifi/deauth/) - deauth, Karma, Evil Portal, DNS Sinkhole, and more

@@ -1,5 +1,5 @@
 Title: GhostScript
-Description: Write Lua scripts that chain CLI commands, react to events, and automate multi-step workflows on GhostESP.
+Description: Write Lua scripts that chain CLI commands, react to events, and automate multi-step workflows on GhostESP
 URL: /latest/ghostscript/
 Version: latest
 Section: GhostESP: Revival
@@ -7,35 +7,35 @@ Search index: /search-index.json
 
 # GhostScript
 
-> Write Lua scripts that chain CLI commands, react to events, and automate multi-step workflows on GhostESP.
+> Write Lua scripts that chain CLI commands, react to events, and automate multi-step workflows on GhostESP
 
 ## On this page
 
-- [What is GhostScript?](#what-is-ghostscript)
+- [What Is GhostScript?](#what-is-ghostscript)
 - [Quickstart](#quickstart)
 - [Device CLI](#device-cli)
-- [Lifecycle of a script](#lifecycle-of-a-script)
+- [Lifecycle of a Script](#lifecycle-of-a-script)
 - [The &lt;code&gt;ghost&lt;/code&gt; API](#the-ghost-api)
 - [Storage Streams](#storage-streams)
 - [Type-2 NFC](#type-2-nfc)
-- [Chaining CLI commands](#chaining-cli-commands)
+- [Chaining CLI Commands](#chaining-cli-commands)
 - [Host-Backed Results](#host-backed-results)
 - [Events](#events)
-- [Rate limiting](#rate-limiting)
+- [Rate Limiting](#rate-limiting)
 - [Coroutines](#coroutines)
 - [Input](#input)
 - [Manifests](#manifests)
 - [Examples](#examples)
 - [Recipes](#recipes)
-- [Deauth APs by SSID pattern](#deauth-aps-by-ssid-pattern)
-- [Stop capture on first handshake](#stop-capture-on-first-handshake)
-- [Runtime environment](#runtime-environment)
-- [Limits and gotchas](#limits-and-gotchas)
-- [Compiling and copying with &lt;code&gt;ghostbt&lt;/code&gt;](#compiling-and-copying-with-ghostbt)
+- [Deauth APs by SSID Pattern](#deauth-aps-by-ssid-pattern)
+- [Stop Capture on First Handshake](#stop-capture-on-first-handshake)
+- [Runtime Environment](#runtime-environment)
+- [Limits and Gotchas](#limits-and-gotchas)
+- [Compiling and Copying with &lt;code&gt;ghostbt&lt;/code&gt;](#compiling-and-copying-with-ghostbt)
 
 ---
 
-## What is GhostScript?
+## What Is GhostScript?
 GhostScript is a tiny Lua 5.4 runtime that runs .gsb precompiled Lua chunks from the SD card. Scripts can call existing APIs and CLI commands, read output, subscribe to events, and react to input, letting you chain commands and automate multi-step workflows without flashing new firmware.
 You author .gs source on your computer, compile it to .gsb with ghostbt, then launch the .gsb from the Apps menu or the CLI. The device intentionally does not load text .gs scripts to keep runtime RAM and firmware size lower.
 Choose GhostScript for portable automation and event-driven workflows. If you need custom native widgets, lower-level hardware APIs, or C performance, compare it with [Native SD Apps](/latest/development/native-sd-apps/).
@@ -71,9 +71,9 @@ script list
 script run &lt;index&gt;
 script status
 script stop
-script list recursively finds standalone .gsb files and directories containing a manifest.json, then prints stable indexes. Use an index from that output with script run &lt;index&gt;. Only one script can run at a time.
+script list recursively finds standalone .gsb files and directories containing a manifest.json, then prints stable indexes. The scan is capped at 32 entries and 4 directory levels deep; anything beyond those limits is not listed. Use an index from that output with script run &lt;index&gt;. Only one script can run at a time.
 On devices with a screen, script run opens the GhostScript runner view. On headless devices, it starts a background task and writes script output to the terminal/serial log. script stop requests that active script stop; use script status to confirm it has become idle.
-## Lifecycle of a script
+## Lifecycle of a Script
 A script has three phases:
 - Top-level chunk: runs once when you launch the script. Use it for setup, ghost.event.on(...) subscriptions, and starting coroutines.
 - on_tick(ms): called every ~100 ms by the runner while the script is alive. Use it for polling, time-based logic, and event-driven state machines. If on_tick is defined, the runtime stays alive after the top-level chunk finishes.
@@ -152,7 +152,7 @@ open accepts &#34;r&#34;, &#34;w&#34;, or &#34;a&#34;; &#34;w&#34; truncates and
 ### Type-2 NFC
 With the nfc permission and a local PN532 or ST25R3916 reader, ghost.nfc.scan_start() begins an isolated Type-2 NDEF scan. Poll scan_active() and use read(max_bytes) after it finishes; the result includes the UID, model, user capacity, NDEF bytes, and read-only, password, and lock state. write_ndef(message) writes a bounded NDEF message only to the same tag that was scanned, rechecks its UID immediately before writing, and refuses read-only, password-protected, or locked tags.
 This facade intentionally excludes MIFARE authentication, key recovery, nonce collection, raw page access, emulation, and non-Type-2 protocols. Call stop() when finished to release the reader. A successful scan emits the compact nfc_tag event (model|uid); read the tag object for complete metadata and NDEF bytes.
-## Chaining CLI commands
+## Chaining CLI Commands
 The killer feature: scripts can call any CLI command, capture its output as events, and decide what to do next based on what came back.
 ghost.event.on(&#34;command.output&#34;, function(line)
 if line:find(&#34;BSSID&#34;) then return end -- skip header
@@ -338,7 +338,7 @@ ghost.event.on(&#34;command.output&#34;, function(line)
 print(&#34;hsk:&#34;, line)
 end, { match = &#34;Handshake found&#34; })
 If you pass both a builtin filter and a match_fn, the builtin runs first and the function only sees what passed.
-### Rate limiting
+### Rate Limiting
 To keep handlers from drowning the runner, the dispatcher throttles command.output to one event per 10 ms per topic. All other topics pass through; add your own throttle inside the handler if you need finer control.
 ### Coroutines
 GhostScript runs one Lua state per script. Use ghost.event.wait() or
@@ -396,7 +396,7 @@ gps_tracker.gs |
 Long-running GPS/power logger with scoped storage. |
 ## Recipes
 These are full workflows you can copy and adapt. Compile them with gbt script compile and drop the generated .gsb on the SD card.
-### Deauth APs by SSID pattern
+### Deauth APs by SSID Pattern
 Live-scan for APs and deauth any whose SSID contains a target string. Useful for knocking down rogue APs or running a quick deauth loop against a specific tenant.
 local TARGET = &#34;CorpWifi&#34;
 local COOLDOWN_MS = 2000
@@ -422,7 +422,7 @@ end)
 ghost.wifi.scan_start()
 print(&#34;scanning for SSIDs matching &#34; .. TARGET)
 Tune COOLDOWN_MS and BURSTS to avoid hammering the radio; the per-BSSID cooldown is essential or you’ll get a frame storm.
-### Stop capture on first handshake
+### Stop Capture on First Handshake
 Useful for unattended captures where you only need one 4-way. The script starts capture -eapol, waits for handshake_captured, and stops capture as soon as one is seen.
 local TARGET_BSSID = nil -- nil = any BSSID; or pin to a specific MAC
 ghost.commands.start(&#34;capture -eapol&#34;)
@@ -444,7 +444,7 @@ ghost.delay(60000)
 ghost.commands.start(&#34;capture -stop&#34;)
 ghost.exit()
 If you want to filter by AP, set TARGET_BSSID to the BSSID string. To capture every handshake on the channel, leave it nil and ghost.exit() on the first event.
-## Runtime environment
+## Runtime Environment
 GhostScript uses Lua 5.4 in 32-bit mode (LUA_32BITS=1): integers are 32-bit and floats are 32-bit. This halves memory usage per Lua value compared to 64-bit mode. For hardware scripting (GPIO, radio channels, RSSI, timestamps) this is fully adequate. GPS coordinates retain ~7 digits of precision.
 Available standard libraries:
 Library |
@@ -461,11 +461,11 @@ coroutine |
 Not available. Use ghost.delay() and ghost.event.wait() for cooperative yielding. |
 io, os, debug, package, utf8 |
 Not available. Use ghost.storage for file I/O. |
-## Limits and gotchas
+## Limits and Gotchas
 -
 Bytecode is limited to 8 KiB per .gsb file. Split the workflow or reduce generated code if the compiled chunk exceeds the limit.
 -
-Single task, cooperative yielding. The script runs on one FreeRTOS task. ghost.delay and ghost.event.wait yield execution without blocking the UI, but long-running CLI commands still block the script task while they execute. The coroutine standard library is not loaded; use ghost.delay / ghost.event.wait for cooperative work.
+Single task, cooperative yielding. The script runs on one FreeRTOS task. ghost.delay and ghost.event.wait yield execution without blocking the UI, but long-running CLI commands still block the script task while they execute.
 -
 No require() of other .gsb files. Each script is a single chunk. Copy helpers between scripts for now.
 -
@@ -487,7 +487,7 @@ Command log buffer is 640 bytes (8 lines × 80 characters); older lines are trim
 No permission prompt at runtime. If a script doesn’t have a permission, the API call errors with permission denied. Check the manifest before shipping.
 -
 Wi-Fi and BLE share one radio on most ESP32s. Starting a BLE scan mid-Wi-Fi-scan will tear down Wi-Fi. Drive them sequentially from the same script.
-## Compiling and copying with ghostbt
+## Compiling and Copying with ghostbt
 # compile a single file
 gbt script compile hello.gs
 # compile all bundled source examples

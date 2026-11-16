@@ -1,0 +1,94 @@
+Title: GhostESP: Revival
+Description: GhostESP is a Wi-Fi pentesting and multi-protocol wireless security platform for ESP32 devices. Scan Wi-Fi networks, capture handshakes, launch attacks, read NFC tags, learn and transmit IR signals, and more
+URL: /v2.2/
+Version: v2.2
+Section: GhostESP Documentation
+Keywords: ESP32, security testing, WiFi, NFC, infrared, penetration testing, toolkit, wireless security
+Search index: /search-index.json
+
+# GhostESP: Revival
+
+> GhostESP is a Wi-Fi pentesting and multi-protocol wireless security platform for ESP32 devices. Scan Wi-Fi networks, capture handshakes, launch attacks, read NFC tags, learn and transmit IR signals, and more
+
+## On this page
+
+- [Start Here](#start-here)
+- [Explore Capabilities](#explore-capabilities)
+
+---
+
+## Start Here
+[
+## 1. Check your board
+Confirm your board, supported features, and the firmware build you need.
+](/v2.2/getting-started/supported-hardware/)
+[
+## 2. Flash GhostESP
+Use the recommended web flasher or choose a manual USB or Flipper Zero method.
+](/v2.2/getting-started/installation-guide/)
+[
+## 3. Connect to GhostESP
+Choose the on-device UI, WebUI, serial CLI, Flipper app, or desktop control app.
+](/v2.2/getting-started/control-methods/)
+[
+## 4. Try your first scan
+Run a passive Wi-Fi scan and confirm that your device is working.
+](/v2.2/getting-started/first-scan/)
+Stuck? The [FAQ](/v2.2/getting-started/faq/) covers setup, credentials, and common failures. If you are adding a module or changing pins, see [Wiring Modules and Peripherals](/v2.2/getting-started/peripheral-wiring/).
+## Explore Capabilities
+[
+## Wi-Fi
+Scan networks, capture handshakes, and launch attacks.
+](/v2.2/wifi/)
+[
+## Bluetooth
+Scan, advertise, read GATT services, and target AirTags.
+](/v2.2/ble/)
+[
+## SubGHz
+Scan, capture, and replay sub-GHz radio signals with a CC1101.
+](/v2.2/subghz/)
+[
+## NFC
+Read, write, and save NFC tags.
+](/v2.2/nfc/)
+[
+## Infrared
+Learn and transmit IR signals and universal remotes.
+](/v2.2/infrared/)
+[
+## GPS
+Log wardrives and tag captures with location data.
+](/v2.2/gps/)
+[
+## LoRa
+Meshtastic chat on SX1262, BLE app link, stock radio interop.
+](/v2.2/lora/)
+[
+## Ethernet
+Fingerprint hosts and scan the wired network.
+](/v2.2/ethernet/)
+[
+## Camera
+Stream MJPEG video and run motion detection.
+](/v2.2/camera/)
+[
+## USB
+Use keyboard, BadUSB, keyboard mode, and mouse jiggler features.
+](/v2.2/usb/)
+[
+## Flipper Zero App
+Control GhostESP from a Flipper Zero.
+](/v2.2/flipper-app/)
+[
+## GhostScript
+Automate multi-step workflows with Lua scripts.
+](/v2.2/ghostscript/)
+[
+## Customization
+Theme packages, boot images, and device styling.
+](/v2.2/customization/)
+[
+## Companion Tools
+Desktop Control App and screen mirroring over USB.
+](/v2.2/companion-tools/)

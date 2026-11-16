@@ -1471,6 +1471,15 @@ static esp_err_t api_command_handler(httpd_req_t *req) {
     }
 
     const char *command = command_json->valuestring;
+    // SerialCommand has 256 bytes including its NUL terminator.
+    if (!command[0] || strlen(command) > 255 || strchr(command, '\n') || strchr(command, '\r')) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_sendstr(req, "Use one command of 1-255 UTF-8 bytes");
+        cJSON_Delete(json);
+        free(content);
+        return ESP_FAIL;
+    }
+
 
     // Add command to log buffer
     char cmd_log[1024];
@@ -1479,7 +1488,7 @@ static esp_err_t api_command_handler(httpd_req_t *req) {
 
     simulateCommand(command);
 
-    httpd_resp_send(req, "Command executed", strlen("Command executed"));
+    httpd_resp_sendstr(req, "Command queued");
 
     cJSON_Delete(json);
     free(content);
@@ -1931,15 +1940,26 @@ static esp_err_t api_esp_comm_control_handler(httpd_req_t *req) {
 // Handler for sending ESP communication commands
 static esp_err_t api_esp_comm_send_handler(httpd_req_t *req) {
     WEBUI_GUARD_OR_RETURN(req);
-    char content[512];
-    int ret = httpd_req_recv(req, content, MIN_(req->content_len, sizeof(content) - 1));
-    if (ret <= 0) {
+    // A 250-byte command can occupy 1500 JSON bytes when escaped.
+    char content[1536];
+    if (req->content_len >= sizeof(content)) {
+        httpd_resp_set_status(req, "413 Payload Too Large");
+        httpd_resp_sendstr(req, "{\"success\":false,\"message\":\"Command payload too large\"}");
+        return ESP_FAIL;
+    }
+    size_t received = 0;
+    while (received < req->content_len) {
+        int count = httpd_req_recv(req, content + received, req->content_len - received);
+        if (count <= 0) break;
+        received += (size_t)count;
+    }
+    if (received != req->content_len || received == 0) {
         httpd_resp_set_status(req, "400 Bad Request");
         httpd_resp_sendstr(req, "{\"error\": \"Invalid request payload\"}");
         return ESP_FAIL;
     }
     
-    content[ret] = '\0';
+    content[received] = '\0';
     
     cJSON *json = cJSON_Parse(content);
     if (!json) {
@@ -1956,8 +1976,20 @@ static esp_err_t api_esp_comm_send_handler(httpd_req_t *req) {
         return ESP_FAIL;
     }
 
-    // Send the full command string as-is (no separate data field needed)
-    bool success = esp_comm_manager_send_command(command->valuestring, NULL);
+    size_t command_len = strlen(command->valuestring);
+    if (command_len == 0 || command_len > 250 ||
+        strchr(command->valuestring, '\n') || strchr(command->valuestring, '\r')) {
+        cJSON_Delete(json);
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_sendstr(req, "{\"success\":false,\"message\":\"Use one command of 1-250 UTF-8 bytes\"}");
+        return ESP_FAIL;
+    }
+    // The stream transport splits the verb and arguments on the peer.
+    // The packet command-name field is only 32 bytes, not a full command line.
+    char command_log[280];
+    snprintf(command_log, sizeof(command_log), "> [peer] %s\n", command->valuestring);
+    ap_manager_add_log(command_log);
+    bool success = esp_comm_manager_send_command_line(command->valuestring);
     
     cJSON *response = cJSON_CreateObject();
     cJSON_AddBoolToObject(response, "success", success);

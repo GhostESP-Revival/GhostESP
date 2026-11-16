@@ -129,20 +129,11 @@ static void populate_script_list(void) {
 
     bool display_was_suspended = false;
     if (badble_sd_begin(&display_was_suspended)) {
-        const char *dir_path = "/mnt/ghostesp/badble";
-        DIR *dir = opendir(dir_path);
-        if (dir) {
-            struct dirent *entry;
-            while ((entry = readdir(dir)) != NULL && script_count < MAX_SCRIPTS) {
-                size_t len = strlen(entry->d_name);
-                if (len > 4 && strcmp(entry->d_name + len - 4, ".txt") == 0) {
-                    strncpy(script_names[script_count], entry->d_name, MAX_SCRIPT_NAME - 1);
-                    script_names[script_count][MAX_SCRIPT_NAME - 1] = '\0';
-                    script_count++;
-                }
-            }
-            closedir(dir);
-        }
+        // Lists badble/ then badusb/ (deduplicated) -- same lookup the manager
+        // uses to actually run a script, so this list and "Run Script" agree.
+        int found = badble_manager_list_scripts(script_names + script_count,
+                                                 MAX_SCRIPTS - script_count);
+        script_count += found;
         badble_sd_end(display_was_suspended);
     }
 

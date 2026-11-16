@@ -2,7 +2,6 @@
 title: "Supported Hardware"
 description: "Device compatibility matrix for GhostESP features"
 weight: 10
-toc: true
 ---
 
 ## Overview
@@ -114,13 +113,21 @@ GhostESP runs on a variety of ESP32 boards with varying feature support. This co
   </table>
 </div>
 
-**OTA:** `✓` means the release build uses a dual-partition OTA layout. `Manual` means USB/manual flashing is required for that release build. Banshee C5 self-OTA (previously `Updater + peer`) is disabled in v2.1.2 due to bad UX and flash overflow; use USB/manual flashing - OTA will return in a future leaner layout.
+**OTA:** `✓` means the release build uses a dual-partition OTA layout. `Manual` means USB/manual flashing is required for that release build. Banshee C5 self-OTA (previously `Updater + peer`) is disabled in v2.2 BETA due to bad UX and flash overflow; use USB/manual flashing - OTA will return in a future leaner layout.
 
 **Native SD Apps:** `✓` means the release build supports loading native `.gapp` apps from SD.
 
 **GPS Default / SD Default:** these columns describe the release build's default or known board wiring. GPS and SD card pins can be configured at runtime on most builds, so `✗` does not mean the feature is impossible on custom wiring.
 
-**M5Stack Grove ports:** the M5Stack CoreS3-SE and AtomS3R configs expose their HY2.0-4P Grove connectors on I2C port 1 (`PORT.A`: SDA=G2, SCL=G1; the CoreS3-SE also has `PORT.B` G8/G9 and `PORT.C` G17/G18). Plug an ST25R3916 NFC module (I2C, 0x50) and/or an M5Stack ENV III unit (SHT30 0x44 + QMP6988 0x70) into Grove `PORT.A` and open the NFC or ENV III app — both devices share the same bus.
+**M5Stack Grove ports:** the M5Stack CoreS3-SE and AtomS3R configs expose their HY2.0-4P Grove connectors on I2C port 1 (`PORT.A`: SDA=G2, SCL=G1; the CoreS3-SE also has `PORT.B` G8/G9 and `PORT.C` G17/G18). Plug an ST25R3916 NFC module (I2C, 0x50) and/or an M5Stack ENV III unit (SHT30 0x44 + QMP6988 0x70) into Grove `PORT.A` and open the NFC or ENV III app - both devices share the same bus.
+
+**Additional feature availability:** some features are not represented in the table above.
+
+- **Ethernet** (`CONFIG_WITH_ETHERNET`) is enabled only on **Banshee S3**.
+- **Native USB SD passthrough** (`usbsd`) is present only on builds with `CONFIG_HAS_USB_MSC_SD`.
+- **USB keyboard host mode** (`usbkbd`) is **ESP32-S3 only**.
+- **Local BadUSB** (`CONFIG_HAS_BADUSB`) is built for Cardputer, Cardputer ADV, CrowPanel 1.28″ Rotary, T-Dongle-S3, TEmbed C1101, and Banshee S3. **VSENSE host detection** is **Banshee S3 only**; Banshee C5 is a remote-HID build without local BadUSB.
+- **Chameleon NFC** (`CONFIG_NFC_CHAMELEON`) is on by default for builds with BLE unless a profile explicitly disables it.
 
 ## Camera Support
 

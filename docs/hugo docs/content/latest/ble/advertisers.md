@@ -1,6 +1,6 @@
 ---
 title: "Advertiser Scan"
-description: "Scan and parse BLE advertisements, including iBeacon packets, without connecting to devices."
+description: "Scan and parse BLE advertisements, including iBeacon packets, without connecting to devices"
 weight: 12
 ---
 
@@ -26,7 +26,7 @@ The parsed advertiser list includes:
 
 ## On-Device UI
 
-1. Open **Menu → Bluetooth**.
+1. Open **BLE** from the main menu.
 2. Choose **Advertiser Scan**.
 3. Let it run until enough nearby advertisers are found.
 4. Press **Back** or another input to stop the scan.
@@ -35,7 +35,7 @@ The parsed advertiser list includes:
 7. Use **Track** in the detail view to monitor RSSI for that advertiser.
 8. Use **Save to SD** in the detail view to write that advertiser's parsed record to the SD card.
 
-## Command Line
+## CLI
 
 Start the parsed advertiser scan:
 
@@ -88,7 +88,8 @@ api->ble_adv_scan_stop_tracking();
 
 // index < 0 saves the full advertiser list, >= 0 saves only that index.
 if (api->ble_adv_scan_save_to_sd(0)) {
-    // scan_file_* handles JIT mount for the Banshee C5 ("Banshee_C5") build
+    // scan_file_* handles JIT mount for the C5 templates
+    // ("somethingsomething", "LilyGo T-Dongle-C5", "NM-CYD-C5")
     // and writes to /mnt/ghostesp/scans/ble_advertiser_<n>.txt
 }
 
@@ -104,8 +105,8 @@ The **Save to SD** action in the advertiser detail view writes a parsed record f
 Saving goes through the same `scan_file_*` helper that other scans use, so it:
 
 - Auto-increments the trailing index when previous files already exist.
-- Calls `sd_card_mount_for_flush` on the Banshee C5 (`Banshee_C5`) build template so the SD card mounts just-in-time, then unmounts after the write.
-- Calls `sd_card_setup_directory_structure` if needed so `/mnt/ghostesp/scans` exists.
+- Calls `sd_card_mount_for_flush` on builds that need just-in-time mounting (templates `"somethingsomething"`, `"LilyGo T-Dongle-C5"`, `"NM-CYD-C5"`) so the SD card mounts just-in-time, then unmounts after the write.
+- Creates `/mnt/ghostesp/scans` with a direct `mkdir` if it does not exist.
 - Reports success through the on-screen toast, matching other scan saves.
 
 ## Notes
@@ -113,4 +114,5 @@ Saving goes through the same `scan_file_*` helper that other scans use, so it:
 - BLE advertiser scan is not available on ESP32-S2.
 - Starting BLE scans temporarily pauses GhostNet Wi-Fi services.
 - Results are keyed by BLE address; devices that rotate addresses may appear as multiple advertisers.
-- GATT discovery is still the right tool when you need to connect and enumerate services.
+- The advertiser scan stores up to 64 advertisers when PSRAM is available, otherwise 32.
+- `listadv` also auto-saves its results to `/mnt/ghostesp/scans/ble_advertisers_<n>.txt` when `auto_save_scans` is enabled (the default).

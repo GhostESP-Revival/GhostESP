@@ -1,10 +1,10 @@
 ---
 title: "Wi-Fi Basics"
-description: "Learn what Wi-Fi attacks are and how they work before diving into tools."
+description: "Learn what Wi-Fi attacks are and how they work before diving into tools"
 weight: 5
 ---
 
-Wi-Fi attacks sound complex, but they're built on a few simple ideas. This page explains what each attack does, why someone might use it, and what you need to know before trying the tools in GhostESP.
+Wi-Fi attacks are built on a few simple ideas. Here's what each one does, why someone might use it, and what to know before trying the tools in GhostESP.
 
 ## What is a Wi-Fi attack?
 
@@ -15,7 +15,7 @@ A Wi-Fi attack is any action that disrupts, intercepts, or tricks Wi-Fi networks
 
 ## Common attacks explained
 
-### Packet Capture
+### Packet capture
 **What it does**: Records all Wi-Fi traffic on a channel and saves it to a file (PCAP format).
 
 **Why**: You can analyze the data later to see what devices are connecting, what SSIDs they're looking for, or extract handshakes for password testing.
@@ -24,7 +24,7 @@ A Wi-Fi attack is any action that disrupts, intercepts, or tricks Wi-Fi networks
 
 **Learn more**: [Capturing packets]({{< relref "capture.md" >}})
 
-### Deauthentication (Deauth)
+### Deauthentication (deauth)
 **What it does**: Sends a fake "disconnect" message to a device, forcing it off the network.
 
 **Why**: Tests network stability, forces devices to reconnect (so you can capture their handshake), or disrupts a specific device.
@@ -33,7 +33,7 @@ A Wi-Fi attack is any action that disrupts, intercepts, or tricks Wi-Fi networks
 
 **Learn more**: [Deauthentication attacks]({{< relref "deauth.md" >}})
 
-### Karma Attack
+### Karma attack
 **What it does**: Pretends to be a Wi-Fi network that a device is looking for, tricking the device into connecting.
 
 **Why**: Intercept traffic from devices or test how they behave when connecting to fake networks.
@@ -42,7 +42,7 @@ A Wi-Fi attack is any action that disrupts, intercepts, or tricks Wi-Fi networks
 
 **Learn more**: [Karma attacks]({{< relref "karma.md" >}})
 
-### Evil Portal
+### Evil portal
 **What it does**: Creates a fake Wi-Fi network with a login page that looks real (like a coffee shop Wi-Fi).
 
 **Why**: Capture credentials, redirect users to a phishing site, or test how users respond to fake login pages.
@@ -51,7 +51,7 @@ A Wi-Fi attack is any action that disrupts, intercepts, or tricks Wi-Fi networks
 
 **Learn more**: [Evil portals]({{< relref "evil-portal.md" >}})
 
-### Handshake Capture
+### Handshake capture
 **What it does**: Records the WPA/WPA2 authentication handshake between a device and router.
 
 **Why**: Export the handshake to offline password cracking tools to test weak passwords.
@@ -59,6 +59,19 @@ A Wi-Fi attack is any action that disrupts, intercepts, or tricks Wi-Fi networks
 **Legal note**: Cracking passwords on networks you don't own is illegal.
 
 **Learn more**: [Handshakes]({{< relref "handshakes.md" >}})
+
+### Other attack modes
+
+GhostESP also exposes additional management-frame attacks from **Menu → Wi-Fi → Attacks** (or the `attack` command):
+
+- **Handshake + Deauth** (`attack -hsd`): Captures handshakes while deauthing to force a reconnect.
+- **Channel Switch (CSA)** (`attack -c`): Sends channel switch announcement frames.
+- **EAPOL Logoff** (`attack -e`): Sends logoff frames instead of deauth frames.
+- **Probe Request Flood** (`attack -p`): Floods the air with probe requests.
+- **Bad Message** (`attack -b`): Sends malformed management frames.
+- **Auth Flood** (`attack -a`): Floods a target with authentication requests.
+- **SAE Flood** (`attack -s <password>`): Floods WPA3 networks with authentication requests (ESP32-C5/C6).
+- **GTK Abuse** (`attack -g <ssid> <password>`): Tests client isolation using the shared group key.
 
 ## Before you start
 
@@ -80,12 +93,3 @@ A Wi-Fi attack is any action that disrupts, intercepts, or tricks Wi-Fi networks
 2. **Choose an attack** based on what you want to learn (see attack descriptions above).
 3. **Capture or execute** using the GhostESP menu or CLI.
 4. **Analyze** the results on your computer (e.g., open PCAP files in Wireshark).
-
-## Next steps
-
-Pick an attack that interests you and read the detailed guide:
-- [Capturing packets]({{< relref "capture.md" >}}) — Record Wi-Fi traffic
-- [Handshakes]({{< relref "handshakes.md" >}}) — Extract authentication data
-- [Karma attacks]({{< relref "karma.md" >}}) — Trick devices into connecting
-- [Evil portals]({{< relref "evil-portal.md" >}}) — Create fake login pages
-- [Survey]({{< relref "survey.md" >}}) — Scan for networks and devices

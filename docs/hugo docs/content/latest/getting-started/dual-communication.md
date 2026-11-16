@@ -1,23 +1,16 @@
 ---
 title: "GhostLink"
-description: "GhostLink connects two ESP32 devices for remote control while maintaining continuous AP hosting."
+description: "GhostLink connects two ESP32 devices for remote control while maintaining continuous AP hosting"
 weight: 100
 ---
 
-GhostLink connects two ESP32 devices so one can host the AP while the other runs attacks.
+GhostLink connects two ESP32 devices over UART so one can host the access point while the other runs attacks. Wire them together, power them on, and they auto-discover and connect; send any GhostESP command from one device to the other, with no manual connection needed in most cases.
 
 ## Prerequisites
 
 - Two compatible ESP32 boards.
 - Three wires (TX, RX, GND) to connect them.
 - Both devices flashed with GhostESP firmware.
-
-## How it works
-
-- Wire two ESP32s together via UART.
-- They auto-discover and connect on boot.
-- Send any GhostESP command from one device to the other.
-- No manual connection commands needed in most cases.
 
 ## Wiring
 
@@ -33,40 +26,23 @@ Both devices need power.
 
 Once wired and powered on, devices automatically find each other:
 
-- `commstatus` - Check if connected
-- `commsend <command>` - Send any command to the other device
+- `commstatus` - Check connection status
+- `commsend <command>` - Send any command to the other device; for example `commsend scanap`, `commsend attack -d`, `commsend beaconspam -r`, or `commsend capture -probe`
 - `commdisconnect` - Disconnect if needed
-
-### Examples
-
-- `commstatus` - Check connection
-- `commsend scanap` - Send command to other device
-- `commsend attack -d` - Start attack on other device
-- `commsend beaconspam -r` - Start beacon spam on other device
-- `commsend capture -probe` - Start probe capture on other device
 
 ## Changing pins
 
-Default pins are TX: GPIO 6, RX: GPIO 7 (or 17 and 16 on base ESP32 models). To change them:
-
-Run `commsetpins <TX_PIN> <RX_PIN>` (for example, `commsetpins 4 5`).
+Default pins are TX: GPIO 6, RX: GPIO 7 (or 17 and 16 on base ESP32 models). To change them, run `commsetpins <TX_PIN> <RX_PIN>` (for example, `commsetpins 4 5`).
 
 Pin changes are saved and persist across reboots. You cannot change pins while connected.
 
 ## Manual connection
 
-If auto-connection fails, you can manually connect:
-
-- `commdiscovery` - Check discovery status
-- `commconnect ESP_A1B2C3` - Connect to specific device
-
-Device names are auto-generated based on MAC address (format: `ESP_XXXXXX`).
+If auto-connection fails, run `commdiscovery` to check discovery status, then `commconnect ESP_A1B2C3` to connect to a specific device. Device names are auto-generated based on MAC address (format: `ESP_XXXXXX`).
 
 ## On-screen UI
 
-When connected, the GhostLink menu appears. It uses a split-view terminal: local logs on the left, remote responses on the right.
-
-Commands sent via the menu automatically open this view.
+When connected, the GhostLink menu appears. It uses a split-view terminal: local logs on the left, remote responses on the right. Commands sent via the menu automatically open this view.
 
 ## Troubleshooting
 
@@ -82,11 +58,10 @@ Commands sent via the menu automatically open this view.
 ## Notes
 
 - Auto-discovery happens every 3 seconds.
-- Connection uses UART at 115,200 baud.
+- Connection uses UART at 115,200 baud by default; Banshee build templates override this to 921,600 baud.
 - The device with the "larger" name becomes master, but commands can be sent from both directions.
 - Auto-reconnect is enabled; the connection will automatically restore if interrupted.
-- Physical wired connection is required.
 
-## See also
+## Related tasks
 
-- [BLE Bridge]({{< relref "ble-bridge.md" >}}) — use one of these wired boards as a Bluetooth proxy to the Android companion app.
+- [BLE Bridge]({{< relref "ble-bridge.md" >}}) - use one of these wired boards as a Bluetooth proxy to the Android companion app.

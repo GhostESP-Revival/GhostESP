@@ -16,6 +16,10 @@ enableRobotsTXT = true
   name = "Latest"
 
 [[params.versioning.options]]
+  id = "v2.2"
+  name = "v2.2"
+
+[[params.versioning.options]]
   id = "v2.1"
   name = "v2.1"
 

@@ -1,0 +1,33 @@
+{{- /* Vertical flow / step diagram. One step per line.
+       "Step text | detail shown on hover" (separate detail lines with ";;"). */ -}}
+{{- $title := .Get "title" -}}
+{{- $caption := .Get "caption" -}}
+{{- $lines := split (.Inner | strings.TrimSpace) "\n" -}}
+<figure class="diagram diagram--flow">
+  {{- with $title }}<figcaption class="diagram__title">{{ . }}</figcaption>{{ end }}
+  <div class="diagram__flow">
+  {{- $n := 0 -}}
+  {{- range $lines -}}
+    {{- $line := strings.TrimSpace . -}}
+    {{- if $line -}}
+      {{- $tip := "" -}}
+      {{- if in $line "|" -}}
+        {{- $lp := split $line "|" -}}
+        {{- $line = strings.TrimSpace (index $lp 0) -}}
+        {{- $tip = strings.TrimSpace (delimit (after 1 $lp) "|") -}}
+      {{- end -}}
+      {{- if gt $n 0 }}<div class="diagram__connector"></div>{{ end -}}
+      {{- $n = add $n 1 -}}
+      {{- $body := $line | markdownify | replaceRE "</?p>" "" -}}
+      <div class="diagram__step">
+        <span class="diagram__step-num">{{ $n }}</span>
+        <span class="diagram__step-body{{ if $tip }} diagram__step-body--info{{ end }}"{{ if $tip }} tabindex="0" aria-label="{{ printf "%s. %s" $line $tip }}"{{ end }}>
+          <span>{{ $body | safeHTML }}</span>
+          {{- if $tip }}<span class="diagram__tip">{{ replace $tip ";;" "\n" }}</span>{{ end }}
+        </span>
+      </div>
+    {{- end -}}
+  {{- end -}}
+  </div>
+  {{- with $caption }}<p class="diagram__caption">{{ . | markdownify | replaceRE "</?p>" "" | safeHTML }}</p>{{ end }}
+</figure>

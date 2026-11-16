@@ -68,6 +68,7 @@ static mc_advert_blob_t *s_blob_cache;  // MC_ADVERT_BLOB_CACHE
 static int s_blob_next;
 
 static void blob_cache_put(const uint8_t *pub, const uint8_t *blob, uint8_t len) {
+
     /* len is uint8_t and MC_MAX_TRANS_UNIT is 255, so it always fits. */
     if (!s_blob_cache || !pub || !blob || len == 0) return;
     int slot = -1;
@@ -578,7 +579,8 @@ static void maybe_forward(mc_packet_t *pkt) {
     mc_packet_set_path_hash_count(pkt, (uint8_t)(n + 1));
 
     uint8_t len = mc_packet_write_to(pkt, s_fwd_frame);
-    /* len is uint8_t and s_fwd_frame is MC_MAX_TRANS_UNIT (255) bytes. */
+
+    // len is uint8_t so it cannot exceed the MC_MAX_TRANS_UNIT buffer size.
     if (len == 0) return;
     s_fwd_len = len;
     s_fwd_pending = true;

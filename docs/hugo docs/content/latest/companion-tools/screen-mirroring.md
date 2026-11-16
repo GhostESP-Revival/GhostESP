@@ -1,6 +1,6 @@
 ---
 title: "Screen Mirroring"
-description: "Mirror your GhostESP display to your desktop for easier viewing and remote control."
+description: "Mirror your GhostESP display to your desktop for easier viewing and remote control"
 weight: 20
 aliases:
   - "/getting-started/screen-mirroring/"
@@ -13,15 +13,10 @@ View and control your device's screen from your computer.
 - A GhostESP device with a display (CYD, T-Deck, Cardputer, etc.)
 - USB cable to connect the device
 - Python 3.8 or newer (for desktop script only)
-- **Note**: CYD devices require 460800 baud instead of the default 115200, and use 8-bit color mode which may result in reduced color quality and slowdowns
-
-## Installation (Desktop Script)
-
-The script is in `scripts/screen_mirror/`. It installs dependencies (pygame, pyserial, numpy) on first run.
-
-**For Web-Based Mirror**: If you prefer not to install Python, use the web mirror at [ghostesp.net/serial](https://ghostesp.net/serial) by opening the **Mirror** tab.
 
 ## Starting the Mirror
+
+The desktop script is in `scripts/screen_mirror/` and installs its dependencies (pygame, pyserial, numpy) on first run. To skip Python entirely, use the web mirror at [ghostesp.net/serial](https://ghostesp.net/serial) and open the **Mirror** tab; that page also includes a console and file browser.
 
 ### Desktop Script
 
@@ -51,10 +46,6 @@ To list available serial ports:
 python ghost_mirror.py --list
 ```
 
-### Web-Based Mirror
-
-Alternatively, visit [ghostesp.net/serial](https://ghostesp.net/serial) and open the **Mirror** tab to use the browser-based mirror without installing Python. The web serial mirror also includes a console and file browser on the same page.
-
 ## Device-Specific Considerations
 
 ### CYD Devices
@@ -71,25 +62,16 @@ To connect to a CYD device:
 python ghost_mirror.py COM3 --baud 460800
 ```
 
-Click **Swap** to fix inverted colors. Note that CYD mirroring is slower and has lower color quality.
+Click **Swap** to fix inverted colors.
 
 ## Using the Mirror
 
-### Window Controls
+Drag the **title bar** to move the window and click **×** to close the application. The mirror only shows content while the device's display is actively updating, and the virtual controls send input as text over the same serial connection.
 
-- **Title bar**: Drag to move the window
-- **× button**: Close the application
-
-### Port Selection
-
-Use the **◄** and **►** buttons in the header to cycle through available COM ports. The current port is displayed between the buttons.
-
-### Connection
-
-- **Connect**: Opens the serial connection and enables mirroring
-- **Disconnect**: Closes the connection cleanly
-
-### Display Controls
+- **Port**: Use the **◄** and **►** buttons in the header to cycle through available COM ports; the current port is shown between them.
+- **Connect**: Opens the serial connection and enables mirroring.
+- **Disconnect**: Closes the connection cleanly.
+- **Swap**: If colors appear wrong (inverted or incorrect), toggles byte order and forces a full screen refresh.
 
 The virtual D-pad on the right side mirrors the physical controls on your device:
 
@@ -101,7 +83,7 @@ The virtual D-pad on the right side mirrors the physical controls on your device
 | ► | Navigate right |
 | ● | Select / Confirm |
 
-### Keyboard Shortcuts
+Keyboard shortcuts:
 
 | Key | Action |
 |-----|--------|
@@ -112,11 +94,7 @@ The virtual D-pad on the right side mirrors the physical controls on your device
 | Enter / Space | Select |
 | Escape | Exit |
 
-### Byte Swap Toggle
-
-If colors appear wrong (inverted or incorrect), click the **Swap** button to toggle byte order. This forces a full screen refresh.
-
-## Command Line Options
+## CLI Options
 
 | Option | Description |
 |--------|-------------|
@@ -146,39 +124,32 @@ python ghost_mirror.py COM3 --baud 921600
 
 ## Troubleshooting
 
-### No display or black screen
+### No Display or Black Screen
 
 - Ensure the device is powered on and showing content on its physical display
 - Try clicking **Connect** to re-establish the connection
 - Check that the correct COM port is selected
 
-### Wrong colors
+### Wrong Colors
 
 - Click the **Swap** button to toggle byte order
 - The display will refresh with corrected colors
 - **For CYD devices**: Poor color fidelity is normal due to 8-bit color mode.
 
-### Connection lost
+### Connection Lost
 
 - The status indicator will turn red
 - Click **Connect** to reconnect
 - If the device was reset, wait for it to boot before reconnecting
 
-### Device resets when connecting
+### Device Resets When Connecting
 
 - This is normal for some boards on first connection
 - The script disables DTR/RTS to prevent resets after initial connection
 
-### Slow or laggy display
+### Slow or Laggy Display
 
 - Screen mirroring uses USB serial which has bandwidth limitations
 - Reduce scale factor if needed
 - Close other applications using the serial port
 - **For CYD devices**: Slowdowns are expected due to 8-bit color mode and bandwidth constraints. Ensure you're using `--baud 460800` for optimal performance. If the display is still slow, try reducing the scale factor further.
-
-## Notes
-
-- **Web vs Desktop**: The desktop script offers better performance and more features. The web-based mirror is a convenience option that works without additional software installation.
-- **Device Display**: The mirror only shows content when the device's display is actively updating.
-- **Input Control**: Virtual D-pad buttons and keyboard shortcuts send commands as text over the same serial connection.
-- **Compatibility**: Works with any GhostESP device that has a display (CYD, T-Deck, Cardputer, etc.).

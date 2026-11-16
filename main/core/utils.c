@@ -1,4 +1,5 @@
 #include "core/utils.h"
+#include "managers/settings_manager.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <esp_heap_caps.h>
@@ -214,6 +215,101 @@ void format_mac_address(const uint8_t *mac, char *buffer, size_t buffer_len, boo
            mac[3],
            mac[4],
            mac[5]);
+}
+
+// ============================================================================
+// Privacy Mode (PII redaction for on-screen display)
+// ============================================================================
+
+bool privacy_mode_is_enabled(void) {
+  /* Reads the persisted flag straight out of the global settings struct, so
+   * there is no extra state, allocation or static buffer. */
+  return settings_get_privacy_mode(&G_Settings);
+}
+
+void privacy_redact_text(char *text) {
+  if (text == NULL || !privacy_mode_is_enabled()) {
+    return;
+  }
+  for (char *p = text; *p != '\0'; ++p) {
+    unsigned char c = (unsigned char)*p;
+    if (c >= 32 && c <= 126) {
+      *p = '*';
+    }
+  }
+}
+
+void privacy_redact_text_copy(const char *src, char *dst, size_t dst_size) {
+  if (dst == NULL || dst_size == 0) {
+    return;
+  }
+  if (src == NULL) {
+    dst[0] = '\0';
+    return;
+  }
+  strncpy(dst, src, dst_size - 1);
+  dst[dst_size - 1] = '\0';
+  privacy_redact_text(dst);
+}
+
+void privacy_redact_ssid(char *ssid) {
+  if (ssid == NULL || !privacy_mode_is_enabled()) {
+    return;
+  }
+  /* Placeholder labels contain no PII and stay readable. */
+  if (ssid[0] == '(' || ssid[0] == '<' || strncmp(ssid, "Hidden", 6) == 0) {
+    return;
+  }
+  privacy_redact_text(ssid);
+}
+
+void privacy_redact_ssid_copy(const char *src, char *dst, size_t dst_size) {
+  if (dst == NULL || dst_size == 0) {
+    return;
+  }
+  if (src == NULL) {
+    dst[0] = '\0';
+    return;
+  }
+  strncpy(dst, src, dst_size - 1);
+  dst[dst_size - 1] = '\0';
+  privacy_redact_ssid(dst);
+}
+
+void privacy_redact_mac(char *mac_text) {
+  static const char kLowerMask[] = "xx:xx:xx";
+  static const char kUpperMask[] = "XX:XX:XX";
+  if (mac_text == NULL || !privacy_mode_is_enabled()) {
+    return;
+  }
+  size_t len = strlen(mac_text);
+  bool upper = false;
+  if (len == 17) {
+    /* Full "AA:BB:CC:DD:EE:FF" -> keep the vendor OUI, mask the device half. */
+    for (int i = 0; i < 8; ++i) {
+      char c = mac_text[i];
+      if (c >= 'A' && c <= 'F') {
+        upper = true;
+        break;
+      }
+    }
+    memcpy(mac_text + 9, upper ? kUpperMask : kLowerMask, 8);
+  } else if (len == 8) {
+    /* Short "DD:EE:FF" device-id suffix (no vendor info) -> mask entirely. */
+    for (int i = 0; i < 8; ++i) {
+      char c = mac_text[i];
+      if (c >= 'A' && c <= 'F') {
+        upper = true;
+        break;
+      }
+    }
+    memcpy(mac_text, upper ? kUpperMask : kLowerMask, 8);
+  }
+}
+
+void format_mac_address_masked(const uint8_t *mac, char *buffer, size_t buffer_len, bool uppercase) {
+  format_mac_address(mac, buffer, buffer_len, uppercase);
+  privacy_redact_mac(buffer);
 }
 
 // ============================================================================
