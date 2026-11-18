@@ -12,7 +12,7 @@ extern "C" {
 typedef struct {
     uint8_t percentage;
     uint16_t voltage_mv;
-    int16_t current_ma;
+    int16_t current_ma; /* Zero when unavailable; MAX17048 does not measure current. */
     uint16_t capacity_mah;
     uint16_t remaining_capacity_mah;
     bool is_charging;
@@ -27,6 +27,7 @@ bool fuel_gauge_manager_init(void);
 
 /**
  * @brief Get current fuel gauge data
+ * The Espressif MAX17048 backend returns a cached background-task sample.
  * @param data Pointer to fuel_gauge_data_t structure to fill
  * @return true if data read successfully, false otherwise
  */
