@@ -56,7 +56,7 @@ lv_obj_t *popup_create_body_label(lv_obj_t *container, const char *text, lv_coor
 
 #if defined(NFC_HAS_LOCAL_READER) || defined(CONFIG_NFC_CHAMELEON)
 #include "managers/nfc/mifare_classic.h"
-#include "managers/nfc/mifare_attack.h"
+#include "managers/nfc/mifare_test.h"
 #include "managers/nfc/flipper_nfc_compat.h"
 #include "managers/nfc/nfc_backend.h"
 #endif
@@ -542,7 +542,7 @@ void mfc_ui_set_phase(int sector, int first_block, bool key_b, int total_keys) {
     
     // Add detailed status messages for MFC dictionary attack phases
     if (sector == 0 && first_block == 0) {
-        status_display_show_status("MFC Attack Start");
+        status_display_show_status("MFC Test Start");
     } else if (sector >= 0) {
         char status_msg[32];
         snprintf(status_msg, sizeof(status_msg), "MFC Sec %d Key %c", sector, key_b ? 'B' : 'A');

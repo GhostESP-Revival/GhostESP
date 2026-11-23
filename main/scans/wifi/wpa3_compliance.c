@@ -4,7 +4,7 @@
  */
 
 #include "scans/wifi/wpa3_compliance.h"
-#include "scans/wifi/deauth_pmf_note.h"
+#include "scans/wifi/reconnect_pmf_note.h"
 #include "scans/wifi/ap_scan.h"
 #include "core/glog.h"
 #include "core/scan_saver.h"

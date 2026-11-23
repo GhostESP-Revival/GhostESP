@@ -385,6 +385,7 @@ def setup_esp_idf_environment(idf_path: str) -> Tuple[Dict[str, str], str]:
 def get_build_targets() -> List[Dict[str, str]]:
     """Get the build target configuration matrix"""
     return [
+        {"name": "Hosyond E32R35T", "idf_target": "esp32", "sdkconfig_file": "configs/sdkconfig.Hosyond_E32R35T_3.5inch_88.9mm", "zip_name": "Hosyond_E32R35T.zip"},
         {"name": "esp32-generic", "idf_target": "esp32", "sdkconfig_file": "configs/sdkconfig.default.esp32", "zip_name": "esp32-generic.zip"},
         {"name": "esp32s2-generic", "idf_target": "esp32s2", "sdkconfig_file": "configs/sdkconfig.default.esp32s2", "zip_name": "esp32s2-generic.zip"},
         {"name": "esp32s3-generic", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.default.esp32s3", "zip_name": "esp32s3-generic.zip"},
@@ -430,6 +431,7 @@ def get_build_targets() -> List[Dict[str, str]]:
         {"name": "Cardputer ADV", "idf_target": "esp32s3", "sdkconfig_file": "configs/sdkconfig.cardputeradv", "zip_name": "CardputerADV.zip"},
         {"name": "Marauder V8", "idf_target": "esp32c5", "sdkconfig_file": "configs/sdkconfig.MarauderV8", "zip_name": "MarauderV8.zip"},
         {"name": "Marauder Pancake", "idf_target": "esp32c5", "sdkconfig_file": "configs/sdkconfig.Pancake", "zip_name": "MarauderPancake.zip"},
+        {"name": "Waveshare C5 3.5", "idf_target": "esp32c5", "sdkconfig_file": "configs/sdkconfig.WaveshareC5_35", "zip_name": "Waveshare_C5_35.zip"},
         {"name": "Banshee C5", "idf_target": "esp32c5", "sdkconfig_file": "configs/sdkconfig.somethingsomething", "zip_name": "Banshee-C5.zip"}
     ]
 

@@ -19,7 +19,7 @@ list(FILTER app_sources EXCLUDE REGEX "vendor/ed25519/.*\\.c")
 idf_build_get_property(idf_target IDF_TARGET)
 if(idf_target STREQUAL "esp32s2")
     message(STATUS "Excluding BLE sources for ${idf_target} target (no local BLE hardware)")
-    list(FILTER app_sources EXCLUDE REGEX "attacks/ble/.*\\.c")
+    list(FILTER app_sources EXCLUDE REGEX "features/ble/.*\\.c")
     list(FILTER app_sources EXCLUDE REGEX "scans/ble/.*\\.c")
     list(FILTER app_sources EXCLUDE REGEX "managers/ble_manager\\.c")
 endif()
@@ -113,10 +113,10 @@ list(APPEND required_components esp_https_server)
 if(idf_target STREQUAL "esp32p4")
     list(REMOVE_ITEM app_sources
          "${CMAKE_SOURCE_DIR}/main/managers/espnow_manager.c"
-         "${CMAKE_SOURCE_DIR}/main/attacks/wifi/gtk_abuse.c")
+         "${CMAKE_SOURCE_DIR}/main/features/wifi/gtk_abuse.c")
     list(APPEND app_sources
          "${CMAKE_SOURCE_DIR}/main/managers/espnow_manager_stub.c"
-         "${CMAKE_SOURCE_DIR}/main/attacks/wifi/gtk_abuse_stub.c")
+         "${CMAKE_SOURCE_DIR}/main/features/wifi/gtk_abuse_stub.c")
     # Keep these target-gated rather than profile-gated. ESP-IDF may rebuild
     # the component requirements graph without sdkconfig values available.
     list(APPEND required_components esp_wifi esp_hosted esp_wifi_remote esp_lcd_ek79007 esp_lcd_touch_gt911 esp_mm esp_driver_ppa esp_video)

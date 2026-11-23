@@ -41,7 +41,7 @@ Target -> GhostESP : ICMP echo reply | Echo reply (type 0) matching the random I
 
 ### Display (touchscreen)
 
-1. Navigate to **Menu → Wi-Fi → Attacks → GTK Isolation Bypass Test**
+1. Navigate to **Menu → Wi-Fi → Wi-Fi Tests → GTK Isolation Bypass Test**
 2. Enter the **network SSID** when prompted
 3. Enter the **network password** when prompted
 4. The test will connect, extract the GTK, inject a test frame, and check for a reply
@@ -50,19 +50,19 @@ Target -> GhostESP : ICMP echo reply | Echo reply (type 0) matching the random I
 ### CLI
 
 ```
-attack -g "SSID" "PASSWORD"
+wifitest -g "SSID" "PASSWORD"
 ```
 
 For networks with spaces in the name:
 
 ```
-attack -g "My Home Network" "mypassword"
+wifitest -g "My Home Network" "mypassword"
 ```
 
-To stop the test, run `stopdeauth` (which halts all running Wi-Fi attacks), or back out of the detail view on-device:
+To stop the test, run `stopreconnect` (which halts all running Wi-Fi attacks), or back out of the detail view on-device:
 
 ```
-stopdeauth
+stopreconnect
 ```
 
 ## Results

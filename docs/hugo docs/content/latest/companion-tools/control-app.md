@@ -60,7 +60,7 @@ The **Wi-Fi Operations** tab groups its controls into **Scanning**, **Attacks**,
 
 - **Scan Access Points**: Discover nearby Wi-Fi networks
 - **List APs/Stations**: View currently stored access points and stations
-- **Deauth Attacks**: Start or stop deauthentication attacks on selected networks
+- **Reconnect Tests**: Start or stop reconnect tests on selected networks
 - **Beacon Spam**: Send beacon frames with options for:
   - Random SSIDs
   - Rickroll SSIDs

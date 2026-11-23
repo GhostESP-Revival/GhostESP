@@ -40,7 +40,7 @@
 #include "scans/ble/flipper_scan.h"
 #include "scans/ble/airtag_scan.h"
 #include "scans/ble/gatt_scan.h"
-#include "attacks/ble/ble_spam.h"
+#include "features/ble/ble_spam.h"
 #include "managers/ble_bridge_manager.h"
 #ifdef CONFIG_HAS_BADBLE
 #include "managers/badble_manager.h"

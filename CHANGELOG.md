@@ -8,6 +8,9 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 
 ### Added
 
+- Added Hosyond E32R35T 3.5-inch ST7796U/XPT2046 board support - @Entropypiewholes (#415)
+- Added Banshee Lite support - @Billi-Green (#408)
+- Added IP5306 charger configuration and status support, and configured the Banshee Lite C5 to use its MAX17048 fuel gauge - @Billi-Green (#408)
 - Sentry now identifies GhostNet networks as GhostESP devices
 - Added Sentry settings to choose which devices appear and turn popups on or off
 - Added Sentry logs to help explain why no devices appear
@@ -18,6 +21,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Vendor names now appear in AP/station scans, attack target lists, Ethernet ARP results, port/SNMP scans, GATT scans and Sentry rows; randomized MACs are labelled "Private address"
 - Added `scanarp stop` and `scanlocal stop`
 - Added `forgetwifi` command to clear the saved WiFi network and disconnect from it
+- Added support for the Waveshare ESP32-C5-Touch-LCD-3.5 - @slickrick773 (#433)
 - Cloud Store now shows a clear "No internet. Connect GhostESP to WiFi" message when opened, refreshed or installing without a connection
 - BadBLE's Run Script list and `badble run`/`badble list` now also find scripts in `/mnt/ghostesp/badusb/`, not just `/mnt/ghostesp/badble/`
 - Renamed the "mDNS Discovery" menu entry to "Local Scan" and added "List Local Scan" to reopen the last results without rescanning
@@ -29,6 +33,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 
 ### Changed
 
+- Renamed Deauth to Reconnect Test and refreshed testing terminology
 - Improved Airspace Monitor alerts in crowded places
 - Airspace Monitor device rows stay in place while updating
 - Added Airspace Monitor logs to help investigate alerts
@@ -42,6 +47,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 
 ### Fixed
 
+- Fixed BadUSB HID enumeration on affected ESP32-S3 boards, including Banshee Lite S3 - @14790897 (#440)
 - Fixed touch drag scrolling in Sentry settings
 - Improved Sentry scan reliability and added messages when a scanner fails to start
 - Fixed Sentry counting the same sighting repeatedly
@@ -69,6 +75,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Fixed Cert Scan reliability: concurrent sweeps no longer share TLS contexts, stalled hosts time out, and the CA chain is completed to the trusted emSign root
 - Fixed HTTPS sinkhole and Cert Scan state across restarts, including intercept-list persistence and stale certificate state
 - Fixed beacon spam trying to reconnect to the saved WiFi network while the attack was running
+- Fixed beacon spam beacons being discarded by Wi-Fi 6 clients; fake SSIDs now use valid WPA2 frames with a proper RSN IE and no malformed HE element - @14790897
 
 ## v2.2.2
 

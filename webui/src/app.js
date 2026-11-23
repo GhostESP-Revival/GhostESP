@@ -883,7 +883,7 @@ function renderApDetail(data) {
     </div>
     <div class="detail-actions">
       <button class="btn primary" data-item-action="select-ap" data-index="${escapeAttr(data.index)}">Select AP</button>
-      <button class="btn danger" data-item-action="deauth" data-index="${escapeAttr(data.index)}">Deauth</button>
+      <button class="btn danger" data-item-action="deauth" data-index="${escapeAttr(data.index)}">Reconnect Test</button>
       <button class="btn" data-item-action="track-ap">Track AP</button>
       <button class="btn" data-item-action="connect-ap" data-ssid="${escapeAttr(data.ssid)}">Connect</button>
     </div>
@@ -903,7 +903,7 @@ function renderStationDetail(data) {
     </div>
     <div class="detail-actions">
       <button class="btn primary" data-item-action="select-sta" data-index="${escapeAttr(data.index)}">Select Station</button>
-      <button class="btn danger" data-item-action="deauth-sta" data-index="${escapeAttr(data.index)}">Deauth</button>
+      <button class="btn danger" data-item-action="deauth-sta" data-index="${escapeAttr(data.index)}">Reconnect Test</button>
       <button class="btn" data-item-action="track-sta">Track Station</button>
     </div>
   </div>`;
@@ -1101,7 +1101,7 @@ function renderBatchToolbar(type) {
   const label = type === 'ap' ? 'AP' : 'Station';
   const action = type === 'ap' ? 'deauth' : null;
   return `<div class="batch-toolbar"><span>${count} ${label}${count > 1 ? 's' : ''} selected</span><div class="actions">
-    ${action ? `<button class="btn danger" data-batch-action="${action}">Deauth Selected</button>` : '<span class="chip warn">Firmware only supports single-station deauth</span>'}
+    ${action ? `<button class="btn danger" data-batch-action="${action}">Reconnect Test Selected</button>` : '<span class="chip warn">Firmware only supports single-station reconnect testing</span>'}
     <button class="btn ghost" data-batch-action="clear">Clear</button>
   </div></div>`;
 }

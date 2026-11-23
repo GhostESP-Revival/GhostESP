@@ -14,7 +14,7 @@
 #include "managers/ethernet/eth_fingerprint.h"
 #include "managers/ethernet/eth_utils.h"
 #include "managers/ethernet/eth_http.h"
-#include "attacks/ethernet/eth_arp_poison.h"
+#include "features/ethernet/eth_arp_poison.h"
 #include "lwip/ip4_addr.h"
 #include "lwip/etharp.h"
 #include "lwip/netif.h"

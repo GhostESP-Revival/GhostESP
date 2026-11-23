@@ -13,9 +13,9 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "attacks/ble/ble_spam.h"
-#include "attacks/ethernet/eth_arp_poison.h"
-#include "attacks/wifi/dhcp_starvation.h"
+#include "features/ble/ble_spam.h"
+#include "features/ethernet/eth_arp_poison.h"
+#include "features/wifi/dhcp_starvation.h"
 #include "core/dns_server.h"
 #include "scans/wifi/name_sniff.h"
 #include "managers/aerial_detector_manager.h"
@@ -137,12 +137,12 @@ void handle_stop_flipper(int argc, char **argv) {
     }
 
     if (wifi_manager_is_channel_switch_attack_running()) {
-        glog("Stopped channel switch attack.\n");
+        glog("Stopped channel switch test.\n");
         stopped_any = true;
     }
     wifi_manager_stop_deauth();
     if (wifi_manager_stop_handshake_deauth()) {
-        glog("Stopped handshake+deauth attack.\n");
+        glog("Stopped handshake + reconnect test.\n");
         stopped_any = true;
     }
     wifi_manager_stop_channel_switch_attack();
@@ -152,12 +152,12 @@ void handle_stop_flipper(int argc, char **argv) {
     }
     wifi_manager_stop_probe_flood();
     if (wifi_manager_is_bad_msg_running()) {
-        glog("Stopped bad msg attack.\n");
+        glog("Stopped bad msg test.\n");
         stopped_any = true;
     }
     wifi_manager_stop_bad_msg();
     if (wifi_manager_is_auth_flood_running()) {
-        glog("Stopped auth flood attack.\n");
+        glog("Stopped auth flood test.\n");
         stopped_any = true;
     }
     wifi_manager_stop_auth_flood();
@@ -255,7 +255,7 @@ void handle_stop_flipper(int argc, char **argv) {
     stopped_any = true;
 
     if (wifi_manager_stop_deauth_station()) {
-        glog("Stopped station deauth.\n");
+        glog("Stopped station reconnect test.\n");
         stopped_any = true;
     }
     wifi_manager_stop_deauth();
@@ -263,7 +263,7 @@ void handle_stop_flipper(int argc, char **argv) {
     wifi_manager_stop_eapollogoff_attack();
     wifi_manager_stop_sae_flood();
     if (wifi_manager_karma_is_running()) {
-        glog("Stopped Karma attack.\n");
+        glog("Stopped Karma test.\n");
         stopped_any = true;
     }
     wifi_manager_stop_karma();            // stop karma attack (sets flag; task self-exits)

@@ -14,5 +14,5 @@ GhostESP includes BLE (Bluetooth Low Energy) scanning and attack tools.
 - [Scanning]({{< relref "scanning.md" >}}) - discover nearby BLE devices and detect suspected skimmers
 - [Advertiser Scan]({{< relref "advertisers.md" >}}) - passively parse BLE advertisements
 - [GATT Discovery]({{< relref "gatt.md" >}}) - enumerate services on connected devices
-- [Attacks]({{< relref "attacks.md" >}}) - spam and AirTag spoofing
+- [Tests]({{< relref "tests.md" >}}) - spam and AirTag spoofing
 - [BadBLE Keyboard]({{< relref "badble.md" >}}) - BLE HID keyboard running DuckyScript payloads

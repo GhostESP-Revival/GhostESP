@@ -84,8 +84,8 @@ void ble_stop_gatt_scan(void);
 int ble_get_gatt_device_count(void);
 int ble_get_gatt_device_data(int index, uint8_t *mac, int8_t *rssi, char *name, size_t name_len);
 
-// BLE spam functions - defined in attacks/ble/ble_spam.h
-// Include attacks/ble/ble_spam.h for ble_spam_type_t and ble_spam_* functions
+// BLE spam functions - defined in features/ble/ble_spam.h
+// Include features/ble/ble_spam.h for ble_spam_type_t and ble_spam_* functions
 
 #endif
 #endif // BLE_MANAGER_H

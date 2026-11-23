@@ -1,12 +1,16 @@
 ---
-title: "Deauthentication Attacks"
+title: "Reconnect Test"
 description: "Force devices to disconnect from a Wi-Fi network"
+aliases:
+  - "/latest/wifi/deauth/"
 weight: 25
 ---
 
-Deauthentication (deauth) attacks force devices to disconnect from a Wi-Fi network. This is useful for testing network resilience or capturing authentication handshakes when devices reconnect.
+Reconnect Test sends frames that disconnect clients from a Wi-Fi network. Use it to test connection resilience or capture authentication handshakes when clients reconnect.
 
-> **Note:** Only perform deauth attacks on networks you own or have permission to test. See [Legal and ethical rules]({{< relref "basics.md#legal-and-ethical-rules" >}}).
+> **Note:** Only perform reconnect tests on networks you own or have permission to test. See [Legal and ethical rules]({{< relref "basics.md#legal-and-ethical-rules" >}}).
+
+The Reconnect Test sends deauthentication and disassociation frames to test client reconnection; it does not guarantee that a client reconnects. Use `reconnect` to start and `stopreconnect` to stop. Legacy `attack -d`, `attack -hsd`, and `stopdeauth` commands remain supported.
 
 ## How it works
 
@@ -27,9 +31,9 @@ Attacker -> AP : forged Deauth (from the client) | Deauthentication (subtype 0x0
 Client -> AP : reconnection attempt | Broadcast deauths (dest `FF:FF:FF:FF:FF:FF`) hit every client on the AP
 {{< /seq >}}
 
-### Broadcast and targeted attacks
+### Broadcast and targeted tests {#broadcast-and-targeted-attacks}
 
-The attack sends frames in two ways:
+The test sends frames in two ways:
 
 1. **Broadcast** (`FF:FF:FF:FF:FF:FF`): Hits all devices on the network without needing to know who's connected
 2. **Targeted**: If you've scanned for stations (`scansta`), GhostESP automatically includes any discovered clients associated with the selected AP
@@ -41,7 +45,7 @@ For targeted stations, GhostESP sends frames in both directions:
 - **AP → Station**: Appears to come from the access point, telling the device to disconnect
 - **Station → AP**: Appears to come from the device, telling the AP the device is leaving
 
-This makes the attack more reliable since both sides think the connection ended.
+This makes the test more reliable since both sides think the connection ended.
 
 ## Frequency band limitations
 
@@ -49,7 +53,7 @@ This makes the attack more reliable since both sides think the connection ended.
 
 Most ESP32 boards (ESP32, ESP32-S2, ESP32-S3, ESP32-C3, ESP32-C6) only support **2.4 GHz Wi-Fi**. This means:
 
-- You can only deauth networks on channels 1-14
+- You can only run reconnect tests on networks on channels 1-14
 - 5 GHz networks are invisible and unaffected
 - Many modern routers use both bands-devices on the 5 GHz band will stay connected
 
@@ -57,7 +61,7 @@ Most ESP32 boards (ESP32, ESP32-S2, ESP32-S3, ESP32-C3, ESP32-C6) only support *
 
 The **ESP32-C5** supports both 2.4 GHz and 5 GHz bands, allowing you to:
 
-- Scan and attack networks on all Wi-Fi channels
+- Scan and test networks on all Wi-Fi channels
 - Target devices on 5 GHz networks
 
 If your target network uses 5 GHz, you need an ESP32-C5 based device.
@@ -66,9 +70,9 @@ If your target network uses 5 GHz, you need an ESP32-C5 based device.
 
 **PMF** (also called MFP or 802.11w) is a security feature that cryptographically signs management frames. When enabled, devices can verify that deauth frames actually came from the real access point.
 
-### Networks immune to deauth
+### Networks protected against disconnect frames {#networks-immune-to-deauth}
 
-- **WPA3 networks**: PMF is mandatory. Deauth attacks will not work.
+- **WPA3 networks**: PMF is mandatory. Reconnect tests will not work.
 - **WPA2/WPA3 mixed mode**: Devices using WPA3 are protected; WPA2 devices may still be vulnerable.
 - **WPA2 with PMF enabled**: Some enterprise networks enable PMF on WPA2.
 
@@ -83,7 +87,7 @@ Security: WPA3
 PMF: Required
 ```
 
-If you see `PMF: Required`, deauth attacks will have no effect on that network.
+If you see `PMF: Required`, reconnect tests will have no effect on that network.
 
 ## Prerequisites
 
@@ -91,15 +95,15 @@ If you see `PMF: Required`, deauth attacks will have no effect on that network.
 - Target network on a supported frequency band (2.4 GHz for most boards, or 5 GHz with ESP32-C5)
 - **Country code set** in device settings (see Troubleshooting if you get errors)
 
-## Launching a deauth attack
+## Launching a reconnect test
 
 ### On-device UI
 
 1. Open **Menu → Wi-Fi → Scanning** and wait for the scan to complete.
 2. Select your target with **Select AP**.
-3. Open **Menu → Wi-Fi → Attacks → Deauth Attack**.
+3. Open **Menu → Wi-Fi → Wi-Fi Tests → Reconnect Test**.
 4. The device will continuously send deauth frames to all clients on that network.
-5. To stop, run `stopdeauth` in the terminal.
+5. To stop, run `stopreconnect` in the terminal.
 
 ### CLI
 
@@ -115,13 +119,13 @@ If you see `PMF: Required`, deauth attacks will have no effect on that network.
    ```
    select -a 1
    ```
-4. Start the attack:
+4. Start the test:
    ```
-   attack -d
+   reconnect
    ```
-5. Stop the attack:
+5. Stop the test:
    ```
-   stopdeauth
+   stopreconnect
    ```
 
 ### Targeting multiple networks
@@ -130,16 +134,16 @@ You can select multiple access points at once:
 
 ```
 select -a 1,3,5
-attack -d
+reconnect
 ```
 
 GhostESP iterates the selected APs in selection order, tuning to each AP's channel as it goes. Order your selection with this in mind if you want to reduce channel switching.
 
 ## Troubleshooting
 
-### ESP_ERR_INVALID_ARG when deauthing
+### ESP_ERR_INVALID_ARG during a reconnect test {#esp_err_invalid_arg-when-deauthing}
 
-This error occurs when attempting to deauth a network on a channel not allowed by your current country code setting. The default country is **US** (index `0`), which permits channels 1-11. (The `01` "World Safe" entry is only the fallback used when a settings slot is out of range, not the boot default.)
+This error occurs when testing a network on a channel not allowed by your current country code setting. The default country is **US** (index `0`), which permits channels 1-11. (The `01` "World Safe" entry is only the fallback used when a settings slot is out of range, not the boot default.)
 
 If your target network is on channel 12, 13, or 14, you must set the correct country code first.
 
@@ -180,9 +184,9 @@ Replace `<CC>` with one of the supported country codes (the `setcountry` command
 - **Europe, Australia** (`GB`, `DE`, `AU`, etc.): Channels 1-13
 - **Japan** (`JP`): Channels 1-14
 
-### Attack has no effect
+### Test has no effect
 
-- **Check the band**: If the network is on 5 GHz and you're using a 2.4 GHz-only board, the attack won't work.
+- **Check the band**: If the network is on 5 GHz and you're using a 2.4 GHz-only board, the test won't work.
 - **Check for PMF**: WPA3 networks and some WPA2 networks with PMF enabled are immune.
 - **Multiple APs**: Some networks have multiple access points. You may need to target each one separately.
 - **Distance**: Get closer to the access point for a stronger signal.
@@ -195,8 +199,8 @@ Devices reconnect immediately after being kicked. If they keep getting back on:
 - Move closer to the access point
 - Check for other interference
 
-## Related attacks
+## Related tests
 
-The `attack` command selects from several management-frame attacks. See [Other attack modes]({{< relref "basics.md#other-attack-modes" >}}) in Wi-Fi Basics for what each one does, and the [CLI Reference]({{< relref "../getting-started/command-line-reference.md" >}}) for the exact flags.
+The `wifitest` command selects from several management-frame attacks. See [Other attack modes]({{< relref "basics.md#other-attack-modes" >}}) in Wi-Fi Basics for what each one does, and the [CLI Reference]({{< relref "../getting-started/command-line-reference.md" >}}) for the exact flags.
 
-All of these stop with `stopdeauth`, which halts every running Wi-Fi attack.
+All of these stop with `stopreconnect`, which halts every running Wi-Fi attack.

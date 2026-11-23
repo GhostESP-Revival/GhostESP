@@ -10,7 +10,7 @@
  * and WiFi control functions.
  */
 
-#include "attacks/wifi/probe_request_flood.h"
+#include "features/wifi/probe_request_flood.h"
 #include "managers/wifi_manager.h"
 #include "managers/ap_manager.h"
 #include "managers/status_display_manager.h"
@@ -204,7 +204,7 @@ void probe_request_flood_start(void) {
     ghostscript_emit_event("attack_started", "probe_flood");
     BaseType_t attack_rc = xTaskCreate_psram(probe_flood_task, "probe_flood", 4096, NULL, 5, &probe_flood_task_handle);
     if (attack_rc != pdPASS) {
-        glog("Probe Request Flood failed to start (attack=%ld)\n", (long)attack_rc);
+        glog("Probe Request Flood failed to start (test=%ld)\n", (long)attack_rc);
         probe_flood_running = false;
         if (probe_flood_task_handle) {
             vTaskDeleteWithCaps(probe_flood_task_handle);
@@ -217,7 +217,7 @@ void probe_request_flood_start(void) {
 #endif
         return;
     }
-    glog("Probe Flood running. Use 'stopdeauth' or 'stop' to end.\n");
+    glog("Probe Flood running. Use 'stopreconnect' or 'stop' to end.\n");
 }
 
 void probe_request_flood_stop(void) {

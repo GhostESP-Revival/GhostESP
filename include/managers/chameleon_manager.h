@@ -8,7 +8,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include "managers/nfc/mifare_attack.h"
+#include "managers/nfc/mifare_test.h"
 
 #ifdef __cplusplus
 extern "C" {

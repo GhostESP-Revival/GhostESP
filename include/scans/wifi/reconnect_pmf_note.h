@@ -1,5 +1,5 @@
 /**
- * @file deauth_pmf_note.h
+ * @file reconnect_pmf_note.h
  * @brief Plain-English note about whether deauth is expected to get through
  *
  * Lives apart from the rest of the WPA3 compliance reporting so the message
@@ -7,8 +7,8 @@
  * logging dependencies. The authmode is taken as a plain uint8_t because that
  * is how a station record stores the security type of the AP it was seen on.
  */
-#ifndef DEAUTH_PMF_NOTE_H
-#define DEAUTH_PMF_NOTE_H
+#ifndef RECONNECT_PMF_NOTE_H
+#define RECONNECT_PMF_NOTE_H
 
 #include <stdint.h>
 
@@ -31,4 +31,4 @@ const char *deauth_pmf_note(uint8_t authmode);
 }
 #endif
 
-#endif /* DEAUTH_PMF_NOTE_H */
+#endif /* RECONNECT_PMF_NOTE_H */

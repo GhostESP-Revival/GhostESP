@@ -45,6 +45,14 @@ static const lv_font_t *terminal_font(void) {
         case 2: return &lv_font_montserrat_20;
         default: return &lv_font_montserrat_16;
     }
+#elif defined(CONFIG_WAVESHARE_C5_35_LCD)
+    /* 320x480 on a 3.5" panel: the 10-14px set is too small to read, so
+     * the default (Small) starts where the other boards' Large is. */
+    switch (size) {
+        case 0: return &lv_font_montserrat_14;
+        case 2: return &lv_font_montserrat_18;
+        default: return &lv_font_montserrat_16;
+    }
 #else
     switch (size) {
         case 0: return &lv_font_montserrat_10;

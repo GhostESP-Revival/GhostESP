@@ -1,5 +1,5 @@
-#ifndef CHANNEL_SWITCH_ATTACK_H
-#define CHANNEL_SWITCH_ATTACK_H
+#ifndef CHANNEL_SWITCH_TEST_H
+#define CHANNEL_SWITCH_TEST_H
 
 #include <stdbool.h>
 #include <stdint.h>

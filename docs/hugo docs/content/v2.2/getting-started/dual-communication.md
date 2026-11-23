@@ -27,7 +27,7 @@ Both devices need power.
 Once wired and powered on, devices automatically find each other:
 
 - `commstatus` - Check connection status
-- `commsend <command>` - Send any command to the other device; for example `commsend scanap`, `commsend attack -d`, `commsend beaconspam -r`, or `commsend capture -probe`
+- `commsend <command>` - Send any command to the other device; for example `commsend scanap`, `commsend reconnect`, `commsend beaconspam -r`, or `commsend capture -probe`
 - `commdisconnect` - Disconnect if needed
 
 ## Changing pins
