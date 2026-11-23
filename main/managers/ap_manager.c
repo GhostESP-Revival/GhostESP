@@ -41,6 +41,8 @@ static const char *TAG = "ap_manager";
 #include "esp_vfs_fat.h"
 #include "esp_heap_caps.h"
 #include "managers/status_display_manager.h"
+#include "managers/ghostcam_manager.h"
+#include "managers/sd_card_manager.h"
 #include "managers/auth_digest.h"
 #include "managers/views/terminal_screen.h"
 #include "managers/wifi_manager.h"
@@ -78,6 +80,9 @@ static esp_err_t api_logs_handler(httpd_req_t *req);
 static esp_err_t api_esp_comm_status_handler(httpd_req_t *req);
 static esp_err_t api_esp_comm_control_handler(httpd_req_t *req);
 static esp_err_t api_esp_comm_send_handler(httpd_req_t *req);
+static esp_err_t api_battery_handler(httpd_req_t *req);
+static esp_err_t api_led_get_handler(httpd_req_t *req);
+static esp_err_t api_led_post_handler(httpd_req_t *req);
 
 static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_id,
                           void *event_data);
@@ -102,6 +107,11 @@ static esp_err_t teardown_mdns(void);
 #define AUTH_MAX_HDR_LEN 512            // max size for Authorization header (increased for Digest)
 #define AUTH_MAX_DECODE_LEN 256         // max decoded credential length
 
+#define WEBUI_GUARD_OR_RETURN(req) \
+    do {                           \
+        if (!ap_manager_webui_request_allowed(req)) return ESP_OK; \
+    } while (0)
+
 static bool is_safe_mnt_path(const char *path, bool allow_root) {
     if (!path || strncmp(path, "/mnt", 4) != 0) return false;
     if (path[4] != '\0' && path[4] != '/') return false;
@@ -114,6 +124,166 @@ static bool is_safe_upload_filename(const char *name) {
     if (!name || name[0] == '\0' || strlen(name) >= 128) return false;
     if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) return false;
     return strchr(name, '/') == NULL && strchr(name, '\\') == NULL && strstr(name, "..") == NULL;
+}
+
+static esp_err_t send_json_response(httpd_req_t *req, cJSON *root) {
+    if (!root) {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        return httpd_resp_sendstr(req, "{\"error\":\"Failed to create JSON object\"}");
+    }
+
+    char *response = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!response) {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        return httpd_resp_sendstr(req, "{\"error\":\"Failed to serialize JSON\"}");
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t ret = httpd_resp_sendstr(req, response);
+    free(response);
+    return ret;
+}
+
+static esp_err_t send_api_error(httpd_req_t *req, const char *status, const char *message) {
+    httpd_resp_set_status(req, status);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, message);
+}
+
+static bool api_sd_card_begin(httpd_req_t *req, bool *display_was_suspended,
+                              bool *jit_started) {
+    if (display_was_suspended) *display_was_suspended = false;
+    if (jit_started) *jit_started = false;
+
+    if (!sd_card_jit_begin(display_was_suspended, true)) {
+        send_api_error(req, "503 Service Unavailable",
+                       "{\"error\":\"SD card unavailable.\"}");
+        return false;
+    }
+    if (jit_started) *jit_started = true;
+    return true;
+}
+
+static void api_sd_card_end(bool jit_started, bool display_was_suspended) {
+    if (jit_started) sd_card_jit_end(display_was_suspended);
+}
+
+static esp_err_t api_battery_handler(httpd_req_t *req) {
+    WEBUI_GUARD_OR_RETURN(req);
+
+    ghostcam_battery_t battery = {
+        .available = false,
+        .voltage_mv = -1,
+        .percentage = -1,
+        .charging = false,
+    };
+    bool supported = ghostcam_manager_is_supported();
+    bool available = supported && ghostcam_manager_get_battery(&battery);
+
+    cJSON *root = cJSON_CreateObject();
+    if (!root) return send_json_response(req, NULL);
+    cJSON_AddBoolToObject(root, "supported", supported);
+    cJSON_AddBoolToObject(root, "available", available);
+    cJSON_AddNumberToObject(root, "voltage_mv", available ? battery.voltage_mv : -1);
+    cJSON_AddNumberToObject(root, "percentage", available ? battery.percentage : -1);
+    cJSON_AddBoolToObject(root, "charging", available && battery.charging);
+    return send_json_response(req, root);
+}
+
+static esp_err_t api_led_get_handler(httpd_req_t *req) {
+    WEBUI_GUARD_OR_RETURN(req);
+
+    ghostcam_led_t led = {0};
+    bool supported = ghostcam_manager_is_supported();
+    if (supported) ghostcam_manager_get_led(&led);
+
+    cJSON *root = cJSON_CreateObject();
+    if (!root) return send_json_response(req, NULL);
+    cJSON_AddBoolToObject(root, "supported", supported);
+    cJSON_AddBoolToObject(root, "enabled", supported && led.enabled);
+    cJSON_AddNumberToObject(root, "brightness", supported ? led.brightness : 0);
+    cJSON_AddBoolToObject(root, "sd_active", supported && led.sd_active);
+    return send_json_response(req, root);
+}
+
+static esp_err_t api_led_post_handler(httpd_req_t *req) {
+    WEBUI_GUARD_OR_RETURN(req);
+
+    if (!ghostcam_manager_is_supported()) {
+        return send_api_error(req, "404 Not Found", "{\"error\":\"LED control unavailable.\"}");
+    }
+    if (req->content_len == 0 || req->content_len > 256) {
+        return send_api_error(req, "400 Bad Request", "{\"error\":\"Invalid JSON payload.\"}");
+    }
+
+    char body[257];
+    size_t body_len = 0;
+    while (body_len < req->content_len) {
+        int received = httpd_req_recv(req, body + body_len,
+                                      (size_t)req->content_len - body_len);
+        if (received <= 0) {
+            return send_api_error(req, "400 Bad Request",
+                                  "{\"error\":\"Failed to receive payload.\"}");
+        }
+        body_len += (size_t)received;
+    }
+    body[body_len] = '\0';
+
+    cJSON *json = cJSON_Parse(body);
+    if (!json) {
+        return send_api_error(req, "400 Bad Request", "{\"error\":\"Invalid JSON payload.\"}");
+    }
+
+    ghostcam_led_t current = {0};
+    ghostcam_manager_get_led(&current);
+    bool enabled = current.enabled;
+    uint8_t brightness = current.brightness;
+    bool changed = false;
+
+    cJSON *enabled_item = cJSON_GetObjectItemCaseSensitive(json, "enabled");
+    if (enabled_item) {
+        if (!cJSON_IsBool(enabled_item)) {
+            cJSON_Delete(json);
+            return send_api_error(req, "400 Bad Request",
+                                  "{\"error\":\"enabled must be boolean.\"}");
+        }
+        enabled = cJSON_IsTrue(enabled_item);
+        changed = true;
+    }
+
+    cJSON *brightness_item = cJSON_GetObjectItemCaseSensitive(json, "brightness");
+    if (brightness_item) {
+        double value = cJSON_IsNumber(brightness_item) ? brightness_item->valuedouble : -1;
+        if (!isfinite(value) || value < 0 || value > 100 || floor(value) != value) {
+            cJSON_Delete(json);
+            return send_api_error(req, "400 Bad Request",
+                                  "{\"error\":\"brightness must be an integer from 0 to 100.\"}");
+        }
+        brightness = (uint8_t)value;
+        changed = true;
+    }
+    cJSON_Delete(json);
+
+    if (!changed) {
+        return send_api_error(req, "400 Bad Request",
+                              "{\"error\":\"Provide enabled or brightness.\"}");
+    }
+
+    esp_err_t ret = ghostcam_manager_set_led(enabled, brightness);
+    if (ret != ESP_OK) {
+        return send_api_error(req, "500 Internal Server Error",
+                              "{\"error\":\"Failed to update LED.\"}");
+    }
+
+    ghostcam_manager_get_led(&current);
+    cJSON *root = cJSON_CreateObject();
+    if (!root) return send_json_response(req, NULL);
+    cJSON_AddBoolToObject(root, "supported", true);
+    cJSON_AddBoolToObject(root, "enabled", current.enabled);
+    cJSON_AddNumberToObject(root, "brightness", current.brightness);
+    cJSON_AddBoolToObject(root, "sd_active", current.sd_active);
+    return send_json_response(req, root);
 }
 
 static bool is_ip_in_ap_subnet(uint32_t addr_net_order) {
@@ -175,11 +345,6 @@ deny:
     httpd_resp_sendstr(req, "Unauthorized");
     return false;
 }
-
-#define WEBUI_GUARD_OR_RETURN(req) \
-    do {                           \
-        if (!ap_manager_webui_request_allowed(req)) return ESP_OK; \
-    } while (0)
 
 // simple global backoff state (very small memory footprint)
 static uint8_t auth_fail_count = 0;
@@ -247,7 +412,7 @@ static esp_netif_t *netif = NULL;
 static bool mdns_freed = false;
 
 static httpd_config_t server_config;
-static httpd_uri_t uri_handlers[20];
+static httpd_uri_t uri_handlers[24];
 static int handler_count = 0;
 static bool config_loaded = false;
 
@@ -323,6 +488,12 @@ static esp_err_t api_sd_card_get_handler(httpd_req_t *req) {
 
     char query[512] = {0};
     char path_param[SD_DIRECTORY_PATH_MAX] = "/mnt";
+    bool display_was_suspended = false;
+    bool jit_started = false;
+    cJSON *response_json = NULL;
+    cJSON *files_array = NULL;
+    char *response_string = NULL;
+    esp_err_t result = ESP_FAIL;
     
     esp_err_t query_ret = httpd_req_get_url_query_str(req, query, sizeof(query));
     if (query_ret == ESP_OK && strlen(query) > 0) {
@@ -343,13 +514,17 @@ static esp_err_t api_sd_card_get_handler(httpd_req_t *req) {
 
     ESP_LOGI(TAG, "Scanning SD path: %s", path_param);
 
+    if (!api_sd_card_begin(req, &display_was_suspended, &jit_started)) {
+        return ESP_FAIL;
+    }
+
     struct stat st;
     if (stat(path_param, &st) != 0) {
         ESP_LOGE(TAG, "Path not accessible: %s", path_param);
         httpd_resp_set_status(req, "404 Not Found");
         httpd_resp_set_type(req, "application/json");
         httpd_resp_sendstr(req, "{\"error\": \"Path not found.\"}");
-        return ESP_FAIL;
+        goto cleanup;
     }
 
     if (!S_ISDIR(st.st_mode)) {
@@ -357,14 +532,14 @@ static esp_err_t api_sd_card_get_handler(httpd_req_t *req) {
         httpd_resp_set_status(req, "400 Bad Request");
         httpd_resp_set_type(req, "application/json");
         httpd_resp_sendstr(req, "{\"error\": \"Path is not a directory.\"}");
-        return ESP_FAIL;
+        goto cleanup;
     }
 
-    cJSON *response_json = cJSON_CreateObject();
+    response_json = cJSON_CreateObject();
     if (!response_json) {
         httpd_resp_set_status(req, "500 Internal Server Error");
         httpd_resp_sendstr(req, "{\"error\": \"Failed to create JSON object.\"}");
-        return ESP_FAIL;
+        goto cleanup;
     }
 
     cJSON_AddStringToObject(response_json, "path", path_param);
@@ -382,39 +557,48 @@ static esp_err_t api_sd_card_get_handler(httpd_req_t *req) {
         ESP_LOGW(TAG, "Could not get FATFS info (%s)", esp_err_to_name(ret));
     }
 
-    cJSON *files_array = cJSON_CreateArray();
+    files_array = cJSON_CreateArray();
     bool truncated = false;
     if (!files_array || scan_directory_non_recursive(path_param, files_array, &truncated) != ESP_OK) {
         if (files_array) cJSON_Delete(files_array);
-        cJSON_Delete(response_json);
+        files_array = NULL;
         httpd_resp_set_status(req, "500 Internal Server Error");
         httpd_resp_sendstr(req, "{\"error\": \"Failed to scan directory.\"}");
-        return ESP_FAIL;
+        goto cleanup;
     }
     cJSON_AddItemToObject(response_json, "files", files_array);
     cJSON_AddBoolToObject(response_json, "truncated", truncated);
 
-    char *response_string = cJSON_PrintUnformatted(response_json);
+    response_string = cJSON_PrintUnformatted(response_json);
     if (!response_string) {
         ESP_LOGE(TAG, "Failed to serialize JSON.");
-        cJSON_Delete(response_json);
         httpd_resp_set_status(req, "500 Internal Server Error");
         httpd_resp_sendstr(req, "{\"error\": \"Failed to serialize SD card data.\"}");
-        return ESP_FAIL;
+        goto cleanup;
     }
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, response_string);
+    result = ESP_OK;
 
-    cJSON_Delete(response_json);
+cleanup:
     free(response_string);
-
-    return ESP_OK;
+    cJSON_Delete(response_json);
+    api_sd_card_end(jit_started, display_was_suspended);
+    return result;
 }
 
 static esp_err_t api_sd_card_post_handler(httpd_req_t *req) {
     WEBUI_GUARD_OR_RETURN(req);
     char buf[512];
+    cJSON *json = NULL;
+    cJSON *path_item = NULL;
+    FILE *file = NULL;
+    char *chunk_buf = NULL;
+    bool display_was_suspended = false;
+    bool jit_started = false;
+    esp_err_t result = ESP_FAIL;
+
     int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
     if (received <= 0) {
         ESP_LOGE(TAG, "Failed to receive request payload.");
@@ -425,7 +609,7 @@ static esp_err_t api_sd_card_post_handler(httpd_req_t *req) {
 
     // Parse JSON payload
     buf[received] = '\0'; // Null-terminate the received string
-    cJSON *json = cJSON_Parse(buf);
+    json = cJSON_Parse(buf);
     if (!json) {
         ESP_LOGE(TAG, "Failed to parse JSON payload.");
         httpd_resp_set_status(req, "400 Bad Request");
@@ -433,7 +617,7 @@ static esp_err_t api_sd_card_post_handler(httpd_req_t *req) {
         return ESP_FAIL;
     }
 
-    cJSON *path_item = cJSON_GetObjectItem(json, "path");
+    path_item = cJSON_GetObjectItem(json, "path");
     if (!cJSON_IsString(path_item) || !path_item->valuestring) {
         ESP_LOGE(TAG, "Missing or invalid 'path' in request payload.");
         cJSON_Delete(json);
@@ -452,13 +636,17 @@ static esp_err_t api_sd_card_post_handler(httpd_req_t *req) {
         return ESP_FAIL;
     }
 
-    FILE *file = fopen(file_path, "rb");
+    if (!api_sd_card_begin(req, &display_was_suspended, &jit_started)) {
+        cJSON_Delete(json);
+        return ESP_FAIL;
+    }
+
+    file = fopen(file_path, "rb");
     if (!file) {
         ESP_LOGE(TAG, "Failed to open file: %s", file_path);
-        cJSON_Delete(json);
         httpd_resp_set_status(req, "404 Not Found");
         httpd_resp_sendstr(req, "{\"error\": \"File not found.\"}");
-        return ESP_FAIL;
+        goto cleanup;
     }
 
     // Set response headers for chunked transfer
@@ -466,45 +654,37 @@ static esp_err_t api_sd_card_post_handler(httpd_req_t *req) {
     httpd_resp_set_hdr(req, "Content-Disposition", "attachment");
 
     // Allocate a buffer for sending chunks
-    char *chunk_buf = malloc(AP_MANAGER_BUFFER_SIZE);
+    chunk_buf = malloc(AP_MANAGER_BUFFER_SIZE);
     if (!chunk_buf) {
         ESP_LOGE(TAG, "Failed to allocate memory for chunk buffer.");
-        fclose(file);
-        cJSON_Delete(json);
         httpd_resp_set_status(req, "500 Internal Server Error");
         httpd_resp_sendstr(req, "{\"error\": \"Memory allocation failed.\"}");
-        return ESP_FAIL;
+        goto cleanup;
     }
 
     size_t bytes_read;
-    esp_err_t ret = ESP_OK;
     while ((bytes_read = fread(chunk_buf, 1, AP_MANAGER_BUFFER_SIZE, file)) > 0) {
         if (httpd_resp_send_chunk(req, chunk_buf, bytes_read) != ESP_OK) {
             ESP_LOGE(TAG, "Failed to send file chunk.");
-            ret = ESP_FAIL;
-            break;
+            goto cleanup;
         }
     }
 
     // Send final, zero-length chunk
-    if (ret == ESP_OK) {
-        if (httpd_resp_send_chunk(req, NULL, 0) != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to send final chunk.");
-            ret = ESP_FAIL;
-        }
+    if (httpd_resp_send_chunk(req, NULL, 0) != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to send final chunk.");
+        goto cleanup;
     }
 
-    fclose(file);
+    ESP_LOGI(TAG, "File sent successfully: %s", file_path);
+    result = ESP_OK;
+
+cleanup:
+    if (file) fclose(file);
     free(chunk_buf);
     cJSON_Delete(json);
-
-    if (ret == ESP_OK) {
-        ESP_LOGI(TAG, "File sent successfully: %s", file_path);
-    } else {
-        ESP_LOGE(TAG, "File download failed for: %s", file_path);
-    }
-
-    return ret;
+    api_sd_card_end(jit_started, display_was_suspended);
+    return result;
 }
 
 #define MAX_PATH_LENGTH 512
@@ -549,6 +729,8 @@ esp_err_t get_query_param(httpd_req_t *req, const char *key, char *value, size_t
 esp_err_t api_sd_card_delete_file_handler(httpd_req_t *req) {
     WEBUI_GUARD_OR_RETURN(req);
     char filepath[256 + 1];
+    bool display_was_suspended = false;
+    bool jit_started = false;
 
     size_t query_len = httpd_req_get_url_query_len(req) + 1;
     if (query_len > 1) {
@@ -568,16 +750,22 @@ esp_err_t api_sd_card_delete_file_handler(httpd_req_t *req) {
 
             ESP_LOGI(TAG, "Deleting file: %s", filepath);
 
+            if (!api_sd_card_begin(req, &display_was_suspended, &jit_started)) {
+                return ESP_FAIL;
+            }
+
             int res = unlink(filepath);
             if (res == 0) {
                 ESP_LOGI(TAG, "File deleted successfully");
                 httpd_resp_set_status(req, "200 OK");
                 httpd_resp_send(req, "File deleted successfully", HTTPD_RESP_USE_STRLEN);
+                api_sd_card_end(jit_started, display_was_suspended);
                 return ESP_OK;
             } else {
                 ESP_LOGE(TAG, "Failed to delete file: %s, errno: %d", filepath, errno);
                 httpd_resp_set_status(req, "500 Internal Server Error");
                 httpd_resp_send(req, "Failed to delete the file", HTTPD_RESP_USE_STRLEN);
+                api_sd_card_end(jit_started, display_was_suspended);
                 return ESP_FAIL;
             }
         }
@@ -593,6 +781,17 @@ esp_err_t api_sd_card_delete_file_handler(httpd_req_t *req) {
 static esp_err_t api_sd_card_upload_handler(httpd_req_t *req) {
     WEBUI_GUARD_OR_RETURN(req);
     ESP_LOGI(TAG, "Received file upload request.");
+
+    bool display_was_suspended = false;
+    bool jit_started = false;
+    char *buf = NULL;
+    char *file_path = NULL;
+    FILE *file = NULL;
+    int received = 0;
+    int total_received = 0;
+    bool headers_parsed = false;
+    char *body_start = NULL;
+    esp_err_t result = ESP_FAIL;
 
     // Retrieve 'path' query parameter
     char path_param[MAX_PATH_LENGTH] = {0};
@@ -616,20 +815,17 @@ static esp_err_t api_sd_card_upload_handler(httpd_req_t *req) {
     }
     ESP_LOGI(TAG, "Upload path: %s", path_param);
 
-    // Buffer for receiving data
-    char *buf = malloc(AP_MANAGER_BUFFER_SIZE + 1);
-    if (!buf) {
-        httpd_resp_set_status(req, "500 Internal Server Error");
-        httpd_resp_sendstr(req, "{\"error\": \"Memory allocation failed for buffer.\"}");
+    if (!api_sd_card_begin(req, &display_was_suspended, &jit_started)) {
         return ESP_FAIL;
     }
 
-    char *file_path = NULL;
-    FILE *file = NULL;
-    int received;
-    int total_received = 0;
-    bool headers_parsed = false;
-    char *body_start = NULL;
+    // Buffer for receiving data
+    buf = malloc(AP_MANAGER_BUFFER_SIZE + 1);
+    if (!buf) {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_sendstr(req, "{\"error\": \"Memory allocation failed for buffer.\"}");
+        goto cleanup;
+    }
 
     while ((received = httpd_req_recv(req, buf, AP_MANAGER_BUFFER_SIZE)) > 0) {
         buf[received] = '\0';
@@ -652,31 +848,27 @@ static esp_err_t api_sd_card_upload_handler(httpd_req_t *req) {
                         char original_filename[128] = {0};
                         memcpy(original_filename, filename_start, filename_len);
                         if (!is_safe_upload_filename(original_filename)) {
-                            free(buf);
                             httpd_resp_set_status(req, "400 Bad Request");
                             httpd_resp_sendstr(req, "{\"error\": \"Invalid filename.\"}");
-                            return ESP_FAIL;
+                            goto cleanup;
                         }
 
                         // Allocate memory for the full file path
                         size_t file_path_size = strlen(path_param) + strlen(original_filename) + 2;
                         file_path = malloc(file_path_size);
                         if (!file_path) {
-                            free(buf);
                             httpd_resp_set_status(req, "500 Internal Server Error");
                             httpd_resp_sendstr(req, "{\"error\": \"Memory allocation failed for file path.\"}");
-                            return ESP_FAIL;
+                            goto cleanup;
                         }
                         snprintf(file_path, file_path_size, "%s/%s", path_param, original_filename);
                         
                         ESP_LOGI(TAG, "Writing to file: %s", file_path);
                         file = fopen(file_path, "wb");
                         if (!file) {
-                            free(buf);
-                            free(file_path);
                             httpd_resp_set_status(req, "500 Internal Server Error");
                             httpd_resp_sendstr(req, "{\"error\": \"Failed to open file for writing.\"}");
-                            return ESP_FAIL;
+                            goto cleanup;
                         }
                         
                         // Write the first part of the file data
@@ -693,18 +885,23 @@ static esp_err_t api_sd_card_upload_handler(httpd_req_t *req) {
         }
 
         if (total_received > MAX_FILE_SIZE) {
-            if (file) fclose(file);
-            free(file_path);
-            free(buf);
             httpd_resp_set_status(req, "413 Payload Too Large");
             httpd_resp_sendstr(req, "{\"error\": \"Upload too large.\"}");
-            return ESP_FAIL;
+            goto cleanup;
         }
     }
     
     free(buf);
+    buf = NULL;
     if (file) {
         fclose(file);
+        file = NULL;
+
+        if (!file_path) {
+            httpd_resp_set_status(req, "400 Bad Request");
+            httpd_resp_sendstr(req, "{\"error\": \"Invalid multipart upload.\"}");
+            goto cleanup;
+        }
         
         // Post-process the file to remove the boundary
         file = fopen(file_path, "r+b");
@@ -725,23 +922,34 @@ static esp_err_t api_sd_card_upload_handler(httpd_req_t *req) {
                 }
             }
             fclose(file);
+            file = NULL;
         }
     }
-    free(file_path); // Free the allocated file_path
 
     if (received < 0) {
         ESP_LOGE(TAG, "Error receiving file data.");
         httpd_resp_set_status(req, "500 Internal Server Error");
         httpd_resp_sendstr(req, "{\"error\": \"Failed to receive file data.\"}");
-        return ESP_FAIL;
+        goto cleanup;
     }
-    
+    if (!file_path) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_sendstr(req, "{\"error\": \"Invalid multipart upload.\"}");
+        goto cleanup;
+    }
+
     ESP_LOGI(TAG, "File upload finished, total bytes: %d", total_received);
     httpd_resp_set_status(req, "200 OK");
     httpd_resp_set_type(req, "text/plain");
     httpd_resp_sendstr(req, "File uploaded successfully.");
+    result = ESP_OK;
 
-    return ESP_OK;
+cleanup:
+    if (file) fclose(file);
+    free(buf);
+    free(file_path);
+    api_sd_card_end(jit_started, display_was_suspended);
+    return result;
 }
 
 esp_err_t ap_manager_ensure_wifi_init(void) {
@@ -2109,6 +2317,9 @@ static esp_err_t load_server_config(void) {
     ADD_URI_HANDLER("/api/esp_comm/status", HTTP_GET, api_esp_comm_status_handler);
     ADD_URI_HANDLER("/api/esp_comm/control", HTTP_POST, api_esp_comm_control_handler);
     ADD_URI_HANDLER("/api/esp_comm/send", HTTP_POST, api_esp_comm_send_handler);
+    ADD_URI_HANDLER("/api/battery", HTTP_GET, api_battery_handler);
+    ADD_URI_HANDLER("/api/led", HTTP_GET, api_led_get_handler);
+    ADD_URI_HANDLER("/api/led", HTTP_POST, api_led_post_handler);
 #ifdef CONFIG_HAS_CAMERA
     ADD_URI_HANDLER("/camera", HTTP_GET, camera_stream_page_handler);
     ADD_URI_HANDLER("/camera/stream", HTTP_GET, camera_stream_http_handler);

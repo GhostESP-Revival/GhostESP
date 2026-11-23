@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square)](LICENSE)
 [![ESP-IDF](https://img.shields.io/badge/ESP--IDF-v6.1-orange?style=flat-square)](https://docs.espressif.com/projects/esp-idf/)
 [![Discord](https://img.shields.io/discord/5cyNmUMgwh?style=flat-square&label=Discord&color=5865F2)](https://discord.gg/5cyNmUMgwh)
-[![Boards](https://img.shields.io/badge/board%20targets-62-2ea043?style=flat-square)](#supported-boards)
+[![Boards](https://img.shields.io/badge/board%20targets-63-2ea043?style=flat-square)](#supported-boards)
 
 > **⚠️ Only flash GhostESP with the [official flasher](https://ghostesp.net/flasher) or bins from our [GitHub releases](https://github.com/GhostESP-Revival/GhostESP/releases).** We can't verify integrity or provide support for third-party flashers and mirrors.
 > 
@@ -286,7 +286,7 @@ GhostESP is a platform, not a bag of tools. Five things set it apart:
 
 ## Supported Boards
 
-62 board targets build in CI ([`.github/workflows/compile_all.yml`](.github/workflows/compile_all.yml)) from 61 configs in [`configs/`](configs/). Awok V5 shares the generic ESP32-S2 config.
+63 board targets build in CI ([`.github/workflows/compile_all.yml`](.github/workflows/compile_all.yml)) from 62 configs in [`configs/`](configs/). Awok V5 shares the generic ESP32-S2 config.
 
 <details>
 <summary><strong>Board feature matrix (click to expand)</strong></summary>
@@ -349,6 +349,7 @@ GhostESP is a platform, not a bag of tools. Five things set it apart:
 | NM-CYD-C5 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ | ✗ |
 | ACE S3 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | - | ✓ | ✗ | ✗ | ✗ |
 | Seeed XIAO ESP32-S3 Sense | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | - | ✓ | ✓ | ✗ | ✗ |
+| GhostCam (XIAO ESP32-S3 Sense carrier) | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | - | ✓ | ✓ | ✗ | ✗ |
 | Seeed XIAO ESP32-S3 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | - | ✓ | ✓ | ✗ | ✗ |
 | Seeed XIAO ESP32-C5 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | - | ✓ | ✗ | ✗ | ✗ |
 | Marauder v8 | ✓ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | Full | ✓ | ✗ | ✓ | ✗ |
@@ -370,6 +371,8 @@ GhostESP is a platform, not a bag of tools. Five things set it apart:
 
 **Banshee** ships as two configs: the S3 main board (headless) and the C5 module that drives its display and status LED, paired over GhostLink. Self-OTA is disabled on the C5 in v2.2; update it over GhostLink from the S3 or by USB.
 
+**GhostCam:** select `configs/sdkconfig.ghostcam` (or **GhostCam** in `build.py`) for the XIAO ESP32-S3 Sense carrier with an active-high GPIO7 LED and a GPIO1 battery ADC using a 1 MΩ/1 MΩ divider. Its WebUI hardware card provides battery voltage/percentage and LED toggle/brightness controls. SD uses `CS=21`, `SCK=7`, `MISO=8`, `MOSI=9`; just-in-time mounting temporarily releases the LED pin for SD access. The standard `configs/sdkconfig.xiao_esp32s3_sense` profile keeps its normal camera/SD behavior without these carrier-specific controls.
+
 </details>
 
 ---
@@ -388,7 +391,7 @@ The table below compares GhostESP against other broad-scope firmware. It is base
 | Current source available for audit | [x] | [x] | Limited / older public source | Limited / older public source |
 | ESP-IDF-native architecture | [x] |  |  |  |
 | Arduino / PlatformIO architecture |  | [x] | [x] | [x] |
-| Supported board targets | 62 CI targets | 48+ | 4 | 1 |
+| Supported board targets | 63 CI targets | 48+ | 4 | 1 |
 | Full LVGL graphical UI | [x] |  |  |  |
 | Web dashboard / REST control | [x] | [x] |  |  |
 | Captive portal web server | [x] | [x] | [x] | [x] |

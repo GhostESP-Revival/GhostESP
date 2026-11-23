@@ -8,6 +8,11 @@
 const state = {
   settings: {},
   comm: { state: 'unknown', connected: false },
+  ghostcam: {
+    supported: false,
+    battery: { available: false, voltage_mv: -1, percentage: -1, charging: false },
+    led: { enabled: false, brightness: 100, sd_active: false },
+  },
   logs: '',
   currentPath: '/mnt',
   pendingRiskCommand: null,
@@ -574,6 +579,7 @@ function renderDashboard() {
   renderDashboardWifi();
   renderDashboardGhostLink();
   renderDashboardSd();
+  renderGhostcam();
   renderDashboardFeatures();
   renderDashboardRecent();
 }
@@ -659,6 +665,36 @@ function renderDashboardSd() {
     $('dash-sd-status').textContent = 'Unknown';
     $('dash-sd-status').className = 'dash-card-sub';
   }
+}
+
+function renderGhostcam() {
+  const card = $('ghostcam-card');
+  if (!card) return;
+
+  const sense = state.ghostcam;
+  card.hidden = !sense.supported;
+  if (!sense.supported) return;
+
+  const battery = sense.battery || {};
+  const led = sense.led || {};
+  const batteryAvailable = battery.available && Number.isFinite(Number(battery.percentage));
+  const ledActive = !!led.sd_active;
+
+  $('ghostcam-status').textContent = ledActive
+    ? 'SD temporarily owns GPIO7'
+    : batteryAvailable ? 'Ready' : 'Battery ADC unavailable';
+  $('ghostcam-status').className = 'dash-card-sub ' + (ledActive ? 'warn' : batteryAvailable ? 'good' : 'bad');
+  $('ghostcam-battery').textContent = batteryAvailable ? `${Number(battery.percentage)}%` : 'Unavailable';
+  $('ghostcam-battery-voltage').textContent = batteryAvailable && Number.isFinite(Number(battery.voltage_mv))
+    ? `${(Number(battery.voltage_mv) / 1000).toFixed(2)} V` : '-';
+  $('ghostcam-battery-charge').textContent = batteryAvailable
+    ? (battery.charging ? 'Charging' : 'Not detected') : '-';
+  $('ghostcam-led-state').textContent = led.enabled
+    ? `On (${Number(led.brightness)}%)` : 'Off';
+  $('ghostcam-led-enabled').checked = !!led.enabled;
+  const brightness = $('ghostcam-led-brightness');
+  if (brightness && document.activeElement !== brightness) brightness.value = String(Number(led.brightness) || 0);
+  $('ghostcam-led-brightness-value').textContent = `${Number(led.brightness) || 0}%`;
 }
 
 function renderDashboardFeatures() {
@@ -1323,6 +1359,7 @@ async function refreshAll() {
     }
     $('api-dot').className = 'dot good';
     $('api-status').textContent = 'Connected';
+    loadGhostcam().catch(() => {});
     renderDashboard();
   } catch (e) {
     $('api-dot').className = 'dot bad';
@@ -1375,6 +1412,34 @@ async function loadSettings() {
     el.addEventListener('input', updateSettingsSummaries);
     el.addEventListener('change', updateSettingsSummaries);
   });
+}
+
+async function loadGhostcam() {
+  const [batteryRes, ledRes] = await Promise.all([
+    api('/api/battery', { cache: 'no-store' }),
+    api('/api/led', { cache: 'no-store' }),
+  ]);
+  if (!batteryRes.ok || !ledRes.ok) throw new Error('GhostCam API unavailable');
+  const battery = await batteryRes.json();
+  const led = await ledRes.json();
+  state.ghostcam = {
+    supported: !!(battery.supported || led.supported),
+    battery,
+    led,
+  };
+  renderGhostcam();
+}
+
+async function setGhostcamLed(patch) {
+  const res = await api('/api/led', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error('LED update failed');
+  state.ghostcam.led = await res.json();
+  state.ghostcam.supported = !!state.ghostcam.led.supported;
+  renderGhostcam();
 }
 
 function getVal(id) { const el = $(id); return el ? el.value : ''; }
@@ -1882,6 +1947,21 @@ function bindEvents() {
     }
   });
   $('upload-btn').addEventListener('click', () => uploadFile().catch(e => toast(e.message, 'bad')));
+  $('ghostcam-led-enabled')?.addEventListener('change', e => {
+    setGhostcamLed({ enabled: e.target.checked }).catch(e => {
+      toast(e.message, 'bad');
+      loadGhostcam().catch(() => {});
+    });
+  });
+  $('ghostcam-led-brightness')?.addEventListener('input', e => {
+    $('ghostcam-led-brightness-value').textContent = `${e.target.value}%`;
+  });
+  $('ghostcam-led-brightness')?.addEventListener('change', e => {
+    setGhostcamLed({ brightness: parseInt(e.target.value, 10) }).catch(e => {
+      toast(e.message, 'bad');
+      loadGhostcam().catch(() => {});
+    });
+  });
   $('comm-send-btn').addEventListener('click', () => {
     const cmd = $('comm-input').value.trim();
     if (cmd) {
@@ -2019,6 +2099,7 @@ function init() {
   });
   state.terminalTimer = setInterval(() => {
     refreshLogs(false).then(pollPeerResponses).catch(() => {});
+    loadGhostcam().catch(() => {});
     if (document.querySelector('#page-dashboard.active')) renderDashboard();
     populateDashboardIfStale();
   }, 2000);

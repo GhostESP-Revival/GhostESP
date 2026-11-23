@@ -105,6 +105,34 @@
                 </div>
               </div>
             </div>
+            <div class="panel dash-card ghostcam-card" id="ghostcam-card" hidden>
+              <div class="dash-card-header">
+                <div class="dash-card-icon">GC</div>
+                <div>
+                  <h3>GhostCam Hardware</h3>
+                  <p class="dash-card-sub" id="ghostcam-status">Checking...</p>
+                </div>
+              </div>
+              <div class="status-grid ghostcam-stats" style="margin-top:12px">
+                <div class="stat"><label>Battery</label><strong id="ghostcam-battery">Unavailable</strong></div>
+                <div class="stat"><label>Pack Voltage</label><strong id="ghostcam-battery-voltage">-</strong></div>
+                <div class="stat"><label>Charge State</label><strong id="ghostcam-battery-charge">-</strong></div>
+                <div class="stat"><label>LED State</label><strong id="ghostcam-led-state">Off</strong></div>
+              </div>
+              <div class="ghostcam-controls">
+                <label class="ghostcam-led-toggle">
+                  <span class="switch">
+                    <input type="checkbox" id="ghostcam-led-enabled">
+                    <span class="switch-track"><span class="switch-thumb"></span></span>
+                  </span>
+                  <span><strong>GPIO7 LED</strong><small>RAM-only control; SD access temporarily takes the pin.</small></span>
+                </label>
+                <label class="ghostcam-brightness" for="ghostcam-led-brightness">
+                  <span><strong>Brightness</strong><output id="ghostcam-led-brightness-value">100%</output></span>
+                  <input type="range" id="ghostcam-led-brightness" min="0" max="100" step="1" value="100">
+                </label>
+              </div>
+            </div>
             <div class="dash-features" id="dash-features"></div>
             <div class="dash-section" id="dash-recent-section" hidden>
               <h3>Recent Networks</h3>
