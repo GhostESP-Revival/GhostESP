@@ -41,7 +41,7 @@ static const char *TAG = "ap_manager";
 #include "esp_vfs_fat.h"
 #include "esp_heap_caps.h"
 #include "managers/status_display_manager.h"
-#include "managers/xiao_sense_manager.h"
+#include "managers/ghostcam_manager.h"
 #include "managers/sd_card_manager.h"
 #include "managers/auth_digest.h"
 #include "managers/views/terminal_screen.h"
@@ -172,14 +172,14 @@ static void api_sd_card_end(bool jit_started, bool display_was_suspended) {
 static esp_err_t api_battery_handler(httpd_req_t *req) {
     WEBUI_GUARD_OR_RETURN(req);
 
-    xiao_sense_battery_t battery = {
+    ghostcam_battery_t battery = {
         .available = false,
         .voltage_mv = -1,
         .percentage = -1,
         .charging = false,
     };
-    bool supported = xiao_sense_manager_is_supported();
-    bool available = supported && xiao_sense_manager_get_battery(&battery);
+    bool supported = ghostcam_manager_is_supported();
+    bool available = supported && ghostcam_manager_get_battery(&battery);
 
     cJSON *root = cJSON_CreateObject();
     if (!root) return send_json_response(req, NULL);
@@ -194,9 +194,9 @@ static esp_err_t api_battery_handler(httpd_req_t *req) {
 static esp_err_t api_led_get_handler(httpd_req_t *req) {
     WEBUI_GUARD_OR_RETURN(req);
 
-    xiao_sense_led_t led = {0};
-    bool supported = xiao_sense_manager_is_supported();
-    if (supported) xiao_sense_manager_get_led(&led);
+    ghostcam_led_t led = {0};
+    bool supported = ghostcam_manager_is_supported();
+    if (supported) ghostcam_manager_get_led(&led);
 
     cJSON *root = cJSON_CreateObject();
     if (!root) return send_json_response(req, NULL);
@@ -210,7 +210,7 @@ static esp_err_t api_led_get_handler(httpd_req_t *req) {
 static esp_err_t api_led_post_handler(httpd_req_t *req) {
     WEBUI_GUARD_OR_RETURN(req);
 
-    if (!xiao_sense_manager_is_supported()) {
+    if (!ghostcam_manager_is_supported()) {
         return send_api_error(req, "404 Not Found", "{\"error\":\"LED control unavailable.\"}");
     }
     if (req->content_len == 0 || req->content_len > 256) {
@@ -235,8 +235,8 @@ static esp_err_t api_led_post_handler(httpd_req_t *req) {
         return send_api_error(req, "400 Bad Request", "{\"error\":\"Invalid JSON payload.\"}");
     }
 
-    xiao_sense_led_t current = {0};
-    xiao_sense_manager_get_led(&current);
+    ghostcam_led_t current = {0};
+    ghostcam_manager_get_led(&current);
     bool enabled = current.enabled;
     uint8_t brightness = current.brightness;
     bool changed = false;
@@ -270,13 +270,13 @@ static esp_err_t api_led_post_handler(httpd_req_t *req) {
                               "{\"error\":\"Provide enabled or brightness.\"}");
     }
 
-    esp_err_t ret = xiao_sense_manager_set_led(enabled, brightness);
+    esp_err_t ret = ghostcam_manager_set_led(enabled, brightness);
     if (ret != ESP_OK) {
         return send_api_error(req, "500 Internal Server Error",
                               "{\"error\":\"Failed to update LED.\"}");
     }
 
-    xiao_sense_manager_get_led(&current);
+    ghostcam_manager_get_led(&current);
     cJSON *root = cJSON_CreateObject();
     if (!root) return send_json_response(req, NULL);
     cJSON_AddBoolToObject(root, "supported", true);

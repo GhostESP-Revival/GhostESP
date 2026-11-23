@@ -1,4 +1,4 @@
-#include "managers/xiao_sense_manager.h"
+#include "managers/ghostcam_manager.h"
 
 #include "driver/gpio.h"
 #include "driver/ledc.h"
@@ -12,23 +12,23 @@
 
 #include <string.h>
 
-static const char *TAG = "xiao_sense";
+static const char *TAG = "ghostcam";
 
-#define XIAO_SENSE_LED_GPIO GPIO_NUM_7
-#define XIAO_SENSE_BATTERY_CHANNEL ADC_CHANNEL_0 /* GPIO1 on ESP32-S3 */
-#define XIAO_SENSE_PWM_FREQ_HZ 5000
-#define XIAO_SENSE_PWM_RESOLUTION LEDC_TIMER_10_BIT
-#define XIAO_SENSE_PWM_TIMER LEDC_TIMER_3
-#define XIAO_SENSE_PWM_CHANNEL LEDC_CHANNEL_7
-#define XIAO_SENSE_PWM_MAX ((1U << 10) - 1U)
-#define XIAO_SENSE_ADC_SAMPLES 8
+#define GHOSTCAM_LED_GPIO GPIO_NUM_7
+#define GHOSTCAM_BATTERY_CHANNEL ADC_CHANNEL_0 /* GPIO1 on ESP32-S3 */
+#define GHOSTCAM_PWM_FREQ_HZ 5000
+#define GHOSTCAM_PWM_RESOLUTION LEDC_TIMER_10_BIT
+#define GHOSTCAM_PWM_TIMER LEDC_TIMER_3
+#define GHOSTCAM_PWM_CHANNEL LEDC_CHANNEL_7
+#define GHOSTCAM_PWM_MAX ((1U << 10) - 1U)
+#define GHOSTCAM_ADC_SAMPLES 8
 
 typedef struct {
     int mv;
     uint8_t percentage;
-} xiao_sense_soc_point_t;
+} ghostcam_soc_point_t;
 
-static const xiao_sense_soc_point_t s_soc_curve[] = {
+static const ghostcam_soc_point_t s_soc_curve[] = {
     {3000, 0},
     {3300, 5},
     {3500, 15},
@@ -54,15 +54,15 @@ static adc_cali_handle_t s_adc_cali;
 static bool s_adc_ready;
 static int s_filtered_mv = -1;
 
-bool xiao_sense_manager_is_supported(void) {
+bool ghostcam_manager_is_supported(void) {
 #if defined(CONFIG_IDF_TARGET_ESP32S3) && defined(CONFIG_BUILD_CONFIG_TEMPLATE)
-    return strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "xiao_esp32s3_sense") == 0;
+    return strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "ghostcam") == 0;
 #else
     return false;
 #endif
 }
 
-static uint8_t xiao_sense_voltage_to_percentage(int mv) {
+static uint8_t ghostcam_voltage_to_percentage(int mv) {
     const size_t count = sizeof(s_soc_curve) / sizeof(s_soc_curve[0]);
 
     if (mv <= s_soc_curve[0].mv) return s_soc_curve[0].percentage;
@@ -70,8 +70,8 @@ static uint8_t xiao_sense_voltage_to_percentage(int mv) {
 
     for (size_t i = 1; i < count; ++i) {
         if (mv <= s_soc_curve[i].mv) {
-            const xiao_sense_soc_point_t *low = &s_soc_curve[i - 1];
-            const xiao_sense_soc_point_t *high = &s_soc_curve[i];
+            const ghostcam_soc_point_t *low = &s_soc_curve[i - 1];
+            const ghostcam_soc_point_t *high = &s_soc_curve[i];
             int mv_range = high->mv - low->mv;
             int pct_range = high->percentage - low->percentage;
             return (uint8_t)(low->percentage +
@@ -82,31 +82,31 @@ static uint8_t xiao_sense_voltage_to_percentage(int mv) {
     return s_soc_curve[count - 1].percentage;
 }
 
-static uint32_t xiao_sense_led_duty_locked(void) {
+static uint32_t ghostcam_led_duty_locked(void) {
     if (!s_led_enabled) return 0;
-    return ((uint32_t)s_led_brightness * XIAO_SENSE_PWM_MAX) / 100U;
+    return ((uint32_t)s_led_brightness * GHOSTCAM_PWM_MAX) / 100U;
 }
 
-static esp_err_t xiao_sense_apply_led_locked(void) {
+static esp_err_t ghostcam_apply_led_locked(void) {
     if (!s_led_attached) return ESP_ERR_INVALID_STATE;
 
     esp_err_t ret = ledc_set_duty(LEDC_LOW_SPEED_MODE,
-                                  XIAO_SENSE_PWM_CHANNEL,
-                                  xiao_sense_led_duty_locked());
+                                  GHOSTCAM_PWM_CHANNEL,
+                                  ghostcam_led_duty_locked());
     if (ret != ESP_OK) return ret;
-    return ledc_update_duty(LEDC_LOW_SPEED_MODE, XIAO_SENSE_PWM_CHANNEL);
+    return ledc_update_duty(LEDC_LOW_SPEED_MODE, GHOSTCAM_PWM_CHANNEL);
 }
 
-static esp_err_t xiao_sense_attach_led_locked(void) {
+static esp_err_t ghostcam_attach_led_locked(void) {
     if (!s_ledc_ready) return ESP_ERR_NOT_SUPPORTED;
-    if (s_led_attached) return xiao_sense_apply_led_locked();
+    if (s_led_attached) return ghostcam_apply_led_locked();
 
     ledc_channel_config_t channel_config = {
-        .gpio_num = XIAO_SENSE_LED_GPIO,
+        .gpio_num = GHOSTCAM_LED_GPIO,
         .speed_mode = LEDC_LOW_SPEED_MODE,
-        .channel = XIAO_SENSE_PWM_CHANNEL,
+        .channel = GHOSTCAM_PWM_CHANNEL,
         .intr_type = LEDC_INTR_DISABLE,
-        .timer_sel = XIAO_SENSE_PWM_TIMER,
+        .timer_sel = GHOSTCAM_PWM_TIMER,
         .duty = 0,
         .hpoint = 0,
     };
@@ -114,10 +114,10 @@ static esp_err_t xiao_sense_attach_led_locked(void) {
     if (ret != ESP_OK) return ret;
 
     s_led_attached = true;
-    return xiao_sense_apply_led_locked();
+    return ghostcam_apply_led_locked();
 }
 
-static void xiao_sense_init_adc(void) {
+static void ghostcam_init_adc(void) {
     adc_oneshot_unit_init_cfg_t unit_config = {
         .unit_id = ADC_UNIT_1,
     };
@@ -132,7 +132,7 @@ static void xiao_sense_init_adc(void) {
         .bitwidth = ADC_BITWIDTH_DEFAULT,
     };
     ret = adc_oneshot_config_channel(s_adc_unit,
-                                     XIAO_SENSE_BATTERY_CHANNEL,
+                                     GHOSTCAM_BATTERY_CHANNEL,
                                      &channel_config);
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "Battery ADC channel init failed: %s", esp_err_to_name(ret));
@@ -154,8 +154,8 @@ static void xiao_sense_init_adc(void) {
     s_adc_ready = true;
 }
 
-esp_err_t xiao_sense_manager_init(void) {
-    if (!xiao_sense_manager_is_supported()) return ESP_ERR_NOT_SUPPORTED;
+esp_err_t ghostcam_manager_init(void) {
+    if (!ghostcam_manager_is_supported()) return ESP_ERR_NOT_SUPPORTED;
     if (s_initialized) return ESP_OK;
 
     s_mutex = xSemaphoreCreateMutex();
@@ -163,20 +163,20 @@ esp_err_t xiao_sense_manager_init(void) {
 
     ledc_timer_config_t timer_config = {
         .speed_mode = LEDC_LOW_SPEED_MODE,
-        .duty_resolution = XIAO_SENSE_PWM_RESOLUTION,
-        .timer_num = XIAO_SENSE_PWM_TIMER,
-        .freq_hz = XIAO_SENSE_PWM_FREQ_HZ,
+        .duty_resolution = GHOSTCAM_PWM_RESOLUTION,
+        .timer_num = GHOSTCAM_PWM_TIMER,
+        .freq_hz = GHOSTCAM_PWM_FREQ_HZ,
         .clk_cfg = LEDC_AUTO_CLK,
     };
     esp_err_t led_ret = ledc_timer_config(&timer_config);
     if (led_ret == ESP_OK) {
         s_ledc_ready = true;
-        led_ret = xiao_sense_attach_led_locked();
+        led_ret = ghostcam_attach_led_locked();
     } else {
         ESP_LOGW(TAG, "GPIO7 PWM timer init failed: %s", esp_err_to_name(led_ret));
     }
 
-    xiao_sense_init_adc();
+    ghostcam_init_adc();
     s_initialized = true;
     s_led_enabled = false;
     s_led_brightness = 100;
@@ -184,23 +184,23 @@ esp_err_t xiao_sense_manager_init(void) {
     if (led_ret != ESP_OK) {
         ESP_LOGW(TAG, "GPIO7 LED unavailable: %s", esp_err_to_name(led_ret));
     }
-    ESP_LOGI(TAG, "XIAO Sense peripherals initialized (LED off, battery ADC GPIO1)");
+    ESP_LOGI(TAG, "GhostCam peripherals initialized (LED off, battery ADC GPIO1)");
     return ESP_OK;
 }
 
-static bool xiao_sense_read_battery_locked(xiao_sense_battery_t *out) {
+static bool ghostcam_read_battery_locked(ghostcam_battery_t *out) {
     if (!s_adc_ready) return false;
 
     int raw_total = 0;
-    for (int i = 0; i < XIAO_SENSE_ADC_SAMPLES; ++i) {
+    for (int i = 0; i < GHOSTCAM_ADC_SAMPLES; ++i) {
         int raw = 0;
-        if (adc_oneshot_read(s_adc_unit, XIAO_SENSE_BATTERY_CHANNEL, &raw) != ESP_OK) {
+        if (adc_oneshot_read(s_adc_unit, GHOSTCAM_BATTERY_CHANNEL, &raw) != ESP_OK) {
             return false;
         }
         raw_total += raw;
     }
 
-    int raw = raw_total / XIAO_SENSE_ADC_SAMPLES;
+    int raw = raw_total / GHOSTCAM_ADC_SAMPLES;
     int measured_mv = 0;
     if (s_adc_cali && adc_cali_raw_to_voltage(s_adc_cali, raw, &measured_mv) != ESP_OK) {
         measured_mv = (raw * 3300) / 4095;
@@ -220,37 +220,37 @@ static bool xiao_sense_read_battery_locked(xiao_sense_battery_t *out) {
 
     out->available = true;
     out->voltage_mv = s_filtered_mv;
-    out->percentage = xiao_sense_voltage_to_percentage(s_filtered_mv);
+    out->percentage = ghostcam_voltage_to_percentage(s_filtered_mv);
     /* GPIO1 only measures pack voltage; this board has no charger signal here. */
     out->charging = false;
     return true;
 }
 
-bool xiao_sense_manager_get_battery(xiao_sense_battery_t *out) {
+bool ghostcam_manager_get_battery(ghostcam_battery_t *out) {
     if (!out) return false;
-    *out = (xiao_sense_battery_t){
+    *out = (ghostcam_battery_t){
         .available = false,
         .voltage_mv = -1,
         .percentage = -1,
         .charging = false,
     };
 
-    if (!xiao_sense_manager_is_supported() || !s_initialized || !s_mutex) return false;
+    if (!ghostcam_manager_is_supported() || !s_initialized || !s_mutex) return false;
     if (xSemaphoreTake(s_mutex, portMAX_DELAY) != pdTRUE) return false;
-    bool available = xiao_sense_read_battery_locked(out);
+    bool available = ghostcam_read_battery_locked(out);
     xSemaphoreGive(s_mutex);
     return available;
 }
 
-void xiao_sense_manager_get_led(xiao_sense_led_t *out) {
+void ghostcam_manager_get_led(ghostcam_led_t *out) {
     if (!out) return;
-    *out = (xiao_sense_led_t){
+    *out = (ghostcam_led_t){
         .enabled = false,
         .brightness = 0,
         .sd_active = false,
     };
 
-    if (!xiao_sense_manager_is_supported() || !s_mutex) return;
+    if (!ghostcam_manager_is_supported() || !s_mutex) return;
     if (xSemaphoreTake(s_mutex, portMAX_DELAY) != pdTRUE) return;
     out->enabled = s_led_enabled;
     out->brightness = s_led_brightness;
@@ -258,46 +258,46 @@ void xiao_sense_manager_get_led(xiao_sense_led_t *out) {
     xSemaphoreGive(s_mutex);
 }
 
-esp_err_t xiao_sense_manager_set_led(bool enabled, uint8_t brightness) {
-    if (!xiao_sense_manager_is_supported()) return ESP_ERR_NOT_SUPPORTED;
+esp_err_t ghostcam_manager_set_led(bool enabled, uint8_t brightness) {
+    if (!ghostcam_manager_is_supported()) return ESP_ERR_NOT_SUPPORTED;
     if (brightness > 100) return ESP_ERR_INVALID_ARG;
     if (!s_initialized || !s_mutex) return ESP_ERR_INVALID_STATE;
     if (xSemaphoreTake(s_mutex, portMAX_DELAY) != pdTRUE) return ESP_ERR_TIMEOUT;
 
     s_led_enabled = enabled;
     s_led_brightness = brightness;
-    esp_err_t ret = s_sd_active ? ESP_OK : xiao_sense_attach_led_locked();
+    esp_err_t ret = s_sd_active ? ESP_OK : ghostcam_attach_led_locked();
     xSemaphoreGive(s_mutex);
     return ret;
 }
 
-void xiao_sense_manager_sd_mount_begin(void) {
-    if (!xiao_sense_manager_is_supported()) return;
+void ghostcam_manager_sd_mount_begin(void) {
+    if (!ghostcam_manager_is_supported()) return;
     if (!s_mutex) {
-        gpio_reset_pin(XIAO_SENSE_LED_GPIO);
+        gpio_reset_pin(GHOSTCAM_LED_GPIO);
         return;
     }
     if (xSemaphoreTake(s_mutex, portMAX_DELAY) != pdTRUE) return;
 
     if (!s_sd_active) {
         if (s_led_attached) {
-            ledc_stop(LEDC_LOW_SPEED_MODE, XIAO_SENSE_PWM_CHANNEL, 0);
+            ledc_stop(LEDC_LOW_SPEED_MODE, GHOSTCAM_PWM_CHANNEL, 0);
             s_led_attached = false;
         }
-        gpio_reset_pin(XIAO_SENSE_LED_GPIO);
-        gpio_set_direction(XIAO_SENSE_LED_GPIO, GPIO_MODE_INPUT);
+        gpio_reset_pin(GHOSTCAM_LED_GPIO);
+        gpio_set_direction(GHOSTCAM_LED_GPIO, GPIO_MODE_INPUT);
         s_sd_active = true;
     }
     xSemaphoreGive(s_mutex);
 }
 
-void xiao_sense_manager_sd_mount_end(void) {
-    if (!xiao_sense_manager_is_supported() || !s_mutex) return;
+void ghostcam_manager_sd_mount_end(void) {
+    if (!ghostcam_manager_is_supported() || !s_mutex) return;
     if (xSemaphoreTake(s_mutex, portMAX_DELAY) != pdTRUE) return;
 
     if (s_sd_active) {
         s_sd_active = false;
-        esp_err_t ret = xiao_sense_attach_led_locked();
+        esp_err_t ret = ghostcam_attach_led_locked();
         if (ret != ESP_OK) {
             ESP_LOGW(TAG, "GPIO7 LED restore failed: %s", esp_err_to_name(ret));
         }

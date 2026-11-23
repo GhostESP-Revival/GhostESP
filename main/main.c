@@ -27,7 +27,7 @@
 #include "core/esp_comm_manager.h"
 #include "core/ghostlink_bench.h"
 #include "managers/status_display_manager.h"
-#include "managers/xiao_sense_manager.h"
+#include "managers/ghostcam_manager.h"
 #if defined(CONFIG_IDF_TARGET_ESP32P4)
 #include "esp_hosted.h"
 #include "managers/p4_slave_ota_manager.h"
@@ -625,8 +625,8 @@ static void deferred_sd_init_task(void *arg) {
     vTaskDelete(NULL);
     return;
 #endif
-    if (xiao_sense_manager_is_supported()) {
-        ESP_LOGI(TAG, "SD init skipped: XIAO Sense uses JIT SD mounting");
+    if (ghostcam_manager_is_supported()) {
+        ESP_LOGI(TAG, "SD init skipped: GhostCam uses JIT SD mounting");
 #ifdef CONFIG_WITH_SCREEN
         boot_status_set_progress(100.0f, "SD uses JIT mounting");
         boot_status_signal_completion();
@@ -700,12 +700,12 @@ void app_main(void) {
     MEASURE_INIT_RAM("Ghostchi Mood init", ghostchi_mood_init());
     ghostchi_mood_record_event(GHOSTCHI_MOOD_EVENT_BOOT, 3);
 
-    if (xiao_sense_manager_is_supported()) {
-        esp_err_t xiao_ret;
-        MEASURE_INIT_RAM("XIAO Sense peripherals", xiao_ret = xiao_sense_manager_init());
-        if (xiao_ret != ESP_OK) {
-            ESP_LOGW(TAG, "XIAO Sense peripheral init failed: %s",
-                     esp_err_to_name(xiao_ret));
+    if (ghostcam_manager_is_supported()) {
+        esp_err_t ghostcam_ret;
+        MEASURE_INIT_RAM("GhostCam peripherals", ghostcam_ret = ghostcam_manager_init());
+        if (ghostcam_ret != ESP_OK) {
+            ESP_LOGW(TAG, "GhostCam peripheral init failed: %s",
+                     esp_err_to_name(ghostcam_ret));
         }
     }
 
@@ -730,7 +730,7 @@ void app_main(void) {
 
 #if defined(CONFIG_USING_SPI) && defined(CONFIG_SD_SPI_CS_PIN) && \
     !defined(CONFIG_CROWPANEL_EPAPER_42)
-    if (!xiao_sense_manager_is_supported()) {
+    if (!ghostcam_manager_is_supported()) {
         /* Keep the card deselected before any shared-bus display/touch traffic. */
         gpio_reset_pin(CONFIG_SD_SPI_CS_PIN);
         gpio_set_direction(CONFIG_SD_SPI_CS_PIN, GPIO_MODE_OUTPUT);

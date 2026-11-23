@@ -75,6 +75,7 @@ static const ota_board_key_alias_t OTA_BOARD_KEY_ALIASES[] = {
     {"somethingsomething", "Banshee_C5"},
     {"somethingsomething2", "Banshee_S3"},
     {"xiao_esp32s3_sense", "XIAO_S3_Sense"},
+    {"ghostcam", "GhostCam"},
     {"xiao_esp32s3", "XIAO_S3"},
 };
 
@@ -1030,6 +1031,7 @@ static const char *ota_sd_artifact_base_for_board(void) {
     if (strcmp(board, "somethingsomething2") == 0) return "Banshee_S3";
     if (strcmp(board, "NM-CYD-C5") == 0) return "NM-CYD-C5";
     if (strcmp(board, "xiao_esp32s3_sense") == 0) return "XIAO_S3_Sense";
+    if (strcmp(board, "ghostcam") == 0) return "GhostCam";
     if (strcmp(board, "xiao_esp32s3") == 0) return "XIAO_S3";
 #endif
     return NULL;

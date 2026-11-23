@@ -8,7 +8,7 @@
 const state = {
   settings: {},
   comm: { state: 'unknown', connected: false },
-  xiaoSense: {
+  ghostcam: {
     supported: false,
     battery: { available: false, voltage_mv: -1, percentage: -1, charging: false },
     led: { enabled: false, brightness: 100, sd_active: false },
@@ -559,7 +559,7 @@ function renderDashboard() {
   renderDashboardWifi();
   renderDashboardGhostLink();
   renderDashboardSd();
-  renderXiaoSense();
+  renderGhostcam();
   renderDashboardFeatures();
   renderDashboardRecent();
 }
@@ -639,11 +639,11 @@ function renderDashboardSd() {
   }
 }
 
-function renderXiaoSense() {
-  const card = $('xiao-sense-card');
+function renderGhostcam() {
+  const card = $('ghostcam-card');
   if (!card) return;
 
-  const sense = state.xiaoSense;
+  const sense = state.ghostcam;
   card.hidden = !sense.supported;
   if (!sense.supported) return;
 
@@ -652,21 +652,21 @@ function renderXiaoSense() {
   const batteryAvailable = battery.available && Number.isFinite(Number(battery.percentage));
   const ledActive = !!led.sd_active;
 
-  $('xiao-sense-status').textContent = ledActive
+  $('ghostcam-status').textContent = ledActive
     ? 'SD temporarily owns GPIO7'
     : batteryAvailable ? 'Ready' : 'Battery ADC unavailable';
-  $('xiao-sense-status').className = 'dash-card-sub ' + (ledActive ? 'warn' : batteryAvailable ? 'good' : 'bad');
-  $('xiao-battery').textContent = batteryAvailable ? `${Number(battery.percentage)}%` : 'Unavailable';
-  $('xiao-battery-voltage').textContent = batteryAvailable && Number.isFinite(Number(battery.voltage_mv))
+  $('ghostcam-status').className = 'dash-card-sub ' + (ledActive ? 'warn' : batteryAvailable ? 'good' : 'bad');
+  $('ghostcam-battery').textContent = batteryAvailable ? `${Number(battery.percentage)}%` : 'Unavailable';
+  $('ghostcam-battery-voltage').textContent = batteryAvailable && Number.isFinite(Number(battery.voltage_mv))
     ? `${(Number(battery.voltage_mv) / 1000).toFixed(2)} V` : '-';
-  $('xiao-battery-charge').textContent = batteryAvailable
+  $('ghostcam-battery-charge').textContent = batteryAvailable
     ? (battery.charging ? 'Charging' : 'Not detected') : '-';
-  $('xiao-led-state').textContent = led.enabled
+  $('ghostcam-led-state').textContent = led.enabled
     ? `On (${Number(led.brightness)}%)` : 'Off';
-  $('xiao-led-enabled').checked = !!led.enabled;
-  const brightness = $('xiao-led-brightness');
+  $('ghostcam-led-enabled').checked = !!led.enabled;
+  const brightness = $('ghostcam-led-brightness');
   if (brightness && document.activeElement !== brightness) brightness.value = String(Number(led.brightness) || 0);
-  $('xiao-led-brightness-value').textContent = `${Number(led.brightness) || 0}%`;
+  $('ghostcam-led-brightness-value').textContent = `${Number(led.brightness) || 0}%`;
 }
 
 function renderDashboardFeatures() {
@@ -1330,7 +1330,7 @@ async function refreshAll() {
     }
     $('api-dot').className = 'dot good';
     $('api-status').textContent = 'Connected';
-    loadXiaoSense().catch(() => {});
+    loadGhostcam().catch(() => {});
     renderDashboard();
   } catch (e) {
     $('api-dot').className = 'dot bad';
@@ -1385,32 +1385,32 @@ async function loadSettings() {
   });
 }
 
-async function loadXiaoSense() {
+async function loadGhostcam() {
   const [batteryRes, ledRes] = await Promise.all([
     api('/api/battery', { cache: 'no-store' }),
     api('/api/led', { cache: 'no-store' }),
   ]);
-  if (!batteryRes.ok || !ledRes.ok) throw new Error('XIAO Sense API unavailable');
+  if (!batteryRes.ok || !ledRes.ok) throw new Error('GhostCam API unavailable');
   const battery = await batteryRes.json();
   const led = await ledRes.json();
-  state.xiaoSense = {
+  state.ghostcam = {
     supported: !!(battery.supported || led.supported),
     battery,
     led,
   };
-  renderXiaoSense();
+  renderGhostcam();
 }
 
-async function setXiaoLed(patch) {
+async function setGhostcamLed(patch) {
   const res = await api('/api/led', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
     body: JSON.stringify(patch),
   });
   if (!res.ok) throw new Error('LED update failed');
-  state.xiaoSense.led = await res.json();
-  state.xiaoSense.supported = !!state.xiaoSense.led.supported;
-  renderXiaoSense();
+  state.ghostcam.led = await res.json();
+  state.ghostcam.supported = !!state.ghostcam.led.supported;
+  renderGhostcam();
 }
 
 function getVal(id) { const el = $(id); return el ? el.value : ''; }
@@ -1897,19 +1897,19 @@ function bindEvents() {
     }
   });
   $('upload-btn').addEventListener('click', () => uploadFile().catch(e => toast(e.message, 'bad')));
-  $('xiao-led-enabled')?.addEventListener('change', e => {
-    setXiaoLed({ enabled: e.target.checked }).catch(e => {
+  $('ghostcam-led-enabled')?.addEventListener('change', e => {
+    setGhostcamLed({ enabled: e.target.checked }).catch(e => {
       toast(e.message, 'bad');
-      loadXiaoSense().catch(() => {});
+      loadGhostcam().catch(() => {});
     });
   });
-  $('xiao-led-brightness')?.addEventListener('input', e => {
-    $('xiao-led-brightness-value').textContent = `${e.target.value}%`;
+  $('ghostcam-led-brightness')?.addEventListener('input', e => {
+    $('ghostcam-led-brightness-value').textContent = `${e.target.value}%`;
   });
-  $('xiao-led-brightness')?.addEventListener('change', e => {
-    setXiaoLed({ brightness: parseInt(e.target.value, 10) }).catch(e => {
+  $('ghostcam-led-brightness')?.addEventListener('change', e => {
+    setGhostcamLed({ brightness: parseInt(e.target.value, 10) }).catch(e => {
       toast(e.message, 'bad');
-      loadXiaoSense().catch(() => {});
+      loadGhostcam().catch(() => {});
     });
   });
   $('comm-send-btn').addEventListener('click', () => {
@@ -2035,7 +2035,7 @@ function init() {
   });
   state.terminalTimer = setInterval(() => {
     refreshLogs(false).then(pollPeerResponses).catch(() => {});
-    loadXiaoSense().catch(() => {});
+    loadGhostcam().catch(() => {});
     if (document.querySelector('#page-dashboard.active')) renderDashboard();
     populateDashboardIfStale();
   }, 2000);

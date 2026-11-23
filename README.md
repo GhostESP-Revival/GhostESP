@@ -308,6 +308,7 @@ GhostESP is a platform, not a bag of tools. Five things set it apart:
 | NM-CYD-C5 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Full | ✓ | ✓ | ✓ |
 | ACE S3 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ |
 | Seeed XIAO ESP32-S3 Sense | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✓ | ✗ |
+| GhostCam (XIAO ESP32-S3 Sense carrier) | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✓ | ✗ |
 | Seeed XIAO ESP32-S3 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✓ | ✗ |
 | Seeed XIAO ESP32-C5 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | — | ✓ | ✗ | ✗ |
 | Marauder v8 | ✓ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | Full | ✓ | ✗ | ✓ |
@@ -328,6 +329,8 @@ GhostESP is a platform, not a bag of tools. Five things set it apart:
 **Native SD Apps:** at compile time the feature depends only on `CONFIG_SPIRAM` (`main/Kconfig.projbuild:1410`). At runtime the app gallery checks `MALLOC_CAP_SPIRAM` and renders into the full LVGL screen, so a display is required for the UI to be usable. That leaves it enabled on: AWOK Mini, Waveshare/Crowtech/Sunton 7″, CrowPanel Advance 2.4/2.8/3.5/4.3/5″, CrowPanel Advanced P4 5″/7/9/10.1″ (v1.1/v1.2+), JC3248W535EN, T-Deck, T-Embed CC1101, GhostLink P1 Core, T-Dongle-C5, NM-CYD-C5, M5Stack CoreS3-SE, Banshee (C5), and Marauder v8/Pancake C5. Boards with a screen but no PSRAM (Cardputer, Cardputer ADV, the CYD2 family, S3TWatch, T-Dongle-S3, M5Stack AtomS3R, etc.) don't get it.
 
 **Banshee** ships as two configs: the S3 main board (headless) and the C5 module that drives its display and status LED, paired over GhostLink.
+
+**GhostCam:** select `configs/sdkconfig.ghostcam` (or **GhostCam** in `build.py`) for the XIAO ESP32-S3 Sense carrier with an active-high GPIO7 LED and a GPIO1 battery ADC using a 1 MΩ/1 MΩ divider. Its WebUI hardware card provides battery voltage/percentage and LED toggle/brightness controls. SD uses `CS=21`, `SCK=7`, `MISO=8`, `MOSI=9`; just-in-time mounting temporarily releases the LED pin for SD access. The standard `configs/sdkconfig.xiao_esp32s3_sense` profile keeps its normal camera/SD behavior without these carrier-specific controls.
 
 </details>
 
