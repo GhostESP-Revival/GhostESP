@@ -323,6 +323,12 @@ void handle_startwd(int argc, char **argv) {
         }
         if (!peer_helper_ok) wardriving_set_peer_assist(false);
 
+        if (prefer_peer_only && peer_helper_ok) {
+            // start_wardriving() resets GPS source selection.  The Banshee C5
+            // still scans locally, but its paired S3 is the authoritative GPS.
+            gps_manager_set_peer_gps_preferred(true);
+        }
+
         if (prefer_peer_only && !peer_helper_ok) {
             gps_manager_set_peer_gps_preferred(false);
             gps_manager_clear_peer_fix();
@@ -383,17 +389,16 @@ void handle_dualwd(int argc, char **argv) {
         return;
     }
 
-    bool prefer_peer_only = false;
+    bool use_peer_gps = false;
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    prefer_peer_only = (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0 ||
-                        strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething2") == 0) &&
-                       !esp_comm_manager_is_remote_command() &&
-                       esp_comm_manager_is_connected();
+    use_peer_gps = strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0 &&
+                   !esp_comm_manager_is_remote_command() &&
+                   esp_comm_manager_is_connected();
 #endif
 
     bool dual_initialized_gps = false;
-    if (!prefer_peer_only) {
-        ble_set_suspend_allowed(false);
+    ble_set_suspend_allowed(false);
+    if (!use_peer_gps) {
         gps_manager_set_peer_gps_preferred(false);
         gps_manager_init(&g_gpsManager);
         dual_initialized_gps = g_gpsManager.isinitilized;
@@ -415,33 +420,35 @@ void handle_dualwd(int argc, char **argv) {
         return;
     }
 
-    if (!prefer_peer_only) {
-        if (!ble_start_scanning()) {
-            ble_set_suspend_allowed(true);
-            csv_file_close();
-            gps_manager_deinit(&g_gpsManager);
-            glog("Failed to start BLE scan for dual wardriving.\n");
-            status_display_show_status("BLE Start Fail");
-            return;
-        }
-        ble_register_handler(ble_wardriving_callback);
+    if (!ble_start_scanning()) {
+        ble_set_suspend_allowed(true);
+        csv_file_close();
+        if (dual_initialized_gps) gps_manager_deinit(&g_gpsManager);
+        glog("Failed to start BLE scan for dual wardriving.\n");
+        status_display_show_status("BLE Start Fail");
+        return;
+    }
+    ble_register_handler(ble_wardriving_callback);
 
-        wifi_manager_start_monitor_mode(wardriving_scan_callback);
-        if (!start_wardriving()) {
-            ble_unregister_handler(ble_wardriving_callback);
-            ble_stop();
-            wifi_manager_stop_monitor_mode();
-            csv_file_close();
-            ble_set_suspend_allowed(true);
-            gps_manager_deinit(&g_gpsManager);
-            glog("Failed to start wardriving observation queue.\n");
-            status_display_show_status("Dual Drive Fail");
-            return;
-        }
+    wifi_manager_start_monitor_mode(wardriving_scan_callback);
+    if (!start_wardriving()) {
+        ble_unregister_handler(ble_wardriving_callback);
+        ble_stop();
+        wifi_manager_stop_monitor_mode();
+        csv_file_close();
+        ble_set_suspend_allowed(true);
+        if (dual_initialized_gps) gps_manager_deinit(&g_gpsManager);
+        glog("Failed to start wardriving observation queue.\n");
+        status_display_show_status("Dual Drive Fail");
+        return;
     }
 
-    if (prefer_peer_only) {
-        glog("Dual wardriving observing via GhostLink peer GPS.\n");
+    // start_wardriving() intentionally resets session state, including the GPS
+    // source.  Restore the C5's peer-GPS choice after the local scanners start.
+    gps_manager_set_peer_gps_preferred(use_peer_gps);
+
+    if (use_peer_gps) {
+        glog("Dual wardriving scanning locally with GhostLink peer GPS.\n");
     } else if (esp_comm_manager_is_connected()) {
         glog("GhostLink peer connected; helper assist is not used in dual wardriving.\n");
     }

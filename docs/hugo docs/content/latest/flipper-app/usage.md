@@ -1,6 +1,6 @@
 ---
 title: "Usage Guide"
-description: "Basic navigation and common workflows for the Flipper Zero companion app."
+description: "Basic navigation and common workflows for the Flipper Zero companion app"
 weight: 70
 keywords: ["usage", "navigation", "workflow", "guide"]
 ---
@@ -17,7 +17,7 @@ The app uses a menu-driven interface:
 
 ### Wi-Fi Handshake Capture
 
-1. Navigate to **WiFi** → **Scanning & Probing** → **Scan: (APs)**
+1. Navigate to **Wi-Fi** → **Scanning & Probing** → **Scan: (APs)**
 2. Wait for scan to complete
 3. Select target network from list
 4. Go to **Packet Capture** → **EAPOL**
@@ -26,7 +26,7 @@ The app uses a menu-driven interface:
 
 ### Beacon Spam Attack
 
-1. Navigate to **WiFi** → **Attacks** → **Beacon Spam (List)**
+1. Navigate to **Wi-Fi** → **Attacks** → **Beacon Spam (List)**
 2. Select spam mode (List, Random, Rickroll, or Custom)
 3. If using List mode, manage your beacon list first
 4. Start the spam attack
@@ -34,10 +34,7 @@ The app uses a menu-driven interface:
 
 ### BLE Device Scanning
 
-1. Navigate to **Bluetooth** → **Scanning & Detection** → **Scan BLE**
-2. Wait for scan to complete
-3. View discovered devices
-4. Select device for additional actions (spoof, track, etc.)
+See [BLE Features]({{< relref "ble-features.md" >}}) for the BLE scanning workflow under **Bluetooth** → **Scanning & Detection** and the actions available for discovered devices.
 
 ### GPS Wardriving
 
@@ -49,4 +46,4 @@ The app uses a menu-driven interface:
 
 ## File Management
 
-Use **qFlipper** or remove the SD card to transfer files to your computer. See [Configuration]({{< relref "configuration.md#file-storage" >}}) for file storage locations.
+See [File Storage]({{< relref "configuration.md#file-storage" >}}) for where captured files are saved on the Flipper Zero and how to transfer them to your computer.

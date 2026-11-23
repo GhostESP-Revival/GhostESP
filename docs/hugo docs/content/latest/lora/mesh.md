@@ -7,7 +7,7 @@ weight: 40
 
 GhostESP speaks the stock Meshtastic wire format so it interoperates with unmodified firmware.
 
-## Wire format
+## Wire Format
 
 Each LoRa frame is:
 
@@ -21,10 +21,18 @@ Each LoRa frame is:
 
 Direct messages use X25519 and authenticated AES-CCM instead of the channel key. Both nodes must first learn each other's public key from NodeInfo.
 
-## Region and channel
+{{< flow title="How a mesh message is sent" caption="Interoperates with unmodified Meshtastic firmware." >}}
+Build a `Data` protobuf | Portnum, payload, and routing fields
+Encrypt with the channel PSK | AES-CTR; LongFast default PSK `AQ==` gives chash `0x08`
+Prepend the 16-byte header | from, to, packet ID, flags, chash, next hop, relay
+Transmit and retry | Up to three attempts, spaced by the modem airtime
+Deduplicate on receipt | `from` + packet ID; repeats are acked but not shown twice
+{{< /flow >}}
+
+## Region and Channel
 
 - **Region slots:** each of the 24 region presets selects a Meshtastic frequency slot, bandwidth, spreading factor, coding rate, and power ceiling (e.g., US LongFast at 906.875 MHz / SF11 / BW250). GhostESP and stock nodes must agree; mismatch = no RX.
-- **Sync word:** `0x442B` — Meshtastic private LoRa sync word (not `0x12`/`0x34` public). GhostESP sets this on SX1262 at `lora start`; stock nodes ignore frames with other sync words.
+- **Sync word:** `0x442B`, the Meshtastic private LoRa sync word (not `0x12`/`0x34` public). GhostESP sets this on SX1262 at `lora start`; stock nodes ignore frames with other sync words.
 - **Default-key channel:** `LongFast` on chash `0x08`. Custom PSKs derive a different chash; both ends must match.
 
 ## Routing
@@ -38,8 +46,8 @@ Direct messages use X25519 and authenticated AES-CCM instead of the channel key.
 ## NodeInfo
 
 - **Interval:** every 3 hours per node (plus on boot and on explicit request). GhostESP sends its long/short name, HW model, and role after `lora start`.
-- **Discovery:** first 30–60 seconds after `lora start` populates `lora nodes` as NodeInfos arrive. Nodes expire from the list only on long silence.
-- **Diagnostics:** `lora nodes` and `lora diag` expose last NodeInfo timestamps, SNR/RSSI, and hop counts.
-- **Capacity:** Heltec V3 keeps up to 200 nodes in RAM. Up to 32 important peer records are retained across reboot, prioritizing public keys and user flags.
+- **Discovery:** first 30-60 seconds after `lora start` populates `lora nodes` as NodeInfos arrive. Nodes expire from the list only on long silence.
+- **Diagnostics:** `lora nodes` lists `!node short rssi snr [pki][+]`; `lora diag` reports last NodeInfo timestamps and SNR/RSSI.
+- **Capacity:** up to 200 nodes in RAM. Up to 96 peer records are retained across reboot on PSRAM builds (32 without PSRAM), prioritizing public keys and user flags.
 
 See [Commands]({{< relref "commands.md" >}}) for tuning SF/BW and [Getting Started]({{< relref "getting-started.md" >}}) for first contact.

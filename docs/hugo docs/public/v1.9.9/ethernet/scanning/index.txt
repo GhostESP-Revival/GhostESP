@@ -1,0 +1,82 @@
+Title: Network Scanning
+Description: Discover and scan devices on your Ethernet network.
+URL: /v1.9.9/ethernet/scanning/
+Version: v1.9.9
+Section: Ethernet
+Search index: /search-index.json
+
+# Network Scanning
+
+> Discover and scan devices on your Ethernet network.
+
+## On this page
+
+- [Device Discovery](#device-discovery)
+- [Network Fingerprinting](#network-fingerprinting)
+- [ARP Scanning](#arp-scanning)
+- [Ping Scanning](#ping-scanning)
+- [Service Discovery](#service-discovery)
+- [Banner Grabbing and Service Detection](#banner-grabbing-and-service-detection)
+- [Port Scanning](#port-scanning)
+- [TCP Port Scanning](#tcp-port-scanning)
+- [Scan Gateway](#scan-gateway)
+- [Scan All Ports](#scan-all-ports)
+- [Traceroute](#traceroute)
+- [DNS Resolution](#dns-resolution)
+- [DNS Lookup](#dns-lookup)
+- [Statistics](#statistics)
+- [Network Statistics](#network-statistics)
+
+---
+
+Use Ethernet scanning tools to discover devices, services, and open ports on your network.
+## Device Discovery
+### Network Fingerprinting
+Identify devices using service announcements (mDNS, SSDP, NBNS):
+ethfp
+See [Network Fingerprinting](/v1.9.9/ethernet/fingerprinting/) for detailed information.
+### ARP Scanning
+Discover active hosts on the network using ARP:
+etharp
+Returns a list of IP addresses and MAC addresses of devices responding to ARP requests.
+### Ping Scanning
+Scan for active hosts using ICMP ping:
+ethping
+Sends ping requests to discover which hosts are online.
+## Service Discovery
+### Banner Grabbing and Service Detection
+Probe a host for running services and grab banners:
+ethserv &lt;ip&gt;
+Example:
+ethserv 192.168.1.1
+Attempts to connect to common ports and retrieve service information (HTTP, SSH, FTP, etc.).
+## Port Scanning
+### TCP Port Scanning
+Scan specific ports on a target:
+ethports &lt;ip&gt; &lt;port&gt;
+Examples:
+ethports 192.168.1.100 80
+ethports 192.168.1.100 22,80,443
+### Scan Gateway
+Scan the gateway (DHCP server):
+ethports local 80
+### Scan All Ports
+Scan all common ports on a target:
+ethports 192.168.1.100 all
+## Traceroute
+Trace the network path to a host:
+ethtrace &lt;ip&gt;
+Example:
+ethtrace 8.8.8.8
+Shows each hop (router) between your device and the target.
+## DNS Resolution
+### DNS Lookup
+Resolve a domain name to an IP address:
+ethdns &lt;domain&gt;
+Example:
+ethdns google.com
+## Statistics
+### Network Statistics
+Display Ethernet interface statistics:
+ethstats
+Shows packet counts, errors, and other interface metrics.

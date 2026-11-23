@@ -8,6 +8,7 @@
 #include "gui/gui_anim.h"
 #include "gui/ios_toggle.h"
 #include "lvgl.h"
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -30,25 +31,14 @@ typedef struct options_view_t {
     int capacity;
     int selected;
     int btn_h;
+    /* Vertical insets the list was built with. A full-screen list owns the space
+     * between the status bar and the screen edge itself, so it has none; keeping
+     * them stops a later theme/row-height refresh from adding an inset back and
+     * leaving a gap under the last row. */
+    lv_coord_t pad_top;
+    lv_coord_t pad_bottom;
     bool use_asset_pack_background;
-
-    /* Virtual (windowed) list state. When virtual_mode is set, `items` holds a
-     * fixed pool of rows and `count` equals the pool size; the backing data is
-     * described by the callbacks instead of one object per item. */
-    bool virtual_mode;
-    int visible_rows;
-    int window_start;
-    int virtual_count;
-    int virtual_selected;
-    options_view_count_fn virtual_count_fn;
-    options_view_fill_fn virtual_fill_fn;
-    options_view_activate_fn virtual_activate_fn;
-    void *virtual_user_data;
 } options_view_t;
-
-static void virtual_bind_rows(options_view_t *ov);
-static void virtual_row_event_cb(lv_event_t *e);
-static int compute_visible_rows(const options_view_t *ov);
 
 static inline bool ensure_capacity(options_view_t *ov, int need) {
     if (ov->capacity >= need) return true;
@@ -184,11 +174,16 @@ static void apply_selected_style(options_view_t *ov, lv_obj_t *item, bool on) {
 }
 
 static options_view_t *options_view_create_internal(lv_obj_t *parent, const char *title,
-                                                     bool use_asset_pack_background) {
+                                                     bool use_asset_pack_background,
+                                                     bool transparent) {
+    /* A real parent widget means the list is embedded, not a full screen. That
+       has to be decided before the NULL fallback, otherwise every caller would
+       look like it was parented to the screen. */
+    bool parented = parent && parent != lv_scr_act();
     if (!parent) parent = lv_scr_act();
     options_view_t *ov = (options_view_t *)calloc(1, sizeof(options_view_t));
     if (!ov) return NULL;
-    ov->use_asset_pack_background = use_asset_pack_background;
+    ov->use_asset_pack_background = use_asset_pack_background && !transparent;
 
     int h = LV_VER_RES;
     int status_bar_h = GUI_STATUS_BAR_H;
@@ -199,17 +194,45 @@ static options_view_t *options_view_create_internal(lv_obj_t *parent, const char
 
     ov->list = lv_list_create(parent);
     int list_w = GUI_OPTIONS_LIST_WIDTH;
-    lv_obj_set_size(ov->list, list_w, h - status_bar_h);
-    lv_obj_align(ov->list, LV_ALIGN_TOP_MID, 0, status_bar_h);
+    if (parented) {
+        /* lv_obj_get_content_width/height() read the parent's coords, which are
+           only valid after a layout pass. Every view creates its host in the same
+           create() call that builds this list, so those coords are still the
+           post-constructor placeholder (0x0 -- lv_obj.c leaves y2 = y1 - 1) and
+           sizing from them produced an invisible 0x0 list. Measure after a
+           layout instead. */
+        lv_obj_update_layout(parent);
+        lv_coord_t host_w = lv_obj_get_content_width(parent);
+        lv_coord_t host_h = lv_obj_get_content_height(parent);
+        /* A full-screen host is not a content card: it has no margins or bottom
+           safe area of its own, so the list still takes the screen geometry and
+           leaves the status bar alone, which is what every caller relied on.
+           Only a genuinely inset host gets filled edge to edge. */
+        if (host_h >= h - status_bar_h || host_w <= 0 || host_h <= 0) {
+            lv_obj_set_size(ov->list, list_w, h - status_bar_h);
+            lv_obj_align(ov->list, LV_ALIGN_TOP_MID, 0, status_bar_h);
+        } else {
+            lv_obj_set_size(ov->list, host_w, host_h);
+            lv_obj_align(ov->list, LV_ALIGN_TOP_MID, 0, 0);
+        }
+    } else {
+        lv_obj_set_size(ov->list, list_w, h - status_bar_h);
+        lv_obj_align(ov->list, LV_ALIGN_TOP_MID, 0, status_bar_h);
+    }
     lv_obj_set_style_bg_color(ov->list, bg, 0);
     lv_obj_set_style_bg_opa(ov->list,
-                            ov->use_asset_pack_background && asset_pack_get_background_tile()
-                                ? LV_OPA_TRANSP : LV_OPA_COVER,
+                            transparent ? LV_OPA_TRANSP
+                                        : (ov->use_asset_pack_background &&
+                                           asset_pack_get_background_tile()
+                                               ? LV_OPA_TRANSP
+                                               : LV_OPA_COVER),
                             0);
     lv_obj_set_style_pad_left(ov->list, GUI_OPTIONS_LIST_PAD_HOR, 0);
     lv_obj_set_style_pad_right(ov->list, GUI_OPTIONS_LIST_PAD_HOR, 0);
-    lv_obj_set_style_pad_top(ov->list, GUI_SAFEAREA_VER, 0);
-    lv_obj_set_style_pad_bottom(ov->list, GUI_SAFEAREA_VER + GUI_HOME_SAFE_H, 0);
+    ov->pad_top = parented ? 0 : GUI_SAFEAREA_VER;
+    ov->pad_bottom = parented ? 0 : GUI_SAFEAREA_VER + GUI_HOME_SAFE_H;
+    lv_obj_set_style_pad_top(ov->list, ov->pad_top, 0);
+    lv_obj_set_style_pad_bottom(ov->list, ov->pad_bottom, 0);
     lv_obj_set_style_border_width(ov->list, 0, 0);
     lv_obj_set_style_radius(ov->list, 0, 0);
 
@@ -274,11 +297,32 @@ static options_view_t *options_view_create_internal(lv_obj_t *parent, const char
 }
 
 options_view_t *options_view_create(lv_obj_t *parent, const char *title) {
-    return options_view_create_internal(parent, title, true);
+    return options_view_create_internal(parent, title, true, false);
 }
 
 options_view_t *options_view_create_no_bg(lv_obj_t *parent, const char *title) {
-    return options_view_create_internal(parent, title, false);
+    return options_view_create_internal(parent, title, false, false);
+}
+
+options_view_t *options_view_create_flags(lv_obj_t *parent, const char *title, bool transparent) {
+    return options_view_create_internal(parent, title, !transparent, transparent);
+}
+
+int options_view_item_at(const options_view_t *ov, int32_t x, int32_t y) {
+    if (!ov || !ov->items) return -1;
+    /* ov->items already tracks every added row, so hit testing costs no extra
+       allocation. lv_obj_get_coords returns post-scroll coordinates, which is
+       what a touch point is expressed in. */
+    for (int i = 0; i < ov->count; i++) {
+        lv_obj_t *item = ov->items[i];
+        if (!item || !lv_obj_is_valid(item)) continue;
+        if (lv_obj_has_flag(item, LV_OBJ_FLAG_HIDDEN)) continue;
+        lv_area_t a;
+        lv_obj_get_coords(item, &a);
+        if (x < a.x1 || x > a.x2 || y < a.y1 || y > a.y2) continue;
+        return i;
+    }
+    return -1;
 }
 
 void options_view_destroy(options_view_t *ov) {
@@ -344,10 +388,6 @@ void options_view_trigger_wipe(options_view_t *ov) {
 
 void options_view_set_selected(options_view_t *ov, int index) {
     if (!ov || ov->count == 0) return;
-    if (ov->virtual_mode) {
-        options_view_virtual_select(ov, index);
-        return;
-    }
     if (index < 0) index = ov->count - 1;
     if (index >= ov->count) index = 0;
     if (ov->selected == index) return;
@@ -375,10 +415,6 @@ void options_view_set_item_height(options_view_t *ov, int height) {
 
 void options_view_move_selection(options_view_t *ov, int delta) {
     if (!ov || ov->count == 0) return;
-    if (ov->virtual_mode) {
-        options_view_virtual_move(ov, delta);
-        return;
-    }
     options_view_set_selected(ov, ov->selected + delta);
 }
 
@@ -401,16 +437,10 @@ void options_view_clear(options_view_t *ov) {
     }
     ov->count = 0;
     ov->selected = -1;
-    ov->virtual_mode = false;
-    ov->visible_rows = 0;
-    ov->window_start = 0;
-    ov->virtual_count = 0;
-    ov->virtual_selected = 0;
 }
 
 int options_view_get_item_count(const options_view_t *ov) {
-    if (!ov) return 0;
-    return ov->virtual_mode ? ov->virtual_count : ov->count;
+    return ov ? ov->count : 0;
 }
 
 lv_obj_t *options_view_get_list(options_view_t *ov) {
@@ -440,8 +470,11 @@ void options_view_refresh_styles(options_view_t *ov) {
         lv_obj_set_style_pad_row(ov->list, GUI_GRID, 0);
         lv_obj_set_style_pad_left(ov->list, GUI_OPTIONS_LIST_PAD_HOR, 0);
         lv_obj_set_style_pad_right(ov->list, GUI_OPTIONS_LIST_PAD_HOR, 0);
-        lv_obj_set_style_pad_top(ov->list, GUI_SAFEAREA_VER, 0);
-        lv_obj_set_style_pad_bottom(ov->list, GUI_SAFEAREA_VER, 0);
+        /* Same insets the list was built with, not a fresh guess: a full-screen
+         * list has none, and re-adding one would shorten the rows' area and
+         * open a gap under the last row. */
+        lv_obj_set_style_pad_top(ov->list, ov->pad_top, 0);
+        lv_obj_set_style_pad_bottom(ov->list, ov->pad_bottom, 0);
     }
 
     lv_style_set_bg_color(&ov->style_item, surface);
@@ -506,211 +539,7 @@ void options_view_relayout_item(options_view_t *ov, lv_obj_t *item) {
 
 void options_view_refresh_selected_item(options_view_t *ov) {
     if (!ov) return;
-    if (ov->virtual_mode) {
-        int row = ov->virtual_selected - ov->window_start;
-        if (row >= 0 && row < ov->count) apply_selected_style(ov, ov->items[row], true);
-        return;
-    }
     if (ov->selected < 0 || ov->selected >= ov->count) return;
     apply_selected_style(ov, ov->items[ov->selected], true);
 }
 
-/* ---------------------------------------------------------------------------
- * Virtual (windowed) lists
- * ------------------------------------------------------------------------- */
-
-#define OPTIONS_VIEW_LABEL_CHARS 128
-
-/* Zebra striping follows the item index, not the pool row, so the alternating
- * pattern stays stable while rows are rebound on scroll. */
-static void virtual_apply_row_style(options_view_t *ov, lv_obj_t *row, int index) {
-    lv_obj_remove_style(row, &ov->style_item, 0);
-    lv_obj_remove_style(row, &ov->style_item_alt, 0);
-    lv_obj_remove_style(row, &ov->style_item_pressed, LV_STATE_PRESSED);
-    lv_obj_remove_style(row, &ov->style_item_alt_pressed, LV_STATE_PRESSED);
-    lv_style_t *zebra = get_zebra_style(ov, index);
-    lv_obj_add_style(row, zebra, 0);
-    lv_obj_add_style(row, zebra == &ov->style_item ? &ov->style_item_pressed
-                                                   : &ov->style_item_alt_pressed,
-                     LV_STATE_PRESSED);
-}
-
-/* How many rows the list can show at once. Derived from the list geometry and
- * the current row height so it tracks the Row Height setting and panel size
- * instead of a per-menu constant. */
-static int compute_visible_rows(const options_view_t *ov) {
-    if (!ov || !ov->list || !lv_obj_is_valid(ov->list)) return 1;
-
-    /* An object's height lives in its coordinates, which are only valid after a
-     * layout pass. Force one so the pool size is right the first time the view
-     * is shown rather than collapsing to a single row. */
-    lv_obj_update_layout(ov->list);
-
-    lv_coord_t list_h = lv_obj_get_height(ov->list);
-    if (list_h <= 0) list_h = LV_VER_RES - GUI_STATUS_BAR_H;
-
-    lv_coord_t avail = list_h
-                     - lv_obj_get_style_pad_top(ov->list, 0)
-                     - lv_obj_get_style_pad_bottom(ov->list, 0);
-    lv_coord_t gap = lv_obj_get_style_pad_row(ov->list, 0);
-    lv_coord_t row_h = ov->btn_h > 0 ? ov->btn_h : 1;
-    if (gap < 0) gap = 0;
-
-    /* Round UP so the pool includes the partially visible row at the bottom of
-     * the viewport. Sizing to whole rows only would end the list short and
-     * leave dead space below it; a scrolling list clips that last row at the
-     * viewport edge instead, and the row pool has to do the same to look right.
-     * The extra row costs one more LVGL object, never more, so the object count
-     * stays constant in the number of items. */
-    lv_coord_t stride = row_h + gap;
-    int rows = (avail <= 0) ? 1 : (int)((avail - 1) / stride) + 1;
-    if (rows < 1) rows = 1;
-    return rows;
-}
-
-static void virtual_bind_rows(options_view_t *ov) {
-    if (!ov || !ov->virtual_mode) return;
-    char buf[OPTIONS_VIEW_LABEL_CHARS];
-
-    for (int r = 0; r < ov->visible_rows && r < ov->count; ++r) {
-        lv_obj_t *row = ov->items[r];
-        if (!row || !lv_obj_is_valid(row)) continue;
-        lv_obj_t *lbl = lv_obj_get_child(row, 0);
-
-        if (ov->virtual_count == 0) {
-            if (r == 0) {
-                if (lbl) lv_label_set_text(lbl, "No items found");
-                lv_obj_clear_flag(row, LV_OBJ_FLAG_HIDDEN);
-                lv_obj_set_user_data(row, (void *)(intptr_t)-1);
-                virtual_apply_row_style(ov, row, 0);
-            } else {
-                if (lbl) lv_label_set_text(lbl, "");
-                lv_obj_add_flag(row, LV_OBJ_FLAG_HIDDEN);
-                lv_obj_set_user_data(row, (void *)(intptr_t)-1);
-            }
-            continue;
-        }
-
-        int index = ov->window_start + r;
-        if (index < ov->virtual_count) {
-            buf[0] = '\0';
-            if (ov->virtual_fill_fn) {
-                ov->virtual_fill_fn(index, buf, sizeof(buf), ov->virtual_user_data);
-            }
-            if (lbl) lv_label_set_text(lbl, buf);
-            lv_obj_clear_flag(row, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_set_user_data(row, (void *)(intptr_t)index);
-            virtual_apply_row_style(ov, row, index);
-        } else {
-            if (lbl) lv_label_set_text(lbl, "");
-            lv_obj_add_flag(row, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_set_user_data(row, (void *)(intptr_t)-1);
-        }
-    }
-}
-
-static void virtual_row_event_cb(lv_event_t *e) {
-    lv_obj_t *row = lv_event_get_target(e);
-    options_view_t *ov = (options_view_t *)lv_event_get_user_data(e);
-    if (!ov || !ov->virtual_mode || !row) return;
-    int index = (int)(intptr_t)lv_obj_get_user_data(row);
-    if (index < 0 || index >= ov->virtual_count) return;
-    options_view_virtual_select(ov, index);
-    if (ov->virtual_activate_fn) ov->virtual_activate_fn(index, ov->virtual_user_data);
-}
-
-void options_view_virtual_start(options_view_t *ov,
-                                options_view_count_fn count_fn,
-                                options_view_fill_fn fill_fn,
-                                options_view_activate_fn activate_fn,
-                                void *user_data) {
-    if (!ov || !ov->list) return;
-
-    options_view_clear(ov);
-    ov->virtual_mode = true;
-    ov->virtual_count_fn = count_fn;
-    ov->virtual_fill_fn = fill_fn;
-    ov->virtual_activate_fn = activate_fn;
-    ov->virtual_user_data = user_data;
-    ov->window_start = 0;
-    ov->virtual_selected = 0;
-    ov->virtual_count = 0;
-
-    ov->visible_rows = compute_visible_rows(ov);
-    if (!ensure_capacity(ov, ov->visible_rows)) return;
-    for (int i = 0; i < ov->visible_rows; ++i) {
-        if (!options_view_add_item(ov, "", virtual_row_event_cb, ov)) break;
-    }
-    options_view_virtual_refresh(ov);
-}
-
-void options_view_virtual_refresh(options_view_t *ov) {
-    if (!ov || !ov->virtual_mode) return;
-
-    int n = ov->virtual_count_fn ? ov->virtual_count_fn(ov->virtual_user_data) : 0;
-    if (n < 0) n = 0;
-    ov->virtual_count = n;
-
-    if (ov->virtual_selected > n - 1) ov->virtual_selected = (n > 0) ? n - 1 : 0;
-    if (ov->virtual_selected < 0) ov->virtual_selected = 0;
-
-    int max_start = n - ov->visible_rows;
-    if (max_start < 0) max_start = 0;
-    if (ov->virtual_selected < ov->window_start) ov->window_start = ov->virtual_selected;
-    if (ov->window_start > max_start) ov->window_start = max_start;
-    if (ov->window_start < 0) ov->window_start = 0;
-
-    virtual_bind_rows(ov);
-    ov->selected = ov->virtual_selected;
-    for (int r = 0; r < ov->visible_rows; ++r) {
-        lv_obj_t *row = ov->items[r];
-        if (!row || !lv_obj_is_valid(row)) continue;
-        apply_selected_style(ov, row, n > 0 && (ov->window_start + r) == ov->virtual_selected);
-    }
-}
-
-void options_view_virtual_select(options_view_t *ov, int index) {
-    if (!ov || !ov->virtual_mode || ov->virtual_count <= 0) return;
-    if (index < 0) index = ov->virtual_count - 1;
-    if (index >= ov->virtual_count) index = 0;
-
-    ov->virtual_selected = index;
-    int max_start = ov->virtual_count - ov->visible_rows;
-    if (max_start < 0) max_start = 0;
-    if (index < ov->window_start) {
-        ov->window_start = index;
-    } else if (index >= ov->window_start + ov->visible_rows) {
-        ov->window_start = index - ov->visible_rows + 1;
-    }
-    if (ov->window_start > max_start) ov->window_start = max_start;
-    if (ov->window_start < 0) ov->window_start = 0;
-
-    virtual_bind_rows(ov);
-    ov->selected = index;
-    for (int r = 0; r < ov->visible_rows; ++r) {
-        lv_obj_t *row = ov->items[r];
-        if (!row || !lv_obj_is_valid(row)) continue;
-        apply_selected_style(ov, row, (ov->window_start + r) == index);
-    }
-}
-
-void options_view_virtual_move(options_view_t *ov, int delta) {
-    if (!ov || !ov->virtual_mode) return;
-    options_view_virtual_select(ov, ov->virtual_selected + delta);
-}
-
-bool options_view_is_virtual(const options_view_t *ov) {
-    return ov ? ov->virtual_mode : false;
-}
-
-int options_view_virtual_count(const options_view_t *ov) {
-    return (ov && ov->virtual_mode) ? ov->virtual_count : 0;
-}
-
-int options_view_virtual_visible_rows(const options_view_t *ov) {
-    return (ov && ov->virtual_mode) ? ov->visible_rows : 0;
-}
-
-int options_view_virtual_selected(const options_view_t *ov) {
-    return (ov && ov->virtual_mode) ? ov->virtual_selected : -1;
-}

@@ -82,6 +82,9 @@ typedef enum {
     SETTING_THIRD_CONTROL,
     SETTING_TERMINAL_COLOR,
     SETTING_INVERT_COLORS,
+#ifdef CONFIG_BANSHEE_LITE_C5
+    SETTING_AUTO_FLIP,
+#endif
     SETTING_WEB_AUTH,
     SETTING_WEBUI_AP_ONLY,
     SETTING_AP_ENABLED,
@@ -160,6 +163,7 @@ typedef enum {
     SETTING_LOCKSCREEN_TYPE,
     SETTING_LOCKSCREEN_TIMEOUT,
     SETTING_LOCKSCREEN_CHANGE_PIN,
+    SETTING_LOCKSCREEN_SLIDE,
     // Wardriving settings
     SETTING_WD_HOP_PRIMARY,
     SETTING_WD_HOP_HELPER,
@@ -187,6 +191,7 @@ typedef enum {
     SETTING_OTA_UPDATE_PEER,
     SETTING_OTA_INSTALL_FROM_SD,
     SETTING_SUN_MODE,
+    SETTING_PRIVACY_MODE,
     SETTING_LOG_LEVEL,
     SETTING_FAVORITES,
     SETTING_FAVORITES_BYPASS,
@@ -299,6 +304,9 @@ typedef struct {
   uint8_t terminal_font_size;   // 0=Small, 1=Normal, 2=Large
   uint8_t menu_theme;  // Theme for main menu colors (0=Default)
   bool invert_colors; // Invert screen colors
+#ifdef CONFIG_BANSHEE_LITE_C5
+  bool auto_flip_enabled; // Rotate the UI when the device is held sideways
+#endif
   bool web_auth_enabled;
   bool webui_restrict_to_ap;
   bool usb_msc_enabled; // Remember USB SD passthrough toggle (never auto-starts at boot)
@@ -378,6 +386,7 @@ typedef struct {
     bool touch_drag_scroll;          // Drag-to-scroll on the options screen
     bool sun_mode;                   // Outdoor visibility: forces max brightness + high contrast
     uint8_t sun_mode_saved_brightness; // Brightness to restore when Sun Mode is turned off
+    bool privacy_mode;               // Redact SSIDs and MAC addresses on screen (wardriving PII)
     uint8_t log_level;                 // ESP-IDF global log level (esp_log_level_t)
     uint8_t favorites_count;
     char favorites[FAVORITES_MAX][FAVORITE_NAME_LEN];
@@ -390,6 +399,7 @@ typedef struct {
     char lockscreen_obfuscated[32]; // Length-prefixed obfuscated PIN blob
     uint16_t lockscreen_timeout_sec;   // Auto-lock after inactivity (0=off)
     bool lockscreen_wake_lock;        // Lock on wake-from-sleep
+    bool lockscreen_slide_unlock;     // Touch-only: Apple-style slide-to-unlock (no-PIN mode)
 
     // Wardriving settings
     uint16_t wd_hop_primary_ms;      // Primary chip hop interval (50-500ms)
@@ -531,6 +541,10 @@ void settings_set_terminal_font_size(FSettings *settings, uint8_t size);
 uint8_t settings_get_terminal_font_size(const FSettings *settings);
 void settings_set_invert_colors(FSettings *settings, bool enabled);
 bool settings_get_invert_colors(const FSettings *settings);
+#ifdef CONFIG_BANSHEE_LITE_C5
+void settings_set_auto_flip_enabled(FSettings *settings, bool enabled);
+bool settings_get_auto_flip_enabled(const FSettings *settings);
+#endif
 
 // Getter and Setter for web auth
 void settings_set_web_auth_enabled(FSettings *settings, bool enabled);
@@ -689,6 +703,8 @@ void settings_set_high_contrast(FSettings *settings, bool enabled);
 bool settings_get_high_contrast(const FSettings *settings);
 void settings_set_sun_mode(FSettings *settings, bool enabled);
 bool settings_get_sun_mode(const FSettings *settings);
+void settings_set_privacy_mode(FSettings *settings, bool enabled);
+bool settings_get_privacy_mode(const FSettings *settings);
 void settings_set_log_level(FSettings *settings, uint8_t level);
 uint8_t settings_get_log_level(const FSettings *settings);
 bool settings_is_favorite(const FSettings *settings, const char *name);
@@ -717,6 +733,8 @@ void settings_set_lockscreen_timeout_sec(FSettings *settings, uint16_t sec);
 uint16_t settings_get_lockscreen_timeout_sec(const FSettings *settings);
 void settings_set_lockscreen_wake_lock(FSettings *settings, bool enabled);
 bool settings_get_lockscreen_wake_lock(const FSettings *settings);
+void settings_set_lockscreen_slide_unlock(FSettings *settings, bool enabled);
+bool settings_get_lockscreen_slide_unlock(const FSettings *settings);
 
 // Wardriving settings
 void settings_set_wd_hop_primary_ms(FSettings *settings, uint16_t ms);

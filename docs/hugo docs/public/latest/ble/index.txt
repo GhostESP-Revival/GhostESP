@@ -1,0 +1,25 @@
+Title: BLE
+Description: Overview of GhostESP&#39;s BLE capabilities
+URL: /latest/ble/
+Version: latest
+Section: GhostESP: Revival
+Keywords: BLE, Bluetooth, scanning, attacks, wireless security
+Search index: /search-index.json
+
+# BLE
+
+> Overview of GhostESP&#39;s BLE capabilities
+
+## On this page
+
+- [Quick Links](#quick-links)
+
+---
+
+GhostESP includes BLE (Bluetooth Low Energy) scanning and attack tools.
+## Quick Links
+- [Scanning](/latest/ble/scanning/) - discover nearby BLE devices and detect suspected skimmers
+- [Advertiser Scan](/latest/ble/advertisers/) - passively parse BLE advertisements
+- [GATT Discovery](/latest/ble/gatt/) - enumerate services on connected devices
+- [Attacks](/latest/ble/attacks/) - spam and AirTag spoofing
+- [BadBLE Keyboard](/latest/ble/badble/) - BLE HID keyboard running DuckyScript payloads

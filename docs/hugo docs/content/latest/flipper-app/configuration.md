@@ -1,6 +1,6 @@
 ---
 title: "Configuration & System"
-description: "LED control, SD card configuration, and system settings in the Flipper Zero companion app."
+description: "LED control, SD card configuration, and system settings in the Flipper Zero companion app"
 weight: 60
 keywords: ["configuration", "settings", "led", "rgb", "sd card", "system"]
 ---

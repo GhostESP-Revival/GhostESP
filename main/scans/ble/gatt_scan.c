@@ -18,6 +18,7 @@
  */
 
 #include "scans/ble/gatt_scan.h"
+#include "core/ouis.h"
 #include "core/scan_saver.h"
 #include "core/glog.h"
 #include "core/utils.h"
@@ -360,6 +361,15 @@ static bool wait_for_flag(volatile bool *flag_ptr, uint8_t timeout_ticks) {
     return false;
 }
 
+/** Resolve the device's OUI vendor, or "Private address" for randomized MACs. */
+static void device_vendor_str(const GattDevice *dev, char *out, size_t out_sz) {
+    out[0] = '\0';
+    char mac_str[18];
+    format_addr_mac_upper(dev->addr.val, mac_str);
+    if (ouis_lookup_vendor(mac_str, out, out_sz)) return;
+    if (ouis_is_private_mac(mac_str)) snprintf(out, out_sz, "Private address");
+}
+
 /**
  * @brief Print a single GATT device entry in formatted style
  */
@@ -368,11 +378,18 @@ static void print_gatt_device_formatted(uint16_t idx, const GattDevice *dev, con
     format_addr_mac_upper(dev->addr.val, mac_str);
     const char *name = get_device_name(dev);
     const char *tracker = tracker_type_to_string(dev->tracker_type);
+    char vendor[64];
+    device_vendor_str(dev, vendor, sizeof(vendor));
     
     glog("[%u] Name: %s,\n"
-         "     MAC: %s,\n"
-         "     RSSI: %d,\n",
-         idx, name, mac_str, dev->rssi);
+         "     MAC: %s,\n",
+         idx, name, mac_str);
+    
+    if (vendor[0]) {
+        glog("     Vendor: %s,\n", vendor);
+    }
+    
+    glog("     RSSI: %d,\n", dev->rssi);
     
     if (tracker) {
         glog("     Type: %s,\n", tracker);
@@ -1054,6 +1071,9 @@ void gatt_scan_print_devices(void) {
             
             scan_file_printf(&sf, "[%u] Name: %s, MAC: %s, RSSI: %d",
                              i, get_device_name(dev), mac_str, dev->rssi);
+            char vendor[64];
+            device_vendor_str(dev, vendor, sizeof(vendor));
+            if (vendor[0]) scan_file_printf(&sf, ", Vendor: %s", vendor);
             if (tracker) scan_file_printf(&sf, ", Type: %s", tracker);
             if (flags[0]) scan_file_printf(&sf, ", Status: %s", flags);
             scan_file_printf(&sf, "\n");

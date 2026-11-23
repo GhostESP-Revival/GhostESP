@@ -1,0 +1,41 @@
+Title: Learning Signals
+Description: Capture IR buttons and remotes with GhostESP
+URL: /v1.8.1/infrared/learning/
+Version: v1.8.1
+Section: Infrared
+Search index: /search-index.json
+
+# Learning Signals
+
+> Capture IR buttons and remotes with GhostESP
+
+## On this page
+
+- [Before you start](#before-you-start)
+- [Learn a remote or button](#learn-a-remote-or-button)
+- [Storage layout](#storage-layout)
+- [Tips](#tips)
+
+---
+
+## Before you start
+- Hardware: Use a board with IR RX support (see [hardware requirements](/v1.8.1/infrared/hardware/)).
+- SD card: Inserted and mounted so GhostESP can save .ir files under /ghostesp/infrared/.
+- Easy Learn: Optional assistant that suggests button names; toggle it via infrared_easy in the command line config or the settings menu.
+## Learn a remote or button
+-
+Open the Infrared view from the main menu and choose Learn Remote for a new file or Learn Button inside a saved remote to append a new signal to an existing remote.
+-
+Align the source remote with the IR receiver window, hold it steady within a few centimeters, then press the button once.
+-
+Confirm the button name. Easy Learn provides a suggested label during learning, otherwise use the on-screen keyboard.
+-
+Watch the preview popup for carrier frequency, protocol name, and decoded address/command details. Cancel and retry if you recieve a raw decode on a known non-raw signal.
+-
+Confirm to save. GhostESP will create a new .ir file for fresh remotes or append the button to the currently open file automatically.
+### Storage layout
+- New remotes are written to /ghostesp/infrared/remotes/&lt;name&gt;.ir.
+- Adding to an existing remote appends another named button block inside the same .ir file.
+### Tips
+- Keep the remote within a few centimeters of the receiver and avoid direct sunlight.
+- If learning fails, exit and re-open the Infrared learning popup to try to reinitialize the RMT RX channel.

@@ -4,31 +4,32 @@ description: "Organize, rename, and edit GhostESP IR files"
 weight: 30
 ---
 
-## Directory layout
+## Directory Layout
 
-- `/mnt/ghostesp/infrared/remotes` — Individual remotes captured on-device
-- `/mnt/ghostesp/infrared/universals` — Library files with many commands
+- `/mnt/ghostesp/infrared/remotes` - Individual remotes captured on-device
+- `/mnt/ghostesp/infrared/universals` - Library files with many commands
 - The Infrared UI reads from `/mnt/ghostesp/infrared/...` when the SD card is mounted.
+- CLI `ir learn` writes new files as `Learned_<protocol>_<address>_<command>.ir`, or `Learned_RAW_<timestamp>.ir` for raw captures.
 
-### Flipper IR libraries
+### Flipper IR Libraries
 
 GhostESP reads standard Flipper `.ir` format. Download packs from [Lucaslhm/Flipper-IRDB](https://github.com/Lucaslhm/Flipper-IRDB).
 
 Universal IR files are available at [Momentum Flipper Firmware](https://github.com/Next-Flip/Momentum-Firmware/tree/dev/applications/main/infrared/resources/infrared/assets). Download and place them under `infrared/universals`.
 
-### Built-in Universal IR file
+### Built-in Universal IR File
 
 In addition to SD card files, GhostESP includes a built-in Universal IR file with popular TV POWER signals. This file doesn't require an SD card.
 
 
-### Append new signals
+### Append New Signals
 
 - Choose *Add Signal* while a remote is open to append a newly learned button.
 - Easy Learn suggests button names; otherwise you will be prompted via the on-screen keyboard.
 
-## Web UI management
+## WebUI Management
 
-- Connect to the GhostNet AP and open the web UI.
+- Connect to the GhostNet AP and open the WebUI.
 - Browse to the file manager tab and navigate to `/mnt/ghostesp/infrared/`.
 - Upload `.ir` files to the appropriate folder or download existing ones for backups.
 

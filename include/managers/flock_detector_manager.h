@@ -25,12 +25,27 @@ typedef enum {
     FLOCK_DETECT_OUI_ADDR3 = 2,
     FLOCK_DETECT_SSID      = 3,
     FLOCK_DETECT_WILDCARD_PROBE = 4,
+    FLOCK_DETECT_STREAM    = 5,   // Google-OUI MAC with a sustained video-style uplink
 } FlockDetectMethod;
 
 typedef enum {
     FLOCK_CONF_LOW  = 0,   // OUI-only match (chip vendor OUI, high false-positive rate)
     FLOCK_CONF_HIGH = 1,   // Wildcard probe or SSID keyword (Flock-specific signature)
 } FlockConfidence;
+
+// Which surveillance vendor/class a WiFi hit belongs to. FLOCK_CLASS_NONE is
+// "no match"; the OUI/keyword tables carry this in their high bits.
+typedef enum {
+    FLOCK_CLASS_NONE = 0,
+    FLOCK_CLASS_FLOCK,
+    FLOCK_CLASS_CAMERA,
+    FLOCK_CLASS_ALPR,
+    FLOCK_CLASS_RING,
+    FLOCK_CLASS_AXON,
+    FLOCK_CLASS_HAK5,
+    FLOCK_CLASS_NEST,
+    FLOCK_CLASS_GHOSTESP,
+} FlockDeviceClass;
 
 typedef struct {
     char mac[FLOCK_MAC_STR_LEN];
@@ -42,6 +57,7 @@ typedef struct {
     uint16_t count;
     char ssid[FLOCK_SSID_STR_LEN];
     FlockConfidence confidence;
+    uint8_t device_class;   // FlockDeviceClass
 } FlockDetection;
 
 typedef void (*FlockDetectorCallback)(const FlockDetection *det, void *user_data);
@@ -54,8 +70,19 @@ esp_err_t flock_detector_stop(void);
 bool flock_detector_is_running(void);
 
 int flock_detector_get_count(void);
+uint32_t flock_detector_get_rx_count(void);
+uint32_t flock_detector_get_valid_rx_count(void);
 const FlockDetection* flock_detector_get_detection(int index);
 void flock_detector_clear_detections(void);
+
+// True for Flock Safety hits (and unclassified ones). Other vendor classes the
+// detector also collects for sentry (Ring, Nest, cameras, ALPR, Axon, Hak5) are
+// false, so Flock-only views (flocklist, flockscan output) can skip them.
+bool flock_detector_is_flock(const FlockDetection *det);
+
+// Sentry sets this so vendor hits are logged too. Off by default: the
+// standalone flock scan reports Flock devices only.
+void flock_detector_set_show_all(bool show_all);
 
 void flock_detector_set_callback(FlockDetectorCallback cb, void *user_data);
 

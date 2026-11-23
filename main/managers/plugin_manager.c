@@ -410,6 +410,26 @@ static bool read_file_to_buffer(const char *path, char **out_buf) {
     return true;
 }
 
+static bool app_binary_matches_arch(const char *path) {
+    /* A multi-target manifest describes supported builds, not a portable ELF.
+     * Verify the actual binary before it can shadow a compatible package. */
+    unsigned char header[20];
+    FILE *file = fopen(path, "rb");
+    if (!file) return false;
+    size_t bytes = fread(header, 1, sizeof(header), file);
+    fclose(file);
+    if (bytes != sizeof(header) || memcmp(header, "\177ELF", 4) != 0 ||
+        header[4] != 1 || header[5] != 1) return false; /* ELF32, little endian */
+    unsigned machine = (unsigned)header[18] | ((unsigned)header[19] << 8);
+#if CONFIG_IDF_TARGET_ARCH_RISCV
+    return machine == 243; /* EM_RISCV */
+#elif CONFIG_IDF_TARGET_ARCH_XTENSA
+    return machine == 94; /* EM_XTENSA */
+#else
+    return false;
+#endif
+}
+
 static bool parse_manifest(const char *base_path, plugin_app_manifest_t *out) {
     char manifest_path[PLUGIN_APP_PATH_MAX];
     if (!join_path(manifest_path, sizeof(manifest_path), base_path, "manifest.json")) {
@@ -467,6 +487,7 @@ static bool parse_manifest(const char *base_path, plugin_app_manifest_t *out) {
     out->icon_width = (uint16_t)copy_json_u32(root, "icon_width", 0);
     out->icon_height = (uint16_t)copy_json_u32(root, "icon_height", 0);
     out->requires_psram = copy_json_bool(root, "requires_psram", false);
+    out->forward_back = copy_json_bool(root, "forward_back", false);
 
     cJSON *permissions = cJSON_GetObjectItemCaseSensitive(root, "permissions");
     if (cJSON_IsArray(permissions)) {
@@ -519,6 +540,17 @@ static bool parse_manifest(const char *base_path, plugin_app_manifest_t *out) {
         snprintf(out->error, sizeof(out->error), "invalid id");
         return false;
     }
+    /* Reject apps built for another chip here rather than at dlopen time.
+     * Without this they boot, take a tile in the gallery, inflate a folder
+     * count and only then fail to launch. Placed before the appdata dir is
+     * created and its state file read, so a rejected app costs nothing.
+     * A manifest that declares no target at all stays allowed, so older
+     * packages keep working. */
+    if (!plugin_manager_target_matches(out)) {
+        snprintf(out->error, sizeof(out->error), "built for another target (this board: %s)",
+                 plugin_api_current_target());
+        return false;
+    }
     ensure_appdata_dir(out->id);
     if (out->name[0] == '\0') strncpy(out->name, out->id, sizeof(out->name) - 1);
     load_app_state(out);
@@ -560,6 +592,10 @@ static bool parse_manifest(const char *base_path, plugin_app_manifest_t *out) {
     }
     if (!sd_card_exists(out->entry_path)) {
         snprintf(out->error, sizeof(out->error), "entry missing");
+        return false;
+    }
+    if (!app_binary_matches_arch(out->entry_path)) {
+        snprintf(out->error, sizeof(out->error), "app ELF architecture does not match firmware");
         return false;
     }
 
@@ -629,6 +665,16 @@ bool plugin_manager_required_features_supported(const plugin_app_manifest_t *app
     return true;
 }
 
+static int compare_apps_by_name(const void *lhs, const void *rhs) {
+    const plugin_app_manifest_t *a = (const plugin_app_manifest_t *)lhs;
+    const plugin_app_manifest_t *b = (const plugin_app_manifest_t *)rhs;
+    int by_name = strcasecmp(a->name, b->name);
+    /* Ties break on id so the registry order is total, not just mostly
+     * stable, and `apps list` output is reproducible. */
+    if (by_name != 0) return by_name;
+    return strcmp(a->id, b->id);
+}
+
 int plugin_manager_reload(void) {
     int64_t start_us = esp_timer_get_time();
     if (!plugin_manager_target_supported()) {
@@ -667,6 +713,7 @@ int plugin_manager_reload(void) {
     plugin_manager_materialize_packages();
     ESP_LOGI(TAG, "Package materialize check took %lld ms", (long long)((esp_timer_get_time() - materialize_start_us) / 1000));
 
+    /* Installed apps take precedence over package caches with the same id. */
     const char *scan_dirs[] = { PLUGIN_APPS_DIR, PLUGIN_APP_CACHE_DIR };
     for (size_t scan_i = 0; scan_i < sizeof(scan_dirs) / sizeof(scan_dirs[0]) && s_app_count < PLUGIN_APP_REGISTRY_CAPACITY; ++scan_i) {
         DIR *dir = opendir(scan_dirs[scan_i]);
@@ -695,10 +742,25 @@ int plugin_manager_reload(void) {
                 memset(app, 0, sizeof(*app));
                 continue;
             }
+            /* Installing a .gapp leaves its source package on SD, so its
+             * materialized cache can describe an already installed app.
+             * Keep one registry entry per id, just as find()/launch expect. */
+            const plugin_app_manifest_t *existing = plugin_manager_find(app->id);
+            if (existing) {
+                ESP_LOGW(TAG, "Skipping duplicate app %s at %s (using %s)",
+                         app->id, base_path, existing->base_path);
+                memset(app, 0, sizeof(*app));
+                continue;
+            }
             s_app_count++;
         }
 
         closedir(dir);
+    }
+    /* readdir order is arbitrary. Sort before decoding icons so the gallery,
+     * folder counts and `apps list` all present the same stable order. */
+    if (s_app_count > 1) {
+        qsort(s_apps, (size_t)s_app_count, sizeof(s_apps[0]), compare_apps_by_name);
     }
     for (int i = 0; i < s_app_count; ++i) {
         if (s_apps[i].icon[0] != '\0' && s_apps[i].icon_width > 0 && s_apps[i].icon_height > 0 && !s_apps[i].icon_dsc) {

@@ -1,23 +1,29 @@
 ---
 title: "Ghostchi"
-description: "An autonomous Wi-Fi hunting tamagotchi that learns, adapts, and has opinions."
+description: "An autonomous Wi-Fi hunting tamagotchi that learns, adapts, and has opinions"
 weight: 35
 ---
 
-Ghostchi is a tamagotchi that lives on your device and hunts WPA handshakes. It scans for access points, ranks them by likelihood of a successful capture, listens for EAPOL traffic, and if passive listening doesn't work, it forces the issue with a deauth burst. It remembers what worked and what didn't across sessions and reboots. It also has a name, moods, and things to say about you and the networks it hunts.
+Ghostchi is a tamagotchi that lives on your device and hunts WPA handshakes. It scans for access points, ranks them by likelihood of a successful capture, and listens for EAPOL traffic. By default it is **passive** and never transmits deauth frames; if you opt into **aggressive** mode it will also force the issue with a short deauth burst. It remembers what worked and what didn't across sessions and reboots. It also has a name, moods, and things to say about you and the networks it hunts.
 
-> **Legal note**: Only capture traffic from networks you own or have explicit permission to test. Unauthorized network testing is illegal in most jurisdictions.
+> **Legal note**: Only capture traffic from networks you own or have permission to test. See [Legal and ethical rules]({{< relref "basics.md#legal-and-ethical-rules" >}}).
 
 ## How it hunts
 
 The hunting loop runs continuously once you start a session:
 
 1. **Sweep** -- Scans all channels for visible APs, scores each one, picks the best target.
-2. **Lock** -- Tunes to the target's channel and listens passively for EAPOL handshakes (2-5 seconds depending on how crowded the area is).
-3. **Stim** -- If passive listening didn't catch anything, fires a short deauth burst to force a client reconnect, then listens again.
+2. **Lock** -- Tunes to the target's channel and listens for EAPOL handshakes. In the default passive mode the window is long (30-60 seconds depending on how crowded the area is), because the ghost has to wait for a real client to reconnect on its own.
+3. **Stim (aggressive mode only)** -- If you've enabled aggressive mode and passive listening didn't catch anything, it fires a short deauth burst to force a client reconnect, then listens again. Passive mode never takes this step.
 4. **Cooldown** -- Pauses briefly before starting over. Successes and failures both affect how the ghost targets APs going forward.
 
-The whole cycle runs on a 250ms tick. Deauth is only used once per target attempt -- if the first push doesn't produce a handshake, the ghost gives up on that target and moves on rather than hammering it.
+The whole cycle runs on a 250ms tick. Even in aggressive mode, deauth is only used once per target attempt -- if the first push doesn't produce a handshake, the ghost gives up on that target and moves on rather than hammering it.
+
+## Passive vs. aggressive mode
+
+Ghostchi defaults to **passive** mode: it sweeps, locks, and listens, but never sends deauth frames. **Aggressive** mode re-enables the legacy behaviour where each target attempt ends with a short deauth burst to force a client reconnect. Only use aggressive mode on networks you own or have explicit permission to test.
+
+Switch modes from the Ghostchi screen with the middle button on the second or third page (it reads **PASSIVE** / **AGGRESSIVE**). The choice is persisted in `state.bin` (v3) and restored on the next boot. State files older than v3 have no mode field, so upgrading users silently get the new passive default.
 
 ## The scoring system
 
@@ -33,15 +39,23 @@ Confidence is calculated alongside the score and displayed on-screen as a percen
 
 ## Adaptive strategy
 
-Timing adjusts based on how many APs are nearby:
+Timing adjusts based on how many APs are nearby. In the default **passive** mode the listen window is long:
+
+| Environment | APs | Passive listen | Settle time |
+|-------------|-----|----------------|-------------|
+| Crowded | 18+ | 30s | 850ms |
+| Normal | 6-17 | 45s | 1.2s |
+| Sparse | 1-5 | 60s | 1.5s |
+
+More APs means more natural EAPOL traffic, so the ghost can use shorter windows. Fewer APs means it needs to wait longer.
+
+**Aggressive** mode uses a much shorter window because the deauth burst produces EAPOL within a few hundred milliseconds:
 
 | Environment | APs | Passive listen | Settle time | Deauth burst |
 |-------------|-----|----------------|-------------|--------------|
 | Crowded | 18+ | 2.2s | 850ms | 450ms |
 | Normal | 6-17 | 3.4s | 1.2s | 650ms |
 | Sparse | 1-5 | 5.0s | 1.5s | 850ms |
-
-More APs means more natural EAPOL traffic, so the ghost can use shorter windows. Fewer APs means it needs to wait longer and push harder.
 
 ## The learning system
 
@@ -58,7 +72,7 @@ Session aggregates (total sessions, handshakes, attempts, failures, XP, and acti
 
 ## Your ghost
 
-Each device generates a unique Ghostchi character from its WiFi MAC address. The name is deterministic -- same MAC, same name, forever. Names use a pronounceable consonant-vowel pattern producing things like "bemira", "kivexa", "lofenu", "tafuri", "zasin".
+Each device generates a unique Ghostchi character from its Wi-Fi MAC address. The name is deterministic -- same MAC, same name, forever. Names use a pronounceable consonant-vowel pattern producing things like "bemira", "kivexa", "lofenu", "tafuri", "zasin".
 
 ### Moods
 
@@ -71,7 +85,7 @@ The ghost's mood changes based on what it's been through:
 | proud | Has at least one handshake to its name |
 | thriving | 6+ sessions or 3+ captures (permanent title) |
 | drowsy | Left idle for 8+ hours |
-| restless | Left idle for 24+ hours |
+| asleep | Left idle for 24+ hours |
 | hunting | Actively running a session |
 | blocked | No SD card |
 
@@ -99,9 +113,9 @@ XP sources:
 | Evil portal started | 5 |
 | Flappy Ghost game over | 5 |
 | IR signal transmitted | 4 |
-| Wardriving WiFi AP logged | 4 |
-| WiFi AP scan started | 3 |
-| WiFi STA connected | 3 |
+| Wardriving Wi-Fi AP logged | 4 |
+| Wi-Fi AP scan started | 3 |
+| Wi-Fi STA connected | 3 |
 | Target attempt (ghostchi) | 3 (aggressive mode) / 1 (passive mode) |
 | Wardriving BLE logged | 3 |
 | Station scan started | 3 |
@@ -109,7 +123,7 @@ XP sources:
 | Beacon spam started | 3 |
 | BLE spam started | 3 |
 | Manual deauth started | 3 |
-| BLE device discovered | 2 |
+| BLE discovery events (1 XP per 250 events) | 1 |
 | Deauth burst (ghostchi) | 2 |
 | Settings saved | 1 |
 
@@ -127,7 +141,7 @@ The ghost talks. Messages are context-aware and cycle every few seconds with mul
 
 Use **Left/Right** to cycle through three screens:
 
-### Page 1: Current State
+### Page 1: Current state
 - **MODE** -- Active, Standby, or Blocked
 - **CH** -- Current channel
 - **APS** -- Visible access points
@@ -135,13 +149,13 @@ Use **Left/Right** to cycle through three screens:
 - **PWND** -- Total handshakes captured
 - **CONF** -- Confidence percentage
 
-### Page 2: System Stats
+### Page 2: System stats
 - **HEAP** / **IRAM** -- Free memory
 - **TRIES** / **MISSES** -- Attempt history
 - **IDLE** -- Time since last session
 - **SESS** -- Total sessions run
 
-### Page 3: Character Passport
+### Page 3: Character passport
 Your ghost's name, mood, level, XP bar, and animated portrait. The sprite bobs gently on a twinkling starfield background and changes expression to match its current state.
 
 ## Files on the SD card
@@ -166,7 +180,7 @@ Each session appends to its own PCAP file and flushes it cleanly when stopped. C
 1. Open **Menu → Apps → Ghostchi**.
 2. Make sure an SD card is mounted. The ghost will tell you if it's blocked.
 3. Start a session. The ghost takes over from there.
-4. Leave it running. It will sweep, lock, listen, and adapt.
+4. Leave it running. It will sweep, lock, and listen - passively by default. Switch to **Aggressive** mode from the second or third page if you want it to deauth.
 5. Stop when you're done. Copy the `.pcap` and `.log` files off the SD card.
 6. Open the PCAP in Wireshark to inspect EAPOL and association frames.
 

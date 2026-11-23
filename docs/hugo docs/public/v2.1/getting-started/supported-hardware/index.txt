@@ -1,0 +1,200 @@
+Title: Supported Hardware
+Description: Device compatibility matrix for GhostESP features
+URL: /v2.1/getting-started/supported-hardware/
+Version: v2.1
+Section: Getting Started
+Search index: /search-index.json
+
+# Supported Hardware
+
+> Device compatibility matrix for GhostESP features
+
+## On this page
+
+- [Overview](#overview)
+- [Compatibility Matrix](#compatibility-matrix)
+- [Camera Support](#camera-support)
+- [Vendor Boards](#vendor-boards)
+
+---
+
+## Overview
+GhostESP runs on a variety of ESP32 boards with varying feature support. This compatibility matrix helps you identify which features are built in or preconfigured for each release build.
+## Compatibility Matrix
+Search boards
+Require Features
+Bluetooth
+PN532 NFC
+Chameleon NFC
+IR TX
+IR RX
+GPS default
+Keyboard
+Display
+SD default
+OTA
+Native SD Apps
+Clear filters
+No boards match the selected filters.
+Board | 
+Bluetooth | 
+NFC (PN532) | 
+NFC (Chameleon) | 
+IR TX | 
+IR RX | 
+GPS Default |
+Keyboard |
+Display |
+SD Default |
+OTA |
+Native SD Apps |
+CYD2USB | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✓ | Manual | ✗ |
+CYDMicroUSB | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✓ | Manual | ✗ |
+CYDDualUSB | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✓ | Manual | ✗ |
+CYD2432S028R | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✓ | Manual | ✗ |
+CYD 2.4″ variants | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✓ | Manual | ✗ |
+Waveshare 7″ | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ |
+Crowtech 7″ | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✗ | Manual | ✗ |
+Sunton 7″ | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✗ | ✓ | ✗ |
+Cardputer | ✓ | ✗ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ |
+Cardputer ADV | ✓ | ✗ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ |
+MarauderV4 | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✗ | ✓ | ✗ |
+Marauder V8 | ✓ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✓ | ✓ | Manual | ✓ |
+Marauder Pancake | ✓ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✓ | ✓ | Manual | ✓ |
+MarauderV6 | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✗ | Manual | ✗ |
+AwokMini | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✓ | ✗ | Manual | ✗ |
+Awok V5 | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✗ | Manual | ✗ |
+T-Dongle-S3 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ✗ |
+T-Dongle-C5 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ |
+T-Display S3 Touch | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✓ | Manual | ✗ |
+S3TWatch | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ | ✗ | ✓ | has 4MB vfs partition | ✓ | ✗ |
+TEmbed C1101 | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ |
+Banshee | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | Updater &#43; peer | ✓ |
+GhostBoard | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ | Manual | ✗ |
+Poltergeist | ✓ | ✗ | ✓ | ✓ | ✓ | ✗ | ✗ | Status Display | ✓ | Manual | ✗ |
+T-Deck | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | Manual | ✓ |
+JCMK DevBoardPro | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✓ | Manual | ✗ |
+RabbitLabs Minion | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ | Manual | ✗ |
+Lolin S3 Pro | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ | Manual | ✓ |
+XIAO ESP32-S3 Sense | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✓ | ✗ | ✓ | ✓ | ✓ |
+XIAO ESP32-C5 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | Manual | ✓ |
+Flipper JCMK GPS | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ | Manual | ✗ |
+ESP32 (generic) | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ | Manual | ✗ |
+ESP32-S2 (generic) | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ | Manual | ✗ |
+ESP32-C3 (generic) | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ | Manual | ✗ |
+ESP32-S3 (generic) | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ | Manual | ✗ |
+ESP32-C5 (generic) | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ | Manual | ✗ |
+ESP32-C6 (generic) | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ | Manual | ✗ |
+Heltec V3 | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | Status Display | ✓ | Manual | ✗ |
+OTA: ✓ means the release build uses a dual-partition OTA layout. Updater &#43; peer means Banshee uses the C5 updater app for its display MCU and GhostLink peer update for the S3. Manual means USB/manual flashing is required for that release build.
+Native SD Apps: ✓ means the release build supports loading native .gapp apps from SD.
+GPS Default / SD Default: these columns describe the release build’s default or known board wiring. GPS and SD card pins can be configured at runtime on most builds, so ✗ does not mean the feature is impossible on custom wiring.
+## Camera Support
+- XIAO ESP32-S3 Sense currently has the dedicated camera-enabled build and supports the [Motion Detector](/v2.1/camera/motion-detector/) feature.
+- The current motion detector implementation uses QQVGA grayscale capture for low RAM usage and fast comparisons.
+- XIAO ESP32-C5 is a supported board config, but it does not include the onboard camera motion detector path used by the S3 Sense build.
+## Vendor Boards
+The following table lists the vendor-specific boards supported by GhostESP with their corresponding build names:
+Board Name |
+Build Name |
+Image |
+CYDMicroUSB |
+CYDMicroUSB.zip |
+|
+CYDDualUSB |
+CYDDualUSB.zip |
+|
+CYD2432S028R |
+CYD2432S028R.zip |
+|
+Waveshare 7″ |
+Waveshare_LCD.zip |
+|
+Crowtech 7″ |
+Crowtech_LCD.zip |
+|
+Sunton 7″ |
+Sunton_LCD.zip |
+|
+Cardputer |
+ESP32-S3-Cardputer.zip |
+|
+Cardputer ADV |
+CardputerADV.zip |
+|
+MarauderV4 |
+MarauderV4_FlipperHub.zip |
+|
+Marauder V8 |
+MarauderV8.zip |
+|
+Marauder Pancake |
+MarauderPancake.zip |
+|
+MarauderV6 &amp; AwokDual |
+MarauderV6_AwokDual.zip |
+|
+AwokMini |
+AwokMini.zip |
+|
+Awok V5 |
+esp32v5_awok.zip |
+|
+LilyGo T-Dongle-S3 |
+LilyGo-TDongleS3.zip |
+|
+LilyGo T-Dongle-C5 |
+LilyGo-TDongleC5.zip |
+|
+T-Display S3 Touch |
+LilyGo-TDisplayS3-Touch.zip |
+|
+S3TWatch |
+LilyGo-S3TWatch-2020.zip |
+|
+TEmbed CC1101 |
+LilyGo-TEmbedC1101.zip |
+|
+GhostBoard |
+ghostboard.zip |
+|
+RabbitLabs Poltergeist |
+Poltergeist.zip |
+|
+T-Deck |
+LilyGo-T-Deck.zip |
+|
+JCMK DevBoardPro |
+JCMK_DevBoardPro.zip |
+|
+RabbitLabs Minion |
+RabbitLabs_Minion.zip |
+|
+RabbitLabs Phantom |
+CYD2USB2.4Inch.zip |
+|
+Lolin S3 Pro |
+Lolin_S3_Pro.zip |
+|
+Seeed Studio XIAO ESP32-S3 Sense |
+xiao_esp32s3_sense.zip |
+|
+Seeed Studio XIAO ESP32-C5 |
+xiao_esp32c5.zip |
+|
+Flipper JCMK GPS |
+Flipper_JCMK_GPS.zip |
+|
+JC3248W535EN |
+JC3248W535EN_LCD.zip |
+|
+Wired Hatters ESPRocket |
+esp32-generic.zip |
+|
+Wired Hatters Ultimate Marauder |
+Red Port: esp32-generic.zip and Blue Port: MarauderV4_FlipperHub.zip |
+|
+Heltec V3 |
+heltecv3.zip |
+|
+Note: Images are being added as they become available.

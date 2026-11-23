@@ -1,0 +1,14 @@
+{{- /* Per-section search index. For a top-level version section such as
+     /latest/ this contains every page in that firmware version (including
+     section overview pages) with full text for rich snippets. */ -}}
+{{- $prefix := .RelPermalink -}}
+{{- $pages := slice -}}
+{{- range .Site.Pages -}}
+  {{- if strings.HasPrefix .RelPermalink $prefix -}}
+    {{- $entry := partial "index-entry.html" (dict "page" . "withContent" true) -}}
+    {{- if $entry -}}
+      {{- $pages = $pages | append $entry -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- $pages | jsonify -}}

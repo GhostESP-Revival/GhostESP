@@ -2320,6 +2320,8 @@ CONFIG_ENABLE_NATIVE_SD_APPS=y
 # The rear function switch must be set to 01 (WM); these pins are the
 # module wiring and intentionally do not use the Heltec V3 defaults.
 CONFIG_HAS_LORA=y
+CONFIG_HAS_MESHCORE=y
+CONFIG_MESHCORE_REGION_US=y
 CONFIG_LORA_SPI_HOST=3
 CONFIG_LORA_SPI_MOSI_PIN=6
 CONFIG_LORA_SPI_MISO_PIN=4

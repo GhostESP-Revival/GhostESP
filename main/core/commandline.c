@@ -18,7 +18,7 @@
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 #include "managers/ble_manager.h"
 #include "managers/ble_bridge_manager.h"
-#include "attacks/ble/ble_spam.h"
+#include "features/ble/ble_spam.h"
 #include "scans/ble/advertiser_scan.h"
 #include "scans/ble/flipper_scan.h"
 #include "host/ble_gap.h"
@@ -59,7 +59,7 @@
 #include "managers/ethernet/eth_fingerprint.h"
 #include "managers/ethernet/eth_utils.h"
 #include "managers/ethernet/eth_http.h"
-#include "attacks/ethernet/eth_arp_poison.h"
+#include "features/ethernet/eth_arp_poison.h"
 #include "lwip/ip4_addr.h"
 #include "lwip/etharp.h"
 #include "lwip/netif.h"
@@ -139,13 +139,13 @@ extern dns_server_handle_t dns_handle;
 #endif
 
 
-#include "attacks/wifi/dhcp_starvation.h"
+#include "features/wifi/dhcp_starvation.h"
 
 static Command *command_list_head = NULL;
 static Command *command_pool = NULL;
 static Command *command_free_list = NULL;
 
-#define COMMAND_REGISTRY_MAX 192
+#define COMMAND_REGISTRY_MAX 256
 TaskHandle_t VisualizerHandle = NULL;
 TaskHandle_t gps_info_task_handle = NULL;
 
@@ -411,6 +411,7 @@ void register_commands() {
     register_command("scansta", handle_sta_scan);
     register_command("scanlocal", handle_ip_lookup);
     register_command("stopscan", cmd_wifi_scan_stop);
+    register_command("wifitest", handle_attack_cmd);
     register_command("attack", handle_attack_cmd);
     register_command("list", handle_list);
     register_command("beaconspam", handle_beaconspam);
@@ -421,15 +422,20 @@ void register_commands() {
     register_command("beaconshow", handle_beaconshow);
     register_command("beaconspamlist", handle_beaconspamlist);
     register_command("stopspam", handle_stop_spam);
+    register_command("reconnect", handle_reconnect_cmd);
+    register_command("stopreconnect", handle_stop_deauth);
     register_command("stopdeauth", handle_stop_deauth);
     register_command("select", handle_select_cmd);
     register_command("capture", handle_capture_scan);
     register_command("startportal", handle_start_portal);
     register_command("disconnect", handle_wifi_disconnect);
+    register_command("forgetwifi", handle_wifi_forget);
     register_command("wifistatus", handle_wifi_status);
     register_command("autoreconnect", handle_wifi_autoreconnect_cmd);
     register_command("stopportal", stop_portal);
     register_command("sinkhole", handle_sinkhole_cmd);
+  register_command("certscan", handle_certscan_cmd);
+  register_command("trustscan", handle_certscan_cmd); // old name, kept as an alias
     register_command("connect", handle_wifi_connection);
     register_command("dialconnect", handle_dial_command);
     register_command("powerprinter", handle_printer_command);
@@ -538,6 +544,7 @@ void register_commands() {
     register_command("setcountry", handle_setcountry);
     register_command("webauth", handle_web_auth_cmd);
     register_command("webuiap", handle_webuiap_cmd);
+    register_command("privacy", handle_privacy_cmd);
     register_command("clockstyle", handle_clockstyle_cmd);
     register_command("statusbarclock", handle_statusbarclock_cmd);
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
@@ -552,6 +559,10 @@ void register_commands() {
 #endif
     register_command("nrf24", handle_nrf24_cmd);
     register_command("lora", handle_lora_cmd);
+    register_command("meshtastic", handle_lora_cmd);
+    register_command("meshcore", handle_meshcore_cmd);
+    register_command("mc", handle_meshcore_cmd);
+    register_command("mesh", handle_mesh_cmd);
     register_command("audio", handle_audio_cmd);
     register_command("badusb", handle_badusb_cmd);
 #ifdef CONFIG_HAS_USB_MSC_SD

@@ -1,5 +1,12 @@
+# Non-OTA (factory) partition table for the S3TWatch (16MB).
+#
+# app0 is 0x3E0000, matching partitions.csv. The 4MB 'storage' FAT partition
+# keeps its 0x400000 offset, and because a 16MB part has flash to spare,
+# coredump keeps its full 128KB by moving past storage rather than being
+# squeezed against the app.
+#
 # Name,     Type, SubType, Offset,  Size,    Flags
 nvs,        data, nvs,     0x9000,  0x7000,
-app0,       app,  factory, 0x10000, 0x3D0000,
-coredump,   data, coredump,0x3E0000,0x20000,
-storage,    data, fat,     0x400000,0x400000, 
+app0,       app,  factory, 0x10000, 0x3E0000,
+storage,    data, fat,     0x400000,0x400000,
+coredump,   data, coredump,0x800000,0x20000,

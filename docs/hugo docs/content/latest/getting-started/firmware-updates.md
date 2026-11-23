@@ -1,9 +1,8 @@
 ---
 title: "Firmware Updates"
-description: "How GhostESP firmware update checks, installs, peer updates and SD card updates work."
+description: "How GhostESP firmware update checks, installs, peer updates and SD card updates work"
 keywords: ["firmware", "ota", "updates", "sd card", "banshee", "ghostlink"]
 weight: 120
-toc: true
 ---
 
 GhostESP supports several firmware update paths. The options shown on your device depend on the board, flash layout, network support, and whether a GhostLink peer is configured.
@@ -44,7 +43,7 @@ Boards with a normal dual-partition OTA layout download the firmware, write it t
 
 ## Banshee C5 Update Behavior
 
-> **v2.1.2: Banshee C5 self-OTA disabled.** The `Banshee_C5` build previously used a dedicated updater app (reserve `updater` partition + 1.12 MB embedded updater) to work around the fixed native-app flash-XIP partition. The flow was unreliable and repeatedly pushed the app over flash (`app0 0x550000` overflow `0x17BF0` in v2.1.2). Self-OTA is disabled for this board for now; flash via USB using the [Installation Guide]({{< relref "installation-guide.md" >}}) or the Web Flasher at https://ghostesp.net/flasher . OTA will return in a future release with a leaner layout.
+> **v2.2 BETA: Banshee C5 self-OTA disabled.** The `Banshee_C5` build previously used a dedicated updater app (reserve `updater` partition + 1.12 MB embedded updater) to work around the fixed native-app flash-XIP partition. The flow was unreliable and repeatedly pushed the app over flash (`app0 0x550000` overflow `0x17BF0` in v2.2 BETA). Self-OTA is disabled for this board for now; flash via USB using the [Installation Guide]({{< relref "installation-guide.md" >}}) or the Web Flasher at https://ghostesp.net/flasher. OTA will return in a future release with a leaner layout.
 
 <details><summary>Previous updater flow (historical, currently disabled)</summary>
 
@@ -83,36 +82,36 @@ During a peer update, the primary downloads the peer firmware and streams it ove
 
 ## SD Card Firmware Updates
 
-On boards with a normal dual-partition OTA layout, **Install from SD Card** can install firmware from the SD card.
+On boards with a normal dual-partition OTA layout, **Install from SD card** can install firmware from the SD card.
 
-The action is hidden on boards where SD-card OTA is not supported, including Banshee C5 (self-OTA disabled in v2.1.2).
+The action is hidden on boards where SD-card OTA is not supported, including Banshee C5 (self-OTA disabled in v2.2 BETA).
 
 To use SD-card OTA:
 
 1. Copy the firmware image to the SD card as `/ghostesp/firmware_update.bin`.
 2. Optional: copy a SHA-256 sidecar to `/ghostesp/firmware_update.sha256`.
-3. Open **Settings → Firmware Update → Install from SD Card**.
+3. Open **Settings → Firmware Update → Install from SD card**.
 4. Confirm the install dialog.
 5. Keep the device powered until it reboots.
 
 If `firmware_update.sha256` exists, GhostESP verifies the SD firmware before booting it. If the sidecar is missing, GhostESP flashes the SD firmware without a sidecar hash check.
 
-## Temporary AP and Web UI Disable During Updates
+## Temporary AP and WebUI Disable During Updates
 
-On boards without PSRAM, internal RAM is too tight to run the Web UI at the same time as the OTA download. To keep the download from stalling or out-of-memory killing itself, GhostESP automatically turns off the access point and Web UI for the duration of the update, then turns it back on when the new firmware boots.
+On boards without PSRAM, internal RAM is too tight to run the WebUI at the same time as the OTA download. To keep the download from stalling or out-of-memory killing itself, GhostESP automatically turns off the access point and WebUI for the duration of the update, then turns it back on when the new firmware boots.
 
-This only happens on no-PSRAM boards (for example, Cardputer ADV). Boards with PSRAM keep the AP and Web UI running through the whole update.
+This only happens on no-PSRAM boards (for example, Cardputer ADV). Boards with PSRAM keep the AP and WebUI running through the whole update.
 
 What you should expect on a no-PSRAM board during a network update:
 
 - The `GhostNet` access point disappears as soon as the download starts.
-- The Web UI at `http://192.168.4.1` becomes unreachable.
-- When the new firmware boots successfully, the access point and Web UI come back automatically.
+- The WebUI at `http://192.168.4.1` becomes unreachable.
+- When the new firmware boots successfully, the access point and WebUI come back automatically.
 - The setting **Wi-Fi AP → Enable Access Point** is restored to its previous value (on or off) after the reboot.
 
 What happens if the download is interrupted or fails:
 
-- The access point and Web UI are restored before you return to the menu, without needing a reboot.
+- The access point and WebUI are restored before you return to the menu, without needing a reboot.
 - A failed install does not leave the device in a no-AP state.
 
 What you can do if the access point does not come back:
@@ -127,5 +126,5 @@ What you can do if the access point does not come back:
 
 - If an update check says no firmware was found, confirm that **Update Channel** is set correctly.
 - If install says no update is ready, run **Check Device Update** first.
-- Banshee C5: self-OTA is disabled in v2.1.2 (see above); use USB/manual flashing. The updater failure popup only appears on builds with the updater partition (pre-v2.1.2).
+- Banshee C5: self-OTA is disabled in v2.2 BETA (see above); use USB/manual flashing. The updater failure popup only appears on builds with the updater partition (pre-v2.2 BETA).
 - If the device cannot boot normal firmware after a failed update, reflash manually with USB using the [Installation Guide]({{< relref "installation-guide.md" >}}).

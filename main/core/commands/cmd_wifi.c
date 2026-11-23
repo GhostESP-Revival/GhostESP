@@ -9,6 +9,7 @@
 #include "managers/status_display_manager.h"
 #include "managers/wifi_manager.h"
 #include "scans/wifi/hop_profile.h"
+#include "scans/wifi/local_scan.h"
 #include "scans/wifi/wifi_channels.h"
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 #include "managers/ble_manager.h"
@@ -173,7 +174,7 @@ static void hop_print_mode(const char *verb) {
 
     uint8_t channels[WIFI_CHANNELS_MAX] = {0};
     size_t count = 0;
-    hop_profile_resolve(channels, sizeof(channels), &count);
+    hop_profile_resolve_monitor(channels, sizeof(channels), &count);
     glog(" -> %u channel", (unsigned)count);
     if (count != 1) glog("s");
     glog(": ");
@@ -214,7 +215,7 @@ void handle_hop_cmd(int argc, char **argv) {
             return;
         }
         if (!hop_profile_set_custom_from_string(argv[2])) {
-            glog("Invalid channel list '%s'. Use e.g. 1,6,11 (1-14, 36-48, 149-165)\n", argv[2]);
+            glog("Invalid channel list '%s'. Use channels supported by this target and country\n", argv[2]);
             return;
         }
         hop_profile_set_mode(HOP_MODE_CUSTOM);
@@ -223,7 +224,7 @@ void handle_hop_cmd(int argc, char **argv) {
         // Treat the argument as a bare channel list.
         if (!hop_profile_set_custom_from_string(argv[1])) {
             glog("Usage: hop [auto|all|basic|custom <1,2,3>|1,2,3]\n");
-            glog("Invalid channel list '%s'. Use e.g. 1,6,11 (1-14, 36-48, 149-165)\n", argv[1]);
+            glog("Invalid channel list '%s'. Use channels supported by this target and country\n", argv[1]);
             return;
         }
         hop_profile_set_mode(HOP_MODE_CUSTOM);
@@ -254,22 +255,22 @@ void handle_sta_scan(int argc, char **argv) {
 void handle_attack_cmd(int argc, char **argv) {
     if (argc > 1) {
         if (strcmp(argv[1], "-d") == 0) {
-            glog("Deauthentication starting...\n");
+            glog("Reconnect test starting...\n");
             wifi_manager_deauth_station();
-            status_display_show_status("Deauth Start");
+            status_display_show_status("Reconnect Start");
             return;
         } else if (strcmp(argv[1], "-hsd") == 0) {
-            glog("Handshake+Deauth starting...\n");
+            glog("Handshake + Reconnect Test starting...\n");
             wifi_manager_start_handshake_deauth();
-            status_display_show_status("HS+Deauth Start");
+            status_display_show_status("HS+Reconnect Start");
             return;
         } else if (strcmp(argv[1], "-c") == 0) {
-            glog("Channel Switch attack starting...\n");
+            glog("Channel Switch test starting...\n");
             wifi_manager_start_channel_switch_attack();
-            status_display_show_status("CSA Attack Start");
+            status_display_show_status("CSA Test Start");
             return;
         } else if (strcmp(argv[1], "-e") == 0) {
-            glog("EAPOL Logoff attack starting...\n");
+            glog("EAPOL Logoff test starting...\n");
             wifi_manager_start_eapollogoff_attack();
             status_display_show_status("EAPOL Start");
             return;
@@ -279,28 +280,28 @@ void handle_attack_cmd(int argc, char **argv) {
             status_display_show_status("Probe Flood Start");
             return;
         } else if (strcmp(argv[1], "-b") == 0) {
-            glog("Bad Msg attack starting...\n");
+            glog("Bad Msg test starting...\n");
             wifi_manager_start_bad_msg();
             status_display_show_status("Bad Msg Start");
             return;
         } else if (strcmp(argv[1], "-a") == 0) {
-            glog("Auth Flood attack starting...\n");
+            glog("Auth Flood test starting...\n");
             wifi_manager_start_auth_flood();
             status_display_show_status("Auth Flood Start");
             return;
         } else if (strcmp(argv[1], "-s") == 0) {
             if (argc < 3) {
-                glog("Usage: attack -s <password>\n");
+                glog("Usage: wifitest -s <password>\n");
                 status_display_show_status("Need Password");
                 return;
             }
-            glog("SAE flood attack starting...\n");
+            glog("SAE flood test starting...\n");
             wifi_manager_start_sae_flood(argv[2]);
             status_display_show_status("SAE Start");
             return;
         } else if (strcmp(argv[1], "-g") == 0) {
             if (argc < 4) {
-                glog("Usage: attack -g <ssid> <password>\n");
+                glog("Usage: wifitest -g <ssid> <password>\n");
                 status_display_show_status("GTK Usage");
                 return;
             }
@@ -310,8 +311,8 @@ void handle_attack_cmd(int argc, char **argv) {
             return;
         }
     }
-    glog("Usage: attack -d (deauth) | attack -hsd (handshake+deauth) | attack -c (channel switch) | attack -e (EAPOL logoff) | attack -p (probe flood) | attack -b (bad msg) | attack -a (auth flood) | attack -s <password> (SAE flood) | attack -g <ssid> <password> (GTK abuse)\n");
-    status_display_show_status("Attack Usage");
+    glog("Usage: wifitest -d (reconnect test) | wifitest -hsd (handshake + reconnect test) | wifitest -c (channel switch) | wifitest -e (EAPOL logoff) | wifitest -p (probe flood) | wifitest -b (bad msg) | wifitest -a (auth flood) | wifitest -s <password> (SAE flood) | wifitest -g <ssid> <password> (GTK abuse)\n");
+    status_display_show_status("Test Usage");
 }
 
 void handle_sae_flood_cmd(int argc, char **argv) {
@@ -319,7 +320,7 @@ void handle_sae_flood_cmd(int argc, char **argv) {
         glog("Usage: saeflood <password>\n");
         return;
     }
-    glog("Starting SAE flood attack...\n");
+    glog("Starting SAE flood test...\n");
     wifi_manager_start_sae_flood(argv[1]);
     status_display_show_status("SAE Flood On");
 }
@@ -327,7 +328,7 @@ void handle_sae_flood_cmd(int argc, char **argv) {
 void handle_stop_sae_flood_cmd(int argc, char **argv) {
     (void)argc;
     (void)argv;
-    glog("Stopping SAE flood attack...\n");
+    glog("Stopping SAE flood test...\n");
     wifi_manager_stop_sae_flood();
     status_display_show_status("SAE Flood Off");
 }
@@ -337,6 +338,19 @@ void handle_sae_flood_help_cmd(int argc, char **argv) {
     (void)argv;
     wifi_manager_sae_flood_help();
     status_display_show_status("SAE Help");
+}
+
+void handle_reconnect_cmd(int argc, char **argv) {
+    if (argc == 1) {
+        char *legacy_argv[] = {"attack", "-d"};
+        handle_attack_cmd(2, legacy_argv);
+    } else if (argc == 2 &&
+               (strcmp(argv[1], "-d") == 0 || strcmp(argv[1], "-hsd") == 0)) {
+        handle_attack_cmd(argc, argv);
+    } else {
+        glog("Usage: reconnect [-d|-hsd]\n");
+        glog("Sends deauthentication/disassociation frames to test client reconnection.\n");
+    }
 }
 
 void handle_stop_deauth(int argc, char **argv) {
@@ -352,8 +366,8 @@ void handle_stop_deauth(int argc, char **argv) {
     wifi_manager_stop_probe_flood();
     wifi_manager_stop_bad_msg();
     wifi_manager_stop_auth_flood();
-    glog("All WiFi attacks stopped...\n");
-    status_display_show_status("Attacks Off");
+    glog("All WiFi tests stopped...\n");
+    status_display_show_status("Tests Off");
 }
 
 void handle_select_cmd(int argc, char **argv) {
@@ -501,78 +515,14 @@ void handle_wifi_connection(int argc, char **argv) {
         }
         glog("Connecting using saved credentials: %s\n", ssid);
     } else {
-        char ssid_buffer[128] = {0};
-        char password_buffer[128] = {0};
-        int i = 1;
-        // SSID parsing
-        if (argv[1][0] == '"') {
-            char *dest = ssid_buffer;
-            bool found_end = false;
-            strncpy(dest, &argv[1][1], sizeof(ssid_buffer) - 1);
-            dest += strlen(&argv[1][1]);
-            if (argv[1][strlen(argv[1]) - 1] == '"') {
-                ssid_buffer[strlen(ssid_buffer) - 1] = '\0';
-                found_end = true;
-            }
-            i = 2;
-            while (!found_end && i < argc) {
-                *dest++ = ' ';
-                if (strchr(argv[i], '"')) {
-                    size_t len = strchr(argv[i], '"') - argv[i];
-                    strncpy(dest, argv[i], len);
-                    dest[len] = '\0';
-                    found_end = true;
-                } else {
-                    strncpy(dest, argv[i], sizeof(ssid_buffer) - (dest - ssid_buffer) - 1);
-                    dest += strlen(argv[i]);
-                }
-                i++;
-            }
-            if (!found_end) {
-                glog("Error: Missing closing quote for SSID\n");
-                return;
-            }
-            ssid = ssid_buffer;
-        } else {
-            ssid = argv[1];
-            i = 2;
+        if (argc > 3) {
+            glog("Usage: connect <SSID> [PASSWORD] (quote arguments containing spaces)\n");
+            return;
         }
-        // Password parsing
-        if (i < argc) {
-            if (argv[i][0] == '"') {
-                char *dest = password_buffer;
-                bool found_end = false;
-                strncpy(dest, &argv[i][1], sizeof(password_buffer) - 1);
-                dest += strlen(&argv[i][1]);
-                if (argv[i][strlen(argv[i]) - 1] == '"') {
-                    password_buffer[strlen(password_buffer) - 1] = '\0';
-                    found_end = true;
-                }
-                i++;
-                while (!found_end && i < argc) {
-                    *dest++ = ' ';
-                    if (strchr(argv[i], '"')) {
-                        size_t len = strchr(argv[i], '"') - argv[i];
-                        strncpy(dest, argv[i], len);
-                        dest[len] = '\0';
-                        found_end = true;
-                    } else {
-                        strncpy(dest, argv[i], sizeof(password_buffer) - (dest - password_buffer) - 1);
-                        dest += strlen(argv[i]);
-                    }
-                    i++;
-                }
-                if (!found_end) {
-                    glog("Error: Missing closing quote for password\n");
-                    return;
-                }
-                password = password_buffer;
-            } else {
-                password = argv[i];
-            }
-        } else {
-            password = "";
-        }
+        // handle_serial_command already removed quote delimiters. Parse once;
+        // literal quotes inside a credential are data, not another quoting layer.
+        ssid = argv[1];
+        password = argc > 2 ? argv[2] : "";
         // Save provided credentials to NVS
         settings_set_sta_ssid(&G_Settings, ssid);
         settings_set_sta_password(&G_Settings, password);
@@ -604,6 +554,34 @@ void handle_wifi_disconnect(int argc, char **argv) {
     if (VisualizerHandle != NULL) {
         wifi_manager_stop_visualizer();
     }
+}
+
+void handle_wifi_forget(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    const char *saved_ssid = settings_get_sta_ssid(&G_Settings);
+    if (saved_ssid == NULL || saved_ssid[0] == '\0') {
+        glog("No saved WiFi network.\n");
+        return;
+    }
+
+    char forgotten[sizeof(G_Settings.sta_ssid)];
+    strlcpy(forgotten, saved_ssid, sizeof(forgotten));
+
+    // Stop auto-reconnect first, or the drop below would just rejoin it.
+    wifi_manager_stop_reconnect();
+    wifi_manager_set_manual_disconnect(true);
+    wifi_ap_record_t ap_info;
+    if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+        esp_wifi_disconnect();
+    }
+
+    settings_set_sta_ssid(&G_Settings, "");
+    settings_set_sta_password(&G_Settings, "");
+    settings_save_sta_credentials(&G_Settings);
+
+    glog("Forgot saved WiFi network: %s\n", forgotten);
+    status_display_show_status("WiFi Forgotten");
 }
 
 void handle_wifi_status(int argc, char **argv) {
@@ -642,11 +620,29 @@ void handle_wifi_status(int argc, char **argv) {
 }
 
 void handle_ip_lookup(int argc, char **argv) {
-    (void)argc;
-    (void)argv;
-    glog("Starting IP lookup...\n");
-    wifi_manager_start_ip_lookup();
-    status_display_show_status("IP Lookup");
+    if (argc >= 2 && strcmp(argv[1], "stop") == 0) {
+        if (!local_scan_is_running()) {
+            glog("Local scan is not running.\n");
+            return;
+        }
+        local_scan_cancel();
+        status_display_show_status("Local Stop");
+        return;
+    }
+
+    glog("Starting local network scan...\n");
+    esp_err_t err = local_scan_start_async();
+    if (err == ESP_ERR_INVALID_STATE) {
+        glog("A local scan is already running. Use 'scanlocal stop' to cancel it.\n");
+        status_display_show_status("Local Busy");
+        return;
+    }
+    if (err != ESP_OK) {
+        glog("Error: Could not start local scan.\n");
+        status_display_show_status("Local Failed");
+        return;
+    }
+    status_display_show_status("Local Scan");
 }
 
 void handle_wifi_autoreconnect_cmd(int argc, char **argv) {

@@ -49,7 +49,11 @@ void *disp_driver_init(void)
 
     // We still use menuconfig for these settings
     // It will be set up during runtime in the future
-#if (defined(CONFIG_LV_DISP_BACKLIGHT_SWITCH) || defined(CONFIG_LV_DISP_BACKLIGHT_PWM))
+    /* S3TWatch's display manager owns the backlight timer and channel. Its
+     * RC_FAST clock and KEEP_ALIVE sleep mode keep PWM running in low power
+     * mode. Reinitializing here with LEDC_AUTO_CLK and the default sleep mode
+     * overwrites that setup and makes the dimmed backlight flicker. */
+#if (defined(CONFIG_LV_DISP_BACKLIGHT_SWITCH) || defined(CONFIG_LV_DISP_BACKLIGHT_PWM)) && !defined(CONFIG_IS_S3TWATCH)
 #if CONFIG_LV_DISP_PIN_BCKL >= 0
     const disp_backlight_config_t bckl_config = {
         .gpio_num = CONFIG_LV_DISP_PIN_BCKL,

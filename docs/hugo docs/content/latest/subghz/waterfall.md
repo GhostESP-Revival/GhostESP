@@ -1,11 +1,11 @@
 ---
 title: "Waterfall Spectrum Analyzer"
-description: "Use the SubGHz waterfall to visualize CC1101 RSSI activity across common RF bands."
+description: "Use the SubGHz waterfall to visualize CC1101 RSSI activity across common RF bands"
 keywords: ["SubGHz", "waterfall", "spectrum analyzer", "CC1101", "RSSI", "RF"]
 weight: 28
 ---
 
-The SubGHz waterfall spectrum analyzer visualizes RF activity from a CC1101 radio using real RSSI measurements. It is designed to show where signal energy is present across common SubGHz bands without using fake FFT-derived output.
+The SubGHz waterfall spectrum analyzer visualizes RF activity from a CC1101 radio using real RSSI measurements across common SubGHz bands.
 
 ## What It Shows
 
@@ -54,16 +54,16 @@ The display device reassembles the streamed chunks, stores the latest line for e
 The waterfall includes a compact peak readout:
 
 ```text
-Peak: 433.92 MHz ch 18 Lv 72
+Peak: 433.92 MHz ch 0 Lv 72
 ```
 
 This shows the strongest bin in the latest full composite:
 
 - Band frequency
-- Channel/bin index inside that band
+- Channel field - always `0` in firmware; the band frequency already pins the bin
 - RSSI display level from 0-100
 
-## Palette And Smoothing
+## Palette and smoothing
 
 The palette is tuned for RF visualization:
 
@@ -73,11 +73,10 @@ black → deep blue → purple → magenta → orange → white
 
 Low-level noise is kept dark, while stronger signals move into brighter colors. The waterfall uses percentile-based noise-floor and ceiling tracking so a single spike does not cause the whole display to flicker or re-scale aggressively.
 
-## Notes And Limits
+## Notes and Limits
 
 - The CC1101 is not an SDR. It does not provide raw IQ samples.
 - The waterfall uses RSSI measurements, not FFT output.
-- Band separators indicate real gaps in coverage between scanned bands.
 - Signals outside the configured scan bands will not appear.
 - Results depend on antenna quality, board layout, local RF noise, and CC1101 configuration.
 

@@ -2,35 +2,11 @@
 title: "Visualizer (Rave Mode)"
 description: "Stream desktop audio to GhostESP and render a live spectrum visualizer"
 weight: 5
-toc: true
 ---
 
 `Visualizer` is the on-device music visualizer app (previously labeled Rave Mode). It renders a live 15-band spectrum from audio sent over USB serial or UDP.
 
-## Recommended Download (Windows)
-
-Start here for the easiest setup:
-
-- [`rave_tray.exe`](https://github.com/GhostESP-Revival/GhostESP/blob/Development-deki/scripts/Audio%20Visualizers/rave_tray.exe)
-
-The current transport supports:
-
-- High-rate USB serial streaming with compact binary frames
-- UDP streaming on port `6677`
-- Auto-discovery service over UDP `6678` (device advertises, helper auto-targets)
-
-## Requirements
-
-- A GhostESP build with screen support
-- Desktop helper from `scripts/Audio Visualizers/`
-- For USB mode: data-capable USB cable
-- For UDP mode: host and GhostESP on the same network
-
-## Open the App
-
-From the device UI, open **Apps → Visualizer**.
-
-You can also open it from CLI:
+Open it from the CLI:
 
 ```
 rave on
@@ -41,6 +17,25 @@ Close with:
 ```
 rave off
 ```
+
+## Recommended Download (Windows)
+
+Start here for the easiest setup:
+
+- [`rave_tray.exe`](https://github.com/GhostESP-Revival/GhostESP/blob/Development-deki/scripts/Audio%20Visualizers/rave_tray.exe)
+
+The current transport supports:
+
+- High-rate USB serial streaming with compact binary frames (15-band frames marked `A5 5A C3 3C`)
+- UDP streaming on port `6677`
+- Auto-discovery service over UDP `6678` (device advertises, helper auto-targets)
+
+## Prerequisites
+
+- A GhostESP build with screen support
+- Desktop helper from `scripts/Audio Visualizers/`
+- For USB mode: data-capable USB cable
+- For UDP mode: host and GhostESP on the same network
 
 ## Quick Start (USB Serial)
 
@@ -125,7 +120,7 @@ Tray menu actions:
 - `Open Interactive Helper` opens `rave_helper.bat`
 - `Stop Stream` stops the background stream
 
-## Advanced (optional)
+## Advanced (Optional)
 
 Direct script arguments are optional and mainly for troubleshooting or automation.
 
@@ -141,4 +136,4 @@ python "_internal\Display_Visualizer.py" --list-ports
 - If level is always low, run `--list-sources` and select the correct playback loopback source.
 - If Wi-Fi auto-discovery does not find a device, try direct IP mode. Some guest networks/VLANs block local broadcast traffic.
 - If audio capture drops with runtime errors (for example `0x88890004`), the helper now retries and auto-recovers; if it repeats often, reselect the playback source and update audio drivers.
-- `raveport` should return protocol details for serial helper probe.
+- `raveport` returns the fixed serial probe reply `RAVE_SERIAL A55AC33C 79`: the `A55AC33C` marker identifies the serial frame format and `79` is the frame size (32 + 32 + 15 bands) that the helper expects.

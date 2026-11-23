@@ -5,18 +5,27 @@
 
 #if defined(CONFIG_WITH_SCREEN) && defined(CONFIG_HAS_LORA)
 
+#include "core/utils.h"
+#include "esp_log.h"
 #include "esp_timer.h"
 #include "gui/gui_router.h"
+#include "gui/ios_toggle.h"
 #include "gui/lvgl_safe.h"
 #include "gui/options_view.h"
 #include "gui/design_tokens.h"
+#include "gui/theme_palette_api.h"
 #include "gui/toast.h"
 #include "managers/display_manager.h"
 #include "managers/lora_manager.h"
 #include "managers/lora_channels.h"
 #include "managers/lora_modem.h"
 #include "managers/lora_mesh.h"
+#include "managers/settings_manager.h"
 #include "managers/views/keyboard_screen.h"
+#ifdef CONFIG_HAS_MESHCORE
+#include "managers/meshcore_manager.h"
+#include "managers/meshcore_mesh.h"
+#endif
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,11 +33,16 @@
 
 #define LORA_UI_NODES_MAX 8
 #define LORA_UI_TAP_SLOP 12
+/* Encoder HUD double-press window (ms). Kept short so a single press still
+ * feels responsive on the no-PSRAM Heltec builds. */
+#define LORA_HUD_DOUBLE_PRESS_MS 280
 
 typedef enum {
     PAGE_MAIN = 0,
     PAGE_ACTIVITY,
     PAGE_SETTINGS,
+    PAGE_MESHTASTIC_SETTINGS,
+    PAGE_MESHCORE_SETTINGS,
     PAGE_MODEM,
     PAGE_DEVICE,
     PAGE_CHANNELS,
@@ -60,6 +74,7 @@ typedef enum {
     ACT_NODE_NEXT,
     ACT_MESSAGE_REPLY,
     ACT_MESSAGE_BACK,
+    ACT_MESSAGE_RETRY_BASE = 400,
     ACT_NEW_DM = 60,
     ACT_SETTINGS = 61,
     ACT_INFO = 62,
@@ -77,6 +92,16 @@ typedef enum {
     ACT_DEVICE_TX,
     ACT_DEVICE_HOP,
     ACT_DEVICE_ROLE,
+    ACT_PROTOCOL = 90,
+    ACT_MESHTASTIC_SETTINGS = 91,
+    ACT_MESHCORE_SETTINGS,
+    ACT_AUTOSTART,
+    ACT_MT_RADIO,
+    ACT_MC_RADIO,
+    ACT_MC_NAME,
+    ACT_MC_TX,
+    ACT_MC_ADVERT,
+    ACT_MC_FLOOD_ADVERT,
     ACT_CHANNEL_BASE = 300,
     ACT_NODE_BASE = 100,
     ACT_MESSAGE_BASE = 200,
@@ -99,16 +124,34 @@ static lora_page_t s_resume_page;
 static bool s_resume_pending;
 static bool s_compose_dm;
 static uint32_t s_compose_node;
+static uint8_t s_compose_peer_key[32];
+static uint8_t s_compose_channel;
+static char s_compose_initial_text[160];
 static uint32_t s_selected_node;
 static uint32_t s_visible_node_ids[LORA_UI_NODES_MAX];
+static uint8_t s_visible_node_keys[LORA_UI_NODES_MAX][32];
 static uint16_t s_visible_node_count;
 static uint16_t s_visible_node_total;
 static uint16_t s_node_offset;
 static uint16_t s_visible_message_count;
 static uint32_t s_conversations[CONFIG_LORA_MSG_RING + 1];
+static uint8_t s_conversation_keys[CONFIG_LORA_MSG_RING + 1][32];
+static uint8_t s_conversation_channels[CONFIG_LORA_MSG_RING + 1];
+static bool s_conversation_direct[CONFIG_LORA_MSG_RING + 1];
 static uint32_t s_conversation;
+static uint8_t s_conversation_key[32];
+static bool s_conversation_group;
+static uint8_t s_conversation_channel;
 static uint32_t s_chat_signature;
 static bool s_node_picker;
+/* Remembers whether the HUD's first row is currently the start affordance, so
+ * an externally started/stopped radio cannot leave a stale row action. */
+static bool s_main_off;
+/* Encoder HUD double-press: the first press is held back briefly so a second
+ * press can be recognised as "toggle radio" instead of activating a row. */
+static lv_timer_t *s_press_timer;
+static uint32_t s_press_ms;
+static bool s_press_pending;
 static uint32_t s_chat_seq;
 static uint8_t s_unread_count;
 static char s_chat_preview[56];
@@ -122,9 +165,68 @@ static void rebuild_page(void);
 static void action_click(lv_event_t *e);
 static void open_composer(bool dm, uint32_t node, lora_page_t return_page);
 static void set_page(lora_page_t page);
+static void notice(const char *text, uint8_t type);
 
-static bool in_conversation(const lora_msg_t *m) {
-    return s_conversation ? m->direct && m->node_num == s_conversation : !m->direct;
+static bool start_meshtastic_backend(void) {
+    if (lora_manager_needs_setup()) return false;
+#ifdef CONFIG_HAS_MESHCORE
+    bool restore_meshcore = mc_manager_is_running();
+    if (restore_meshcore) mc_manager_stop();
+#endif
+    bool ok = lora_manager_start();
+#ifdef CONFIG_HAS_MESHCORE
+    if (!ok && restore_meshcore) {
+        if (!mc_manager_start())
+            ESP_LOGW("LoRaUI", "could not restore MeshCore after Meshtastic start failure: %s",
+                     mc_manager_last_error());
+    }
+#endif
+#ifdef CONFIG_HAS_MESHCORE
+    if (ok) mc_manager_set_default_backend_meshcore(false);
+#endif
+    return ok;
+}
+
+#ifdef CONFIG_HAS_MESHCORE
+static bool start_meshcore_backend(void) {
+    bool ok = mc_manager_start();
+    if (ok) mc_manager_set_default_backend_meshcore(true);
+    return ok;
+}
+#endif
+
+typedef struct {
+    char who[24];
+    char text[160];
+    uint32_t node_num;
+    uint8_t peer_key[32];
+    uint8_t channel;
+    uint32_t timestamp_ms;
+    bool outgoing;
+    bool direct;
+    bool read;
+    uint8_t delivery;
+    uint32_t packet_id;
+} ui_msg_t;
+
+static bool ui_meshcore(void);
+
+static bool key_is_zero(const uint8_t *key, size_t len) {
+    if (!key) return true;
+    for (size_t i = 0; i < len; ++i)
+        if (key[i] != 0) return false;
+    return true;
+}
+
+static bool in_conversation(const ui_msg_t *m) {
+#ifdef CONFIG_HAS_MESHCORE
+    if (ui_meshcore())
+        return s_conversation_group
+                   ? (!m->direct && m->channel == s_conversation_channel)
+                   : (m->direct && memcmp(m->peer_key, s_conversation_key,
+                                          sizeof(s_conversation_key)) == 0);
+#endif
+    return s_conversation_group ? !m->direct : m->direct && m->node_num == s_conversation;
 }
 
 static void notice(const char *text, uint8_t type) {
@@ -146,20 +248,251 @@ static const char *node_name(const lora_mesh_node_t *node, char *out, size_t cap
     return out;
 }
 
-static void message_name(const lora_msg_t *message, char *out, size_t cap) {
+// ---- Mesh backend adapter -------------------------------------------------
+// The chat and node surfaces are shared by Meshtastic and MeshCore, but each
+// stack keeps its own ring/table. These shims present a common UI message and
+// node record so the page builders stay backend-agnostic. Without
+// CONFIG_HAS_MESHCORE everything forwards to the Meshtastic manager unchanged.
+static bool ui_meshcore(void) {
+#ifdef CONFIG_HAS_MESHCORE
+    /* Prefer the live owner, but keep the selected backend visible while the
+     * radio is stopped or a start attempt failed. Otherwise an idle/failure
+     * state silently falls back to Meshtastic nodes, messages, and status. */
+    if (mc_manager_is_running()) return true;
+    if (lora_manager_is_running()) return false;
+    return mc_manager_default_backend_meshcore();
+#else
+    return false;
+#endif
+}
+
+static bool ui_radio_running(void) { return ui_meshcore() || lora_manager_is_running(); }
+
+static const char *ui_last_error(void) {
+#ifdef CONFIG_HAS_MESHCORE
+    if (ui_meshcore()) return mc_manager_last_error();
+#endif
+    return lora_manager_last_error();
+}
+
+static const char *ui_protocol_name(void) {
+    return ui_meshcore() ? "MeshCore" : "Meshtastic";
+}
+
+#ifdef CONFIG_HAS_MESHCORE
+static void ui_mc_msg_to_ui(const mc_msg_t *in, ui_msg_t *out) {
+    memset(out, 0, sizeof(*out));
+    snprintf(out->who, sizeof(out->who), "%s", in->who);
+    snprintf(out->text, sizeof(out->text), "%s", in->text);
+    out->node_num = in->direct ? in->node_hash : 0;
+    memcpy(out->peer_key, in->peer_key, sizeof(out->peer_key));
+    out->channel = in->channel;
+    out->timestamp_ms = in->timestamp_ms;
+    out->outgoing = in->outgoing;
+    out->direct = in->direct;
+    out->read = in->read;
+    out->delivery = in->delivery;
+    out->packet_id = in->packet_id;
+}
+#endif
+
+static uint16_t ui_msg_count(void) {
+#ifdef CONFIG_HAS_MESHCORE
+    if (ui_meshcore()) return mc_manager_msg_count();
+#endif
+    return lora_manager_msg_count();
+}
+
+static bool ui_msg_at(uint16_t index, ui_msg_t *out) {
+#ifdef CONFIG_HAS_MESHCORE
+    if (ui_meshcore()) {
+        mc_msg_t m;
+        if (!mc_manager_msg_at(index, &m)) return false;
+        ui_mc_msg_to_ui(&m, out);
+        return true;
+    }
+#endif
+    lora_msg_t m;
+    if (!lora_manager_msg_at(index, &m)) return false;
+    memset(out, 0, sizeof(*out));
+    snprintf(out->who, sizeof(out->who), "%s", m.who);
+    snprintf(out->text, sizeof(out->text), "%s", m.text);
+    out->node_num = m.node_num;
+    out->timestamp_ms = m.timestamp_ms;
+    out->outgoing = m.outgoing;
+    out->direct = m.direct;
+    out->read = m.read;
+    out->delivery = m.delivery;
+    out->packet_id = m.packet_id;
+    return true;
+}
+
+static bool ui_latest_message(ui_msg_t *out, uint32_t *out_seq) {
+#ifdef CONFIG_HAS_MESHCORE
+    if (ui_meshcore()) {
+        mc_msg_t m;
+        if (!mc_manager_latest_message(&m, out_seq)) return false;
+        ui_mc_msg_to_ui(&m, out);
+        return true;
+    }
+#endif
+    lora_msg_t m;
+    if (!lora_manager_latest_message(&m, out_seq)) return false;
+    memset(out, 0, sizeof(*out));
+    snprintf(out->who, sizeof(out->who), "%s", m.who);
+    snprintf(out->text, sizeof(out->text), "%s", m.text);
+    out->node_num = m.node_num;
+    out->timestamp_ms = m.timestamp_ms;
+    out->outgoing = m.outgoing;
+    out->direct = m.direct;
+    out->read = m.read;
+    out->delivery = m.delivery;
+    out->packet_id = m.packet_id;
+    return true;
+}
+
+static void ui_chat_read(void) {
+#ifdef CONFIG_HAS_MESHCORE
+    if (ui_meshcore()) {
+        if (s_conversation_group) mc_manager_chat_read_channel(s_conversation_channel);
+        else mc_manager_chat_read_key(s_conversation_key);
+        return;
+    }
+#endif
+    lora_manager_chat_read(s_conversation);
+}
+
+static bool ui_send_text(const char *text, uint8_t channel) {
+#ifdef CONFIG_HAS_MESHCORE
+    if (ui_meshcore()) return mc_manager_send_channel_text(channel, text);
+#endif
+    return lora_manager_send_text(text);
+}
+
+static bool ui_send_dm(const char *text, uint32_t node, const uint8_t *peer_key) {
+#ifdef CONFIG_HAS_MESHCORE
+    if (ui_meshcore()) return mc_manager_send_dm_key(peer_key, text);
+#endif
+    return lora_manager_send_dm_text(text, node, 0, true, NULL);
+}
+
+typedef struct {
+    uint32_t id;      // Meshtastic node_num; MeshCore uses peer_key
+    char name[32];
+    uint8_t peer_key[32];
+    int16_t rssi;
+    bool has_rssi;
+    bool has_pubkey;
+} ui_node_t;
+
+static uint16_t ui_nodes_total(void) {
+#ifdef CONFIG_HAS_MESHCORE
+    if (ui_meshcore()) return (uint16_t)mc_mesh_contact_count();
+#endif
+    return lora_mesh_nodes(NULL, 0);
+}
+
+static bool ui_node_at(uint16_t index, ui_node_t *out) {
+    memset(out, 0, sizeof(*out));
+#ifdef CONFIG_HAS_MESHCORE
+    if (ui_meshcore()) {
+        const mc_contact_t *c = mc_mesh_contact_at((int)index);
+        if (!c) return false;
+        snprintf(out->name, sizeof(out->name), "%s", c->name[0] ? c->name : "unnamed");
+        memcpy(out->peer_key, c->pub_key, sizeof(out->peer_key));
+        out->id = c->pub_key[0];
+        out->has_pubkey = true;
+        return true;
+    }
+#endif
+    lora_mesh_node_t node;
+    if (!lora_mesh_node_at(index, &node)) return false;
+    node_name(&node, out->name, sizeof(out->name));
+    out->id = node.node_num;
+    out->rssi = node.last_rssi;
+    out->has_rssi = true;
+    out->has_pubkey = node.has_pubkey;
+    return true;
+}
+
+static bool ui_node_name_for(uint32_t id, char *out, size_t cap) {
+#ifdef CONFIG_HAS_MESHCORE
+    if (ui_meshcore()) {
+        for (int i = 0, n = mc_mesh_contact_count(); i < n; ++i) {
+            const mc_contact_t *c = mc_mesh_contact_at(i);
+            if (c && c->pub_key[0] == (uint8_t)id) {
+                snprintf(out, cap, "%s", c->name[0] ? c->name : "unknown");
+                return true;
+            }
+        }
+        return false;
+    }
+#endif
+    lora_mesh_node_t node;
+    if (!lora_mesh_node_get(id, &node)) return false;
+    node_name(&node, out, cap);
+    return true;
+}
+
+#ifdef CONFIG_HAS_MESHCORE
+static bool ui_node_name_for_key(const uint8_t key[32], char *out, size_t cap) {
+    if (!ui_meshcore() || !key) return false;
+    const mc_contact_t *c = mc_mesh_find_contact_pubkey(key, 32);
+    if (!c || !c->name[0]) return false;
+    snprintf(out, cap, "%s", c->name);
+    return true;
+}
+#endif
+
+static void ui_status(lora_status_t *st) {
+    memset(st, 0, sizeof(*st));
+#ifdef CONFIG_HAS_MESHCORE
+    if (ui_meshcore()) {
+        mc_status_t m;
+        mc_manager_get_status(&m);
+        st->running = m.running;
+        st->radio_present = m.radio_present;
+        st->freq_hz = (uint32_t)(m.freq_mhz * 1000000.0f + 0.5f);
+        st->sf = m.sf;
+        st->bw_khz = (int)(m.bw_khz + 0.5f);
+        st->cr = m.cr;
+        st->tx_dbm = m.tx_dbm;
+        st->tx_ok = m.tx_ok;
+        st->tx_fail = m.tx_fail;
+        st->rx_ok = m.rx_ok;
+        st->rx_dups = m.rx_dup;
+        st->last_rssi = m.last_rssi;
+        st->last_snr = m.last_snr;
+        st->node_count = m.node_count;
+        return;
+    }
+#endif
+    lora_manager_get_status(st);
+}
+
+static void message_name(const ui_msg_t *message, char *out, size_t cap) {
     if (!message->direct) {
         snprintf(out, cap, "%.23s", message->outgoing ? "you" :
                  (message->who[0] ? message->who : "unknown"));
         return;
     }
-    if (message->direct && message->node_num) {
-        lora_mesh_node_t node;
-        if (lora_mesh_node_get(message->node_num, &node)) {
-            node_name(&node, out, cap);
+    if (ui_meshcore()) {
+#ifdef CONFIG_HAS_MESHCORE
+        if (ui_node_name_for_key(message->peer_key, out, cap)) return;
+        if (message->outgoing) {
+            snprintf(out, cap, "DM !%02X%02X%02X%02X", message->peer_key[0],
+                     message->peer_key[1], message->peer_key[2], message->peer_key[3]);
             return;
         }
+        snprintf(out, cap, "%.23s", message->who[0] ? message->who : "unknown");
+        return;
+#endif
+    }
+    if (message->node_num) {
+        if (ui_node_name_for(message->node_num, out, cap)) return;
         if (message->outgoing) {
-            snprintf(out, cap, "DM !%08X", (unsigned)message->node_num);
+            if (ui_meshcore()) snprintf(out, cap, "DM !%02X", (unsigned)message->node_num);
+            else snprintf(out, cap, "DM !%08X", (unsigned)message->node_num);
             return;
         }
     }
@@ -168,7 +501,7 @@ static void message_name(const lora_msg_t *message, char *out, size_t cap) {
     snprintf(out, cap, "%.23s", who);
 }
 
-static void message_age(const lora_msg_t *message, char *out, size_t cap) {
+static void message_age(const ui_msg_t *message, char *out, size_t cap) {
     if (!message->timestamp_ms) {
         snprintf(out, cap, "--");
         return;
@@ -202,6 +535,27 @@ static lv_obj_t *add_row(const char *label, int action) {
      * child-off/parent-on arrangement so the containing list receives drag. */
     lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(row, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
+    return row;
+}
+
+/* An on/off row, drawn as an iOS switch pinned to the right edge instead of an
+ * "ON - tap to stop" suffix, so the state reads at a glance. The switch is not
+ * clickable itself: taps bubble to the row, whose action handler applies the
+ * change and rebuilds the page with the new value. */
+static lv_obj_t *add_toggle_row(const char *label, int action, bool value) {
+    lv_obj_t *row = add_row(label, action);
+    if (!row) return NULL;
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_t *lbl = lv_obj_get_child(row, 0);
+    if (lbl) {
+        lv_obj_set_flex_grow(lbl, 1);
+        lv_obj_set_width(lbl, LV_SIZE_CONTENT);
+    }
+    lv_obj_t *toggle = ios_toggle_create(row);
+    lv_obj_update_layout(row);
+    ios_toggle_set_value(toggle, value, false);
     return row;
 }
 
@@ -246,6 +600,32 @@ static void style_message_bubble(lv_obj_t *bubble, lv_obj_t *list,
     lv_obj_set_style_translate_x(bubble, outgoing ? available - bubble_w : 0, 0);
 }
 
+/* Chat identity for conversation bubbles: outgoing messages carry a light
+ * accent tint and hug the right edge (translate in style_message_bubble),
+ * incoming ones sit on the alternate surface. A failed outgoing message gets
+ * a danger border so tap-to-retry is visible before any text is read. */
+static void style_bubble_colors(lv_obj_t *bubble, bool outgoing, bool failed) {
+    if (!bubble) return;
+    uint8_t theme = settings_get_menu_theme(&G_Settings);
+    lv_color_t surface = lv_color_hex(theme_palette_get_surface(theme));
+    if (outgoing) {
+        /* ~30% accent over the surface keeps theme text readable. */
+        lv_color_t accent = lv_color_hex(theme_palette_get_accent(theme));
+        lv_obj_set_style_bg_color(bubble, lv_color_mix(accent, surface, 77), 0);
+    } else {
+        lv_obj_set_style_bg_color(bubble,
+                                  lv_color_hex(theme_palette_get_surface_alt(theme)), 0);
+    }
+    lv_obj_set_style_bg_opa(bubble, LV_OPA_COVER, 0);
+    if (outgoing && failed) {
+        lv_obj_set_style_border_color(bubble, lv_color_hex(theme_palette_get_danger(theme)), 0);
+        lv_obj_set_style_border_width(bubble, 2, 0);
+        lv_obj_set_style_border_opa(bubble, LV_OPA_COVER, 0);
+    } else {
+        lv_obj_set_style_border_width(bubble, 0, 0);
+    }
+}
+
 static void configure_list(void) {
     lv_obj_t *list = options_view_get_list(s_ov);
     if (!list) return;
@@ -278,9 +658,13 @@ static void update_row_text(int index, const char *text) {
 
 static void main_label(int row, char *out, size_t cap) {
     lora_status_t st = {0};
-    lora_manager_get_status(&st);
+    ui_status(&st);
     switch (row) {
     case MAIN_CHAT:
+        if (!st.running) {
+            snprintf(out, cap, "Radio OFF - press to start");
+            break;
+        }
         if (s_unread_count)
             snprintf(out, cap, "Messages: %u new - %.56s",
                      (unsigned)s_unread_count, s_chat_preview);
@@ -288,7 +672,7 @@ static void main_label(int row, char *out, size_t cap) {
         else snprintf(out, cap, "Messages: none yet");
         break;
     case MAIN_NODES:
-        snprintf(out, cap, "Nodes: %u", (unsigned)lora_manager_node_count());
+        snprintf(out, cap, "Nodes: %u", (unsigned)ui_nodes_total());
         break;
     case MAIN_SETTINGS: snprintf(out, cap, "Radio settings"); break;
     case MAIN_INFO:
@@ -314,10 +698,14 @@ static void build_main(void) {
         ACT_MESSAGES, ACT_NODES, ACT_SETTINGS, ACT_INFO, ACT_BACK,
     };
     options_view_set_title(s_ov, "LoRa");
+    /* With the radio off the first row is the start affordance, so touch and
+     * single-press users get there without knowing the double-press shortcut. */
+    bool off = !ui_radio_running();
+    s_main_off = off;
     char label[96];
     for (int i = 0; i < MAIN_COUNT; ++i) {
         main_label(i, label, sizeof(label));
-        add_row(label, actions[i]);
+        add_row(label, (i == MAIN_CHAT && off) ? ACT_RADIO : actions[i]);
     }
 }
 
@@ -352,7 +740,7 @@ static void activity_label(int row, const lora_status_t *st, char *line, size_t 
 static void refresh_activity(void) {
     if (!s_ov || s_page != PAGE_ACTIVITY) return;
     lora_status_t st = {0};
-    lora_manager_get_status(&st);
+    ui_status(&st);
     char line[96];
     for (int i = 0; i < 6; ++i) {
         activity_label(i, &st, line, sizeof(line));
@@ -362,7 +750,7 @@ static void refresh_activity(void) {
 
 static void build_activity(void) {
     lora_status_t st = {0};
-    lora_manager_get_status(&st);
+    ui_status(&st);
     options_view_set_title(s_ov, "LoRa Activity");
     char line[96];
     for (int i = 0; i < 6; ++i) {
@@ -372,28 +760,192 @@ static void build_activity(void) {
     add_row(LV_SYMBOL_LEFT " Back", ACT_BACK);
 }
 
+#ifdef CONFIG_HAS_MESHCORE
+// ---- Protocol toggle (Meshtastic <-> MeshCore) -----------------------------
+// Mirrors the NFC view's PN532/ST25R backend row: off = Meshtastic,
+// on = MeshCore. The choice is persisted (NVS "mesh"/"mode") and shared with
+// the `mesh` CLI. If a radio is already running the toggle switches it live;
+// otherwise it just selects what the Radio row will start.
+static lv_obj_t *s_proto_btn;
+
+static bool proto_is_meshcore(void) {
+    return mc_manager_default_backend_meshcore();
+}
+
+static void proto_item_text(char *out, size_t out_len) {
+    if (!out || out_len == 0) return;
+    snprintf(out, out_len, "%s", proto_is_meshcore() ? "Protocol: MeshCore" : "Protocol: Meshtastic");
+}
+
+static lv_obj_t *proto_find_toggle(void) {
+    if (!s_proto_btn || !lv_obj_is_valid(s_proto_btn)) return NULL;
+    uint32_t n = lv_obj_get_child_cnt(s_proto_btn);
+    for (uint32_t i = 0; i < n; i++) {
+        lv_obj_t *child = lv_obj_get_child(s_proto_btn, i);
+        if (child && lv_obj_get_user_data(child) == IOS_TOGGLE_USER_DATA) return child;
+    }
+    return NULL;
+}
+
+static void proto_update(bool animate) {
+    if (!s_proto_btn || !lv_obj_is_valid(s_proto_btn)) return;
+    lv_obj_t *label = lv_obj_get_child(s_proto_btn, 0);
+    if (label) {
+        char text[40];
+        proto_item_text(text, sizeof(text));
+        lv_label_set_text(label, text);
+    }
+    lv_obj_t *toggle = proto_find_toggle();
+    if (toggle) ios_toggle_set_value(toggle, proto_is_meshcore(), animate);
+}
+
+static void proto_switch(void) {
+    bool to_meshcore = !proto_is_meshcore();
+    if (to_meshcore) {
+        if (mc_manager_is_running()) return;
+        if (!start_meshcore_backend()) notice(mc_manager_last_error(), TOAST_ERROR);
+        else notice("MeshCore started", TOAST_SUCCESS);
+    } else {
+        if (lora_manager_is_running()) return;
+        if (lora_manager_needs_setup()) notice("Set Meshtastic region first", TOAST_WARN);
+        else if (!start_meshtastic_backend()) notice(lora_manager_last_error(), TOAST_ERROR);
+        else notice("Meshtastic started", TOAST_SUCCESS);
+    }
+}
+
+static void proto_event_cb(lv_event_t *e) {
+    proto_switch();
+    // Touch events carry `e` (animate); encoder/keyboard events pass NULL.
+    proto_update(e != NULL);
+    /* The selected backend is also shown by the radio and boot auto-start
+     * rows. Refresh the whole settings page so those labels cannot describe
+     * the backend before the switch. */
+    rebuild_page();
+}
+
+static void add_protocol_toggle(void) {
+    char text[40];
+    proto_item_text(text, sizeof(text));
+    s_proto_btn = options_view_add_item(s_ov, text, proto_event_cb, NULL);
+    if (!s_proto_btn) return;
+    lv_obj_set_flex_flow(s_proto_btn, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(s_proto_btn, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_t *label = lv_obj_get_child(s_proto_btn, 0);
+    if (label) {
+        lv_obj_set_flex_grow(label, 1);
+        lv_obj_set_width(label, LV_SIZE_CONTENT);
+    }
+    lv_obj_t *toggle = ios_toggle_create(s_proto_btn);
+    lv_obj_update_layout(s_proto_btn);
+    ios_toggle_set_value(toggle, proto_is_meshcore(), false);
+}
+#endif // CONFIG_HAS_MESHCORE
+
+/* Start or stop Meshtastic. Used by the Meshtastic Settings radio switch,
+ * which always drives the Meshtastic radio even when the protocol toggle is
+ * pointed at MeshCore. */
+static void meshtastic_radio_toggle(void) {
+    bool stopping = lora_manager_is_running();
+    bool ok = true;
+    if (stopping) lora_manager_stop();
+    else if (lora_manager_needs_setup()) ok = false;
+    else ok = start_meshtastic_backend();
+    notice(ok ? (stopping ? "Meshtastic stopped" : "Meshtastic started")
+              : (lora_manager_needs_setup() ? "Set Meshtastic region first"
+                                             : lora_manager_last_error()),
+           ok ? TOAST_SUCCESS : TOAST_ERROR);
+    rebuild_page();
+}
+
+/* Start or stop the protocol selected by the toggle. Shared by the Radio row
+ * and the HUD encoder double-press. */
+static void toggle_radio(void) {
+#ifdef CONFIG_HAS_MESHCORE
+    if (proto_is_meshcore()) {
+        bool mc_stopping = mc_manager_is_running();
+        bool mc_ok = true;
+        if (mc_stopping) mc_manager_stop();
+        else mc_ok = start_meshcore_backend();
+        notice(mc_ok ? (mc_stopping ? "MeshCore stopped" : "MeshCore started")
+                     : mc_manager_last_error(), mc_ok ? TOAST_SUCCESS : TOAST_ERROR);
+        rebuild_page();
+        return;
+    }
+#endif
+    meshtastic_radio_toggle();
+}
+
 static void build_settings(void) {
+    options_view_set_title(s_ov, "Radio Settings");
+#ifdef CONFIG_HAS_MESHCORE
+    add_protocol_toggle();
+    bool running = proto_is_meshcore() ? mc_manager_is_running() : lora_manager_is_running();
+#else
+    bool running = lora_manager_is_running();
+#endif
+    add_toggle_row("Radio", ACT_RADIO, running);
+    /* The protocol row above already names the backend that boots. */
+    add_toggle_row("Auto-start on boot", ACT_AUTOSTART, lora_manager_auto_start_enabled());
+    add_row("Meshtastic settings", ACT_MESHTASTIC_SETTINGS);
+#ifdef CONFIG_HAS_MESHCORE
+    add_row("MeshCore settings", ACT_MESHCORE_SETTINGS);
+#endif
+    add_row(LV_SYMBOL_LEFT " Back", ACT_BACK);
+}
+
+static void build_meshtastic_settings(void) {
     lora_status_t st = {0};
     lora_manager_get_status(&st);
-    options_view_set_title(s_ov, "Radio Settings");
+    options_view_set_title(s_ov, "Meshtastic Settings");
     char line[96];
-    snprintf(line, sizeof(line), "Radio: %s - tap to %s", st.running ? "ON" : "OFF",
-             st.running ? "stop" : "start");
-    add_row(line, ACT_RADIO);
-    snprintf(line, sizeof(line), "Region: %s%s - tap to change",
+    const char *stop_first = st.running ? " (stop radio first)" : "";
+    add_toggle_row("Radio", ACT_MT_RADIO, st.running);
+    snprintf(line, sizeof(line), "Region: %s%s%s - tap to change",
              lora_region_name((int)st.region),
-             lora_manager_region_saved() ? "" : " *");
+             lora_manager_region_saved() ? "" : " *", stop_first);
     add_row(line, ACT_REGION);
-    snprintf(line, sizeof(line), "TX power: %d dBm - tap to change", st.tx_dbm);
+    snprintf(line, sizeof(line), "TX power: %d dBm%s - tap to change", st.tx_dbm, stop_first);
     add_row(line, ACT_TX);
     snprintf(line, sizeof(line), "Phone link: %s - tap to change",
              st.companion == LORA_COMPANION_WIFI ? "WiFi" : "BLE");
     add_row(line, ACT_COMPANION);
-    add_row("Modem and frequency", ACT_MODEM);
+    snprintf(line, sizeof(line), "Modem and frequency%s", stop_first);
+    add_row(line, ACT_MODEM);
     add_row("Device behavior", ACT_DEVICE);
     add_row("Channels", ACT_CHANNELS);
-    add_row(LV_SYMBOL_LEFT " Back", ACT_BACK);
+    add_row(LV_SYMBOL_LEFT " Back to mesh settings", ACT_BACK);
 }
+
+#ifdef CONFIG_HAS_MESHCORE
+static void build_meshcore_settings(void) {
+    const mc_prefs_t *p = mc_mesh_prefs();
+    mc_status_t st;
+    mc_manager_get_status(&st);
+    options_view_set_title(s_ov, "MeshCore Settings");
+    char line[104];
+    add_toggle_row("Radio", ACT_MC_RADIO, st.running);
+    const char *node_name_mc = mc_mesh_node_name();
+    char mc_name_disp[32];
+    if (node_name_mc && node_name_mc[0]) {
+        snprintf(mc_name_disp, sizeof(mc_name_disp), "%s", node_name_mc);
+        privacy_redact_text(mc_name_disp);
+    } else snprintf(mc_name_disp, sizeof(mc_name_disp), "unnamed");
+    snprintf(line, sizeof(line), "Node name: %.24s - tap to edit", mc_name_disp);
+    add_row(line, ACT_MC_NAME);
+    snprintf(line, sizeof(line), "Frequency: %.3f MHz", (double)p->freq_mhz);
+    add_row(line, 0);
+    snprintf(line, sizeof(line), "Modem: BW%.1f SF%u CR4/%u", (double)p->bw_khz,
+             (unsigned)p->sf, (unsigned)p->cr);
+    add_row(line, 0);
+    snprintf(line, sizeof(line), "TX power: %d dBm - tap to cycle", (int)p->tx_dbm);
+    add_row(line, ACT_MC_TX);
+    add_row("Send zero-hop advert", ACT_MC_ADVERT);
+    add_row("Send flood advert", ACT_MC_FLOOD_ADVERT);
+    add_row("Contacts and channels: use MeshCore app", 0);
+    add_row(LV_SYMBOL_LEFT " Back to mesh settings", ACT_BACK);
+}
+#endif
 
 static const char *device_role_name(int role) {
     switch (role) {
@@ -415,24 +967,28 @@ static void build_modem(void) {
                                &override, &channel, NULL);
     options_view_set_title(s_ov, "Modem & Frequency");
     char line[104];
-    snprintf(line, sizeof(line), "Mode: %s - tap to switch", use_preset ? "preset" : "custom");
+    const char *stop_first = lora_manager_is_running() ? " (stop radio first)" : "";
+    snprintf(line, sizeof(line), "Mode: %s%s - tap to switch", use_preset ? "preset" : "custom",
+             stop_first);
     add_row(line, ACT_MODEM_MODE);
-    snprintf(line, sizeof(line), "Preset: %s - tap to cycle",
-             lora_preset_display_name(preset, use_preset));
+    snprintf(line, sizeof(line), "Preset: %s%s - tap to cycle",
+             lora_preset_display_name(preset, use_preset), stop_first);
     add_row(line, ACT_MODEM_PRESET);
     if (!use_preset) {
-        snprintf(line, sizeof(line), "Spread factor: SF%d - tap to cycle", sf);
+        snprintf(line, sizeof(line), "Spread factor: SF%d%s - tap to cycle", sf, stop_first);
         add_row(line, ACT_MODEM_SF);
-        snprintf(line, sizeof(line), "Bandwidth: %d kHz - tap to cycle", bw);
+        snprintf(line, sizeof(line), "Bandwidth: %d kHz%s - tap to cycle", bw, stop_first);
         add_row(line, ACT_MODEM_BW);
-        snprintf(line, sizeof(line), "Coding rate: CR4/%d - tap to cycle", cr);
+        snprintf(line, sizeof(line), "Coding rate: CR4/%d%s - tap to cycle", cr, stop_first);
         add_row(line, ACT_MODEM_CR);
     }
-    snprintf(line, sizeof(line), "Frequency offset: %.1f MHz - tap to cycle", (double)offset);
+    snprintf(line, sizeof(line), "Frequency offset: %.1f MHz%s - tap to cycle",
+             (double)offset, stop_first);
     add_row(line, ACT_MODEM_OFFSET);
-    snprintf(line, sizeof(line), "Channel slot: %u - tap to cycle", (unsigned)channel);
+    snprintf(line, sizeof(line), "Channel slot: %u%s - tap to cycle", (unsigned)channel, stop_first);
     add_row(line, ACT_MODEM_CHANNEL);
-    snprintf(line, sizeof(line), "Frequency override: %.1f MHz - tap to cycle", (double)override);
+    snprintf(line, sizeof(line), "Frequency override: %.1f MHz%s - tap to cycle",
+             (double)override, stop_first);
     add_row(line, ACT_MODEM_OVERRIDE);
     add_row(LV_SYMBOL_LEFT " Back", ACT_BACK);
 }
@@ -444,9 +1000,11 @@ static void build_device(void) {
     lora_manager_get_modem_cfg(NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &tx_enabled);
     options_view_set_title(s_ov, "Device Behavior");
     char line[104];
-    snprintf(line, sizeof(line), "TX enabled: %s - tap to toggle", tx_enabled ? "yes" : "no");
+    const char *stop_first = st.running ? " (stop radio first)" : "";
+    snprintf(line, sizeof(line), "TX enabled: %s%s - tap to toggle", tx_enabled ? "yes" : "no",
+             stop_first);
     add_row(line, ACT_DEVICE_TX);
-    snprintf(line, sizeof(line), "TX power: %d dBm - tap to cycle", st.tx_dbm);
+    snprintf(line, sizeof(line), "TX power: %d dBm%s - tap to cycle", st.tx_dbm, stop_first);
     add_row(line, ACT_TX);
     snprintf(line, sizeof(line), "Hop limit: %d - tap to cycle", st.hop_limit);
     add_row(line, ACT_DEVICE_HOP);
@@ -477,10 +1035,25 @@ static void build_channels(void) {
 
 static void build_info(void) {
     lora_status_t st = {0};
-    lora_manager_get_status(&st);
+    ui_status(&st);
     options_view_set_title(s_ov, "Device Info");
     char line[104];
-    snprintf(line, sizeof(line), "Node ID: !%08X", (unsigned)lora_mesh_node_num());
+    snprintf(line, sizeof(line), "Protocol: %s", ui_protocol_name());
+    add_row(line, ACT_INFO);
+    if (ui_meshcore()) {
+        const char *name = mc_mesh_node_name();
+        char node_disp[32];
+        if (name && name[0]) {
+            snprintf(node_disp, sizeof(node_disp), "%s", name);
+            privacy_redact_text(node_disp);
+        } else snprintf(node_disp, sizeof(node_disp), "unnamed");
+        snprintf(line, sizeof(line), "Node: %s", node_disp);
+    } else {
+        char id[16];
+        snprintf(id, sizeof(id), "!%08X", (unsigned)lora_mesh_node_num());
+        privacy_redact_text(id);
+        snprintf(line, sizeof(line), "Node ID: %s", id);
+    }
     add_row(line, ACT_INFO);
     snprintf(line, sizeof(line), "Radio: %s  %lu.%03lu MHz",
              st.running ? "ON" : "OFF", (unsigned long)(st.freq_hz / 1000000),
@@ -488,28 +1061,46 @@ static void build_info(void) {
     add_row(line, ACT_INFO);
     snprintf(line, sizeof(line), "Modem: SF%d BW%d CR4/%d", st.sf, st.bw_khz, st.cr);
     add_row(line, ACT_INFO);
-    snprintf(line, sizeof(line), "Region: %s  channel %u",
-             lora_region_name((int)st.region), (unsigned)st.channel_num);
-    add_row(line, ACT_INFO);
-    snprintf(line, sizeof(line), "Known nodes: %u", (unsigned)lora_manager_node_count());
+    if (!ui_meshcore()) {
+        snprintf(line, sizeof(line), "Region: %s  channel %u",
+                 lora_region_name((int)st.region), (unsigned)st.channel_num);
+        add_row(line, ACT_INFO);
+    }
+    snprintf(line, sizeof(line), "Known %s: %u", ui_meshcore() ? "contacts" : "nodes",
+             (unsigned)ui_nodes_total());
     add_row(line, ACT_INFO);
     add_row("Traffic details", ACT_ACTIVITY);
     add_row("Refresh node discovery", ACT_DISCOVER);
     add_row(LV_SYMBOL_LEFT " Back", ACT_BACK);
 }
 
-static void node_row_label(const lora_mesh_node_t *node, char *out, size_t cap) {
+static void node_row_label(const ui_node_t *node, char *out, size_t cap) {
+    /* Privacy mode is a display-time transform: mask a copy of the node name
+     * and of the id token, never the node record used for lookups. */
     char name[32];
-    node_name(node, name, sizeof(name));
-    snprintf(out, cap, "%s  !%08X  %d dBm%s%s", name,
-             (unsigned)node->node_num, (int)node->last_rssi,
-             node->has_pubkey ? "  PKI" : "",
-             s_node_picker ? "  select" : "");
+    char id[16];
+    snprintf(name, sizeof(name), "%s", node->name);
+    privacy_redact_text(name);
+    if (node->has_rssi) {
+        snprintf(id, sizeof(id), "!%08X", (unsigned)node->id);
+        privacy_redact_text(id);
+        snprintf(out, cap, "%s  %s  %d dBm%s%s", name, id, (int)node->rssi,
+                 node->has_pubkey ? "" : "  key needed",
+                 s_node_picker ? "  select" : "");
+    } else {
+        snprintf(id, sizeof(id), "!%02X%02X%02X%02X", (unsigned)node->peer_key[0],
+                 (unsigned)node->peer_key[1], (unsigned)node->peer_key[2],
+                 (unsigned)node->peer_key[3]);
+        privacy_redact_text(id);
+        snprintf(out, cap, "%s  %s%s", name, id, s_node_picker ? "  select" : "");
+    }
 }
 
 static void build_nodes(void) {
-    options_view_set_title(s_ov, s_node_picker ? "Choose DM contact" : "LoRa Nodes");
-    uint16_t total = lora_mesh_nodes(NULL, 0);
+    options_view_set_title(s_ov, s_node_picker ? "Choose DM contact"
+                                               : (ui_meshcore() ? "MeshCore Contacts"
+                                                                : "Meshtastic Nodes"));
+    uint16_t total = ui_nodes_total();
     s_visible_node_total = total;
     if (total == 0) s_node_offset = 0;
     else if (s_node_offset >= total)
@@ -522,18 +1113,19 @@ static void build_nodes(void) {
                  (unsigned)(s_node_offset + 1),
                  (unsigned)(s_node_offset + s_visible_node_count), (unsigned)total);
         add_row(line, ACT_DISCOVER);
-    } else {
-        add_row("Refresh discovery", ACT_DISCOVER);
     }
     for (uint16_t i = 0; i < s_visible_node_count; ++i) {
-        lora_mesh_node_t node;
-        if (!lora_mesh_node_at((uint16_t)(s_node_offset + i), &node)) break;
-        s_visible_node_ids[i] = node.node_num;
+        ui_node_t node;
+        if (!ui_node_at((uint16_t)(s_node_offset + i), &node)) break;
+        s_visible_node_ids[i] = node.id;
+        memcpy(s_visible_node_keys[i], node.peer_key, sizeof(node.peer_key));
         node_row_label(&node, line, sizeof(line));
         add_row(line, ACT_NODE_BASE + i);
     }
     if (total == 0) {
-        add_row("No nodes yet - tap to request NodeInfo", ACT_DISCOVER);
+        add_row(ui_meshcore() ? "No contacts yet - adverts add them"
+                              : "No nodes yet - tap to request NodeInfo",
+                ACT_DISCOVER);
     }
     if (s_node_offset > 0) add_row(LV_SYMBOL_LEFT " Previous nodes", ACT_NODE_PREV);
     if (s_node_offset + s_visible_node_count < total)
@@ -543,7 +1135,7 @@ static void build_nodes(void) {
 
 static void refresh_nodes(void) {
     if (!s_ov || s_page != PAGE_NODES) return;
-    uint16_t total = lora_mesh_nodes(NULL, 0);
+    uint16_t total = ui_nodes_total();
     if (total != s_visible_node_total) {
         rebuild_page();
         return;
@@ -556,9 +1148,10 @@ static void refresh_nodes(void) {
     }
     char line[112];
     for (uint16_t i = 0; i < visible; ++i) {
-        lora_mesh_node_t node;
-        if (!lora_mesh_node_at((uint16_t)(s_node_offset + i), &node) ||
-            node.node_num != s_visible_node_ids[i]) {
+        ui_node_t node;
+        if (!ui_node_at((uint16_t)(s_node_offset + i), &node) ||
+            node.id != s_visible_node_ids[i] ||
+            memcmp(node.peer_key, s_visible_node_keys[i], sizeof(node.peer_key)) != 0) {
             rebuild_page();
             return;
         }
@@ -577,12 +1170,19 @@ static void build_node(void) {
     }
     char name[32];
     node_name(&node, name, sizeof(name));
+    privacy_redact_text(name);
     options_view_set_title(s_ov, name);
     char line[104];
-    snprintf(line, sizeof(line), "Node ID: !%08X", (unsigned)node.node_num);
+    char id[16];
+    snprintf(id, sizeof(id), "!%08X", (unsigned)node.node_num);
+    privacy_redact_text(id);
+    snprintf(line, sizeof(line), "Node ID: %s", id);
     add_row(line, ACT_NODE_INFO);
     if (node.has_user && node.short_name[0]) {
-        snprintf(line, sizeof(line), "Short name: %s", node.short_name);
+        char short_name[16];
+        snprintf(short_name, sizeof(short_name), "%s", node.short_name);
+        privacy_redact_text(short_name);
+        snprintf(line, sizeof(line), "Short name: %s", short_name);
         add_row(line, ACT_NODE_INFO);
     }
     seen_text(&node, line, sizeof(line));
@@ -614,33 +1214,73 @@ static void build_node(void) {
 }
 
 static void build_messages(void) {
-    options_view_set_title(s_ov, "Conversations");
+    options_view_set_title(s_ov, ui_meshcore() ? "MeshCore Conversations"
+                                               : "Meshtastic Conversations");
     s_visible_message_count = 1;
     s_conversations[0] = 0;
-    uint16_t count = lora_manager_msg_count();
+    memset(s_conversation_keys[0], 0, sizeof(s_conversation_keys[0]));
+    s_conversation_channels[0] = 0;
+    s_conversation_direct[0] = false;
+    uint16_t count = ui_msg_count();
     for (uint16_t i = count; i > 0; --i) {
-        lora_msg_t m;
-        if (!lora_manager_msg_at(i - 1, &m) || !m.direct || !m.node_num) continue;
+        ui_msg_t m;
+        if (!ui_msg_at(i - 1, &m)) continue;
         bool found = false;
         for (uint16_t j = 0; j < s_visible_message_count; ++j)
-            if (s_conversations[j] == m.node_num) found = true;
-        if (!found) s_conversations[s_visible_message_count++] = m.node_num;
+            if (ui_meshcore()
+                    ? (m.direct && s_conversation_direct[j] &&
+                       memcmp(s_conversation_keys[j], m.peer_key, sizeof(m.peer_key)) == 0) ||
+                      (!m.direct && !s_conversation_direct[j] &&
+                       s_conversation_channels[j] == m.channel)
+                    : (m.direct && s_conversation_direct[j] &&
+                       s_conversations[j] == m.node_num) ||
+                      (!m.direct && !s_conversation_direct[j]))
+                found = true;
+        if (!found && s_visible_message_count <= CONFIG_LORA_MSG_RING) {
+            uint16_t j = s_visible_message_count++;
+            s_conversations[j] = m.node_num;
+            memcpy(s_conversation_keys[j], m.peer_key, sizeof(m.peer_key));
+            s_conversation_channels[j] = m.channel;
+            s_conversation_direct[j] = m.direct;
+        }
     }
     char line[104];
     for (uint16_t c = 0; c < s_visible_message_count; ++c) {
         unsigned unread = 0;
         for (uint16_t i = 0; i < count; ++i) {
-            lora_msg_t m;
-            if (lora_manager_msg_at(i, &m) && !m.read &&
-                (c ? m.direct && m.node_num == s_conversations[c] : !m.direct)) unread++;
+            ui_msg_t m;
+            if (ui_msg_at(i, &m) && !m.read &&
+                (c ? (ui_meshcore()
+                    ? ((s_conversation_direct[c] && m.direct &&
+                        memcmp(m.peer_key, s_conversation_keys[c], sizeof(m.peer_key)) == 0) ||
+                       (!s_conversation_direct[c] && !m.direct &&
+                        m.channel == s_conversation_channels[c]))
+                    : ((s_conversation_direct[c] && m.direct &&
+                        m.node_num == s_conversations[c]) ||
+                       (!s_conversation_direct[c] && !m.direct))) : !m.direct)) unread++;
         }
-        snprintf(line, sizeof(line), c ? "Direct message" : "Public chat");
+        if (c && ui_meshcore() && !s_conversation_direct[c])
+            snprintf(line, sizeof(line), "Channel %u",
+                     (unsigned)s_conversation_channels[c]);
+        else if (c)
+            snprintf(line, sizeof(line), "Direct message");
+        else
+            snprintf(line, sizeof(line), "Public chat");
         for (uint16_t i = count; i > 0; --i) {
-            lora_msg_t m;
-            if (!lora_manager_msg_at(i - 1, &m)) continue;
-            if (c ? (!m.direct || m.node_num != s_conversations[c]) : m.direct) continue;
+            ui_msg_t m;
+            if (!ui_msg_at(i - 1, &m)) continue;
+            bool belongs = c ? (ui_meshcore()
+                    ? ((s_conversation_direct[c] && m.direct &&
+                        memcmp(m.peer_key, s_conversation_keys[c], sizeof(m.peer_key)) == 0) ||
+                       (!s_conversation_direct[c] && !m.direct &&
+                        m.channel == s_conversation_channels[c]))
+                    : ((s_conversation_direct[c] && m.direct &&
+                        m.node_num == s_conversations[c]) ||
+                       (!s_conversation_direct[c] && !m.direct))) : !m.direct;
+            if (!belongs) continue;
             char name[24], age[12];
             message_name(&m, name, sizeof(name));
+            privacy_redact_text(name);
             message_age(&m, age, sizeof(age));
             if (unread) {
                 snprintf(line, sizeof(line), "%.20s  %.8s  %u new  %.28s",
@@ -653,39 +1293,54 @@ static void build_messages(void) {
         }
         add_row(line, ACT_MESSAGE_BASE + c);
     }
-    add_row("New direct message", ACT_NEW_DM);
+    add_row(ui_meshcore() ? "New encrypted direct message" : "New encrypted DM", ACT_NEW_DM);
     add_row(LV_SYMBOL_LEFT " Back", ACT_BACK);
 }
 
 static void build_message(void) {
     char title[32] = "Public chat";
-    if (s_conversation) {
-        lora_msg_t peer = {.direct = true, .outgoing = true, .node_num = s_conversation};
+    if (!s_conversation_group) {
+        ui_msg_t peer = {.direct = true, .outgoing = true, .node_num = s_conversation};
+        if (ui_meshcore()) memcpy(peer.peer_key, s_conversation_key, sizeof(peer.peer_key));
         message_name(&peer, title, sizeof(title));
+        privacy_redact_text(title);
+#ifdef CONFIG_HAS_MESHCORE
+    } else if (ui_meshcore() && s_conversation_channel != 0) {
+        snprintf(title, sizeof(title), "Channel %u", (unsigned)s_conversation_channel);
+#endif
     }
     options_view_set_title(s_ov, title);
-    lora_manager_chat_read(s_conversation);
+    ui_chat_read();
     lv_obj_t *list = options_view_get_list(s_ov);
     /* Conversation bubbles use the screen width; the generic options view
      * reserves menu gutters that otherwise appear as a large empty strip. */
     lv_obj_set_style_pad_left(list, GUI_GRID, 0);
     lv_obj_set_style_pad_right(list, GUI_GRID, 0);
-    uint16_t count = lora_manager_msg_count();
+    uint16_t count = ui_msg_count();
     for (uint16_t i = 0; i < count; ++i) {
-        lora_msg_t m;
-        if (!lora_manager_msg_at(i, &m) || !in_conversation(&m)) continue;
+        ui_msg_t m;
+        if (!ui_msg_at(i, &m) || !in_conversation(&m)) continue;
         char name[24], age[12], text[224];
         message_name(&m, name, sizeof(name));
+        privacy_redact_text(name);
         message_age(&m, age, sizeof(age));
-        const char *state = !m.outgoing ? "" : m.delivery == 1 ? "Pending" :
+        const char *state = !m.outgoing ? "" : m.delivery == 1 ? "Sending" :
                             m.delivery == 2 ? "Delivered" : m.delivery == 3 ? "Failed" : "Sent";
-        snprintf(text, sizeof(text), "%.23s  %.11s  %.9s\n%.159s",
-                 m.outgoing ? "You" : name, age, state, m.text[0] ? m.text : "(empty message)");
-        lv_obj_t *bubble = add_row(text, 0);
+        bool retryable = m.outgoing && m.direct && m.delivery == 3 &&
+                         (ui_meshcore() ? !key_is_zero(m.peer_key, sizeof(m.peer_key))
+                                        : m.node_num != 0);
+        /* Keep the tap-to-retry hint in the state word so it can never be
+         * truncated away, and give sender/time/state room to breathe. */
+        const char *state_full =
+            (m.outgoing && m.delivery == 3 && retryable) ? "Failed - tap to retry" : state;
+        snprintf(text, sizeof(text), "%.24s  %.8s  %.21s\n%.159s",
+                 m.outgoing ? "You" : name, age, state_full,
+                 m.text[0] ? m.text : "(empty message)");
+        lv_obj_t *bubble = add_row(text, retryable ? ACT_MESSAGE_RETRY_BASE + i : 0);
         if (!bubble) continue;
-        lv_obj_set_style_radius(bubble, 12, 0);
-        lv_obj_set_style_border_width(bubble, m.outgoing ? 2 : 0, 0);
         style_message_bubble(bubble, list, text, m.outgoing);
+        style_bubble_colors(bubble, m.outgoing, m.delivery == 3);
+        lv_obj_set_style_radius(bubble, GUI_RADIUS_MD, 0);
     }
     if (!options_view_get_item_count(s_ov))
         add_row("No messages yet", 0);
@@ -702,6 +1357,10 @@ static void rebuild_page(void) {
     case PAGE_MAIN: build_main(); break;
     case PAGE_ACTIVITY: build_activity(); break;
     case PAGE_SETTINGS: build_settings(); break;
+    case PAGE_MESHTASTIC_SETTINGS: build_meshtastic_settings(); break;
+#ifdef CONFIG_HAS_MESHCORE
+    case PAGE_MESHCORE_SETTINGS: build_meshcore_settings(); break;
+#endif
     case PAGE_MODEM: build_modem(); break;
     case PAGE_DEVICE: build_device(); break;
     case PAGE_CHANNELS: build_channels(); break;
@@ -720,6 +1379,11 @@ static void go_back(void) {
     case PAGE_NODE: set_page(PAGE_NODES); break;
     case PAGE_MESSAGE: set_page(PAGE_MESSAGES); break;
     case PAGE_ACTIVITY: set_page(PAGE_INFO); break;
+    case PAGE_MESHTASTIC_SETTINGS:
+#ifdef CONFIG_HAS_MESHCORE
+    case PAGE_MESHCORE_SETTINGS:
+#endif
+        set_page(PAGE_SETTINGS); break;
     case PAGE_SETTINGS:
     case PAGE_MODEM:
     case PAGE_DEVICE:
@@ -737,6 +1401,10 @@ static void go_back(void) {
 }
 
 static void cycle_region(void) {
+    if (lora_manager_is_running()) {
+        notice("Stop Meshtastic radio first", TOAST_WARN);
+        return;
+    }
     lora_status_t st = {0};
     lora_manager_get_status(&st);
     bool ok = lora_manager_set_region((lora_region_t)lora_region_next((int)st.region));
@@ -746,6 +1414,10 @@ static void cycle_region(void) {
 }
 
 static void cycle_tx(void) {
+    if (lora_manager_is_running()) {
+        notice("Stop Meshtastic radio first", TOAST_WARN);
+        return;
+    }
     lora_status_t st = {0};
     lora_manager_get_status(&st);
     lora_hw_t hw;
@@ -766,46 +1438,105 @@ static void compose_submit(const char *text) {
     keyboard_view_set_immediate_callback(NULL);
     bool ok = false;
     if (text && text[0]) {
-        ok = s_compose_dm
-                 ? lora_manager_send_dm_text(text, s_compose_node, 0, true, NULL)
-                 : lora_manager_send_text(text);
+        ok = s_compose_dm ? ui_send_dm(text, s_compose_node, s_compose_peer_key)
+                          : ui_send_text(text, s_compose_channel);
     }
     if (!text || !text[0])
         notice_after_return("Empty message not sent", TOAST_INFO);
     else if (ok)
-        notice_after_return(s_compose_dm ? "Encrypted DM sent" : "Public message sent",
+        notice_after_return(s_compose_dm
+                                ? (ui_meshcore() ? "Direct message queued" : "Encrypted DM queued")
+                                : "Public message sent",
                             TOAST_SUCCESS);
     else
-        notice_after_return(lora_manager_last_error(), TOAST_ERROR);
+        notice_after_return(ui_last_error(), TOAST_ERROR);
+    display_manager_go_back();
+}
+
+/* One-shot keyboard submit for the MeshCore advert name (MeshCore Settings ->
+ * Node name). Mirrors compose_submit's keyboard return/resume handling. */
+static void mc_name_submit(const char *text) {
+    keyboard_view_set_submit_callback(NULL);
+    keyboard_view_set_immediate_callback(NULL);
+    bool ok = text && text[0] && mc_mesh_set_node_name(text);
+    if (!text || !text[0])
+        notice_after_return("Name not changed", TOAST_INFO);
+    else if (ok)
+        notice_after_return("Name saved - send an advert to share it", TOAST_SUCCESS);
+    else
+        notice_after_return("Could not save name", TOAST_ERROR);
     display_manager_go_back();
 }
 
 static void open_composer(bool dm, uint32_t node, lora_page_t return_page) {
-    if (!lora_manager_is_running()) {
+    if (!ui_radio_running()) {
+        s_compose_initial_text[0] = '\0';
         notice("Start the LoRa radio first", TOAST_WARN);
         return;
     }
     s_compose_dm = dm;
     s_compose_node = node;
+    s_compose_channel = (dm || !s_conversation_group) ? 0 : s_conversation_channel;
+    memset(s_compose_peer_key, 0, sizeof(s_compose_peer_key));
+#ifdef CONFIG_HAS_MESHCORE
+    if (dm && ui_meshcore()) memcpy(s_compose_peer_key, s_conversation_key,
+                                    sizeof(s_compose_peer_key));
+#endif
     s_resume_page = return_page;
     s_resume_pending = true;
     keyboard_view_set_return_view(&lora_view);
     keyboard_view_set_submit_callback(compose_submit);
     keyboard_view_set_immediate_callback(NULL);
     keyboard_view_set_placeholder(dm ? "Encrypted direct message" : "Public message");
-    keyboard_view_set_initial_text("");
+    keyboard_view_set_initial_text(s_compose_initial_text);
+    s_compose_initial_text[0] = '\0';
     keyboard_view_set_start_caps(true);
     display_manager_switch_view(&keyboard_view);
 }
 
 static void action_click(lv_event_t *e) {
     int action = (int)(intptr_t)lv_event_get_user_data(e);
+    if (action >= ACT_MESSAGE_RETRY_BASE &&
+        action < ACT_MESSAGE_RETRY_BASE + CONFIG_LORA_MSG_RING) {
+        uint16_t index = (uint16_t)(action - ACT_MESSAGE_RETRY_BASE);
+        ui_msg_t m = {0};
+        if (ui_msg_at(index, &m) && m.direct && m.outgoing && m.delivery == 3 &&
+            (ui_meshcore() ? !key_is_zero(m.peer_key, sizeof(m.peer_key))
+                           : m.node_num != 0)) {
+            s_conversation = m.node_num;
+            s_conversation_group = false;
+#ifdef CONFIG_HAS_MESHCORE
+            if (ui_meshcore())
+                memcpy(s_conversation_key, m.peer_key, sizeof(s_conversation_key));
+#endif
+            snprintf(s_compose_initial_text, sizeof(s_compose_initial_text), "%s", m.text);
+            open_composer(true, s_conversation, PAGE_MESSAGE);
+        } else {
+            notice("Message is no longer retryable", TOAST_WARN);
+        }
+        return;
+    }
     if (action >= ACT_NODE_BASE && action < ACT_NODE_BASE + LORA_UI_NODES_MAX) {
         uint16_t i = (uint16_t)(action - ACT_NODE_BASE);
         if (i < s_visible_node_count) {
             s_selected_node = s_visible_node_ids[i];
-            if (s_node_picker) {
+            /* MeshCore has no Meshtastic-style node detail page; a contact is
+             * simply a DM target, so open the conversation directly. */
+            if (s_node_picker || ui_meshcore()) {
+                if (s_node_picker && !ui_meshcore()) {
+                    lora_mesh_node_t node;
+                    if (lora_mesh_node_get(s_selected_node, &node) && !node.has_pubkey) {
+                        set_page(PAGE_NODE);
+                        notice("Request NodeInfo to enable encrypted DM", TOAST_WARN);
+                        return;
+                    }
+                }
                 s_conversation = s_selected_node;
+                s_conversation_group = false;
+#ifdef CONFIG_HAS_MESHCORE
+                if (ui_meshcore()) memcpy(s_conversation_key, s_visible_node_keys[i],
+                                           sizeof(s_conversation_key));
+#endif
                 s_node_picker = false;
                 set_page(PAGE_MESSAGE);
             } else {
@@ -818,6 +1549,12 @@ static void action_click(lv_event_t *e) {
         uint16_t visual = (uint16_t)(action - ACT_MESSAGE_BASE);
         if (visual < s_visible_message_count) {
             s_conversation = s_conversations[visual];
+            s_conversation_group = !s_conversation_direct[visual];
+            s_conversation_channel = s_conversation_channels[visual];
+#ifdef CONFIG_HAS_MESHCORE
+            if (ui_meshcore()) memcpy(s_conversation_key, s_conversation_keys[visual],
+                                       sizeof(s_conversation_key));
+#endif
             set_page(PAGE_MESSAGE);
         }
         return;
@@ -840,24 +1577,50 @@ static void action_click(lv_event_t *e) {
     }
 
     switch ((lora_action_t)action) {
-    case ACT_RADIO: {
-        bool stopping = lora_manager_is_running();
+    case ACT_RADIO:
+        toggle_radio();
+        break;
+    case ACT_MT_RADIO:
+        meshtastic_radio_toggle();
+        break;
+#ifdef CONFIG_HAS_MESHCORE
+    case ACT_MC_RADIO: {
+        bool stopping = mc_manager_is_running();
         bool ok = true;
-        if (stopping) lora_manager_stop();
-        else ok = lora_manager_start();
-        notice(ok ? (stopping ? "LoRa stopped" : "LoRa started")
-                  : lora_manager_last_error(), ok ? TOAST_SUCCESS : TOAST_ERROR);
+        if (stopping) mc_manager_stop();
+        else ok = start_meshcore_backend();
+        notice(ok ? (stopping ? "MeshCore stopped" : "MeshCore started")
+                  : mc_manager_last_error(), ok ? TOAST_SUCCESS : TOAST_ERROR);
         rebuild_page();
         break;
     }
+#endif
     case ACT_MESSAGES: set_page(PAGE_MESSAGES); break;
-    case ACT_PUBLIC: s_conversation = 0; set_page(PAGE_MESSAGE); break;
+    case ACT_PUBLIC:
+        s_conversation = 0;
+        s_conversation_group = true;
+        s_conversation_channel = 0;
+        memset(s_conversation_key, 0, sizeof(s_conversation_key));
+        set_page(PAGE_MESSAGE);
+        break;
     case ACT_NODES:
         s_node_picker = false;
         s_node_offset = 0;
         set_page(PAGE_NODES);
         break;
     case ACT_SETTINGS: set_page(PAGE_SETTINGS); break;
+    case ACT_MESHTASTIC_SETTINGS: set_page(PAGE_MESHTASTIC_SETTINGS); break;
+#ifdef CONFIG_HAS_MESHCORE
+    case ACT_MESHCORE_SETTINGS: set_page(PAGE_MESHCORE_SETTINGS); break;
+#endif
+    case ACT_AUTOSTART: {
+        bool enabled = !lora_manager_auto_start_enabled();
+        bool ok = lora_manager_set_auto_start(enabled);
+        notice(ok ? (enabled ? "Auto-start enabled" : "Auto-start disabled")
+                  : "Could not save auto-start", ok ? TOAST_SUCCESS : TOAST_ERROR);
+        rebuild_page();
+        break;
+    }
     case ACT_INFO: set_page(PAGE_INFO); break;
     case ACT_MODEM: set_page(PAGE_MODEM); break;
     case ACT_DEVICE: set_page(PAGE_DEVICE); break;
@@ -879,6 +1642,10 @@ static void action_click(lv_event_t *e) {
         break;
     }
     case ACT_MODEM_MODE: {
+        if (lora_manager_is_running()) {
+            notice("Stop Meshtastic radio first", TOAST_WARN);
+            break;
+        }
         bool use_preset = false;
         int preset = 0, sf = 11, bw = 250, cr = 5;
         lora_manager_get_modem_cfg(&use_preset, &preset, &sf, &bw, &cr,
@@ -891,6 +1658,10 @@ static void action_click(lv_event_t *e) {
         break;
     }
     case ACT_MODEM_PRESET: {
+        if (lora_manager_is_running()) {
+            notice("Stop Meshtastic radio first", TOAST_WARN);
+            break;
+        }
         bool use_preset = false;
         int preset = 0;
         lora_manager_get_modem_cfg(&use_preset, &preset, NULL, NULL, NULL,
@@ -905,6 +1676,10 @@ static void action_click(lv_event_t *e) {
     case ACT_MODEM_SF:
     case ACT_MODEM_BW:
     case ACT_MODEM_CR: {
+        if (lora_manager_is_running()) {
+            notice("Stop Meshtastic radio first", TOAST_WARN);
+            break;
+        }
         bool use_preset = false;
         int preset = 0, sf = 11, bw = 250, cr = 5;
         lora_manager_get_modem_cfg(&use_preset, &preset, &sf, &bw, &cr,
@@ -919,6 +1694,10 @@ static void action_click(lv_event_t *e) {
         break;
     }
     case ACT_MODEM_OFFSET: {
+        if (lora_manager_is_running()) {
+            notice("Stop Meshtastic radio first", TOAST_WARN);
+            break;
+        }
         bool use_preset = false, tx_enabled = true;
         int preset = 0, sf = 11, bw = 250, cr = 5;
         float offset = 0, override = 0;
@@ -934,6 +1713,10 @@ static void action_click(lv_event_t *e) {
         break;
     }
     case ACT_MODEM_OVERRIDE: {
+        if (lora_manager_is_running()) {
+            notice("Stop Meshtastic radio first", TOAST_WARN);
+            break;
+        }
         bool use_preset = false, tx_enabled = true;
         int preset = 0, sf = 11, bw = 250, cr = 5;
         float offset = 0, override = 0;
@@ -952,6 +1735,10 @@ static void action_click(lv_event_t *e) {
         break;
     }
     case ACT_MODEM_CHANNEL: {
+        if (lora_manager_is_running()) {
+            notice("Stop Meshtastic radio first", TOAST_WARN);
+            break;
+        }
         bool use_preset = false, tx_enabled = true;
         int preset = 0, sf = 11, bw = 250, cr = 5;
         float offset = 0, override = 0;
@@ -965,6 +1752,10 @@ static void action_click(lv_event_t *e) {
         break;
     }
     case ACT_DEVICE_TX: {
+        if (lora_manager_is_running()) {
+            notice("Stop Meshtastic radio first", TOAST_WARN);
+            break;
+        }
         bool enabled = true;
         lora_manager_get_modem_cfg(NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &enabled);
         bool ok = lora_manager_set_tx_enabled(!enabled);
@@ -996,7 +1787,63 @@ static void action_click(lv_event_t *e) {
         rebuild_page();
         break;
     }
+#ifdef CONFIG_HAS_MESHCORE
+    case ACT_MC_NAME: {
+        const char *cur = mc_mesh_node_name();
+        s_resume_page = PAGE_MESHCORE_SETTINGS;
+        s_resume_pending = true;
+        keyboard_view_set_return_view(&lora_view);
+        keyboard_view_set_submit_callback(mc_name_submit);
+        keyboard_view_set_immediate_callback(NULL);
+        keyboard_view_set_placeholder("MeshCore advert name");
+        keyboard_view_set_initial_text((cur && cur[0]) ? cur : "");
+        keyboard_view_set_start_caps(true);
+        display_manager_switch_view(&keyboard_view);
+        break;
+    }
+    case ACT_MC_TX: {
+        static const int mc_tx_steps[] = {-9, 2, 5, 10, 14, 17, 20, 22};
+        const mc_prefs_t *p = mc_mesh_prefs();
+        lora_hw_t hw;
+        int max = lora_manager_get_hw(&hw) ? hw.max_tx_dbm : 22;
+        int next = mc_tx_steps[0];
+        for (unsigned i = 0; i < sizeof(mc_tx_steps) / sizeof(mc_tx_steps[0]); ++i) {
+            if (mc_tx_steps[i] > p->tx_dbm && mc_tx_steps[i] <= max) {
+                next = mc_tx_steps[i];
+                break;
+            }
+        }
+        if (p->tx_dbm >= max || next > max) next = mc_tx_steps[0];
+        bool ok = mc_mesh_set_tx_power((int8_t)next);
+        if (ok && mc_manager_is_running()) ok = mc_manager_reconfigure_radio();
+        notice(ok ? "MeshCore TX power saved" : mc_manager_last_error(),
+               ok ? TOAST_SUCCESS : TOAST_ERROR);
+        rebuild_page();
+        break;
+    }
+    case ACT_MC_ADVERT:
+    case ACT_MC_FLOOD_ADVERT: {
+        bool running = mc_manager_is_running();
+        bool ok = running && mc_manager_send_advert(action == ACT_MC_FLOOD_ADVERT);
+        notice(ok ? "MeshCore advert sent" :
+                   (running ? mc_manager_last_error() : "Start MeshCore radio first"),
+               ok ? TOAST_SUCCESS : TOAST_ERROR);
+        break;
+    }
+#endif
     case ACT_DISCOVER:
+#ifdef CONFIG_HAS_MESHCORE
+        if (ui_meshcore()) {
+            if (!mc_manager_is_running()) {
+                notice("Start MeshCore radio first", TOAST_WARN);
+                break;
+            }
+            // MeshCore has no NodeInfo request: contacts arrive with adverts.
+            rebuild_page();
+            notice("MeshCore contacts update from adverts", TOAST_INFO);
+            break;
+        }
+#endif
         if (!lora_manager_is_running()) {
             notice("Start the LoRa radio first", TOAST_WARN);
             break;
@@ -1009,11 +1856,17 @@ static void action_click(lv_event_t *e) {
         s_node_offset = 0;
         set_page(PAGE_NODES);
         break;
-    case ACT_NODE_DM: s_conversation = s_selected_node; set_page(PAGE_MESSAGE); break;
+    case ACT_NODE_DM:
+        s_conversation = s_selected_node;
+        s_conversation_group = false;
+        set_page(PAGE_MESSAGE);
+        break;
     case ACT_NODE_INFO: {
-        bool ok = lora_manager_is_running() &&
-                  lora_mesh_send_nodeinfo(s_selected_node, true);
-        notice(ok ? "NodeInfo request sent" : "Could not send NodeInfo request",
+        bool running = lora_manager_is_running();
+        bool ok = running && lora_mesh_send_nodeinfo(s_selected_node, true);
+        notice(ok ? "NodeInfo request sent" :
+                   (running ? "Could not send NodeInfo request"
+                            : "Start Meshtastic radio first"),
                ok ? TOAST_SUCCESS : TOAST_ERROR);
         break;
     }
@@ -1033,7 +1886,9 @@ static void action_click(lv_event_t *e) {
         break;
     }
     case ACT_NODE_BACK:
-        if (s_node_picker) {
+        if (s_page == PAGE_NODE) {
+            set_page(PAGE_NODES);
+        } else if (s_node_picker) {
             s_node_picker = false;
             set_page(PAGE_MESSAGES);
         } else {
@@ -1050,7 +1905,7 @@ static void action_click(lv_event_t *e) {
         rebuild_page();
         break;
     case ACT_MESSAGE_REPLY:
-        open_composer(s_conversation != 0, s_conversation, PAGE_MESSAGE);
+        open_composer(!s_conversation_group, s_conversation, PAGE_MESSAGE);
         break;
     case ACT_MESSAGE_BACK: set_page(PAGE_MESSAGES); break;
     case ACT_BACK: go_back(); break;
@@ -1058,25 +1913,61 @@ static void action_click(lv_event_t *e) {
     }
 }
 
+/* Chat state (seq/preview/unread) belongs to one ring; clear it when the
+ * active backend changes so a switch cannot surface a phantom "new message". */
+static bool s_backend_meshcore;
+
+/* HUD preview line "<sender>: <text>". The sender is built in a stack buffer
+ * and redacted in place: privacy mode hides identities on screen without ever
+ * mutating the stored message. */
+static void chat_preview(const ui_msg_t *message, char *out, size_t cap) {
+    char who[24];
+    if (message->outgoing) snprintf(who, sizeof(who), "you");
+    else if (message->who[0]) {
+        snprintf(who, sizeof(who), "%.20s", message->who);
+        privacy_redact_text(who);
+    } else snprintf(who, sizeof(who), "unknown");
+    snprintf(out, cap, "%.20s: %.32s", who,
+             message->text[0] ? message->text : "(empty message)");
+}
+
+/* Keep the HUD line meaningful even before a new message arrives: seed it from
+ * the most recent stored message (history survives stop/start and reopen). */
+static void refresh_last_preview(void) {
+    ui_msg_t last;
+    uint32_t seq = 0;
+    if (!ui_latest_message(&last, &seq)) return;
+    chat_preview(&last, s_chat_preview, sizeof(s_chat_preview));
+}
+
 static void poll_messages(bool rebuild_messages) {
     (void)rebuild_messages;
-    lora_msg_t last;
+    bool meshcore = ui_meshcore();
+    if (meshcore != s_backend_meshcore) {
+        s_backend_meshcore = meshcore;
+        s_chat_seq = 0;
+        s_unread_count = 0;
+        s_chat_signature = 0;
+        s_chat_preview[0] = '\0';
+        refresh_last_preview();
+        if (s_timer && s_ov) rebuild_page();
+    }
+    ui_msg_t last;
     uint32_t seq = 0;
-    if (!lora_manager_latest_message(&last, &seq) || seq == s_chat_seq) return;
+    if (!ui_latest_message(&last, &seq) || seq == s_chat_seq) return;
     uint32_t previous = s_chat_seq;
     if (previous != 0 && s_page != PAGE_MESSAGES && !last.outgoing &&
         s_unread_count < 99) {
         s_unread_count++;
     }
     s_chat_seq = seq;
-    snprintf(s_chat_preview, sizeof(s_chat_preview), "%.20s: %.32s",
-             last.outgoing ? "you" : (last.who[0] ? last.who : "unknown"),
-             last.text[0] ? last.text : "(empty message)");
+    chat_preview(&last, s_chat_preview, sizeof(s_chat_preview));
     if (previous != 0 && !last.outgoing && s_page != PAGE_MESSAGES &&
         s_page != PAGE_MESSAGE) {
         char who[24];
         char toast[64];
         message_name(&last, who, sizeof(who));
+        privacy_redact_text(who);
         snprintf(toast, sizeof(toast), "New %s from %.16s: %.24s",
                  last.direct ? "DM" : "message", who,
                  last.text[0] ? last.text : "(empty message)");
@@ -1087,11 +1978,12 @@ static void poll_messages(bool rebuild_messages) {
 static void lora_tick(lv_timer_t *timer) {
     (void)timer;
     poll_messages(true);
+    refresh_last_preview();
     uint32_t signature = 0;
     s_unread_count = 0;
-    for (uint16_t i = 0, n = lora_manager_msg_count(); i < n; ++i) {
-        lora_msg_t m;
-        if (!lora_manager_msg_at(i, &m)) continue;
+    for (uint16_t i = 0, n = ui_msg_count(); i < n; ++i) {
+        ui_msg_t m;
+        if (!ui_msg_at(i, &m)) continue;
         signature = signature * 33u + m.timestamp_ms + m.packet_id + m.delivery;
         if (!m.read && s_unread_count < 99) s_unread_count++;
     }
@@ -1110,7 +2002,14 @@ static void lora_tick(lv_timer_t *timer) {
         }
     }
     switch (s_page) {
-    case PAGE_MAIN: refresh_main(); break;
+    case PAGE_MAIN: {
+        /* Rebuild (not just refresh text) when the running state changed, so
+         * the first row's action matches what its label says. */
+        bool off = !ui_radio_running();
+        if (off != s_main_off) rebuild_page();
+        else refresh_main();
+        break;
+    }
     case PAGE_NODES: refresh_nodes(); break;
     case PAGE_ACTIVITY: refresh_activity(); break;
     default: break;
@@ -1124,6 +2023,15 @@ static void activate_selected(void) {
     if (!list || selected < 0 || selected >= options_view_get_item_count(s_ov)) return;
     lv_obj_t *item = lv_obj_get_child(list, selected);
     if (item) lv_event_send(item, LV_EVENT_CLICKED, NULL);
+}
+
+/* The HUD holds back a single encoder press for the double-press window; if no
+ * second press follows, the pending row activation runs here. */
+static void encoder_single_press_cb(lv_timer_t *t) {
+    s_press_timer = NULL;
+    lv_timer_del(t);
+    s_press_pending = false;
+    activate_selected();
 }
 
 static void handle_touch(InputEvent *event) {
@@ -1185,11 +2093,38 @@ static void lora_input(InputEvent *event) {
             move_selection(1);
         else if (key == '\t') move_selection(1);
         else if (key == 'n' && s_page == PAGE_MESSAGE)
-            open_composer(s_conversation != 0, s_conversation, PAGE_MESSAGE);
+            open_composer(!s_conversation_group, s_conversation, PAGE_MESSAGE);
         return;
     }
     if (event->type == INPUT_TYPE_ENCODER) {
-        if (event->data.encoder.button) activate_selected();
+        if (event->data.encoder.button) {
+            /* On the HUD a double-press toggles the radio (start/stop). The
+             * first press is deferred briefly so it does not also activate the
+             * selected row; sub-pages keep the original instant behaviour. */
+            if (s_page != PAGE_MAIN) {
+                activate_selected();
+                return;
+            }
+            uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+            if (s_press_pending && (now - s_press_ms) <= LORA_HUD_DOUBLE_PRESS_MS) {
+                if (s_press_timer) {
+                    lv_timer_del(s_press_timer);
+                    s_press_timer = NULL;
+                }
+                s_press_pending = false;
+                toggle_radio();
+            } else {
+                s_press_pending = true;
+                s_press_ms = now;
+                if (s_press_timer) lv_timer_del(s_press_timer);
+                s_press_timer = lv_timer_create(encoder_single_press_cb,
+                                                LORA_HUD_DOUBLE_PRESS_MS, NULL);
+                if (!s_press_timer) { // timer unavailable: act immediately
+                    s_press_pending = false;
+                    activate_selected();
+                }
+            }
+        }
         else if (event->data.encoder.direction > 0) move_selection(1);
         else if (event->data.encoder.direction < 0) move_selection(-1);
         return;
@@ -1212,11 +2147,16 @@ void lora_view_create(void) {
     s_page = s_resume_pending ? s_resume_page : PAGE_MAIN;
     s_resume_pending = false;
     touch_drag_reset(&s_touch);
-    if (s_page == PAGE_MESSAGES) s_unread_count = 0;
-    poll_messages(false);
     s_ov = options_view_create(NULL, "LoRa");
     if (!s_ov) return;
     lora_view.root = options_view_get_list(s_ov);
+    // Entering the app only opens the HUD; the radio is started explicitly
+    // (double-press on the HUD, the first row while off, or Radio settings).
+    // This keeps a stopped radio cheap and lets the HUD double as a status
+    // screen on boards without much free internal RAM (Heltec V3).
+    if (s_page == PAGE_MESSAGES) s_unread_count = 0;
+    poll_messages(false);
+    refresh_last_preview();
     configure_list();
     rebuild_page();
     s_timer = lv_timer_create(lora_tick, 1000, NULL);
@@ -1228,6 +2168,11 @@ void lora_view_create(void) {
 
 void lora_view_destroy(void) {
     lvgl_timer_del_safe(&s_timer);
+    if (s_press_timer) {
+        lv_timer_del(s_press_timer);
+        s_press_timer = NULL;
+    }
+    s_press_pending = false;
     touch_drag_reset(&s_touch);
     if (s_ov) {
         options_view_destroy(s_ov);

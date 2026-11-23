@@ -1,0 +1,52 @@
+Title: Karma Attack
+Description: Automatically respond to device probes with fake networks.
+URL: /v1.9.9/wifi/karma/
+Version: v1.9.9
+Section: Wi-Fi
+Search index: /search-index.json
+
+# Karma Attack
+
+> Automatically respond to device probes with fake networks.
+
+## On this page
+
+- [Prerequisites](#prerequisites)
+- [Legal and ethical](#legal-and-ethical)
+- [Starting Karma](#starting-karma)
+- [On-device UI](#on-device-ui)
+- [Command line](#command-line)
+- [How it works](#how-it-works)
+- [Troubleshooting](#troubleshooting)
+
+---
+
+Create fake Wi-Fi networks based on SSIDs that nearby devices are searching for. When devices search for a network, Karma broadcasts it back to them.
+Note: Only test this on networks you own or have explicit permission to test. Unauthorized access to networks is illegal in most jurisdictions.
+## Prerequisites
+- GhostESP flashed device, powered on with a wireless antenna.
+- Optional: SD card for evil portal integration.
+## Legal and ethical
+- Only test on your own devices or with written permission.
+- Never use Karma on networks you don’t own.
+## Starting Karma
+### On-device UI
+- Open Menu → WiFi → Attacks → Start Karma Attack.
+The device will begin learning SSIDs from probe requests.
+- To use specific SSIDs instead, choose Start Karma Attack (Custom SSIDs).
+Enter the SSIDs you want to broadcast (separated by commas).
+- The device will start broadcasting fake networks. Leave it running to catch devices.
+- To stop, go back to the menu or select Stop Karma Attack.
+### Command line
+- Run karma start to begin automatic SSID learning.
+The device will cache SSIDs from probe requests.
+- Or run karma start SSID1 SSID2 SSID3 to use specific SSIDs.
+Example: karma start FreeWiFi Starbucks McDonald&#39;s
+- Run karma stop when you’re done.
+## How it works
+Automatic mode: Karma listens for Wi-Fi probe requests from nearby devices and broadcasts fake networks with the SSIDs they’re searching for.
+Custom mode: You specify which SSIDs to broadcast instead of learning them automatically.
+When a device connects to a fake network, a captive portal starts automatically to capture credentials.
+## Troubleshooting
+- Fake networks not appearing: Try restarting with karma stop then karma start.
+- No devices connecting: Ensure devices are actually searching for networks. Try moving closer to the ESP32.

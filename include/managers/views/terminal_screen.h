@@ -35,7 +35,7 @@ void terminal_set_dualcomm_filter(bool enable);
     do {                                                                           \
         char buffer[512];                                                          \
         snprintf(buffer, sizeof(buffer), fmt, ##__VA_ARGS__);                      \
-        if (esp_comm_manager_is_remote_command()) {                                \
+        if (esp_comm_manager_should_forward_output()) {                                \
             esp_comm_manager_send_response((const uint8_t*)buffer, strlen(buffer));\
         }                                                                          \
         ap_manager_add_log(buffer);                                                \
@@ -45,7 +45,7 @@ void terminal_set_dualcomm_filter(bool enable);
     do {                                                                           \
         char buffer[512];                                                          \
         snprintf(buffer, sizeof(buffer), fmt, ##__VA_ARGS__);                      \
-        if (esp_comm_manager_is_remote_command()) {                                \
+        if (esp_comm_manager_should_forward_output()) {                                \
             esp_comm_manager_send_response((const uint8_t*)buffer, strlen(buffer)); \
         }                                                                          \
         ap_manager_add_log(buffer);                                                \

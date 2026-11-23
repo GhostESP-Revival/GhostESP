@@ -40,7 +40,7 @@
 #include "scans/ble/flipper_scan.h"
 #include "scans/ble/airtag_scan.h"
 #include "scans/ble/gatt_scan.h"
-#include "attacks/ble/ble_spam.h"
+#include "features/ble/ble_spam.h"
 #include "managers/ble_bridge_manager.h"
 #ifdef CONFIG_HAS_BADBLE
 #include "managers/badble_manager.h"
@@ -778,6 +778,9 @@ bool ble_stop_custom_adv(void) {
 }
 
 static bool wait_for_ble_ready(void) {
+    if (!ble_initialized) {
+        return false;
+    }
     int rc;
     int retry_count = 0;
     const int max_retries = 50; // 5 seconds total timeout
@@ -816,6 +819,12 @@ bool ble_start_scanning(void) {
 #endif
     if (!ble_initialized) {
         ble_init();
+        if (!ble_initialized) {
+            ESP_LOGE(TAG_BLE, "BLE init failed, scan aborted");
+            TERMINAL_VIEW_ADD_TEXT("BLE init failed\n");
+            status_display_show_status("BLE Init Fail");
+            return false;
+        }
     }
 
     if (!wait_for_ble_ready()) {

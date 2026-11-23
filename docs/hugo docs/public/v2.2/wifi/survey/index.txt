@@ -1,0 +1,44 @@
+Title: Scanning networks
+Description: Discover and review nearby Wi-Fi access points
+URL: /v2.2/wifi/survey/
+Version: v2.2
+Section: Wi-Fi
+Search index: /search-index.json
+
+# Scanning networks
+
+> Discover and review nearby Wi-Fi access points
+
+## On this page
+
+- [Scanning](#scanning)
+- [Troubleshooting](#troubleshooting)
+- [Related tasks](#related-tasks)
+
+---
+
+An AP scan lists nearby Wi-Fi access points without connecting to them. GhostESP uses an active scan (it transmits probe requests) on normal channels and falls back to passive scanning on DFS/restricted channels. Use the on-device UI or the serial CLI; on a single-board setup the WebUI cannot stay connected while the Wi-Fi radio scans.
+How an active scan works
+1
+Tune the radio to the next channelChannels hop automatically while the scan runs
+2
+Capture beacon and probe responsesBeacon (subtype 0x08) and Probe Response (0x05) frames
+3
+Record SSID, BSSID, channel, and RSSISSID can be hidden; RSSI comes from radio metadata
+4
+Repeat until every channel has been visitedThe channel set depends on the country code
+Channels are visited in turn. The scan records what it hears and creates no connection.
+## Scanning
+- Open Menu → Wi-Fi → Recon and choose Scan APs, then wait for the scan to finish.
+- Select List APs and review each network’s name, channel, signal strength, and manufacturer.
+Use Scan APs Live to watch access points appear, or Channel Congestion to review activity by channel.
+From the CLI, run scanap to start a scan, or scanap &lt;1-120&gt; to scan for a fixed number of seconds, then run list -a to see the cached list of networks. Run scanap -live to watch networks appear as they are discovered, or scanap -stop to stop an in-progress scan. Use hop [auto|all|basic|custom &lt;1,2,3&gt;|1,2,3] to control which channels scans and captures hop through.
+A scan lists what is nearby but creates no network connection.
+## Troubleshooting
+- No networks found: Move closer to wireless routers and try scanning again.
+- “You Need to Scan APs First” message: Run a scan before trying to select a network.
+- Live scan stops right away: Stop any active Wi-Fi attacks or portals from the menu and try again.
+## Related tasks
+- [Connect GhostESP to a Wi-Fi network](/v2.2/wifi/connect/)
+- [Find devices on your Wi-Fi network](/v2.2/wifi/lan-discovery/)
+- [Run a full environment sweep](/v2.2/wifi/environment-sweep/)

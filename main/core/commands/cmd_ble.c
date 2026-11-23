@@ -17,7 +17,7 @@
 
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
 #include "managers/ble_manager.h"
-#include "attacks/ble/ble_spam.h"
+#include "features/ble/ble_spam.h"
 #include "scans/ble/advertiser_scan.h"
 #include "scans/ble/device_detect_scan.h"
 #include "scans/ble/flipper_scan.h"
@@ -326,6 +326,9 @@ void handle_ble_wardriving(int argc, char **argv) {
             return;
         }
 
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
+        ble_wardriving_reset_unique_device_count();
+#endif
         ble_start_scanning();
         ble_register_handler(ble_wardriving_callback);
         printf("BLE wardriving started.\n");
@@ -435,39 +438,71 @@ void handle_list_advertisers_cmd(int argc, char **argv) {
 }
 
 void handle_ble_spam_cmd(int argc, char **argv) {
-    if (argc > 1) {
-        if (strcmp(argv[1], "-apple") == 0) {
-            glog("Starting Apple BLE spam...\n");
-            ble_spam_start(BLE_SPAM_APPLE);
-            return;
-        }
-        if (strcmp(argv[1], "-ms") == 0 || strcmp(argv[1], "-microsoft") == 0) {
-            glog("Starting Microsoft BLE spam...\n");
-            ble_spam_start(BLE_SPAM_MICROSOFT);
-            return;
-        }
-        if (strcmp(argv[1], "-samsung") == 0) {
-            glog("Starting Samsung BLE spam...\n");
-            ble_spam_start(BLE_SPAM_SAMSUNG);
-            return;
-        }
-        if (strcmp(argv[1], "-google") == 0) {
-            glog("Starting Google BLE spam...\n");
-            ble_spam_start(BLE_SPAM_GOOGLE);
-            return;
-        }
-        if (strcmp(argv[1], "-random") == 0) {
-            glog("Starting Random BLE spam...\n");
-            ble_spam_start(BLE_SPAM_RANDOM);
-            return;
-        }
-        if (strcmp(argv[1], "-s") == 0) {
-            glog("Stopping BLE spam...\n");
-            ble_spam_stop();
+    ble_spam_type_t type = BLE_SPAM_RANDOM;
+    bool have_type = false;
+    bool want_stop = false;
+    bool have_name = false;
+
+    // Args may appear in any order, e.g. "blespam -apple -name My AirPods"
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-apple") == 0) {
+            type = BLE_SPAM_APPLE;
+            have_type = true;
+        } else if (strcmp(argv[i], "-ms") == 0 || strcmp(argv[i], "-microsoft") == 0) {
+            type = BLE_SPAM_MICROSOFT;
+            have_type = true;
+        } else if (strcmp(argv[i], "-samsung") == 0) {
+            type = BLE_SPAM_SAMSUNG;
+            have_type = true;
+        } else if (strcmp(argv[i], "-google") == 0) {
+            type = BLE_SPAM_GOOGLE;
+            have_type = true;
+        } else if (strcmp(argv[i], "-random") == 0) {
+            type = BLE_SPAM_RANDOM;
+            have_type = true;
+        } else if (strcmp(argv[i], "-s") == 0) {
+            want_stop = true;
+        } else if (strcmp(argv[i], "-name") == 0) {
+            if (i + 1 >= argc) {
+                glog("Error: -name requires a value\n");
+                status_display_show_status("BLE Bad Name");
+                return;
+            }
+            // ble_spam_set_name handles sanitising and length capping
+            ble_spam_set_name(argv[++i]);
+            have_name = true;
+        } else {
+            glog("Unknown option '%s'\n", argv[i]);
+            glog("Usage: blespam [-apple|-ms|-samsung|-google|-random] [-name <text>]\n");
+            glog("       blespam -s\n");
             return;
         }
     }
-    glog("Usage: blespam [-apple|-ms|-samsung|-google|-random|-s]\n");
+
+    if (want_stop) {
+        glog("Stopping BLE spam...\n");
+        ble_spam_stop();
+        return;
+    }
+
+    if (have_type) {
+        ble_spam_start(type);
+        return;
+    }
+
+    if (have_name) {
+        // Renaming an already running spam takes effect on the next packet
+        if (ble_spam_is_running()) {
+            glog("Name applied to running BLE spam\n");
+        } else {
+            glog("Name set. Start a spam mode to use it.\n");
+        }
+        return;
+    }
+
+    glog("Usage: blespam [-apple|-ms|-samsung|-google|-random] [-name <text>]\n");
+    glog("       blespam -s\n");
+    glog("Example: blespam -apple -name \"My AirPods\"\n");
 }
 #endif // CONFIG_IDF_TARGET_ESP32S2
 

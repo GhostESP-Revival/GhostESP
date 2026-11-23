@@ -87,6 +87,16 @@ esp_err_t axp2101_init(void) {
     return err;
   }
 
+  // Creating a device handle does not verify that hardware is responding.
+  err = i2c_master_probe(s_axp_bus, AXP2101_I2C_ADDR, 100);
+  if (err != ESP_OK) {
+    printf("ERROR [%s]: AXP2101 not responding at 0x%02X: %s\n", __func__,
+           AXP2101_I2C_ADDR, esp_err_to_name(err));
+    i2c_master_bus_rm_device(s_axp_dev);
+    s_axp_dev = NULL;
+    return err;
+  }
+
   i2c_initialized = true;
   printf("INFO [%s]: AXP2101 initialized successfully\n", __func__);
   return ESP_OK;
@@ -169,7 +179,6 @@ esp_err_t axp2101_enable_haptic_rail(void) {
 
 esp_err_t axp2101_get_power_level(uint8_t *power_level) {
   if (!i2c_initialized) {
-    printf("ERROR [%s]: AXP2101 is not initialized\n", __func__);
     return ESP_ERR_INVALID_STATE;
   }
 

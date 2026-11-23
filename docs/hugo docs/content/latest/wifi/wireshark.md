@@ -1,21 +1,14 @@
 ---
 title: "USB Dongle Mode (Wireshark)"
-description: "Use GhostESP as a wireless capture dongle for Wireshark."
+description: "Use GhostESP as a wireless capture dongle for Wireshark"
 weight: 26
 ---
 
-Use your GhostESP as a **USB wireless capture dongle** for Wireshark. Instead of saving packets to an SD card, the device streams Wi-Fi and BLE traffic directly to your computer in real-time—just like a commercial Wi-Fi adapter in monitor mode.
-
-This is perfect for live analysis, debugging networks, or learning how wireless protocols work without needing expensive hardware.
-
-## Prerequisites
-
-- GhostESP device connected via USB to your computer
-- Wireshark installed on your computer
+Use your GhostESP as a **USB wireless capture dongle** for Wireshark. Instead of saving packets to an SD card, the device streams Wi-Fi and BLE traffic directly to your computer in real-time-just like a commercial Wi-Fi adapter in monitor mode. That makes it useful for live analysis, debugging networks, or learning how wireless protocols work without expensive hardware. Connect GhostESP to your computer over USB and install Wireshark first.
 
 ## Setup
 
-### Option 1: GUI Installer (Recommended)
+### Option 1: GUI installer (recommended)
 
 The easiest way to install is using the GUI installer, which automatically handles dependencies and installation:
 
@@ -32,7 +25,7 @@ The installer will automatically:
 - Install the extcap files to the correct location
 - Set up all required dependencies in an isolated environment
 
-### Option 2: Manual Installation
+### Option 2: Manual installation
 
 If you prefer manual installation:
 
@@ -62,21 +55,21 @@ If you prefer manual installation:
 
 1. Open Wireshark.
 2. Go to **Capture → Options** or click the gear icon.
-3. Look for **GhostESP WiFi/BLE Capture** in the interface list.
+3. Look for **GhostESP Wi-Fi/BLE Capture** in the interface list.
    - If you don't see it, check that the files are in the correct extcap folder and Python is in your PATH.
 
 ## Capturing Wi-Fi traffic
 
 ### Start capture in Wireshark
 
-1. In Wireshark, find **GhostESP WiFi/BLE Capture** in the interface list.
+1. In Wireshark, find **GhostESP Wi-Fi/BLE Capture** in the interface list.
 2. Click the **gear icon** next to it to configure:
    - **Serial Port**: Select your GhostESP COM port
    - **Baud Rate**: Leave at 115200 (default)
-   - **Capture Type**: Select **WiFi**
+   - **Capture Type**: Select **Wi-Fi**
    - **Channel Lock**: Choose between:
      - **Auto (channel hopping)**: Continuously hop through all channels (default)
-     - **Channel 1-13**: Lock to a specific WiFi channel for focused capture
+     - **Channel lock (1-177, country-validated)**: Lock to a specific Wi-Fi channel for focused capture
 3. Click **Start** to begin capturing.
 
 The GhostESP will automatically:
@@ -95,18 +88,17 @@ Wireshark will display:
 - **Management frames**: Association, authentication, deauth
 - **Control frames**: ACKs, RTS/CTS
 
-### Channel hopping vs. Channel lock
+### Channel hopping vs. channel lock
 
 **Auto (Channel Hopping)**
 - Continuously hops through all legal channels for your country
 - **2.4 GHz**: Channels 1-13 (or 1-14 for Japan)
-- **5 GHz** (ESP32-C5/C6 only): Country-specific channels
+- **5 GHz** (ESP32-C5 only): Country-specific channels
   - **US/CA**: All UNII bands (36-165)
   - **EU**: UNII-1, 2a, 2c (36-140)
   - **JP**: UNII-1, 2a, 2c (36-140, no 165)
   - **CN**: UNII-1, 2a, 3 (36-64, 149-165)
 - Best for general surveillance and discovering networks
-- Set your country with the `setcountry` command before starting capture
 
 **Fixed Channel Lock**
 - Monitors only the selected channel continuously
@@ -127,7 +119,7 @@ Click the red **Stop** button in Wireshark or run `capture -stop` on the GhostES
 
 ### Start BLE capture
 
-1. In Wireshark, configure **GhostESP WiFi/BLE Capture**:
+1. In Wireshark, configure **GhostESP Wi-Fi/BLE Capture**:
    - **Serial Port**: Select your GhostESP COM port
    - **Capture Type**: Select **Bluetooth LE**
 2. Click **Start**.
@@ -146,7 +138,7 @@ Wireshark will decode:
 
 Click **Stop** in Wireshark or run `capture -stop` on the device.
 
-## Command line alternative
+## CLI alternative
 
 You can also start Wireshark mode from the GhostESP terminal without using the Wireshark interface:
 
@@ -154,7 +146,7 @@ You can also start Wireshark mode from the GhostESP terminal without using the W
 ```
 capture -wireshark [-c <channel>]
 ```
-- `-c <channel>`: Optional channel lock (1-13)
+- `-c <channel>`: Optional channel lock (1-177, validated against your country's allowed channels)
 - Without `-c`: Auto channel hopping
 - With `-c`: Lock to specific channel
 
@@ -168,7 +160,7 @@ capture -wiresharkble
 capture -stop
 ```
 
-When using command line mode, you'll need to manually configure Wireshark to capture from the serial port.
+When using CLI mode, you'll need to manually configure Wireshark to capture from the serial port.
 
 ## Troubleshooting
 
@@ -197,7 +189,7 @@ When using command line mode, you'll need to manually configure Wireshark to cap
 - This is expected behavior for live capture
 
 ### Country setting not applied
-- Run `setcountry <code>` before starting capture (e.g., `setcountry US`) — **ESP32-C5 only**
+- Run `setcountry <code>` before starting capture (e.g., `setcountry US`) - available on all targets
 - Restart the device after changing country
 - Verify with `info` command that country is set correctly
 
@@ -205,14 +197,12 @@ When using command line mode, you'll need to manually configure Wireshark to cap
 
 - Wireshark mode streams packets over USB/UART without saving to SD card
 - The device automatically handles PCAP formatting and headers
-- **Auto mode**: Channel hopping covers the full spectrum but reduces dwell time per channel
-- **Fixed channel**: Higher packet capture rate on the selected channel
 - For focused capture on a single channel, use either Channel Lock setting or file-based capture modes
 - BLE capture does not hop channels (BLE uses 3 advertising channels: 37, 38, 39)
-- Channel lock is only available for WiFi capture, not BLE
+- Channel lock is only available for Wi-Fi capture, not BLE
 
-## Next steps
+## Related tasks
 
-- [Capturing packets to file]({{< relref "capture.md" >}}) — Save captures to SD card for later analysis
-- [Handshakes]({{< relref "handshakes.md" >}}) — Extract WPA/WPA2 authentication data
-- [Survey]({{< relref "survey.md" >}}) — Scan for networks and devices
+- [Capturing packets to file]({{< relref "capture.md" >}}) - Save captures to SD card for later analysis
+- [Handshakes]({{< relref "handshakes.md" >}}) - Extract WPA/WPA2 authentication data
+- [Survey]({{< relref "survey.md" >}}) - Scan for networks and devices

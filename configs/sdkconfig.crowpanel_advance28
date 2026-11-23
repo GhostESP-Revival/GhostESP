@@ -2321,6 +2321,8 @@ CONFIG_USING_SPI=y
 # Elecrow Advance 2.8 wireless-module mode (factory SX1262 wiring).
 # GhostESP keeps the display on SPI2 and routes the module on SPI3.
 CONFIG_HAS_LORA=y
+CONFIG_HAS_MESHCORE=y
+CONFIG_MESHCORE_REGION_US=y
 CONFIG_LORA_SPI_HOST=3
 CONFIG_LORA_SPI_MOSI_PIN=3
 CONFIG_LORA_SPI_MISO_PIN=9

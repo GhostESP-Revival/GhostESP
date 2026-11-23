@@ -1,0 +1,87 @@
+{{- /* Builds one search-index record for a page.
+     Context: (dict "page" PAGE "withContent" BOOL)
+     Returns a map, or nil when the page should be excluded. */ -}}
+{{- $page := .page -}}
+{{- $withContent := default false .withContent -}}
+{{- $site := $page.Site -}}
+
+{{- /* Known firmware version ids, e.g. latest, v2.1, v1.9.9. */ -}}
+{{- $versionIds := slice -}}
+{{- with $site.Params.versioning -}}
+  {{- range .options -}}
+    {{- $versionIds = $versionIds | append .id -}}
+  {{- end -}}
+{{- end -}}
+
+{{- /* A docs page lives under /<version>/..., so the first path segment is the version. */ -}}
+{{- $segments := split (strings.TrimPrefix "/" $page.RelPermalink) "/" -}}
+{{- $version := "" -}}
+{{- if gt (len $segments) 0 -}}
+  {{- $first := index $segments 0 -}}
+  {{- if in $versionIds $first -}}
+    {{- $version = $first -}}
+  {{- end -}}
+{{- end -}}
+
+{{- $entry := false -}}
+{{- if and $version (not $page.Params.search_exclude) -}}
+  {{- $sectionTitle := "" -}}
+  {{- $sectionURL := "" -}}
+  {{- with $page.Parent -}}
+    {{- $sectionTitle = .LinkTitle -}}
+    {{- $sectionURL = .RelPermalink -}}
+  {{- end -}}
+
+  {{- $description := "" -}}
+  {{- with $page.Params.description -}}
+    {{- $description = . | plainify | strings.TrimSpace -}}
+  {{- else -}}
+    {{- $description = $page.Summary | plainify | strings.TrimSpace -}}
+  {{- end -}}
+
+  {{- /* Flat list of headings with their stable anchor ids. */ -}}
+  {{- $headings := slice -}}
+  {{- with $page.Fragments -}}
+    {{- range .Identifiers -}}
+      {{- with index $page.Fragments.HeadingsMap . -}}
+        {{- $headings = $headings | append (dict "id" .ID "title" .Title "level" .Level) -}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}
+
+  {{- $textURL := "" -}}
+  {{- with $page.OutputFormats.Get "aitext" -}}
+    {{- $textURL = .RelPermalink -}}
+  {{- end -}}
+
+  {{- $lastmod := "" -}}
+  {{- if not $page.Lastmod.IsZero -}}
+    {{- $lastmod = $page.Lastmod.Format "2006-01-02" -}}
+  {{- end -}}
+
+  {{- $plain := partial "plain-content.html" $page -}}
+  {{- $keywords := default (slice) $page.Params.keywords -}}
+
+  {{- $entry = dict
+    "id" $page.RelPermalink
+    "permalink" $page.RelPermalink
+    "url" $page.RelPermalink
+    "version" $version
+    "section" $sectionTitle
+    "section_url" $sectionURL
+    "title" $page.Title
+    "description" $description
+    "keywords" $keywords
+    "headings" $headings
+    "text_url" $textURL
+    "lastmod" $lastmod
+    "weight" $page.Weight
+    "summary" (truncate 240 $plain)
+  -}}
+
+  {{- if $withContent -}}
+    {{- $entry = merge $entry (dict "content" $plain) -}}
+  {{- end -}}
+{{- end -}}
+
+{{- return $entry -}}

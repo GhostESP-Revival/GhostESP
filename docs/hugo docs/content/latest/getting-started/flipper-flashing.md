@@ -1,15 +1,12 @@
 ---
 title: "Flash with Flipper Zero"
-description: "Use a Flipper Zero and the GhostESP app to flash a compatible ESP32 board."
+description: "Use a Flipper Zero and the GhostESP app to flash a compatible ESP32 board"
 weight: 60
-toc: true
 ---
 
-## What this does
+Use a Flipper Zero as the programmer for a compatible ESP32 board when you prefer a portable flashing workflow.
 
-This method uses a Flipper Zero as the programmer for a compatible ESP32 board. Use it when you prefer a portable flashing workflow.
-
-## Before you start
+## Prerequisites
 
 - A Flipper Zero with an SD card.
 - The GhostESP Flipper app from the [Flipper app catalog](https://lab.flipper.net/apps) or [latest release](https://github.com/GhostESP-Revival/GhostESP-FlipperCompanion/releases/latest).
@@ -17,7 +14,7 @@ This method uses a Flipper Zero as the programmer for a compatible ESP32 board. 
 - A way to copy the extracted firmware files to the Flipper SD card.
 - Correct GPIO wiring between the Flipper and ESP32 board. Refer to the GhostESP Flipper app for the pinout.
 
-## On-device steps
+## Flash the firmware
 
 1. Install the GhostESP `.fap` on the Flipper SD card.
 2. Download and extract the matching GhostESP firmware archive.
@@ -28,9 +25,7 @@ This method uses a Flipper Zero as the programmer for a compatible ESP32 board. 
 7. Select `bootloader.bin`, `partitions.bin`, and `firmware.bin`, then confirm the target variant.
 8. Start the flash and reset the ESP32 when it completes.
 
-## Expected result
-
-GhostESP boots and exposes `GhostNet`. Continue with a connection method or run a first passive Wi-Fi scan.
+GhostESP then boots and exposes `GhostNet`. Continue with a connection method or run a first passive Wi-Fi scan.
 
 ## Troubleshooting
 

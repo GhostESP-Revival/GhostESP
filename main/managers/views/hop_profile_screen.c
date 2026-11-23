@@ -33,6 +33,13 @@ static lv_obj_t *s_root = NULL;
 static options_view_t *s_ov = NULL;
 static lv_obj_t *s_custom_row = NULL;
 
+/* Touch is dispatched as raw InputEvents by display_manager's polling task; no
+ * LVGL indev is registered, so LVGL never raises LV_EVENT_CLICKED on the list
+ * rows on its own. The press/release taps have to be hit-tested and forwarded
+ * here, the way favorites_manager/ethernet do it. */
+static touch_drag_t s_touch_drag;
+static bool s_touch_started = false;
+
 static const char *hop_mode_row_label(hop_mode_t mode) {
     switch (mode) {
         case HOP_MODE_DEFAULT: return "Auto (country/AP list)";
@@ -100,13 +107,77 @@ static void hop_profile_select_row_cb(void) {
     hop_profile_select_row(selected);
 }
 
+/* Returns true when the point is inside `obj`'s current (post-scroll) bounds. */
+static bool hop_point_in_obj(lv_obj_t *obj, const lv_point_t *point) {
+    if (!obj || !point || !lv_obj_is_valid(obj)) return false;
+    lv_area_t area;
+    lv_obj_get_coords(obj, &area);
+    return point->x >= area.x1 && point->x <= area.x2 &&
+           point->y >= area.y1 && point->y <= area.y2;
+}
+
+static void hop_touch_reset(void) {
+    s_touch_started = false;
+    touch_drag_reset(&s_touch_drag);
+}
+
+static bool hop_handle_touch(InputEvent *event) {
+#ifdef CONFIG_USE_TOUCHSCREEN
+    if (!event || event->type != INPUT_TYPE_TOUCH || !s_ov) return false;
+
+    lv_indev_data_t *data = &event->data.touch_data;
+    lv_obj_t *list = options_view_get_list(s_ov);
+    if (!list || !lv_obj_is_valid(list)) return false;
+
+    if (event->is_touch_move) {
+        if (!s_touch_drag.started) return true;
+        touch_drag_update(&s_touch_drag, data, list);
+        return true;
+    }
+
+    if (data->state == LV_INDEV_STATE_PR) {
+        s_touch_started = true;
+        /* Only start drag tracking when the press lands inside the list, so a
+         * stray press on the background neither scrolls nor taps a row. */
+        if (hop_point_in_obj(list, &data->point)) {
+            touch_drag_begin(&s_touch_drag, data);
+        } else {
+            touch_drag_reset(&s_touch_drag);
+        }
+        return true;
+    }
+
+    if (data->state != LV_INDEV_STATE_REL) return true;
+    if (!s_touch_started) return true;
+    s_touch_started = false;
+
+    if (touch_drag_release(&s_touch_drag, data)) {
+        /* A drag happened (or a release-on-release scroll applied): the tap
+         * that ended the drag must not also activate a row. */
+        display_manager_flush_pending_scroll();
+        return true;
+    }
+
+    if (!hop_point_in_obj(list, &data->point)) return true;
+
+    int idx = options_view_item_at(s_ov, data->point.x, data->point.y);
+    if (idx < 0) return true;
+
+    options_view_set_selected(s_ov, idx);
+    hop_profile_select_row(idx);
+    return true;
+#else
+    (void)event;
+    return false;
+#endif
+}
+
 static void hop_profile_input_handler(InputEvent *event) {
     if (!event || !s_ov) return;
 
     switch (event->type) {
         case INPUT_TYPE_TOUCH: {
-            // Rows carry their own click callbacks via options_view; nothing
-            // extra to do here (scroll + row presses handled by the list).
+            hop_handle_touch(event);
             break;
         }
         case INPUT_TYPE_JOYSTICK: {
@@ -158,6 +229,8 @@ static void hop_profile_input_handler(InputEvent *event) {
 static void hop_profile_create(void) {
     uint8_t theme = settings_get_menu_theme(&G_Settings);
     lv_color_t bg = lv_color_hex(theme_palette_get_background(theme));
+
+    hop_touch_reset();
 
     s_root = gui_screen_create_root(NULL, NULL, bg, LV_OPA_TRANSP);
     if (!s_root) return;
@@ -212,6 +285,7 @@ static void hop_profile_create(void) {
 }
 
 static void hop_profile_destroy(void) {
+    hop_touch_reset();
     if (s_ov) {
         options_view_destroy(s_ov);
         s_ov = NULL;

@@ -49,7 +49,7 @@ bool hop_profile_set_custom_from_string(const char *text) {
         return false;
     }
     for (uint8_t i = 0; i < parsed_count; i++) {
-        if (!wifi_channels_is_safe_monitor_channel(parsed[i])) {
+        if (!wifi_channels_is_monitor_channel(parsed[i])) {
             ESP_LOGW(TAG, "Rejecting unsafe monitor channel %u",
                      (unsigned)parsed[i]);
             return false;
@@ -68,7 +68,9 @@ const char *hop_profile_get_custom_str(void) {
     return settings_get_hop_custom_channels(&G_Settings);
 }
 
-void hop_profile_resolve(uint8_t *out, size_t out_cap, size_t *out_count) {
+static void hop_profile_resolve_internal(uint8_t *out, size_t out_cap,
+                                         size_t *out_count,
+                                         bool monitor_mode) {
     if (!out || !out_count || out_cap == 0) return;
     *out_count = 0;
 
@@ -80,8 +82,8 @@ void hop_profile_resolve(uint8_t *out, size_t out_cap, size_t *out_count) {
 
     switch (mode) {
         case HOP_MODE_ALL: {
-            // "All" = every channel the current WiFi country config allows
-            // (includes target-appropriate 5GHz via the country tables).
+            // Build the complete country-allowed plan first. TX callers
+            // filter DFS below; receive-only callers keep it.
             uint8_t *country = (uint8_t *)out;
             candidate_count = wifi_channels_build_country_list(country,
                                                                out_cap);
@@ -111,7 +113,10 @@ void hop_profile_resolve(uint8_t *out, size_t out_cap, size_t *out_count) {
 
     for (size_t i = 0; i < candidate_count && *out_count < out_cap; i++) {
         uint8_t ch = candidates[i];
-        if (!wifi_channels_is_safe_monitor_channel(ch)) continue;
+        bool allowed = monitor_mode
+            ? wifi_channels_is_monitor_channel(ch)
+            : wifi_channels_is_tx_channel(ch);
+        if (!allowed) continue;
 
         bool seen = false;
         for (size_t j = 0; j < *out_count; j++) {
@@ -122,4 +127,12 @@ void hop_profile_resolve(uint8_t *out, size_t out_cap, size_t *out_count) {
         }
         if (!seen) out[(*out_count)++] = ch;
     }
+}
+
+void hop_profile_resolve(uint8_t *out, size_t out_cap, size_t *out_count) {
+    hop_profile_resolve_internal(out, out_cap, out_count, false);
+}
+
+void hop_profile_resolve_monitor(uint8_t *out, size_t out_cap, size_t *out_count) {
+    hop_profile_resolve_internal(out, out_cap, out_count, true);
 }

@@ -9,6 +9,7 @@
 #include "managers/sd_card_manager.h"
 #include "managers/status_display_manager.h"
 #include "managers/wifi_manager.h"
+#include "scans/wifi/wifi_channels.h"
 #include "managers/zigbee_manager.h"
 #include "sdkconfig.h"
 #include "vendor/pcap.h"
@@ -20,6 +21,37 @@
 #include <string.h>
 
 #include "core/network_constants.h"
+
+/* How often a running capture reports progress. Short enough to prove the
+ * capture is alive, long enough not to bury the terminal in log lines. */
+#define CAPTURE_PROGRESS_INTERVAL_MS 5000
+
+/* Label for the periodic progress line, or NULL for modes with nothing
+ * recording to report on (list/export/stop). */
+static const char *capture_type_progress_label(const char *t) {
+    static const struct { const char *type; const char *label; } k_recording[] = {
+        { "-raw",       "RAW"       },
+        { "-probe",     "PROBE"     },
+        { "-deauth",    "DEAUTH"    },
+        { "-beacon",    "BEACON"    },
+        { "-eapol",     "EAPOL"     },
+        { "-pwn",       "PWN"       },
+        { "-wps",       "WPS"       },
+        { "-skimmer",   "SKIMMER"   },
+        { "-ble",       "BLE"       },
+        { "-wireshark", "WIRESHARK" },
+#if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
+        { "-802154",    "802.15.4"  },
+#endif
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
+        { "-wiresharkble", "WIRESHARK BLE" },
+#endif
+    };
+    for (size_t i = 0; i < sizeof(k_recording) / sizeof(k_recording[0]); i++) {
+        if (strcmp(t, k_recording[i].type) == 0) return k_recording[i].label;
+    }
+    return NULL;
+}
 
 static void capture_resolve_pcap_path(const char *arg, char *out, size_t out_len) {
     if (!arg || !out || out_len == 0) return;
@@ -125,7 +157,14 @@ void handle_capture_scan(int argc, char **argv) {
     int parsed_fixed_channel = 0;
     for (int i = 2; i + 1 < argc; i++) {
         if (strcmp(argv[i], "-channel") == 0 || strcmp(argv[i], "-c") == 0) {
-            parsed_fixed_channel = atoi(argv[i + 1]);
+            char *end = NULL;
+            long parsed = strtol(argv[i + 1], &end, 10);
+            if (end == argv[i + 1] || *end != '\0' || parsed < 1 || parsed > 177) {
+                glog("Error: Invalid channel '%s'\n", argv[i + 1]);
+                status_display_show_status("Invalid Channel");
+                return;
+            }
+            parsed_fixed_channel = (int)parsed;
             fixed_channel_set = true;
             break;
         }
@@ -151,9 +190,9 @@ void handle_capture_scan(int argc, char **argv) {
         strcmp(capturetype, "-list") == 0 || strcmp(capturetype, "-export") == 0;
 
     if (fixed_channel_set && wifi_channel_lock_mode) {
-        if (parsed_fixed_channel < 1 || parsed_fixed_channel > MAX_WIFI_CHANNEL) {
-            glog("Error: Invalid channel %d. Must be between 1 and %d\n",
-                 parsed_fixed_channel, MAX_WIFI_CHANNEL);
+        if (!wifi_channels_is_monitor_channel((uint8_t)parsed_fixed_channel)) {
+            glog("Error: Invalid or country-disallowed Wi-Fi channel %d\n",
+                 parsed_fixed_channel);
             status_display_show_status("Invalid Channel");
             return;
         }
@@ -269,6 +308,10 @@ void handle_capture_scan(int argc, char **argv) {
             status_display_show_status("PCAP Fail");
             return;
         }
+        /* A raw capture has to be byte-exact, so write frames as received
+         * rather than trimming management frames to their last valid
+         * information element. */
+        pcap_set_write_frames_verbatim(true);
         wifi_manager_start_monitor_mode(wifi_raw_scan_callback);
         APPLY_CAPTURE_CHANNEL_LOCK();
         status_display_show_status("Capture Raw");
@@ -355,6 +398,8 @@ void handle_capture_scan(int argc, char **argv) {
             status_display_show_status("Wireshark Err");
             return;
         }
+        /* Same callback as -raw, so it gets the same byte-exact framing. */
+        pcap_set_write_frames_verbatim(true);
         wifi_manager_start_monitor_mode(wifi_raw_scan_callback);
 
         if (fixed_channel_set) {
@@ -396,12 +441,6 @@ void handle_capture_scan(int argc, char **argv) {
 #endif
         pcap_file_close();
         pcap_wireshark_stop();
-        pcap_capture_stats_t stats = {0};
-        pcap_get_stats(&stats);
-        glog("Capture stats: seen=%lu written=%lu dropped=%lu\n",
-             (unsigned long)stats.packets_seen,
-             (unsigned long)stats.packets_written,
-             (unsigned long)stats.packets_dropped);
         status_display_show_status("Capture Stop");
     }
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
@@ -430,6 +469,13 @@ void handle_capture_scan(int argc, char **argv) {
 
     }
     #endif
+
+    const char *progress_label = capture_type_progress_label(capturetype);
+    if (progress_label) {
+        // A capture can run for many minutes with nothing between its start
+        // banner and the stop summary, so stream progress while it records.
+        pcap_progress_start(progress_label, CAPTURE_PROGRESS_INTERVAL_MS);
+    }
 
     if (strcmp(capturetype, "-probe") != 0 &&
         strcmp(capturetype, "-deauth") != 0 &&

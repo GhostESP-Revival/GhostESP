@@ -1,6 +1,6 @@
 ---
 title: "BLE Features"
-description: "Bluetooth Low Energy operations available in the Flipper Zero companion app."
+description: "Bluetooth Low Energy operations available in the Flipper Zero companion app"
 weight: 40
 keywords: ["ble", "bluetooth", "scanning", "attacks", "airtag", "skimmer"]
 ---

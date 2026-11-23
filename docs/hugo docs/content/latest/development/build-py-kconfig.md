@@ -1,6 +1,6 @@
 ---
 title: "Adjusting build options"
-description: "Use the build helper to edit GhostESP configuration options."
+description: "Use the build helper to edit GhostESP configuration options"
 weight: 10
 ---
 
@@ -8,11 +8,11 @@ weight: 10
 
 ## Prerequisites
 
-- Python 3 installed with access to the command line.
-- ESP-IDF v6.0 on disk (v6.0.2 recommended). `build.py` can auto-detect common locations or also download it for you.
+- Python 3 installed with access to the CLI.
+- ESP-IDF v6.1 on disk. `build.py` can auto-detect common locations or also download it for you. The version in use is tracked by the badge in the repository [README](https://github.com/GhostESP-Revival/GhostESP).
 - GhostESP repository cloned locally. Clone from GitHub and navigate into the project directory before running the script.
 
-## 1. Launch the helper
+## 1. Launch the Helper
 
 From the project root:
 
@@ -28,15 +28,17 @@ python build.py --targets 2 3
 
 Use `--targets all` to queue every board profile.
 
-When prompted for ESP-IDF, confirm a detected path or allow the script to download v6.0.2. Use `--idf-path <path>` to skip the prompt.
+Add `--menuconfig` to run `menuconfig` for each selected target before building. In that mode the helper copies the chosen board profile to `sdkconfig.defaults` only (not `sdkconfig`), runs `idf.py set-target`, then opens menuconfig; `menuconfig` writes the resulting `sdkconfig` itself.
 
-## 2. Select a build target
+When prompted for ESP-IDF, confirm a detected path or allow the script to download v6.1. Use `--idf-path <path>` to skip the prompt.
+
+## 2. Select a Build Target
 
 GhostESP ships configs for multiple boards inside `configs/`. The helper lists them with numeric IDs. Enter the index for the target whose Kconfig you want to edit (for example `esp32s3-generic`).
 
-The script copies that entry's `sdkconfig.*` file into `sdkconfig` and `sdkconfig.defaults`, then runs `idf.py set-target` so menuconfig matches the board.
+The script copies that entry's `sdkconfig.*` file into `sdkconfig` and `sdkconfig.defaults`, then runs `idf.py set-target` so menuconfig matches the board. (With `--menuconfig` it copies to `sdkconfig.defaults` only, as described above.)
 
-## 3. Run menuconfig for GhostESP options
+## 3. Run Menuconfig for GhostESP Options
 
 After applying the base config, `build.py` launches:
 
@@ -46,13 +48,13 @@ idf.py menuconfig
 
 Use the menu to browse `Ghost ESP Options` and its submenus (Display Options, Misc Options, NFC Options, etc.). Save and exit when finished.
 
-### Enabling core dumps to flash
+### Enabling Core Dumps to Flash
 
 GhostESP can capture ESP-IDF core dumps into a dedicated flash partition after a crash. When enabled, the device exposes a `coredump` CLI command (plus extra coredump status lines in `chipinfo`).
 
 In `idf.py menuconfig`, use the search function to find `ESP_COREDUMP_ENABLE_TO_FLASH` (or search for `COREDUMP`) and enable **core dump to flash**. Make sure your partition table includes a `data,coredump` partition.
 
-### Enabling NFC features
+### Enabling NFC Features
 
 Open **Ghost ESP Options → Misc Options → NFC Options** to toggle the backends:
 
@@ -61,7 +63,7 @@ Open **Ghost ESP Options → Misc Options → NFC Options** to toggle the backen
 
 Turning on either backend automatically sets the internal `HAS_NFC` flag, which enables the UI and shared NFC code paths.
 
-### Enabling displays
+### Enabling Displays
 
 Navigate to **Ghost ESP Options → Display Options** for screen hardware:
 
@@ -84,7 +86,7 @@ The status display shows system information, attack status, and idle animations 
 
 On boards that use the IO expander, three buttons on the expander (P10, P11, P12) can be programmed to run CLI commands or act as joystick buttons. Configure them via **Settings → IO Buttons** on the device or the `iobtn` and `settings` commands; see the [CLI reference](/getting-started/command-line-reference/#io-expander-buttons-if-present).
 
-### Configuring LVGL display driver
+### Configuring LVGL Display Driver
 
 After enabling **Enable Screen Support**, navigate to **Component config → LVGL** to configure the display driver:
 
@@ -92,16 +94,16 @@ After enabling **Enable Screen Support**, navigate to **Component config → LVG
 - Configure **LVGL Touch Input** if your screen has a touchscreen.
 - Adjust **LVGL Display Settings** for rotation, color depth, and refresh rate as needed for your hardware.
 
-## 4. Decide where to store your changes
+## 4. Decide Where to Store Your Changes
 
 Once menuconfig exits, `build.py` asks whether to write the new configuration back into the source tree:
 
-- **Yes** — Copies the generated `sdkconfig` into the original `configs/sdkconfig.*` file _and_ into `sdkconfig.defaults`. Choose this when you want the board profile to permanently carry the new settings.
-- **No** — Keeps `sdkconfig.defaults` updated for the current build only without altering the source file. This is useful when experimenting.
+- **Yes** - Copies the generated `sdkconfig` into the original `configs/sdkconfig.*` file _and_ into `sdkconfig.defaults`. Choose this when you want the board profile to permanently carry the new settings.
+- **No** - Keeps `sdkconfig.defaults` updated for the current build only without altering the source file. This is useful when experimenting.
 
 Regardless of your choice, the helper syncs `sdkconfig.defaults` so the next build uses the options you just saved.
 
-## 5. Rebuild firmware (optional)
+## 5. Rebuild Firmware (Optional)
 
 If you continue through the prompts, `build.py` can clean, rebuild, and package artifacts automatically. Otherwise, rerun later with:
 

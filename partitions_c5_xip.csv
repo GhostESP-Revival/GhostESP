@@ -10,8 +10,16 @@
 # the loader cleanly reports it (flash-XIP unavailable there).
 #
 # Offsets are 64KB-aligned for the C5 MMU page size.
+#
+# app0 is 0x3E0000, matching partitions.csv, so one app binary fits every C5
+# layout. That leaves 0x10000 for coredump (64KB, the ESP-IDF example size)
+# because this table is deliberately kept inside 5MB of flash; boards with more
+# room do not get a bigger coredump here, they get a different table. napps stays
+# at 0x400000 -- the XIP loader locates it by label, but its offset is part of
+# this table's shared contract, so it does not move.
+#
 # Name,     Type, SubType,  Offset,   Size,    Flags
 nvs,        data, nvs,      0x9000,   0x7000,
-app0,       app,  factory,  0x10000,  0x3D0000,
-coredump,   data, coredump, 0x3E0000, 0x20000,
+app0,       app,  factory,  0x10000,  0x3E0000,
+coredump,   data, coredump, 0x3F0000, 0x10000,
 napps,      data, 0xFE,     0x400000, 0x100000,

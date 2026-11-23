@@ -292,14 +292,14 @@ const uint8_t LIVE_AP_CHANNELS_2GHZ[] = {
 };
 const size_t LIVE_AP_CHANNELS_2GHZ_COUNT = sizeof(LIVE_AP_CHANNELS_2GHZ) / sizeof(LIVE_AP_CHANNELS_2GHZ[0]);
 
-// WiFi channels for 2.4 GHz + 5 GHz (ESP32C5/C6 only)
+// WiFi channels for 2.4 GHz + 5 GHz (ESP32-C5 only)
 const uint8_t LIVE_AP_CHANNELS_DUAL[] = {
     // 2.4 GHz channels
     1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,
     // 5 GHz channels
     36, 40, 44, 48, 52, 56, 60, 64,
     100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140, 144,
-    149, 153, 157, 161, 165
+    149, 153, 157, 161, 165, 169, 173, 177
 };
 const size_t LIVE_AP_CHANNELS_DUAL_COUNT = sizeof(LIVE_AP_CHANNELS_DUAL) / sizeof(LIVE_AP_CHANNELS_DUAL[0]);
 

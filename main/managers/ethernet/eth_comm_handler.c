@@ -7,7 +7,7 @@
 #include "core/system_manager.h"
 #include "managers/ethernet/eth_scan_async.h"
 #include "managers/ethernet/eth_fingerprint.h"
-#include "attacks/ethernet/eth_arp_poison.h"
+#include "features/ethernet/eth_arp_poison.h"
 #include "managers/ethernet_manager.h"
 #include "managers/peer_storage_manager.h"
 #include "core/glog.h"

@@ -1,64 +1,68 @@
 ---
 title: "Scanning"
-description: "Discover and analyze nearby Bluetooth Low Energy devices."
+description: "Discover and analyze nearby Bluetooth Low Energy devices"
 weight: 10
 ---
 
-Discover nearby BLE devices and gather information about them.
+Discover nearby BLE devices and gather information about them. You need a Bluetooth-capable GhostESP; BLE scanning is not available on ESP32-S2.
 
 > **Wi-Fi impact:** Starting any BLE scan temporarily suspends the GhostNet access point. Wi-Fi services resume automatically once you stop scanning (for example by running `stop` or pressing **Back** in the UI).
 
-## Prerequisites
+## Scanning for Devices
 
-- GhostESP flashed device, powered on with a wireless antenna.
-- Device must support Bluetooth (not available on ESP32-S2).
+### On-Device UI
 
-## Scanning for devices
-
-### On-device UI
-
-1. Open **Menu → Bluetooth**.
-2. Choose a scanning mode from the options below.
+1. Open **BLE** from the main menu.
+2. Choose a scan: **Detect Devices**, **Advertiser Scan**, **OUI Device Scan**, **GATT Scan**, **Aerial Detector**, **Spam**, or **Raw**.
    The device will start scanning. Leave it running until you have enough data.
-3. Back out of the terminal view to stop scanning.
-   The device will show a summary of discovered devices.
+3. Press **Back** to stop scanning.
+   Use **List Detected Devices** or **List Advertisers** to review results.
 
-### Command line
+### CLI
 
 1. Open the GhostESP terminal.
-2. Run `blescan [OPTION]` where the option is one of the modes below (for example, `blescan -f`).
+2. Run `bledetect` to start the tracker/skimmer/beacon scan, or `blescan [OPTION]` for one of the lower-level scans below.
    The device will start scanning.
-3. Run `blescan -s` when you're done.
+3. Run `bledetect -s` or `blescan -s` when you're done.
    The device will stop scanning and show a summary.
 
-## Scanning modes
+{{< flow title="How a BLE scan works" caption="Starting a BLE scan suspends the GhostNet AP; Wi-Fi resumes when you stop." >}}
+Start scanning | `bledetect` for trackers, or `blescan <mode>` for a lower-level scan
+Capture advertising packets | Legacy advertising plus scan responses
+Classify and store matches | Tracker type, vendor OUI, and service data
+List or track results | `-l` to list, `-t <idx>` to track RSSI
+Stop | `-s` keeps results and the AP returns
+{{< /flow >}}
 
-### Find Flippers
-- **UI**: Menu → Bluetooth → Find Flippers
-- **CLI**: `blescan -f`
-- Scans for nearby Flipper Zero devices and displays their names and signal strength.
-- After scanning, use **Select Flipper** to track a specific device's RSSI (signal strength) in real time as you move around.
+## Detecting Devices (`bledetect`)
+
+`bledetect` is the current on-device **Detect Devices** scan. It watches advertisements and classifies trackers, skimmers, and beacons. Running `bledetect` with no argument starts the scan.
+
+| Flag | Description |
+|------|-------------|
+| `-s` | Stop the scan, keeping discovered devices |
+| `-l` | List discovered devices (index, type, name/MAC, RSSI) |
+| `-c` | Clear results (scan must be stopped first) |
+| `-i` | Show scan state, device count, and tracking info |
+| `-t <idx>` | Track a device and log its live RSSI |
+| `-u` | Stop tracking |
+| `-sp <idx>` | Spoof a detected AirTag; `stopspoof` ends it |
+| `-h` | Show usage |
+
+Recognized signatures: **AirTag**, **Flipper**, **Skimmer Suspect**, **Tile**, **SmartTag**, **Chipolo**, **AirPods**, **Apple Watch**, **FindMy**, **Fast Pair**, **Hearing Aid** (ASHA), **Exposure Beacon** (GAEN), and **Chameleon** (ChameleonUltra).
 
 ### BLE Spam Detector
 - **CLI**: `blescan -ds`
 - Detects active BLE spam attacks from nearby devices. Useful for testing whether your own spam is visible or detecting hostile spam.
 
-### AirTag Scanner
-- **UI**: Menu → Bluetooth → AirTag → Start AirTag Scanner
-- **CLI**: `blescan -a`
-- Scans for Apple AirTags and other Find My devices using active scanning to find more devices.
-- Allows duplicate advertisements to be reported for better tracking.
-- While scanning, RSSI for already discovered AirTags is logged every few seconds to help you see proximity changes over time.
-- Use **List AirTags** to see discovered devices, or **Select AirTag** to prepare for spoofing.
-
 ### BLE Skimmer Detection
-- **UI**: Menu → Bluetooth → BLE Skimmer Detect
 - **CLI**: `capture -skimmer`
 - Scans for payment terminal skimmers that use BLE to exfiltrate card data.
 - Logs detected skimmers to a PCAP file for analysis.
+- There is no skimmer entry in the BLE menu; `bledetect` also flags suspected skimmers as **Skimmer Suspect**.
 
 ### GATT Service Enumeration
-- **UI**: Menu → Bluetooth → GATT Scan → Start GATT Scan
+- **UI**: BLE → GATT Scan
 - **CLI**: `blescan -g`
 - Connect to BLE devices and discover what services they offer (e.g., heart rate, battery level, custom services).
 - Track devices by signal strength to physically locate them.
@@ -66,7 +70,7 @@ Discover nearby BLE devices and gather information about them.
 See the dedicated [GATT Discovery]({{< relref "gatt" >}}) page for a full walkthrough, command reference, and service UUID tables.
 
 ### BLE Advertiser Scan
-- **UI**: Menu → Bluetooth → Advertiser Scan
+- **UI**: BLE → Advertiser Scan
 - **CLI**: `blescan -adv`
 - Passively scans all BLE advertisements, including non-connectable beacons.
 - Parses common advertisement fields and iBeacon UUID, major, minor, and measured power when present.
@@ -75,38 +79,57 @@ See the dedicated [GATT Discovery]({{< relref "gatt" >}}) page for a full walkth
 See the dedicated [Advertiser Scan]({{< relref "advertisers" >}}) page for details.
 
 ### Raw BLE Packet Capture
+- **UI**: BLE → Raw → Raw BLE Scanner
 - **CLI**: `blescan -r`
 - Captures raw BLE packets for offline analysis. Useful for debugging BLE protocol issues.
 
-## Listing and selecting devices
+### Lower-Level CLI Scans
+
+- `blescan -oui <prefix>` - advertiser scan filtered to an OUI prefix (for example `blescan -oui 00:1A:2B`). UI: **BLE → OUI Device Scan → Enter OUI Prefix**.
+- `blescan -vendor <vendor>` - advertiser scan filtered to a vendor name. UI: **BLE → OUI Device Scan → Search Vendors**.
+- `blescan -f` - scans for nearby Flipper Zero devices; list with `listflippers`.
+- `blescan -a` - AirTag scanner using active scanning; list with `listairtags`.
+- `capture -ble` / `capture -wiresharkble` - BLE packet capture for offline and Wireshark analysis.
+
+## BLE Bridge and Wardriving
+
+- `blebridge [start|stop|status|pair <peer_name>]` - BLE bridge to a paired GhostESP peer.
+- `blewardriving` (stop with `blewardriving -s`) - log BLE observations to the wardriving CSV.
+- `dualwd [start|-s]` - Wi-Fi and BLE wardriving together; requires a PSRAM device.
+
+## Auto-Saving Results
+
+When `auto_save_scans` is enabled (the default), list commands write their results to `/mnt/ghostesp/scans/<mode>_<n>.txt` on the SD card, auto-incrementing `<n>`. For example `listadv` writes `ble_advertisers_<n>.txt` and `listgatt` writes `gatt_scan_<n>.txt`.
+
+## Listing and Selecting Devices
 
 After scanning, you can interact with discovered devices:
 
-### List discovered devices
-- **Flippers**: Menu → Bluetooth → Flipper → List Flippers or CLI: `listflippers`
-- **AirTags**: Menu → Bluetooth → AirTag → List AirTags or CLI: `listairtags`
-- **Advertisers**: Menu → Bluetooth → List Advertisers or CLI: `listadv`
-- **GATT Devices**: Menu → Bluetooth → GATT Scan → List GATT Devices or CLI: `listgatt`
+### List Discovered Devices
+- **Detected devices**: **BLE → List Detected Devices** or CLI `bledetect -l`
+- **Advertisers**: **BLE → List Advertisers** or CLI `listadv`
+- **GATT devices**: CLI `listgatt` (also available as **List GATT Devices**)
+- **Flippers**: CLI `listflippers`
+- **AirTags**: CLI `listairtags`
 
-### Select a device for further action
-- **Flipper**: Menu → Bluetooth → Flipper → Select Flipper
-  - Once selected, the device will continuously track and display the Flipper's RSSI (signal strength).
-  - Use this to locate the Flipper by moving around and watching the signal strength change.
-- **AirTag**: Menu → Bluetooth → AirTag → Select AirTag (prepares for spoofing)
-- **GATT Device**: Menu → Bluetooth → GATT Scan → Select GATT Device
-  - Once selected, use **Enumerate Services** to connect and discover the device's GATT services.
-  - Use **Track Device** to locate it using real-time signal strength updates.
+### Select a Device for Further Action
+- **Detected device**: track with `bledetect -t <index>` (stop with `bledetect -u`), or spoof a detected AirTag with `bledetect -sp <index>`.
+- **Flipper**: CLI `selectflipper <index>` continuously tracks and displays the Flipper's RSSI (signal strength). Use this to locate the Flipper by moving around and watching the signal strength change.
+- **AirTag**: CLI `selectairtag <index>` (prepares for spoofing).
+- **GATT device**: CLI `selectgatt <index>`, then `enumgatt` to discover its GATT services, or `trackgatt` to locate it using real-time signal strength updates.
+
+Flipper and AirTag items are not part of the BLE menu; on-device they live under the GhostLink BLE submenu.
 
 ## Notes
 
-- BLE scanning is not available on ESP32-S2 devices.
-- Scanning modes are mutually exclusive; starting a new scan will stop the previous one.
+- BLE scans share one radio: starting a new scan retargets the radio, but other modes' active flags and handlers are not fully reset, so stop the current scan (`blescan -s` / `bledetect -s`) before starting a different one.
 - Signal strength (RSSI) is displayed in dBm; higher values (closer to 0) indicate stronger signals.
+- Advertiser scan stores up to 64 advertisers when PSRAM is available, otherwise 32.
+- GATT scan stores up to 20 devices, each with up to 8 services.
 - Some devices may not respond to all scanning modes depending on their BLE implementation.
 
 ## Troubleshooting
 
 - **No devices found**: Move closer to BLE devices and try scanning again.
-- **Scanning stops immediately**: Check that your device has Bluetooth enabled. Remember that the AP pauses during scans—wait a moment after stopping for Wi-Fi to return.
+- **Scanning stops immediately**: Check that your device has Bluetooth enabled.
 - **Device not responding**: Some devices may be in sleep mode or have BLE disabled. Try scanning again or move closer.
-- **Bluetooth not supported**: Ensure you're using a device other than ESP32-S2, which does not have Bluetooth support.

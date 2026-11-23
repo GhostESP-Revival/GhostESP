@@ -9,7 +9,7 @@ The E-paper Reader is a built-in app for the Elecrow CrowPanel 4.2-inch 400×300
 
 The Reader is included in both CrowPanel e-paper firmware builds. It does not download, copy, or store books in flash.
 
-## SD card layout
+## SD Card Layout
 
 Insert the SD card into a computer and create the following directory at the card's root:
 
@@ -28,7 +28,9 @@ GhostESP creates `ghostesp/comics` automatically when the SD card is initialized
 
 The Reader scans the items directly inside `comics`. A folder is treated as one book, and its image pages must be directly inside that folder. Use zero-padded filenames such as `001.jpg`, `002.jpg`, and `003.jpg` so pages sort in reading order.
 
-## Supported content
+The library lists up to **64 books**; additional items are ignored. Each book's title is capped at **96 characters**, so very long filenames are truncated in the list.
+
+## Supported Content
 
 - **CBZ:** ZIP comic archives containing JPG/JPEG, BMP, or PBM image pages directly in the archive. Encrypted archives are not supported.
 - **Image folders:** A folder containing directly stored JPG/JPEG, BMP, or PBM pages.
@@ -40,7 +42,7 @@ DRM-protected EPUBs and fixed-layout/image-only EPUBs are not supported by the l
 
 For the most reliable first test, create a folder such as `MyComic` and place two ordinary JPG files inside it. CBZ archives should not add an extra top-level directory around the page files.
 
-## Opening a book
+## Opening a Book
 
 1. Boot the CrowPanel with the SD card inserted.
 2. Select **Reader** from the main menu (it is the first item on the e-paper build).
@@ -64,7 +66,7 @@ The 400×300 panel is a 1-bit display, so detail mode is the practical way to re
 
 ## Troubleshooting
 
-### No books appear
+### No Books Appear
 
 Confirm that the physical SD card contains `ghostesp/comics`, not a folder named `/mnt/ghostesp/comics`. Insert the card before booting, then exit and reopen Reader after adding files.
 
@@ -76,10 +78,10 @@ Check that:
 - A CBZ archive has image pages directly inside the archive.
 - An EPUB is unencrypted and reflowable; fixed-layout EPUBs need to be converted to CBZ.
 
-### A page cannot be opened
+### A Page Cannot Be Opened
 
 Try a baseline RGB JPG or a 400×300 JPG first. Unsupported, encrypted, damaged, or unusually encoded image files may show an error page. For EPUBs, verify that `META-INF/container.xml` points to an OPF package and that the OPF has a valid XHTML spine.
 
-### Refreshes seem slow
+### Refreshes Seem Slow
 
 This is expected on e-paper. The Reader waits for the panel's busy signal and throttles page input to avoid overlapping refreshes.

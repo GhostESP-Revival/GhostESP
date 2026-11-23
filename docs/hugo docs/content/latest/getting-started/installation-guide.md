@@ -2,18 +2,25 @@
 title: "Installation Guide"
 description: "Flash GhostESP with the recommended web flasher"
 weight: 20
-toc: true
 ---
 
-## What this does
+The web flasher installs GhostESP firmware on a compatible ESP32 board directly from your browser, and is the recommended method for most users. You need a compatible ESP32 board (see [Supported Hardware]({{< relref "supported-hardware.md" >}})), a USB data cable (Micro USB or USB-C; must be a data cable, not charge-only), and Chrome, Brave, or Edge - Firefox doesn't support WebSerial.
 
-The web flasher installs the GhostESP firmware on a compatible ESP32 board directly from your browser. It is the recommended method for most users.
+## Which variant do I pick?
 
-## Before you start
+The flasher asks for your **chip family**, not your board name. Look your board up in the [Supported Hardware]({{< relref "supported-hardware.md" >}}) table and use its **Chip** column:
 
-- A compatible ESP32 board (see [Supported Hardware]({{< relref "supported-hardware.md" >}}))
-- A USB cable (Micro USB or USB-C; must be a data cable, not charge-only)
-- A modern web browser (Chrome, Brave, or Edge; Firefox doesn't support WebSerial)
+| If your board is… | Pick |
+|---|---|
+| Cardputer, T-Deck, TEmbed, CrowPanel Advance, Lolin S3 Pro, Banshee S3, ACE S3, Waveshare/Crowtech/Sunton 7″ | **ESP32-S3** |
+| Marauder V8, Marauder Pancake, Poltergeist, T-Dongle-C5, Banshee C5, ACE C5, NM-CYD-C5 | **ESP32-C5** |
+| GhostBoard | **ESP32-C6** |
+| MarauderV4, Marauder V6, CYD boards, Minion, JCMK DevBoardPro, Feberis Pro | **ESP32** |
+| Awok V5, AwokMini, Flipper JCMK GPS | **ESP32-S2** |
+| CrowPanel Advanced P4 | **ESP32-P4** |
+| GhostLink P1 Peer | **ESP32-C3** |
+
+> Getting this wrong is the most common cause of a board that flashes successfully but never boots. If you are unsure, check the table before flashing - don't guess.
 
 ## Flash with the web flasher
 
@@ -21,12 +28,10 @@ The web flasher installs the GhostESP firmware on a compatible ESP32 board direc
 2. Close any app that is using the board's serial port.
 3. Enter bootloader mode: hold **BOOT**, connect USB, then release **BOOT**.
 4. If that does not work, hold **BOOT**, tap **RESET**, wait 1-2 seconds, then release **BOOT**.
-5. Select the matching ESP32 variant, click **Connect**, and follow the browser prompts.
+5. Select the chip family from the table above, click **Connect**, and follow the browser prompts.
 6. When flashing finishes, unplug and reconnect the board.
 
-## Expected result
-
-GhostESP boots and creates a Wi-Fi access point named `GhostNet` with password `GhostNet`.
+GhostESP then boots and creates a Wi-Fi access point named `GhostNet` with password `GhostNet`.
 
 ## Troubleshooting
 

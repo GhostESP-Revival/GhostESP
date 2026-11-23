@@ -150,22 +150,14 @@ static void wdstream_emit_status(void) {
 }
 
 static bool wdstream_channel_supported(uint8_t channel) {
-    if (channel < 1 || channel > MAX_WIFI_CHANNEL) return false;
-#if defined(CONFIG_IDF_TARGET_ESP32C5)
-    return (channel >= 1 && channel <= 14) ||
-           (channel >= 36 && channel <= 64) ||
-           (channel >= 100 && channel <= 144) ||
-           (channel >= 149 && channel <= 165);
-#else
-    return channel <= 14;
-#endif
+    return wifi_channels_is_monitor_channel(channel);
 }
 
 static void wdstream_set_default_channels(wdstream_config_t *cfg) {
     cfg->channel_count = 0;
     // User hop profile takes priority over the country list for "auto".
     size_t profile_count = 0;
-    hop_profile_resolve(cfg->channels, WDSTREAM_MAX_CHANNELS, &profile_count);
+    hop_profile_resolve_monitor(cfg->channels, WDSTREAM_MAX_CHANNELS, &profile_count);
     if (profile_count > 0) {
         cfg->channel_count = (uint8_t)profile_count;
         return;
@@ -201,7 +193,8 @@ static bool wdstream_parse_channels(const char *arg, wdstream_config_t *cfg) {
             if (!isdigit((unsigned char)*p)) return false;
         }
         long ch_long = strtol(tok, NULL, 10);
-        if (ch_long < 1 || ch_long > 255 || !wdstream_channel_supported((uint8_t)ch_long)) {
+        if (ch_long < 1 || ch_long > 177 ||
+            !wdstream_channel_supported((uint8_t)ch_long)) {
             return false;
         }
         uint8_t ch = (uint8_t)ch_long;
@@ -277,6 +270,7 @@ static void wdstream_scan_wifi_channel(uint8_t channel, uint32_t interval_ms) {
         .bssid = NULL,
         .channel = channel,
         .show_hidden = true,
+        .scan_type = wifi_channels_requires_passive_scan(channel) ? WIFI_SCAN_TYPE_PASSIVE : WIFI_SCAN_TYPE_ACTIVE,
         .scan_time = {.active.min = scan_time_ms, .active.max = scan_time_ms, .passive = scan_time_ms}
     };
 

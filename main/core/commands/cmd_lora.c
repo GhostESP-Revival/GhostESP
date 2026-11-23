@@ -11,6 +11,7 @@
 #include "managers/lora_sx1262.h"
 #include "managers/lora_ble.h"
 #include "managers/lora_phoneapi.h"
+#include "managers/meshcore_manager.h"
 #include "esp_random.h"
 #include "sdkconfig.h"
 #include <string.h>
@@ -38,9 +39,12 @@ void handle_lora_cmd(int argc, char **argv) {
              "lora pkselftest      X25519/SHA-256/AES-CCM known-answer tests\n"
              "lora pktry <hex>     PKI decrypt-variant probe on a captured frame\n"
              "lora channels        Show 8 channel slots\n"
+             "lora autostart <meshtastic|meshcore|on|off>  Boot auto-start\n"
              "lora region <name>   Set region while stopped (e.g. anz)\n"
-             "lora set <preset|sf|bw|cr|tx|hop|offset|ovrfreq|chnum|txen|role|owner|companion> <value>\n"
-             "Advanced: diag, cad, reg, ble, app, setup\n");
+             "lora set <preset|sf|bw|cr|tx|hop|offset|ovrfreq|chnum|txen|role|owner|companion|autostart> <value>\n"
+             "lora ble pin <none|random|fixed [pin]>  App pairing PIN (default none)\n"
+             "Advanced: diag, cad, reg, ble, app, setup\n"
+             "Tip: `mesh` shows the active mesh and switches Meshtastic <-> MeshCore\n");
         return;
     }
     const char *sub = argc < 2 ? "status" : argv[1];
@@ -74,15 +78,84 @@ void handle_lora_cmd(int argc, char **argv) {
              lora_manager_last_error());
         return;
     }
+    if (strcmp(sub, "autostart") == 0) {
+        const char *backend = "Meshtastic";
+#ifdef CONFIG_HAS_MESHCORE
+        if (mc_manager_default_backend_meshcore()) backend = "MeshCore";
+#endif
+        if (argc < 3) {
+            glog("Auto-start on boot: %s (%s)\n",
+                 lora_manager_auto_start_enabled() ? "on" : "off", backend);
+            glog("Set: lora autostart <meshtastic|meshcore|on|off>\n");
+            return;
+        }
+        const char *arg = argv[2];
+        bool on = strcmp(arg, "on") == 0 || strcmp(arg, "1") == 0 ||
+                  strcmp(arg, "true") == 0;
+        bool off = strcmp(arg, "off") == 0 || strcmp(arg, "0") == 0 ||
+                   strcmp(arg, "false") == 0;
+        bool want_mc = strcmp(arg, "meshcore") == 0 || strcmp(arg, "mc") == 0;
+        bool want_mt = strcmp(arg, "meshtastic") == 0 || strcmp(arg, "mt") == 0 ||
+                       strcmp(arg, "lora") == 0;
+        if (!on && !off && !want_mc && !want_mt) {
+            glog("Usage: lora autostart <meshtastic|meshcore|on|off>\n");
+            return;
+        }
+        if (off) {
+            glog(lora_manager_set_auto_start(false) ? "Auto-start OFF\n"
+                                                    : "auto-start save failed\n");
+            return;
+        }
+        if (on) {
+            glog(lora_manager_set_auto_start(true) ? "Auto-start ON (%s)\n"
+                                                   : "auto-start save failed\n",
+                 backend);
+            return;
+        }
+#ifndef CONFIG_HAS_MESHCORE
+        if (want_mc) {
+            glog("MeshCore not enabled on this board\n");
+            return;
+        }
+#endif
+#ifdef CONFIG_HAS_MESHCORE
+        /* Naming a protocol selects which one boots, not just the flag. */
+        mc_manager_set_default_backend_meshcore(want_mc);
+#endif
+        if (want_mt && lora_manager_needs_setup()) {
+            glog("Note: no Meshtastic region saved yet, so the boot start will be\n"
+                 "      skipped. Set one with: lora set region <name>\n");
+        }
+        glog(lora_manager_set_auto_start(true) ? "Auto-start ON (%s)\n"
+                                               : "auto-start save failed\n",
+             want_mc ? "MeshCore" : "Meshtastic");
+        return;
+    }
     if (strcmp(sub, "start") == 0) {
         if (lora_manager_needs_setup()) {
             char q[640];
             if (lora_manager_setup_text(q, sizeof(q))) glog("%s", q);
             return;
         }
+#ifdef CONFIG_HAS_MESHCORE
+        // One radio: release it from MeshCore before Meshtastic claims it.
+        bool restore_meshcore = mc_manager_is_running();
+        if (restore_meshcore) {
+            mc_manager_stop();
+            glog("Stopped MeshCore (one radio: Meshtastic now owns it)\n");
+        }
+#endif
         if (lora_manager_start()) {
+#ifdef CONFIG_HAS_MESHCORE
+            mc_manager_set_default_backend_meshcore(false);
+#endif
             glog("LoRa started\n");
         } else {
+#ifdef CONFIG_HAS_MESHCORE
+            if (restore_meshcore && !mc_manager_start())
+                glog("Meshtastic failed and MeshCore restore also failed: %s\n",
+                     mc_manager_last_error());
+#endif
             glog("LoRa start failed: %s\n", lora_manager_last_error());
         }
         return;
@@ -107,6 +180,11 @@ void handle_lora_cmd(int argc, char **argv) {
             bool ok = lora_manager_set_region((lora_region_t)code);
             glog(ok ? "LoRa region saved (takes effect on start)\n" : "set region failed: %s\n",
                  lora_manager_last_error());
+            return;
+        }
+        if (strcmp(argv[2], "autostart") == 0) {
+            char *a[] = {argv[0], "autostart", argv[3]};
+            handle_lora_cmd(3, a);
             return;
         }
         if (strcmp(argv[2], "preset") == 0) {
@@ -491,6 +569,33 @@ void handle_lora_cmd(int argc, char **argv) {
         } else if (strcmp(a, "off") == 0) {
             lora_ble_stop();
             glog("LoRa BLE stopped\n");
+        } else if (strcmp(a, "pin") == 0) {
+            uint32_t pin = 0;
+            lora_ble_pin_mode_t m = lora_ble_get_pin_mode(&pin);
+            if (argc >= 4) {
+                const char *k = argv[3];
+                lora_ble_pin_mode_t nm;
+                uint32_t np = 0;
+                if (strcmp(k, "none") == 0 || strcmp(k, "off") == 0) nm = LORA_BLE_PIN_NONE;
+                else if (strcmp(k, "random") == 0) nm = LORA_BLE_PIN_RANDOM;
+                else if (strcmp(k, "fixed") == 0) {
+                    nm = LORA_BLE_PIN_FIXED;
+                    np = argc >= 5 ? (uint32_t)strtoul(argv[4], NULL, 10) : (pin ? pin : 123456);
+                } else {
+                    glog("Usage: lora ble pin <none|random|fixed [6-digit pin]>\n");
+                    return;
+                }
+                if (!lora_ble_set_pin_mode(nm, np)) {
+                    glog("Invalid PIN (must be 6 digits, 100000-999999)\n");
+                    return;
+                }
+                m = nm;
+                pin = np;
+                glog("Phone must forget the old bond and reconnect.\n");
+            }
+            if (m == LORA_BLE_PIN_NONE) glog("LoRa BLE pairing: none (no PIN)\n");
+            else if (m == LORA_BLE_PIN_RANDOM) glog("LoRa BLE pairing: random PIN (shown on node)\n");
+            else glog("LoRa BLE pairing: fixed PIN %06u\n", (unsigned)pin);
         } else {
             glog("LoRa BLE adv:%s conn:%s linked:%s\n",
                  lora_ble_is_advertising() ? "yes" : "no",

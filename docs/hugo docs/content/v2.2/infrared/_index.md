@@ -1,0 +1,23 @@
+---
+title: "Infrared"
+description: "Overview of GhostESP's infrared capabilities"
+keywords: ["infrared", "IR", "remote control", "signal learning", "NEC", "Kaseikyo"]
+weight: 320
+aliases:
+  - "/infrared/"
+---
+
+GhostESP lets you learn IR signals, store them on the SD card, and retransmit them using the onboard LED.
+
+## Supported Protocols
+
+- NEC / NECext / NEC42 / NEC42ext
+- Kaseikyo
+- Pioneer
+- RCA
+- Samsung32
+- SIRC (12-bit, 15-bit, 20-bit)
+- RC5 / RC5X
+- RC6
+
+If a remote uses an unsupported protocol, GhostESP still attempts to capture raw timings so you can replay the signal.

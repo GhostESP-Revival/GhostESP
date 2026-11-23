@@ -8,7 +8,7 @@ aliases:
 
 Build GhostESP from source or extend an installed device without changing its firmware.
 
-## Choose an extension model
+## Choose an Extension Model
 
 | | [GhostScript]({{< relref "../ghostscript" >}}) | [Native SD Apps]({{< relref "native-sd-apps" >}}) |
 |---|---|---|
@@ -23,10 +23,10 @@ Start with **GhostScript** when the available Lua APIs can perform the job. Choo
 
 > Native app permissions gate the official SDK functions, but native apps are not sandboxed. Only install native packages from developers you trust.
 
-## Development paths
+## Development Paths
 
-- **[GhostScript]({{< relref "../ghostscript" >}})** — write, compile, install, and debug Lua automation packages.
-- **[Native SD Apps]({{< relref "native-sd-apps" >}})** — build target-specific C apps with the native SDK.
-- **[GBT]({{< relref "gbt" >}})** — use the current build, packaging, GhostScript compiler, firmware, and serial commands.
-- **[Environment Setup]({{< relref "environment-setup" >}})** — prepare ESP-IDF for firmware and native app development.
-- **[Custom Board Configurations]({{< relref "custom-board-configs" >}})** — add or adjust supported hardware.
+- **[GhostScript]({{< relref "../ghostscript" >}})** - write, compile, install, and debug Lua automation packages.
+- **[Native SD Apps]({{< relref "native-sd-apps" >}})** - build target-specific C apps with the native SDK.
+- **[GBT]({{< relref "gbt" >}})** - use the current build, packaging, GhostScript compiler, firmware, and serial commands.
+- **[Environment Setup]({{< relref "environment-setup" >}})** - prepare ESP-IDF for firmware and native app development.
+- **[Custom Board Configurations]({{< relref "custom-board-configs" >}})** - add or adjust supported hardware.

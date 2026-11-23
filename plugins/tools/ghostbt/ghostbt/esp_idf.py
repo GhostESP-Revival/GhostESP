@@ -7,7 +7,10 @@ import subprocess
 import sys
 
 
-IDF_VERSION = "v6.0.1"
+# must match the ESP-IDF badge in the repository README. ghostbt builds
+# elf_loader shared objects that the firmware dlopen()s, so a mismatch here is
+# an ABI mismatch. scripts/test_idf_version.py fails if the two drift apart.
+IDF_VERSION = "v6.1"
 IDF_REPO_URL = "https://github.com/espressif/esp-idf.git"
 
 GHOSTBT_HOME = pathlib.Path.home() / ".ghostbt"

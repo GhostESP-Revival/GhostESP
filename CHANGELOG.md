@@ -3,80 +3,323 @@
 ## Attribution
 Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A trailing `@handle` credits a guest contributor for that specific line. "Ported from / adapted from" credits the upstream source a feature was based on, not GhostESP authorship.
 
-## v2.2
+
+## v2.2.3
 
 ### Added
-- Added a clock to the centre of the status bar, toggleable in Settings > Date & Time 
+
+- Added Hosyond E32R35T 3.5-inch ST7796U/XPT2046 board support - @Entropypiewholes (#415)
+- Added Banshee Lite support - @Billi-Green (#408)
+- Added IP5306 charger configuration and status support, and configured the Banshee Lite C5 to use its MAX17048 fuel gauge - @Billi-Green (#408)
+- Sentry now identifies GhostNet networks as GhostESP devices
+- Added Sentry settings to choose which devices appear and turn popups on or off
+- Added Sentry logs to help explain why no devices appear
+- Airspace Monitor now saves packet recordings while open
+- Airspace Monitor now warns about unusual channel changes, connection failures and network security changes
+- Reworked `scanlocal` into a full local host scan: it finds hosts with ARP, then identifies each one by NetBIOS name, mDNS hostname, ICMP TTL and mDNS/SSDP services
+- Local scan results now show MAC, vendor, hostname, OS hint and services for each host
+- Vendor names now appear in AP/station scans, attack target lists, Ethernet ARP results, port/SNMP scans, GATT scans and Sentry rows; randomized MACs are labelled "Private address"
+- Added `scanarp stop` and `scanlocal stop`
+- Added `forgetwifi` command to clear the saved WiFi network and disconnect from it
+- Added support for the Waveshare ESP32-C5-Touch-LCD-3.5 - @slickrick773 (#433)
+- Cloud Store now shows a clear "No internet. Connect GhostESP to WiFi" message when opened, refreshed or installing without a connection
+- BadBLE's Run Script list and `badble run`/`badble list` now also find scripts in `/mnt/ghostesp/badusb/`, not just `/mnt/ghostesp/badble/`
+- Renamed the "mDNS Discovery" menu entry to "Local Scan" and added "List Local Scan" to reopen the last results without rescanning
+- Added Cert Scan (`certscan` / Wi-Fi → Cert Scan) to see which hosts still accept a certificate from one of the eight compromised eMudhra intermediates
+  - `certscan hosts` discovers hosts and checks them automatically
+  - Setup works on-device: `certscan cacert <url>` fetches the CA certificate, `certscan key <number>` derives `ca.crt`/`ca.key` from a raw EC scalar, and `certscan genleaf` generates the leaf key; the matching CA is labelled automatically
+- Added optional HTTPS to the DNS sinkhole, signing a certificate per hostname from the SD-card CA and showing results per client
+- Add support for [XIAO ESP32S3 & Wio-SX1262 Kit](https://wiki.seeedstudio.com/wio_sx1262_with_xiao_esp32s3_kit/) - @antonionardella (#428)
+
+### Changed
+
+- Renamed Deauth to Reconnect Test and refreshed testing terminology
+- Improved Airspace Monitor alerts in crowded places
+- Airspace Monitor device rows stay in place while updating
+- Added Airspace Monitor logs to help investigate alerts
+- Sentry settings now use iOS-style switches
+- Restored compact wardrive status updates
+- Increased capture frames to 4 KB without increasing packet-pool RAM
+- Sentry now detects Google Nest cameras and doorbells over BLE and over WiFi - pre2
+- Sentry rows now show how long ago each device was last seen - pre2
+- Beacon spam now uses a STA-only attack radio profile, so it can hop DFS channels and no longer broadcasts the device's own AP
+- Updated the WebUI logo
+
+### Fixed
+
+- Fixed BadUSB HID enumeration on affected ESP32-S3 boards, including Banshee Lite S3 - @14790897 (#440)
+- Fixed touch drag scrolling in Sentry settings
+- Improved Sentry scan reliability and added messages when a scanner fails to start
+- Fixed Sentry counting the same sighting repeatedly
+- Sentry popups no longer replace each other or interrupt device details
+- Fixed Airspace recordings losing their last packets when closed
+- Reduced false Airspace warnings on mesh networks
+- Fixed a crash when starting GPS sharing over GhostLink
+- Fixed stray color codes appearing in the Flipper terminal
+- Fixed status messages corrupting recordings sent to the Flipper
+- Fixed wardriving missing nearby networks on some devices
+- Fixed hidden network names appearing as question marks
+- Raw packet captures now include previously missing control traffic
+- Fixed the timezone picker freezing on CYD boards by paginating the settings list
+- Fixed `scanarp` over the CLI immediately printing "ARP scan cancelled" and scanning nothing
+- Fixed `scanlocal` finding nothing when the web/AP services weren't running
+- Fixed cancelling the local scan from the UI not actually stopping it
+- Fixed slide-to-unlock not responding when the lockscreen appeared over a view like Sentry
+- Fixed Sentry detection popups showing above the lockscreen
+- Fixed touch drag scrolling in the Sentry list and detail views
+- Fixed Sentry rows constantly changing order during busy scans; devices now stay in the order they were first seen
+- Fixed touch scrolling and the Back row not working in the Local Scan host detail view
+- Fixed CrowPanel Advance 4.3" V1.1 backlight initialization - @patlaluci-prog (#432)
+- Fixed `evilportal -c sethtmlstr` dropping long or minified HTML, which made Evil Portal pages uploaded from the Flipper app impossible to start
+- Fixed 5 GHz DFS channel handling for TX attacks: DFS is usable in STA-only attacks and skipped cleanly while an AP interface is active
+- Fixed Cert Scan reliability: concurrent sweeps no longer share TLS contexts, stalled hosts time out, and the CA chain is completed to the trusted emSign root
+- Fixed HTTPS sinkhole and Cert Scan state across restarts, including intercept-list persistence and stale certificate state
+- Fixed beacon spam trying to reconnect to the saved WiFi network while the attack was running
+- Fixed beacon spam beacons being discarded by Wi-Fi 6 clients; fake SSIDs now use valid WPA2 frames with a proper RSN IE and no malformed HE element - @14790897
+
+## v2.2.2
+
+### Added
+
+- Added NEW Sentry view that fuses the Flock camera detector, BLE device-detect and NEW WiFi camera/ALPR/Ring/Axon detectors
+- BLE device detect scan now recognises Meta glasses and Google Find My tags
+- Added slide-to-unlock for the no-PIN lockscreen on touchscreen devices and enabled it by default
+- Added Privacy Mode which redacts third-party SSIDs, MAC addresses, BLE device names, LAN hostnames, GPS coordinates and LoRa/Mesh node identities
+
+### Fixed
+
+- Fixed a heap buffer overflow in the Sinkhole blocklist when the sinkhole folder held 9 or more `.txt` files
+- Fixed GPS satellites-in-view/fix-mode/validity flickering on multi-constellation receivers
+- Fixed the GPS NMEA parser applying fields from sentences that fail their checksum
+- Fixed GPS fix detection on receivers that supply validity through GGA only, and added ZDA/GST/GBS sentence handling
+- Fixed GPS fixes being rejected on receivers that never emit GSA
+- Fixed the setup wizard freezing on CYD boards when a long region/option list exhausted the LVGL pool
+- Setup wizard lists now scroll with touch drag like the other native views
+- Fixed the DNS sinkhole blocklist picker duplicating or skipping entries across pages when `stats.txt` was present (it now pages over the visible list)
+- Fixed the shell command registry running out of slots, which silently dropped the newest commands on the largest board configs
+- Fixed Poltergeist IR transmission from the ESP
+- Fixed long inline IR payloads being truncated by the serial line buffer, which corrupted the transmitted signal
+
+## v2.2.1
+
+### Added
+
+- Added 34 new timezones to the Date & Time picker covering the Americas, Europe, Africa, the Middle East, Asia and Oceania, and added UK British Summer Time (BST) support
+- Support for changing the Meshtastic pairing pin type with defaults set to NO_PIN
+
+### Fixed
+
+- Fixed multi-target app manifests allowing incompatible ELF binaries to hide working SD packages or fail during launch
+- Fixed duplicate SD app tiles and inflated folder counts in the Apps gallery, including default-icon copies and installed apps with cached packages
+
+## v2.2
+
+### TL;DR
+
+**LoRa and Meshtastic:**
+- GhostESP can now talk to Meshtastic and Meshcore networks over SX1262 LoRa radios.
+- The official Meshtastic and Meshcore apps work with it over BLE.
+- LoRa is supported on the Heltec V3 and LilyGo T-Deck.
+- LoRa is also supported on the CrowPanel Advance 2.4/2.8/4.3-inch and the CrowPanel Advanced P4 7/9/10.1-inch.
+
+**Bluetooth:**
+- The BLE device detect scan now has its own CLI command and menu row.
+- It recognises many more devices: Tile, Samsung SmartTag, Chipolo, AirPods, Apple Watch, FindMy clones, Fast Pair / Find Hub accessories, hearing aids, exposure beacons, and Chameleon Ultra.
+- Dual BLE + Wi-Fi wardriving (`dualwd`) is available on PSRAM boards.
+
+**Wi-Fi and captures:**
+- You can set your own channel hopping list for attacks, scans, the airspace monitor, and packet hopping.
+- You can pick your country in Settings > Wi-Fi.
+- Captures now include signal, channel, and rate info, so Wireshark shows per-frame radio details.
+- Captures now include VLAN-tagged traffic and control frames.
+- Several capture bugs that dropped or mangled frames are fixed.
+- A new `mdnssniff` command passively learns local device names (mDNS, LLMNR, SSDP, NetBIOS).
+
+**Apps and hardware:**
+- New Game Boy / Game Boy Color emulator with save states.
+- The Apps gallery now has folders: Tools, System, Games, Communication, Media, and Sensors.
+- The plugin API gained faster menus and a native options list.
+- The T-Deck can now play audio.
+- ESP32-S3 boards with an SD card can expose it over USB.
+- The Elecrow CrowPanel 1.28-inch rotary display is supported.
+- IR TX/RX pins can now be changed at runtime.
+
+**UI:**
+- A clock in the status bar.
+- Analog and seven-segment clock faces.
+- A restyled on-screen keyboard.
+- Reorganised Settings and a new Row Height setting.
+- Subfolder navigation in IR, NFC, SubGHz, Evil Portal, Favorites and BadUSB.
+- The lockscreen is on by default.
+
+**Reliability:**
+- Lower RAM use in GhostScript and wardriving.
+- About 15KB of RAM freed at boot on classic ESP32 boards.
+- Fixes for S3TWatch USB, battery, backlight and RTC.
+- Fixes for the web UI and C5 Wi-Fi scanning.
+- Several memory leaks fixed.
+
+
+### Added
+
+#### Clock & Time
+- Added a clock to the centre of the status bar, toggleable in Settings > Date & Time
 - Added switchable analog and seven-segment clock faces to the Clock view
-- Added Meshtastic-compatible LoRa support for SX1262-family radios including BLE app support with the official Meshtastic App
-- Added LoRa support to:
-  - Heltec V3
-  - Elecrow CrowPanel Advance 2.4-inch
-  - Elecrow CrowPanel Advance 2.8-inch
-  - Elecrow CrowPanel Advance 4.3-inch
-  - Elecrow CrowPanel Advanced P4 7/9/10.1-inch (v1.1 and v1.2+, wireless Meshtastic module)
-- Added USB SD card passthrough on ESP32-S3 boards with an SD card
-- Added custom channel hopping setting that applies to deauth, beacon spam, AP and station scans, airspace monitor, and packet visualizer/capture hopping.
-- Added a Country selector to Settings > Wi-Fi for display UI
-- Added a Row Height setting for the options menus
-- Added support for setting IR TX/RX pins at runtime through the CLI or display UI settings menu
-- Added `dualwd` BLE + WiFi coexistence wardriving (exclusive to PSRAM devices), available from the CLI and GPS menu
-- Added Elecrow CrowPanel 1.28-inch rotary display support with USB Audio volume/mute control
+
+#### LoRa & Meshtastic
+- Added Meshtastic and Meshcore-compatible LoRa support for SX1262 radios, including BLE app support with the official Meshtastic and Meshcore Apps
+- Added LoRa support to Heltec V3, LilyGo TDeck, Elecrow CrowPanel Advance 2.4/2.8/4.3-inch, and CrowPanel Advanced P4 7/9/10.1-inch
+
+#### Wi-Fi & Networking
+- Added a custom channel hopping setting for attacks, AP and station scans, airspace monitor, and packet hopping
+- Added a Country selector to Settings > Wi-Fi
 - Added `mdnssniff` passive local-name sniffer (mDNS/LLMNR/SSDP/NetBIOS) per ARP-discovered host
-- Added a `bledetect` CLI command for the device detect scan with list, track and AirTag spoof actions
-- Added a `glbench` CLI command and Settings > Tools row to benchmark GhostLink throughput and view link statistics
-- Added more devices to the BLE detect devices scan
-  - Tile trackers. Ported from `gatt_scan.c`, adapted from [Flock-You-Android](https://github.com/MaxwellDPS/Flock-You-Android/blob/main/docs/detections/BLE_TRACKER_DETECTION.md) and [Silabs](https://docs.silabs.com/bluetooth/2.13/bluetooth-code-examples-applications/bluetooth-device-tracking-with-tile)
+
+#### Captures & Wireshark
+- Added signal, channel and rate to captures so Wireshark shows per-frame radio info
+- Added 802.1Q/QinQ tag support so VLAN-tagged traffic and handshakes are recognised
+- Added control frames (RTS/CTS/ACK/Block Ack) to the EAPOL and Wireshark captures
+
+#### Bluetooth & BLE
+- Added a `bledetect` CLI command and Devices menu row for the device detect scan, with list, track and AirTag spoof actions
+- Added a `-name <text>` argument to `blespam` to advertise a custom name
+- Added more devices to the BLE detect scan
+  - Tile trackers. Adapted from [Flock-You-Android](https://github.com/MaxwellDPS/Flock-You-Android/blob/main/docs/detections/BLE_TRACKER_DETECTION.md) and [Silabs](https://docs.silabs.com/bluetooth/2.13/bluetooth-code-examples-applications/bluetooth-device-examples-and-use-cases)
   - Samsung SmartTag. Adapted from [arxiv 2210.14702](https://arxiv.org/pdf/2210.14702) and [adwatch](https://github.com/bensmith83/adwatch/blob/main/docs/protocols/smarttag.md)
-  - Chipolo. Ported from `gatt_scan.c`
+  - Chipolo
   - Apple AirPods with per-model variants. Adapted from [Theengs](https://github.com/theengs/decoder/blob/development/src/devices/APPLEAIRPODS_json.h) and [Bruce ble_spam](https://github.com/BruceDevices/firmware/blob/main/src/modules/ble/ble_spam.cpp)
-  - Apple Watch. Adapted from [Theengs](https://github.com/theengs/decoder/blob/development/src/devices/APPLEWATCH_json.h)
-  - Generic FindMy clones. Ported from `gatt_scan.c`
+  - Apple Watch. Adapted from [Theengs](https://github.com/theengs/decoder/blob/development/src/devices/APPLEAIRPOTS_json.h)
+  - Generic FindMy clones
   - Fast Pair / Find Hub accessories. Adapted from the [Google spec](https://developers.google.com/nearby/fast-pair/specifications/extensions/fmdn)
   - Hearing aids. Adapted from [Android docs](https://source.android.com/docs/core/connect/bluetooth/asha)
   - Exposure beacons. Adapted from [Theengs](https://github.com/theengs/decoder/blob/development/src/devices/GAEN_json.h)
-  - Chameleon Ultra. Adapted from `chameleon_manager.c` and [Nordic docs](https://docs.nordicsemi.com/bundle/ncs-latest/page/nrf/libraries/bluetooth_services/services/nus.html)
+  - Chameleon Ultra. Adapted from [Nordic docs](https://docs.nordicsemi.com/bundle/ncs-latest/page/nrf/libraries/bluetooth_services/services/nus.html)
+
+#### GPS & Wardriving
+- Added `dualwd` BLE + WiFi coexistence wardriving (PSRAM devices only) to the CLI and GPS menu
+
+#### Apps & Plugin API
+- Added a Game Boy / Game Boy Color emulator app with save states and battery saves
+- Added an embeddable native options list to the plugin API, plus widget rects, design metrics, a page stack and raw touch state
+- Added batched plugin UI calls for faster plugin menus: `ui_obj_get_rects` and `ui_obj_apply_props`
+- Added a `forward_back` manifest option so plugin apps can handle BACK themselves, and `GHOSTESP_API_HAS()` for feature-gating plugin API fields
+- Added `Tools`, `System`, `Games`, `Communication`, `Media` and `Sensors` folders to the Apps gallery, shared with SD apps by their manifest `category`
+
+#### Hardware Support
+- Added Audio Player support to the LilyGo T-Deck via its onboard MAX98357A speaker amp
+- Added USB SD card passthrough on ESP32-S3 boards with an SD card
+- Added Elecrow CrowPanel 1.28-inch rotary display support with USB Audio volume/mute control
+- Added runtime IR TX/RX pin configuration through the CLI or the settings menu
+
+#### UI & Settings
+- Added a Row Height setting for the options menus
+
+#### Diagnostics
+- Added a `glbench` CLI command and Settings > Tools row to benchmark GhostLink throughput and view link statistics
 
 ### Changed
+
+#### UI & Navigation
+- Added subfolder navigation to IR Remotes and Universals, NFC Saved/Write/Emulate, SubGHz Saved, Evil Portal, Favorites and BadUSB, with full paths for nested files and pagination in Favorites and BadUSB
+- Enabled the lockscreen by default with no PIN on fresh installs
+- Renamed the SD browser's bottom Back row to Exit
+- Restyled the on-screen keyboard with a standard iOS-style layout
+- Defaulted the terminal to white small text with padding, spacing and colour-coded output
+- Reorganized Settings menu categories for easier navigation
 - Improved encoder navigation in grid app menus
 - Added a T-Embed detent mode setting
-- Defaulted the terminal to white small text and improved readability with padding, spacing and colour-coded output
-- Reorganized Settings menu categories for easier navigation
-- Smoothed and improved stability and reliability of the Track RSSI readout and added a warmer/colder trend arrow
-- Standardized bottom touch bar via shared helper
-- Unified back-key handling with shared helper
-- Standardized list/log scrolling with shared helper
-- Standardized view layout and cleanup with shared helpers
-- Mapped IR buttons to theme palette
-- Reduced GhostScript RAM use on across all boards
-- Matched Ethernet dashboard status card to the rounded action rows
+- Improved the Track RSSI readout with a warmer/colder trend arrow
+- Standardized the bottom touch bar, back-key handling, list/log scrolling and view layout with shared helpers
+- Wi-Fi and Bluetooth scan results page with `< Prev` / `Next >` rows
+- Mapped IR buttons to the theme palette
+- Matched the Ethernet dashboard status card to the rounded action rows
+- Sorted SD apps alphabetically instead of in card order
+- Replaced the "SD apps ready" toast on Apps entry with a count in the status bar
+
+#### Messaging & Output
+- Reworded the deauth notice to say plainly whether the target will drop it, based on the network's security type
 - Cleaned up boot and GhostLink console output
-- Restyled the on-screen keyboard with a standard iOS-style layout
-- Wi-Fi and Bluetooth scan result menus now scroll as a single list instead of paging through `< Prev` / `Next >` rows
-- Raised the Banshee GhostLink UART to 921600 baud and enlarged the UART receive buffer to 2048 bytes so the higher rate does not increase receive loss
+- Added periodic capture progress and shut up the PCAP writer HWM log
+
+#### Performance & Memory
+- Reduced GhostScript RAM use across all boards
+- Reduced wardriving queue RAM use by 58% without reducing capture capacity
+- Freed ~15KB of RAM at boot on classic ESP32 boards by releasing unused Classic Bluetooth memory at startup instead of on first BLE use
+- Raised the Banshee GhostLink UART to 921600 baud with a larger receive buffer so the higher rate does not increase receive loss
 
 ### Fixed
-- Fixed T-Embed rotary encoder step rate and sensitivity
-- Fixed encoder select in virtual scan-result lists
-- Fixed GhostScript crash when an event listener received an event
-- Fixed BadBLE touch-drag scrolling
-- Fixed CrowPanel display startup configs
-- Fixed ESP32-C5 merged firmware failing to boot when flashed at `0x0` by placing the bootloader at the required `0x2000` offset - @yanxke (#395)
-- Fixed BadBLE poll timer leak on exit
-- Fixed lockscreen/ghostscript touch bar gaps on large screens
+
+#### Wi-Fi & Scanning
+- Fixed Wi-Fi country and channel handling to honor ESP-IDF channel limits, reject unsupported channels, and keep DFS channels out of active TX
+- Fixed ESP-IDF 6.1 C5 dual-band bandwidth setup, monitor plans and passive DFS scans
+- Fixed C5 station scans across AP/STA-to-promiscuous transitions
+- Fixed Scan All on C5 showing no AP spinner, as the per-channel sweep blocked the UI task
+- Fixed Scan All's station scan being cancelled by taps queued during the AP phase
+- Fixed Wi-Fi Security Check freezing with no spinner and spamming Enter in the terminal
+- Fixed the DNS server task overflowing its stack during Evil Portal sessions on non-PSRAM boards
+- Fixed NM-CYD-C5 AP row crash
+
+#### Captures & Packet Analysis
+- Fixed the HT Control field being ignored on non-QoS data frames, which hid some ARP, EAP and IP traffic
+- Capture summaries now report frames lost to an oversized buffer or a full queue instead of discarding them silently
+- Fixed captures reporting success when an SD write fails
+- Fixed corrupted frames in the Wireshark USB stream
+- Fixed `capture -raw` and `capture -wireshark` dropping data frames over 768 bytes, stripping the FCS only from some frame types, and discarding every ACK/CTS as too short
+- Fixed the Packet Visualiser "Channel Hopping" row being unselectable by touch and doing nothing
+- Fixed Packet Visualiser selector rows being dead on touch boards other than CrowPanel P4
+
+#### Web UI
+- Fixed the web UI dashboard SD Card card never populating; it now shows mount status, path and used/total space
+- Fixed the web UI dashboard "Remote CMD" field reading "No" while remote commands worked; it now shows Running/Idle as "Remote CMD Activity"
+- Fixed the web UI sending Wi-Fi commands with SSIDs or passwords containing quotes or spaces, and made command arguments, long commands and oversized web UI payloads get validated instead of silently truncated
+
+#### UI & Input
+- Fixed empty options menus (Wi-Fi, Settings, BadUSB, NFC, SubGHz, and more)
+- Fixed the setup wizard getting stuck on the country step, which looked like a freeze on keyboard-only devices
+- Fixed excessive row padding in the setup wizard's country and option lists on small panels
+- Fixed on-screen keyboard preview text scrolling vertically instead of horizontally
+- Fixed the Row Height setting being ignored by scan result lists and Enter not opening their detail views
+- Fixed AP/STA result rows rendering beneath the bottom touch bar
+- Fixed lockscreen and GhostScript touch bar gaps on large screens
 - Fixed detail titles always showing 'Details'
-- Fixed PSRAM task stack leaks across Wi-Fi attacks, scans, Ethernet, nRF24, SubGHz and MIC visualizer
-- Fixed DIAL URL/session buffer leaks and uninitialized-pointer cleanup
-- Fixed leaked LVGL async payloads when the display queue is busy
-- Fixed PCAP and wardriving CSV file handles leaking on restart
-- Fixed semaphore leaks in Chameleon and audio receiver init failures
-- Fixed Cloud Store install progress showing "0 KB downloaded" during the install phase
 - Fixed detail view info labels being cut off instead of scrolling sideways when too wide
+- Fixed touch-bar row passthrough
+- Fixed encoder select in scan result lists
+- Fixed T-Embed rotary encoder step rate and sensitivity
+- Fixed main menu and Apps grid titles being unreadable over asset pack backgrounds
+- Fixed BadBLE touch-drag scrolling
+- Fixed BadBLE poll timer leak on exit
+
+#### Apps & Plugins
+- Fixed stuck on-screen buttons and swallowed touch releases in canvas-based plugin apps on non-P4 targets
+- Fixed GhostScript crash when an event listener received an event
+- Fixed SD apps built for another chip showing in the Apps gallery and then failing to launch
+- Fixed Cloud Store install progress showing "0 KB downloaded" during the install phase
+
+#### Hardware & Boards
+- Fixed S3TWatch USB serial becoming unresponsive when the screen turns off
+- Fixed repeated AXP2101 battery errors and invalid battery readings on S3TWatch
+- Fixed S3TWatch backlight flickering instead of dimming in low power mode
 - Fixed T-Watch S3 RTC using the wrong I2C bus and chip address
 - Fixed RTC boot restore trusting an invalid (power-lost) oscillator time
+- Fixed CrowPanel display startup configs
+- Fixed Banshee GhostLink wardriving scans and S3 GPS fix selection
+- Fixed ESP32-C5 merged firmware failing to boot when flashed at `0x0` by placing the bootloader at the required `0x2000` offset - @yanxke (#395)
+
+#### Memory & Stability
+- Fixed memory and handle leaks in LVGL async calls, PSRAM task stacks, PCAP/wardrive CSV files, DIAL sessions and Chameleon/audio semaphores
 
 
-## Revival v2.1.2
+## Revival v2.1.3
+
+### Bug Fixes
+- Fixed boot crash on Cardputer (and other M5GFX boards) under ESP-IDF 6.1 by resetting the new spi_bus_config_t.dma_burst_size field to the driver default after M5GFX fills the config with 0xFF
+- Raised the SD Init task stack from 6K to 8K, fixing a boot-time stack overflow on Cardputer ADV
+
+
+
+## Revival v2.1.2 - 2026-09-03
+
 
 ### Added
 - Added support for more devices including ESP32-P4 boards with ESP32-C6 ESP-Hosted Wi-Fi and Bluetooth  (huge thank you to M5Stack and Elecrow for providing hardware to work on)
@@ -143,7 +386,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Disabled self-OTA on the Banshee C5 (the updater partition and embedded updater image were bad UX and repeatedly pushed the build over flash. OTA is still available over GhostLink to the S3)
 
 
-## Revival v2.1.1
+## Revival v2.1.1 - 2026-08-17
 
 ### Added
 - Added GhostLink P1 Core and Peer support
@@ -428,7 +671,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Added new WiFi docs pages for connecting, LAN discovery, port scanning, and environment sweep
 - Moved GhostScript docs to its own top-level section and updated GBT and native SD app docs
 
-## Revival v2.1-pre4
+## Revival v2.1-pre4 - 2026-07-16
 - Made Cloud Store catalogs grow on demand with paged browsing, supporting up to 32 apps, asset packs, and scripts per type on PSRAM boards
 - Preserved script permissions and memory limits in Cloud Store-installed GhostScript manifests
 - Stopped allocating the native app registry on no-PSRAM boards
@@ -680,7 +923,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
 - Added spinner/detail view flow for ARP Scan Network, mDNS Discovery, and Environment Sweep (replaces terminal dump with scan progress spinner, paginated result list, and per-item detail view)
 - Improved mDNS scan: deduplicates devices across services, null-safe when run from CLI, removed unused 2KB stack allocation
 
-## Revival v2.0-pre8
+## Revival v2.0-pre8 - 2026-06-28
 
 ### Changed
  - BLE advertiser and GATT device tracking now use the same live RSSI meter view as Wi-Fi AP tracking instead of the terminal
@@ -698,7 +941,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
  - Fixed the CYD 2.4" display freezing when no SD card is inserted by no longer tearing down SD's SPI3 bus on mount failure or unmount
 
 
-## Revival v2.0-pre7
+## Revival v2.0-pre7 - 2026-06-27
 
 ### Added
  - Added categorical submenus to the app gallery, grouping native SD apps by their manifest `category` field.
@@ -733,7 +976,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
  - Fixed universal remote button sends over-awarding Ghostchi XP (1 XP per button press instead of 4 XP per signal)
  - Fixed SHUTTING DOWN popup being wider than its text on T-Embed by auto-sizing popups to fit their content
 
-## Revival v2.0-pre6
+## Revival v2.0-pre6 - 2026-06-23
 
 ### Added
  - Add Marauder V8 hardware build - @H4W9
@@ -764,7 +1007,7 @@ Untagged entries are by ([@jaylikesbunda](https://github.com/jaylikesbunda)). A 
  - Fixed fullscreen LVGL popups not filling the runtime display area below the status bar on some configs
  - Fixed saved RGB pins being ignored at boot on boards with `CONFIG_NUM_LEDS=0` when the LED count was never set, causing `setrgbpins` to appear to not persist across reboots
 
-## Revival v2.0-pre5
+## Revival v2.0-pre5 - 2026-06-15
 
 ### Added
  - Added support for assigning a GhostLink connected chip to act as a blebridge between a main chip and the android companion app

@@ -79,6 +79,9 @@ static const SettingDescriptor k_settings_desc[] = {
     {"display_timeout", ST_U32, OFF(display_timeout_ms), "Display", 0, 0, 0},
     {"max_bright", ST_U8, OFF(max_screen_brightness), "Display", 0, 0, 100},
     {"invert_colors", ST_BOOL, OFF(invert_colors), "Display", 0, 0, 0},
+#ifdef CONFIG_BANSHEE_LITE_C5
+    {"auto_flip", ST_BOOL, OFF(auto_flip_enabled), "Display", 0, 0, 0},
+#endif
     {"terminal_color", ST_COLOR_HEX, OFF(terminal_text_color), "Display", 0, 0, 0},
     {"terminal_font_size", ST_U8, OFF(terminal_font_size), "Display", 0, 0, 2},
     {"menu_theme", ST_U8, OFF(menu_theme), "Display", 0, 0, THEME_PALETTE_THEME_COUNT - 1},
@@ -88,6 +91,7 @@ static const SettingDescriptor k_settings_desc[] = {
     {"repeat_speed", ST_U8, OFF(input_repeat_speed), "Display", 0, 0, 2},
     {"high_contrast", ST_BOOL, OFF(high_contrast), "Display", 0, 0, 0},
     {"sun_mode", ST_BOOL, OFF(sun_mode), "Display", 0, 0, 0},
+    {"privacy_mode", ST_BOOL, OFF(privacy_mode), "Display", 0, 0, 0},
     {"theme_bg_fx", ST_BOOL, OFF(theme_background_effects), "Display", 0, 0, 0},
     {"channel_delay", ST_FLOAT, OFF(channel_delay), "System", 0, 0, 0},
     {"broadcast_speed", ST_U16, OFF(broadcast_speed), "System", 0, 0, 65535},
@@ -464,6 +468,39 @@ void handle_webuiap_cmd(int argc, char **argv) {
     glog("Usage: webuiap [on|off|toggle|status]\n");
 }
 
+// privacy - Redact SSIDs and MAC addresses on screen (wardriving PII)
+void handle_privacy_cmd(int argc, char **argv) {
+    bool enabled = settings_get_privacy_mode(&G_Settings);
+
+    if (argc == 1) {
+        enabled = !enabled;
+    } else if (argc == 2) {
+        if (strcmp(argv[1], "on") == 0) {
+            enabled = true;
+        } else if (strcmp(argv[1], "off") == 0) {
+            enabled = false;
+        } else if (strcmp(argv[1], "toggle") == 0) {
+            enabled = !enabled;
+        } else if (strcmp(argv[1], "status") == 0) {
+            glog("Privacy mode is %s.\n", enabled ? "enabled" : "disabled");
+            return;
+        } else {
+            glog("Usage: privacy [on|off|toggle|status]\n");
+            return;
+        }
+    } else {
+        glog("Usage: privacy [on|off|toggle|status]\n");
+        return;
+    }
+
+    settings_set_privacy_mode(&G_Settings, enabled);
+    settings_persist_setting(SETTING_PRIVACY_MODE);
+    glog("Privacy mode %s. SSIDs and MAC addresses are %s on screen.\n",
+         enabled ? "enabled" : "disabled",
+         enabled ? "redacted" : "shown in full");
+    status_display_show_status(enabled ? "Privacy: On" : "Privacy: Off");
+}
+
 // clockstyle - Switch the Clock view between digital, analog and segment faces
 void handle_clockstyle_cmd(int argc, char **argv) {
     static const char *const names[] = {"Digital", "Analog", "Segment"};
@@ -590,9 +627,12 @@ void handle_settings_cmd(int argc, char **argv) {
         glog("    printer_alignment - Printer alignment (0-4)\n");
         glog("  Display Settings:\n");
         glog("    display_timeout   - Display timeout in ms\n");
-        glog("    max_bright        - Max screen brightness (0-100)\n");
-        glog("    invert_colors     - Invert screen colors (true/false)\n");
-        glog("    terminal_color    - Terminal text color (hex)\n");
+         glog("    max_bright        - Max screen brightness (0-100)\n");
+         glog("    invert_colors     - Invert screen colors (true/false)\n");
+#ifdef CONFIG_BANSHEE_LITE_C5
+         glog("    auto_flip        - Auto-rotate between portrait and landscape (true/false)\n");
+#endif
+         glog("    terminal_color    - Terminal text color (hex)\n");
         glog("    terminal_font_size - Terminal font size (0=Small,1=Normal,2=Large)\n");
         glog("    menu_theme        - Menu theme palette index\n");
         glog("    font_size         - Global font size (0=Small,1=Normal,2=Large)\n");
@@ -601,6 +641,7 @@ void handle_settings_cmd(int argc, char **argv) {
         glog("    repeat_speed      - Input repeat speed (0-2)\n");
         glog("    high_contrast     - High contrast mode (true/false)\n");
         glog("    sun_mode          - Sun mode (true/false)\n");
+        glog("    privacy_mode      - Redact SSIDs/MACs on screen (true/false)\n");
         glog("  System Settings:\n");
         glog("    channel_delay     - Channel delay in ms\n");
         glog("    broadcast_speed   - Broadcast speed\n");

@@ -1,13 +1,12 @@
 ---
 title: "GBT (Ghost Build Tool)"
-description: "Build and package Native SD Apps, compile GhostScript, and manage GhostESP firmware."
+description: "Build and package Native SD Apps, compile GhostScript, and manage GhostESP firmware"
 weight: 35
-toc: true
 ---
 
 `gbt` is the GhostESP CLI toolchain. It builds Native SD App `.so` files with ESP-IDF, packages `.gapp` archives, compiles GhostScript `.gs` files into `.gsb` bytecode, builds and flashes firmware, and manages serial devices.
 
-Use [GhostScript]({{< relref "../ghostscript" >}}) or [Native SD Apps]({{< relref "native-sd-apps" >}}) for the extension model and end-to-end workflow. This page describes the commands that currently exist.
+Use [GhostScript]({{< relref "../ghostscript" >}}) or [Native SD Apps]({{< relref "native-sd-apps" >}}) for the extension model and end-to-end workflow.
 
 ## Installation
 
@@ -20,7 +19,7 @@ pip install -e .
 
 This installs `gbt` (and `ghostbt`) as a command on your PATH. Both names invoke the same tool.
 
-### Requirements
+### Prerequisites
 
 - Python 3.10+
 - Git (for `gbt setup`)
@@ -62,7 +61,7 @@ GBT stores discovered ESP-IDF paths in `~/.ghostbt/config.json`. This file is ma
 
 ---
 
-## `gbt create` — Scaffold an App
+## `gbt create` - Scaffold an App
 
 ```
 gbt create <app_id> [--name "Display Name"] [--template basic_app] [--out .]
@@ -73,17 +72,17 @@ Creates a new app project from a basic app template. Placeholders `{{APP_ID}}`, 
 The `app_id` may only contain letters, numbers, `_` and `-`.
 
 The generated directory is a standalone app repository and can live outside the GhostESP firmware tree. It includes:
-- `CMakeLists.txt` — builds the shared object with the ESP-IDF ELF loader component
-- `main/{{APP_SYMBOL}}.c` — minimal app with `GHOSTESP_APP_DEFINE`
-- `manifest.json` — runtime app metadata
-- `sdk/` — the SDK headers used for reproducible catalog builds
-- `sdkconfig.defaults` — enables ELF loader support
-- `.github/workflows/build.yml` — verifies the default ESP32-S3 build on GitHub
-- `.gitignore` and `README.md` — source repository defaults
+- `CMakeLists.txt` - builds the shared object with the ESP-IDF ELF loader component
+- `main/{{APP_SYMBOL}}.c` - minimal app with `GHOSTESP_APP_DEFINE`
+- `manifest.json` - runtime app metadata
+- `sdk/` - the SDK headers used for reproducible catalog builds
+- `sdkconfig.defaults` - enables ELF loader support
+- `.github/workflows/build.yml` - verifies the default ESP32-S3 build on GitHub
+- `.gitignore` and `README.md` - source repository defaults
 
 ---
 
-## `gbt build` — Build an App
+## `gbt build` - Build an App
 
 ```
 gbt build [app_dir] [--target esp32s3] [--skip-set-target]
@@ -100,11 +99,13 @@ Use `--skip-set-target` to skip the `idf.py set-target` step if already configur
 
 ---
 
-## `gbt package` — Package an App
+## `gbt package` - Package an App
 
 ```
-gbt package [app_dir] [--out dist] [--gapp]
+gbt package [app_dir] [--out dist] [--gapp] [--manifest manifest.json]
 ```
+
+`--manifest <name>` selects the manifest filename under the app directory (default: `manifest.json`). This is useful for multi-target app repos that keep one manifest per target alongside a shared source tree.
 
 Copies the built `.so`, `manifest.json`, icons, and assets into `dist/<app_id>/`. Auto-converts PNG icon sources (`icon_source` in manifest) to raw RGB565 or RGB565A8 at the dimensions specified by `icon_width`/`icon_height`.
 
@@ -117,41 +118,43 @@ gbt package ./my_scanner --gapp
 # Output: ./my_scanner/dist/my_scanner-1.0.0-esp32s3.gapp
 ```
 
-Copy the `.gapp` to `/mnt/ghostesp/apps/` on your SD card, then reboot the device. When using an explicit target, prefer `gbt dist`; `gbt package` uses the target from `manifest.json`.
+Install the resulting `.gapp` on your SD card as described in [Native SD Apps]({{< relref "native-sd-apps" >}}). When using an explicit target, prefer `gbt dist`; `gbt package` uses the target from `manifest.json`.
 
 ---
 
-## `gbt dist` — Build + Package
+## `gbt dist` - Build + Package
 
 ```
-gbt dist [app_dir] [--target esp32s3] [--out dist] [--gapp]
+gbt dist [app_dir] [--target esp32s3] [--out dist] [--gapp] [--manifest manifest.json]
 ```
 
-Runs `build` then `package` in sequence and forwards the selected target into the packaged manifest. This is the recommended release command:
+Runs `build` then `package` in sequence and forwards the selected target into the packaged manifest. Like `gbt package`, it accepts `--manifest <name>` to pick the manifest filename under the app directory. This is the recommended release command:
 
 ```powershell
 gbt dist ./my_scanner --target esp32s3 --gapp
 ```
 
+App packaging targets are `esp32`, `esp32s2`, `esp32s3`, `esp32c5`, `esp32c6`, `esp32c61`, and `esp32p4`; `esp32c3` is excluded because the ELF loader configuration does not support `.gapp` shared-object apps for it.
+
 ---
 
-## `gbt asset` — Build Asset Images and Packs
+## `gbt asset` - Build Asset Images and Packs
 
 ```powershell
 gbt asset image ./icon.png --out ./icon.gimg --width 64 --height 64 --format rgb565a8
 gbt asset pack ./my_pack --out ./dist --archive
 ```
 
-`gbt asset image` converts a single PNG to GhostESP's `.gimg` runtime format. `--format` accepts `rgb565`, `rgb565a8` (default), or `indexed_4bpp` — the last quantizes the source to a 16-color palette and packs 4-bit pixels, ideal for internal-only devices where RAM is tight. `gbt asset pack` reads an asset-pack manifest, converts icon/background sources, writes an SD-ready folder, and optionally creates a `.gtheme` archive. Set the pack-wide icon format with the `icon_format` field in the source manifest, or override per-background via the `format` field on each `background_sources` entry.
+`gbt asset image` converts a single PNG to GhostESP's `.gimg` runtime format. `--format` accepts `rgb565`, `rgb565a8` (default), or `indexed_4bpp` - the last quantizes the source to a 16-color palette and packs 4-bit pixels, ideal for internal-only devices where RAM is tight. `gbt asset pack` reads an asset-pack manifest, converts icon/background sources, writes an SD-ready folder, and optionally creates a `.gtheme` archive. Set the pack-wide icon format with the `icon_format` field in the source manifest, or override per-background via the `format` field on each `background_sources` entry.
 
 For backgrounds, a source named `background` with `"variants": true` generates the default runtime set: `full` (`240x320 rgb565`), `half` (`120x160 indexed_4bpp`), `tiny` (`80x107 indexed_4bpp`), and `tile` (`32x32 indexed_4bpp`). Firmware prefers `full` on PSRAM boards and scaled `half`/`tiny` variants on internal-only boards before falling back to the tile.
 
 ---
 
-## `gbt setup` — Install ESP-IDF
+## `gbt setup` - Install ESP-IDF
 
 ```
-gbt setup [--target esp32s3 esp32c6 ...] [--idf-version v6.0] [--install-dir ~/esp-idf]
+gbt setup [--target esp32s3 esp32c6 ...] [--idf-version v6.1] [--install-dir ~/esp-idf]
 ```
 
 If `idf.py` or `$IDF_PATH` is already available, GBT saves the path and exits. Confirm that the existing ESP-IDF installation includes tools for the target you need. Otherwise, GBT clones ESP-IDF from GitHub and runs the installer:
@@ -166,7 +169,7 @@ Supported setup targets include firmware targets such as `esp32c3`. Native SD `.
 
 ---
 
-## `gbt boards` — List Board Configs
+## `gbt boards` - List Board Configs
 
 ```
 gbt boards
@@ -185,7 +188,7 @@ ghostboard_esp32s3             esp32s3
 
 ---
 
-## `gbt firmware` — Build Firmware
+## `gbt firmware` - Build Firmware
 
 ```
 gbt firmware <board> [--repo /path/to/repo] [--skip-set-target]
@@ -202,13 +205,13 @@ Use `gbt boards` to see all available board IDs.
 
 ---
 
-## `gbt flash` — Flash to Device
+## `gbt flash` - Flash to Device
 
 ```
 gbt flash [firmware|app] [options]
 ```
 
-### Flash firmware
+### Flash Firmware
 
 ```
 gbt flash firmware [--port COM3] [--baud 460800] [--board cardputer] [--verify] [--erase] [--monitor]
@@ -221,17 +224,17 @@ gbt flash firmware --board cardputer -m
 # Builds (if needed), flashes, then opens monitor
 ```
 
-### Install app (SD card instructions)
+### Install App (SD Card Instructions)
 
 ```
 gbt flash app --app-dir ./my_scanner [--port COM3]
 ```
 
-This command does not flash or copy an app. It only prints SD-card instructions and currently still expects a serial port. Apps are loaded from SD at runtime; package with `gbt dist ... --gapp`, copy the archive to `/mnt/ghostesp/apps/`, and reboot instead.
+This command does not flash or copy an app. It only prints SD-card instructions and currently still expects a serial port. Apps are loaded from SD at runtime; package with `gbt dist ... --gapp` and install the archive as described in [Native SD Apps]({{< relref "native-sd-apps" >}}) instead.
 
 ---
 
-## `gbt monitor` — Serial Monitor
+## `gbt monitor` - Serial Monitor
 
 ```
 gbt monitor [--port COM3] [--baud 115200]
@@ -243,7 +246,7 @@ Press `Ctrl+]` to exit.
 
 ---
 
-## `gbt ports` — List Serial Ports
+## `gbt ports` - List Serial Ports
 
 ```
 gbt ports
@@ -259,7 +262,7 @@ Uses `pyserial` if available, falling back to ESP-IDF's `serial.tools.list_ports
 
 ---
 
-## `gbt script` — Compile GhostScript
+## `gbt script` - Compile GhostScript
 
 ```
 gbt script compile <file-or-directory> [--out <path>] [--deploy] [--deploy-dir <scripts-dir>]

@@ -1,39 +1,28 @@
 ---
 title: "Scanning networks"
-description: "Passively find and review nearby Wi-Fi access points."
+description: "Discover and review nearby Wi-Fi access points"
 weight: 10
 ---
 
-## What this does
+An AP scan lists nearby Wi-Fi access points without connecting to them. GhostESP uses an **active** scan (it transmits probe requests) on normal channels and falls back to passive scanning on DFS/restricted channels. Use the on-device UI or the serial CLI; on a single-board setup the WebUI cannot stay connected while the Wi-Fi radio scans.
 
-This passive scan lists nearby Wi-Fi access points without connecting to them or transmitting network traffic.
+{{< flow title="How an active scan works" caption="Channels are visited in turn. The scan records what it hears and creates no connection." >}}
+Tune the radio to the next channel | Channels hop automatically while the scan runs
+Capture beacon and probe responses | Beacon (subtype 0x08) and Probe Response (0x05) frames
+Record SSID, BSSID, channel, and RSSI | SSID can be hidden; RSSI comes from radio metadata
+Repeat until every channel has been visited | The channel set depends on the country code
+{{< /flow >}}
 
-## Before you start
+## Scanning
 
-- GhostESP flashed device, powered on with a wireless antenna.
-- Use the on-device UI or serial CLI. On a single-board setup, the WebUI cannot remain connected while the Wi-Fi radio scans.
+1. Open **Menu → Wi-Fi → Recon** and choose **Scan APs**, then wait for the scan to finish.
+2. Select **List APs** and review each network's name, channel, signal strength, and manufacturer.
 
-## On-device steps
+Use **Scan APs Live** to watch access points appear, or **Channel Congestion** to review activity by channel.
 
-1. Open **Menu → WiFi → Scanning**.
-2. Choose **Scan Access Points**.
-3. Wait for the scan to finish.
-4. Select **List Access Points**.
-5. Review each network's name, channel, signal strength, and manufacturer.
+From the CLI, run `scanap` to start a scan, or `scanap <1-120>` to scan for a fixed number of seconds, then run `list -a` to see the cached list of networks. Run `scanap -live` to watch networks appear as they are discovered, or `scanap -stop` to stop an in-progress scan. Use `hop [auto|all|basic|custom <1,2,3>|1,2,3]` to control which channels scans and captures hop through.
 
-Use **Scan APs Live** to see access points as they appear, or **Channel Congestion** to review activity by channel.
-
-## CLI steps
-
-1. Open the GhostESP terminal (serial connection or on-device terminal).
-2. Run `scanap` to start a scan.
-3. Run `list -a` to see the cached list of networks.
-
-Run `scanap -live` to watch networks appear as they are discovered.
-
-## Expected result
-
-GhostESP displays nearby access points and their available details. No network connection is created.
+A scan lists what is nearby but creates no network connection.
 
 ## Troubleshooting
 

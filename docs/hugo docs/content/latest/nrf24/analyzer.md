@@ -8,6 +8,13 @@ The NRF24 analyzer scans 2.4 GHz channels and shows relative RF activity from `2
 
 It also includes a built-in **jamming detection engine** that identifies known threat signatures in real time.
 
+{{< flow title="How the analyzer sweeps" caption="The jam classifier needs 6 consecutive detections before it reports a threat." >}}
+Step through 126 channels | `2.400 GHz` to `2.525 GHz`
+Sample each channel every 45 ms | One RSSI level per channel
+Compare consecutive sweeps | Sustained activity stands out from single blips
+Classify the signature | Known Wi-Fi/Zigbee/video patterns; 6 ticks of confidence before alerting
+{{< /flow >}}
+
 ## Prerequisites
 
 - Firmware built with NRF24 support (`CONFIG_HAS_NRF24=y`)
@@ -16,7 +23,7 @@ It also includes a built-in **jamming detection engine** that identifies known t
 
 If you see `built without CONFIG_HAS_NRF24`, the firmware was built without local NRF24 analyzer support.
 
-## On-device UI
+## On-Device UI
 
 1. Open **Menu → NRF24 → Frequency Analyzer**.
 2. Watch the graph while the scan cursor sweeps channels.
@@ -37,14 +44,14 @@ nrf24 stop
 
 `nrf24 status` prints running state, pause state, last error, and active pin config.
 
-## Reading the graph
+## Reading the Graph
 
 - **X axis:** frequency in GHz (`2.400` to `2.525`)
 - **Y axis:** activity percentage (`0-100%`)
 - **Bars:** current activity estimate per channel
 - **White markers:** recent peak levels
 - **Gray cursor:** current scan position
-- **Red alert bar:** appears across the top of the graph when jamming is detected, showing the threat classification and peak channel
+- **Red alert bar:** appears across the top of the graph when jamming is detected, showing only the threat classification; the channel is in a separate `CH:%03d` label
 - **Red vertical marker:** highlights the peak signal channel during a detection event
 
 ## Jamming Detection
@@ -56,7 +63,7 @@ The analyzer continuously monitors RF activity patterns and can identify several
 The detector analyses channel activity in each scan tick by checking:
 
 1. **Consecutive channel runs** -- long unbroken stretches of high signal indicate a sequential sweep
-2. **Gap channel activity** -- channels between WiFi bands (e.g. 24-25, 49-50, 74-83) are normally quiet; activity here suggests broadband jamming
+2. **Gap channel activity** -- channels between Wi-Fi bands (e.g. 24-25, 49-50, 74-83) are normally quiet; activity here suggests broadband jamming
 3. **Known channel pattern matching** -- specific channel arrays associated with known threat actors
 4. **Simultaneous carrier detection** -- multiple channels at near-100% signal at the same time indicates multi-radio hardware
 5. **Confidence counter** -- detection must persist for 6 consecutive ticks (~270ms) before triggering, preventing false alarms from transient noise
@@ -69,7 +76,7 @@ When a jamming event is confirmed, the status line below the graph changes from 
 |---|---|
 | `BROADBAND NOISE` | Full-band sequential sweep across channels 1-83, often with gap channel saturation |
 | `SIG: FW-A BLE ADV` | Targeted BLE advertising channel jamming on {2, 26, 80} with low total active channel count |
-| `SIG: FW-A WIFI` | WiFi-band jamming using a 15-channel step-5 pattern (channels spaced 5 MHz apart) |
+| `SIG: FW-A WIFI` | Wi-Fi-band jamming using a 15-channel step-5 pattern (channels spaced 5 MHz apart) |
 | `SIG: FW-A HI-BAND` | Targeted upper-band jamming on channels 76, 78, 79 |
 | `SIG: FW-B BLE ADV` | Alternative BLE advertising channel sweep on {2, 26, 80} with multi-radio characteristics |
 | `SIG: FW-B WIFI` | Contiguous lower-band block sweep channels 1-12, indicative of continuous carrier flooding |
@@ -83,7 +90,7 @@ The detector distinguishes two primary threat actor profiles based on their chan
 
 **Firmware A** patterns are characterized by:
 - Sequential channel sweeping with controlled dwell times
-- A distinctive 15-channel WiFi pattern with 5-channel step spacing
+- A distinctive 15-channel Wi-Fi pattern with 5-channel step spacing
 - Single-radio operation (one active carrier at a time)
 - Targeted protocol modes (BLE advertising, upper-band NRF)
 

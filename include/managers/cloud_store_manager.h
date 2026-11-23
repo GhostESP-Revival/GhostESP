@@ -63,6 +63,8 @@ typedef struct {
 
 bool cloud_store_is_available(void);
 bool cloud_store_apps_available(void);
+/** True when Wi-Fi (STA) or Ethernet has an IP address, i.e. the store can reach the internet. */
+bool cloud_store_has_internet(void);
 esp_err_t cloud_store_manager_init(void);
 void cloud_store_manager_cleanup(void);
 esp_err_t cloud_store_refresh_async(void);

@@ -44,6 +44,12 @@ typedef struct {
 #define INPUT_ITEM_SIZE sizeof(InputEvent)
 extern QueueHandle_tt input_queue;
 
+/* Drop every input event still queued. Views call this when opening a modal
+ * overlay that treats any input as "dismiss": events queued before the overlay
+ * existed (e.g. taps that landed while a long scan held the UI) would
+ * otherwise arrive afterwards and immediately cancel it. */
+void display_manager_flush_input_queue(void);
+
 #define MUTEX_TIMEOUT_MS 10
 
 #define HARDWARE_INPUT_TASK_PRIORITY (14)
@@ -219,6 +225,10 @@ void display_manager_restore_status_bar(void);
 // such as PN532 scanning/bruteforcing are active to avoid bus contention.
 void display_manager_set_low_i2c_mode(bool on);
 bool display_manager_is_low_i2c_mode(void);
+
+#ifdef CONFIG_BANSHEE_LITE_C5
+void display_manager_set_auto_flip_enabled(bool enabled);
+#endif
 
 void display_manager_suspend_lvgl_task(void);
 void display_manager_resume_lvgl_task(void);

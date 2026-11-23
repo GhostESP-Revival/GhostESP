@@ -1,0 +1,14 @@
+Title: Customization
+Description: Themes, asset packs, and visual customization for GhostESP
+URL: /latest/customization/
+Version: latest
+Section: GhostESP: Revival
+Search index: /search-index.json
+
+# Customization
+
+> Themes, asset packs, and visual customization for GhostESP
+
+---
+
+Customize the look and feel of GhostESP with asset packs.

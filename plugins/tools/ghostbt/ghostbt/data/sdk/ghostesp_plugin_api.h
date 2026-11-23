@@ -42,6 +42,27 @@ typedef struct {
     uint32_t last_change_ms;
 } ghostesp_input_snapshot_t;
 
+/* Extended input snapshot: the v1 fields plus raw panel touch state.
+ *
+ * This is a separate type on purpose. input_snapshot() has no size argument,
+ * so the firmware cannot tell how large the caller's struct is and appending
+ * fields to ghostesp_input_snapshot_t would overrun an app still built against
+ * the 16-byte v1 layout. Apps that want touch call input_snapshot_ex() with
+ * sizeof(*out), which lets the firmware write only what the caller declared. */
+typedef struct {
+    uint32_t held;
+    uint32_t pressed;
+    uint32_t released;
+    uint32_t last_change_ms;
+    /* True while a finger is physically on the panel, regardless of whether
+     * the touch was routed to this app. A canvas app can use it to drop its
+     * own held virtual buttons when the finger lifts, so a swallowed release
+     * can never leave a direction stuck on. */
+    bool touch_active;
+    int32_t touch_x;   /* display space, only meaningful while touch_active */
+    int32_t touch_y;
+} ghostesp_input_snapshot_v2_t;
+
 typedef struct {
     uint8_t bssid[6];
     char ssid[33];
@@ -98,6 +119,23 @@ typedef struct {
     bool has_appearance;
     uint16_t appearance;
 } ghostesp_ble_adv_info_t;
+
+#define GHOSTESP_ESPNOW_NAME_MAX 24
+#define GHOSTESP_ESPNOW_MESSAGE_MAX 160
+
+typedef struct {
+    uint8_t mac[6];
+    int8_t rssi;
+    uint32_t last_seen_ms;
+    char name[GHOSTESP_ESPNOW_NAME_MAX];
+} ghostesp_espnow_peer_t;
+
+typedef struct {
+    uint8_t sender_mac[6];
+    uint32_t received_at_ms;
+    char sender_name[GHOSTESP_ESPNOW_NAME_MAX];
+    char text[GHOSTESP_ESPNOW_MESSAGE_MAX];
+} ghostesp_espnow_message_t;
 
 typedef void *ghostesp_ui_obj_t;
 typedef void (*ghostesp_ui_button_cb_t)(void *user);
@@ -185,6 +223,65 @@ typedef struct {
 } ghostesp_storage_stat_t;
 
 #define GHOSTESP_NFC_T2_NDEF_MAX 1024
+
+/* Native design tokens from gui/design_tokens.h, exposed so apps can size
+ * rows, padding and safe areas exactly like native views. */
+typedef struct {
+    int32_t row_height;     /* default_row_height() for this panel */
+    int32_t grid;           /* GUI_GRID: base spacing unit */
+    int32_t pad_row;        /* vertical gap between list rows */
+    int32_t safe_area_hor;  /* GUI_SAFEAREA_HOR: side margin */
+    int32_t safe_area_ver;  /* GUI_SAFEAREA_VER: vertical margin */
+    int32_t status_bar_h;   /* GUI_STATUS_BAR_H */
+    int32_t home_safe_h;    /* GUI_HOME_SAFE_H: reserved bottom gesture strip */
+} ghostesp_ui_metrics_t;
+
+/* ---- Batched UI primitives ------------------------------------------
+ *
+ * Every ui_obj_* call and its read-back counterpart costs a blocking hop onto
+ * the LVGL task, so a layout pass over N rows costs 2N round trips and a busy
+ * UI task turns that into visible jank. The two calls below collapse a whole
+ * pass into one hop.
+ *
+ * Both take app-owned arrays: the firmware allocates nothing on the hot path,
+ * so batching does not move any memory into the firmware. `count` is clamped
+ * to the GHOSTESP_UI_BATCH_MAX below; entries that name a stale object, or (for
+ * props) a property this firmware does not know, are skipped and counted so an
+ * app can tell an older firmware from a bug in its own array. */
+
+/* Entries ui_obj_get_rects() will accept in one call. */
+#define GHOSTESP_UI_BATCH_MAX 64
+
+/* Property selectors for ui_obj_apply_props(). Each entry takes up to four
+ * int32 arguments; unused ones are ignored. */
+typedef enum {
+    GHOSTESP_UI_PROP_POS = 1,        /* a=x b=y */
+    GHOSTESP_UI_PROP_SIZE,           /* a=w b=h */
+    GHOSTESP_UI_PROP_WIDTH,          /* a=w */
+    GHOSTESP_UI_PROP_HEIGHT,         /* a=h */
+    GHOSTESP_UI_PROP_PAD,            /* a=left b=right c=top d=bottom */
+    GHOSTESP_UI_PROP_SCROLLABLE,     /* a=nonzero enables */
+    GHOSTESP_UI_PROP_FLEX_ALIGN,     /* a=main b=cross c=track (ghostesp_flex_align_t) */
+    GHOSTESP_UI_PROP_BG_COLOR,       /* a=0xRRGGBB */
+    GHOSTESP_UI_PROP_TEXT_COLOR,     /* a=0xRRGGBB */
+    GHOSTESP_UI_PROP_OPA,            /* a=0..255 */
+    GHOSTESP_UI_PROP_RADIUS,         /* a=px */
+    GHOSTESP_UI_PROP_HIDDEN,         /* a=nonzero hides */
+    GHOSTESP_UI_PROP_ALIGN,          /* a=align b=x_ofs c=y_ofs (ghostesp_align_t) */
+} ghostesp_ui_prop_t;
+
+typedef struct {
+    ghostesp_ui_obj_t obj;
+    uint8_t prop;        /* ghostesp_ui_prop_t */
+    uint8_t _pad[3];     /* keeps the int32 args 4-byte aligned */
+    int32_t a, b, c, d;
+} ghostesp_ui_prop_set_t;
+
+/* Flags for ui_options_create_ex(). */
+#define GHOSTESP_UI_OPTIONS_NO_STATUS_BAR (1u << 0) /* no status bar; title is ignored */
+#define GHOSTESP_UI_OPTIONS_TRANSPARENT   (1u << 1) /* no list background, so whatever is
+                                                   * underneath (a canvas, a card art)
+                                                   * stays visible */
 
 typedef struct {
     uint8_t uid[10];
@@ -614,9 +711,89 @@ typedef struct ghostesp_api {
        elapses). Returns true when no blit is outstanding — i.e. when the
        buffer passed to the last async blit is safe to overwrite. */
     bool (*ui_canvas_blit_async_wait)(uint32_t timeout_ms);
+    bool (*espnow_start)(uint8_t channel);
+    void (*espnow_stop)(void);
+    bool (*espnow_is_active)(void);
+    uint8_t (*espnow_channel)(void);
+    const char *(*espnow_name)(void);
+    const char *(*espnow_last_error)(void);
+    bool (*espnow_announce)(void);
+    int (*espnow_peer_count)(void);
+    bool (*espnow_get_peer)(int index, ghostesp_espnow_peer_t *out);
+    bool (*espnow_send)(const uint8_t mac[6], const char *text);
+    int (*espnow_message_count)(void);
+    bool (*espnow_receive)(ghostesp_espnow_message_t *out);
+    /* Optional strict PSRAM allocation for large app buffers. Unlike malloc,
+       this never falls back to internal RAM. */
+    void *(*psram_malloc)(size_t size);
+    void (*psram_free)(void *ptr);
+
+    /* ---- v2 additions. Appended at the end so v1 apps keep working; apps
+     * that need them should include the matching fields in their required
+     * API size (offsetof(ghostesp_api_t, ...) + sizeof). ---- */
+
+    /* Absolute screen rectangle of a widget, for app-side touch hit-testing
+     * that matches native LVGL geometry exactly. */
+    void (*ui_obj_get_rect)(ghostesp_ui_obj_t obj, int32_t *x, int32_t *y,
+                            int32_t *w, int32_t *h);
+
+    /* Native design tokens (gui/design_tokens.h), so app menus and lists can
+     * match native views on every panel instead of approximating them. */
+    void (*ui_metrics)(ghostesp_ui_metrics_t *out);
+
+    /* Push a page on top of the current one without destroying it, and pop
+     * back with its state intact. Mirrors the native view stack, which
+     * ui_screen_create cannot do because it rebuilds the root each time. */
+    ghostesp_ui_obj_t (*ui_page_push)(const char *title);
+    bool (*ui_page_pop)(void);
+
+    /* ---- v3 additions. Appended at the end so v1/v2 apps keep working; the
+     * firmware is the one that reports its own size in struct_size, so an app
+     * built against a newer header can gate on GHOSTESP_API_HAS() and run on
+     * older firmware. ---- */
+
+    /* One UI-task hop for N widget rects instead of N. `out` receives four
+     * int32 per entry (x, y, w, h) in `objs` order; a stale object comes back
+     * as 0,0,0,0. Returns the number of entries written, which is 0 both for
+     * a bad call and for a call the UI task refused. */
+    int32_t (*ui_obj_get_rects)(const ghostesp_ui_obj_t *objs, int32_t count,
+                                int32_t *out);
+
+    /* One UI-task hop for N property writes, applied in array order. Returns
+     * the number applied; a short result means either a stale object or a
+     * property this firmware predates. */
+    int32_t (*ui_obj_apply_props)(const ghostesp_ui_prop_set_t *sets, int32_t count);
+
+    /* Native options list parented into the app's own object, for embedding a
+     * real firmware-styled list inside a card or overlay instead of
+     * hand-rolling one. Sizes itself to the parent's content area, so the
+     * caller does not have to re-measure it. See the
+     * GHOSTESP_UI_OPTIONS_* flags. */
+    ghostesp_options_t (*ui_options_create_ex)(ghostesp_ui_obj_t parent, const char *title,
+                                               uint32_t flags);
+    /* Row index under a screen point, or -1. Uses the row's post-scroll
+     * coordinates, so it stays correct for a list longer than the screen. */
+    int32_t (*ui_options_item_at)(ghostesp_options_t opts, int32_t x, int32_t y);
+    int32_t (*ui_options_get_item_count)(ghostesp_options_t opts);
+    /* Rewrite one row's label in place, so a value that changes (a save slot's
+     * summary, a selected toggle) does not cost a clear-and-rebuild. */
+    void (*ui_options_update_item_text)(ghostesp_options_t opts, int32_t index, const char *text);
+
+    /* input_snapshot() plus raw touch, with an explicit caller size. Writes
+     * only the fields `out_size` covers, so passing sizeof(ghostesp_input_snapshot_t)
+     * is safe even against a v2-only struct. Returns bytes written, or 0. */
+    int32_t (*input_snapshot_ex)(ghostesp_input_snapshot_v2_t *out, size_t out_size);
 } ghostesp_api_t;
 
 #define GHOSTESP_API_STRUCT_SIZE_V1 sizeof(ghostesp_api_t)
+
+/* Presence test for optional API fields. The firmware fills in struct_size
+ * with the size of the struct it was compiled with, so an app built against a
+ * newer header can check before dereferencing a field an older firmware does
+ * not have. `field` must name a function pointer member. */
+#define GHOSTESP_API_HAS(_api, _field) \
+    ((_api) && (_api)->struct_size >= (offsetof(ghostesp_api_t, _field) + \
+                                        sizeof(((_api)->_field))))
 
 typedef struct ghostesp_app {
     uint32_t api_version;

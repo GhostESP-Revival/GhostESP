@@ -8,6 +8,7 @@
 #include "core/memory_debug.h"
 #include "managers/status_display_manager.h"
 #include "managers/wifi_manager.h"
+#include "scans/wifi/wifi_channels.h"
 #include "managers/sd_card_manager.h"
 #include "scans/wifi/port_scan.h"
 #include "scans/wifi/ssh_scan.h"
@@ -150,8 +151,29 @@ void handle_scan_arp(int argc, char **argv) {
         return;
     }
 
+    if (argc >= 2 && strcmp(argv[1], "stop") == 0) {
+        if (!arp_scan_is_running()) {
+            glog("ARP scan is not running.\n");
+            return;
+        }
+        arp_scan_cancel();
+        status_display_show_status("ARP Stop");
+        return;
+    }
+
+    // Same async path as the UI: keeps the CLI responsive and stoppable.
     glog("Starting ARP scan on local network...\n");
-    wifi_manager_arp_scan_subnet();
+    esp_err_t err = arp_scan_start_async();
+    if (err == ESP_ERR_INVALID_STATE) {
+        glog("An ARP scan is already running. Use 'scanarp stop' to cancel it.\n");
+        status_display_show_status("ARP Busy");
+        return;
+    }
+    if (err != ESP_OK) {
+        glog("Error: Could not start ARP scan.\n");
+        status_display_show_status("ARP Failed");
+        return;
+    }
     status_display_show_status("ARP Scan");
 }
 
@@ -461,7 +483,8 @@ void handle_listen_probes_cmd(int argc, char **argv) {
     if (argc > 1) {
         char *endptr;
         long ch = strtol(argv[1], &endptr, 10);
-        if (*endptr == '\0' && ch >= 1 && ch <= MAX_WIFI_CHANNEL) {
+        if (*endptr == '\0' && ch >= 1 && ch <= 177 &&
+            wifi_channels_is_monitor_channel((uint8_t)ch)) {
             channel = (uint8_t)ch;
             channel_hopping = false;
             glog("Starting to listen for probe requests on channel %d...\n", channel);
@@ -469,7 +492,7 @@ void handle_listen_probes_cmd(int argc, char **argv) {
             snprintf(status_msg, sizeof(status_msg), "Probes Ch %02d", channel);
             status_display_show_status(status_msg);
         } else {
-            glog("Invalid channel: %s. Valid range: 1-%d\n", argv[1], MAX_WIFI_CHANNEL);
+            glog("Invalid or country-disallowed channel: %s\n", argv[1]);
             status_display_show_status("Channel Bad");
             return;
         }
@@ -494,8 +517,16 @@ void handle_listen_probes_cmd(int argc, char **argv) {
 
     if (channel_hopping) {
         wifi_manager_start_monitor_mode(wifi_listen_probes_callback);
+        wifi_manager_start_wireshark_channel_hop();
     } else {
-        esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
+        esp_err_t channel_err = esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
+        if (channel_err != ESP_OK) {
+            glog("Failed to set probe channel %d: %s\n", channel,
+                 esp_err_to_name(channel_err));
+            wifi_manager_stop_monitor_mode();
+            pcap_file_close();
+            return;
+        }
         wifi_manager_start_monitor_mode(wifi_listen_probes_callback);
     }
 }

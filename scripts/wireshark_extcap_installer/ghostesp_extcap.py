@@ -110,6 +110,22 @@ def _is_plausible_packet_header(ts_sec, ts_usec, incl_len, orig_len, snaplen):
     return True
 
 
+def _looks_like_radiotap(buf, offset, incl_len):
+    """A DLT_IEEE802_11_RADIO record must start with a plausible radiotap
+    header. Checking this while resyncing stops the reader from latching onto
+    a false record boundary and then emitting fabricated frames."""
+    if incl_len < 8 or offset + 8 > len(buf):
+        return False
+    if buf[offset] != 0x00:            # radiotap version must be 0
+        return False
+    rt_len = buf[offset + 2] | (buf[offset + 3] << 8)
+    if rt_len < 8 or rt_len > 64:      # sane header length
+        return False
+    if rt_len > incl_len:              # header cannot exceed the record
+        return False
+    return True
+
+
 def _serial_read_some(ser):
     n = ser.in_waiting
     if n and n > 0:
@@ -201,6 +217,7 @@ def capture(interface, port, baud, capture_type, channel_lock, fifo):
 
         try:
             buf = bytearray()
+            check_radiotap = (dlt == 127)
             while True:
                 chunk = _serial_read_some(ser)
                 if chunk:
@@ -215,6 +232,12 @@ def capture(interface, port, baud, capture_type, channel_lock, fifo):
                     needed = 16 + incl_len
                     if len(buf) < needed:
                         break
+
+                    # Reject false resync points: a Wi-Fi record must be
+                    # followed by a valid radiotap header.
+                    if check_radiotap and not _looks_like_radiotap(buf, 16, incl_len):
+                        del buf[0]
+                        continue
 
                     out.write(buf[:16])
                     out.write(buf[16:needed])

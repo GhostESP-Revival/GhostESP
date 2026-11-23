@@ -134,6 +134,20 @@ void gui_router_back(void) {
     display_manager_run_on_lvgl(run_back, NULL);
 }
 
+static void run_refresh(void *arg) {
+    (void)arg;
+    render_current();
+}
+
+void gui_router_refresh(void) {
+    /* Deliberately not display_manager_run_on_lvgl(): that runs inline when the
+     * caller is already on the LVGL task, which is exactly the case here (input
+     * callbacks and LVGL event handlers). Destroying the view that is
+     * currently dispatching an event would pull the tree out from under it, so
+     * always go through the async queue instead. */
+    display_manager_lvgl_async_call(run_refresh, NULL);
+}
+
 const gui_route_t *gui_router_current(void) {
     return s_depth > 0 ? &s_routes[s_depth - 1] : NULL;
 }

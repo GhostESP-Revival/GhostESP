@@ -1,4 +1,8 @@
+#include "sdkconfig.h"
 #include "boot_banner_text.h"
+#if defined(CONFIG_IDF_TARGET_ESP32) && defined(CONFIG_BT_ENABLED)
+#include "esp_bt.h"
+#endif
 #include "core/shell.h"
 #include "core/commandline.h"
 #include "core/callbacks.h"
@@ -54,6 +58,7 @@
 #include "managers/usb_keyboard_manager.h"
 #include "managers/subghz_remote_manager.h"
 #include "managers/lora_manager.h"
+#include "managers/meshcore_manager.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -79,7 +84,7 @@
 #include "managers/motion_detector_manager.h"
 #include "managers/camera_stream_manager.h"
 #endif
-#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER) || defined(CONFIG_HAS_CROWPANEL_NS4168)
+#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER) || defined(CONFIG_HAS_CROWPANEL_NS4168) || defined(CONFIG_HAS_TDECK_SPEAKER)
 #include "managers/audio_receiver_manager.h"
 #endif
 
@@ -211,6 +216,32 @@ RGBManager_t rgb_manager;  // Global instance for entire project
 
 int ieee80211_raw_frame_sanity_check(int32_t arg, int32_t arg2, int32_t arg3) { return 0; }
 static const char *TAG = "Main.c";
+
+/* Opt-in boot auto-start: start the remembered mesh protocol (NVS "mesh"/"mode"
+ * selects Meshtastic vs MeshCore). On display boards this runs late in
+ * app_main — after the AP manager, display and SD-init task have claimed their
+ * internal RAM — so a radio start can never price boot-critical allocations
+ * (like the 8 KiB SD task stack) out of the internal heap. Headless USB builds
+ * keep the early position. Idempotent: both managers no-op when running. */
+static void mesh_auto_start_boot(void) {
+#ifdef CONFIG_HAS_LORA
+    if (!lora_manager_auto_start_enabled()) return;
+#ifdef CONFIG_HAS_MESHCORE
+    if (mc_manager_default_backend_meshcore()) {
+        if (!mc_manager_is_running() && !mc_manager_start()) {
+            ESP_LOGW(TAG, "MeshCore auto-start failed: %s", mc_manager_last_error());
+        }
+        return;
+    }
+#endif
+    if (lora_manager_is_running()) return;
+    if (lora_manager_needs_setup()) {
+        ESP_LOGW(TAG, "Meshtastic auto-start skipped: region is not set");
+    } else if (!lora_manager_start()) {
+        ESP_LOGW(TAG, "Meshtastic auto-start failed: %s", lora_manager_last_error());
+    }
+#endif
+}
 
 /* timegm() is not available in ESP-IDF's newlib for ESP32-C5 (RISC-V).
  * Provide a minimal implementation that both main.c (RTC sync) and
@@ -695,6 +726,12 @@ static void deferred_sd_init_task(void *arg) {
 }
 
 void app_main(void) {
+#if defined(CONFIG_IDF_TARGET_ESP32) && defined(CONFIG_BT_ENABLED)
+    /* BLE is only used on demand, but the Classic BT controller's ~15KB DRAM
+     * is otherwise held until the first ble_init(). Nothing uses Classic BT
+     * (ble_manager releases it anyway), so return it to the heap now. */
+    (void)esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT);
+#endif
     memory_debug_init();
     memory_debug_start_boot_trace();
     MEASURE_INIT_RAM("Ghostchi Mood init", ghostchi_mood_init());
@@ -843,6 +880,10 @@ void app_main(void) {
 #ifdef CONFIG_HAS_LORA
     MEASURE_INIT_RAM("LoRa Manager", lora_manager_early_init_off_main());
 #endif
+#ifdef CONFIG_HAS_MESHCORE
+    // Loads/generates the Ed25519 identity from NVS; no radio access.
+    mc_manager_early_init();
+#endif
 #ifdef CONFIG_HAS_BADUSB
     MEASURE_INIT_RAM("BadUSB Manager", badusb_manager_init());
 #endif
@@ -865,6 +906,9 @@ void app_main(void) {
 #endif
 
 #ifdef USB_MODULE
+    // Headless USB builds exit below; start the mesh before leaving, while the
+    // display-path memory pressure this board never sees does not apply.
+    mesh_auto_start_boot();
     wifi_manager_auto_deauth();
     return;
 #endif
@@ -991,6 +1035,12 @@ void app_main(void) {
             comm_rx = UART_PIN_NO_CHANGE;
         }
 #endif
+#ifdef CONFIG_WAVESHARE_C5_35_LCD
+        /* The default comm pins (6/7) are this board's display SPI SCLK/MOSI
+         * and 11/12 are the UART0 console; there is no peer-comm header. */
+        comm_tx = UART_PIN_NO_CHANGE;
+        comm_rx = UART_PIN_NO_CHANGE;
+#endif
 #ifdef CONFIG_CROWPANEL_EPAPER_42
         /* GPIO7 is the factory display-power enable, not a UART input. This
          * board has no wired peer-comm header, so leave the optional manager
@@ -1037,7 +1087,7 @@ void app_main(void) {
     mic_visualizer_start();
 #endif
 #endif
-#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER) || defined(CONFIG_HAS_CROWPANEL_NS4168)
+#if defined(CONFIG_HAS_TLV320DAC_I2S) || defined(CONFIG_HAS_AW88298_SPEAKER) || defined(CONFIG_HAS_CROWPANEL_NS4168) || defined(CONFIG_HAS_TDECK_SPEAKER)
 #if !defined(CONFIG_WITH_SCREEN)
     // Headless boards only need the receiver when `audio start` runs; it
     // self-initializes there. Skip the boot-time I2S + decode task + 96KB
@@ -1083,21 +1133,42 @@ void app_main(void) {
     esp_err_t io_ret;
     MEASURE_INIT_RAM("Joystick IO Expander init", io_ret = joystick_io_expander_init());
     if (io_ret == ESP_OK) {
-        printf("Joystick: IO expander\n");
-        // Map to display manager expectations: [0]=Left, [1]=Select, [2]=Up, [3]=Right, [4]=Down
-        joystick_init(&joysticks[0], 3, HOLD_LIMIT, true);  // Left button (P03) -> joysticks[0]
-        joystick_init(&joysticks[1], 2, HOLD_LIMIT, true);  // Select button (P02) -> joysticks[1]
-        joystick_init(&joysticks[2], 0, HOLD_LIMIT, true);  // Up button (P00) -> joysticks[2]
-        joystick_init(&joysticks[3], 4, HOLD_LIMIT, true);  // Right button (P04) -> joysticks[3]
-        joystick_init(&joysticks[4], 1, HOLD_LIMIT, true);  // Down button (P01) -> joysticks[4]
-    } else {
-        printf("IO Expander initialization failed, falling back to GPIO mode\n");
-        // Fallback to GPIO mode - map to display manager expectations: [0]=Left, [1]=Select, [2]=Up, [3]=Right, [4]=Down
+        printf("IO Expander initialized successfully for joystick input\n");
+#ifdef CONFIG_BANSHEE_LITE_C5
+        // Map to display manager expectations: [0]=Left, [1]=Select, [2]=Up, [3]=Right, [4]=Down.
         joystick_init(&joysticks[0], CONFIG_L_BTN, HOLD_LIMIT, true);  // Left
         joystick_init(&joysticks[1], CONFIG_C_BTN, HOLD_LIMIT, true);  // Select
         joystick_init(&joysticks[2], CONFIG_U_BTN, HOLD_LIMIT, true);  // Up
         joystick_init(&joysticks[3], CONFIG_R_BTN, HOLD_LIMIT, true);  // Right
         joystick_init(&joysticks[4], CONFIG_D_BTN, HOLD_LIMIT, true);  // Down
+#else
+        // Preserve the legacy IO-expander mapping for existing board profiles.
+        joystick_init(&joysticks[0], 3, HOLD_LIMIT, true);  // Left (P03)
+        joystick_init(&joysticks[1], 2, HOLD_LIMIT, true);  // Select (P02)
+        joystick_init(&joysticks[2], 0, HOLD_LIMIT, true);  // Up (P00)
+        joystick_init(&joysticks[3], 4, HOLD_LIMIT, true);  // Right (P04)
+        joystick_init(&joysticks[4], 1, HOLD_LIMIT, true);  // Down (P01)
+#endif
+    } else {
+#ifdef CONFIG_BANSHEE_LITE_C5
+        printf("IO Expander initialization failed; C5 joystick input unavailable\n");
+#else
+        printf("IO Expander initialization failed, falling back to GPIO mode\n");
+#endif
+        // Fallback to GPIO mode - map to display manager expectations: [0]=Left, [1]=Select, [2]=Up, [3]=Right, [4]=Down
+#ifdef CONFIG_BANSHEE_LITE_C5
+        joystick_init(&joysticks[0], CONFIG_L_BTN, HOLD_LIMIT, true);  // Left
+        joystick_init(&joysticks[1], CONFIG_C_BTN, HOLD_LIMIT, true);  // Select
+        joystick_init(&joysticks[2], CONFIG_U_BTN, HOLD_LIMIT, true);  // Up
+        joystick_init(&joysticks[3], CONFIG_R_BTN, HOLD_LIMIT, true);  // Right
+        joystick_init(&joysticks[4], CONFIG_D_BTN, HOLD_LIMIT, true);  // Down
+#else
+        joystick_init(&joysticks[0], 3, HOLD_LIMIT, true);  // Left
+        joystick_init(&joysticks[1], 2, HOLD_LIMIT, true);  // Select
+        joystick_init(&joysticks[2], 0, HOLD_LIMIT, true);  // Up
+        joystick_init(&joysticks[3], 4, HOLD_LIMIT, true);  // Right
+        joystick_init(&joysticks[4], 1, HOLD_LIMIT, true);  // Down
+#endif
     }
 #else
     // Standard GPIO joystick mode - map to display manager expectations.
@@ -1147,6 +1218,11 @@ void app_main(void) {
 #endif
     MEASURE_INIT_RAM("Switch to startup view", startup_ready = display_manager_switch_view_and_wait_for_refresh(startup_view));
     if (startup_ready) {
+#if defined(CONFIG_WAVESHARE_C5_35_LCD)
+        /* The glass lags panel memory by a few frames; let the first frame
+         * appear before the backlight comes on. */
+        vTaskDelay(pdMS_TO_TICKS(150));
+#endif
         set_backlight_brightness(100);
     } else {
         ESP_LOGW(TAG, "Startup view first refresh did not complete; leaving backlight off");
@@ -1194,6 +1270,12 @@ void app_main(void) {
                                             tskIDLE_PRIORITY + 1, NULL);
         if (sd_task_rc != pdPASS) {
             ESP_LOGE(TAG, "Failed to create SD Init task");
+#ifdef CONFIG_WITH_SCREEN
+            /* The splash only dismisses when this task signals completion.
+             * If the task could not be created (internal heap exhausted),
+             * release the splash here so boot can never wedge on the loader. */
+            boot_status_signal_completion();
+#endif
         }
     }
 
@@ -1287,6 +1369,12 @@ void app_main(void) {
         }
 #endif
     }
+
+    // Auto-start the remembered mesh protocol here, after every boot-critical
+    // internal allocation (AP manager, display/LVGL, splash, SD-init task
+    // stack) has been made. A failed start is logged and simply leaves the
+    // radio off instead of starving the boot.
+    mesh_auto_start_boot();
 
     printf("\n");
     ESP_LOGI(TAG, "Build config used: %s", CONFIG_BUILD_CONFIG_TEMPLATE);

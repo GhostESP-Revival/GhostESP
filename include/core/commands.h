@@ -22,6 +22,7 @@ void handle_sta_scan(int argc, char **argv);
 void handle_select_cmd(int argc, char **argv);
 void handle_wifi_connection(int argc, char **argv);
 void handle_wifi_disconnect(int argc, char **argv);
+void handle_wifi_forget(int argc, char **argv);
 void handle_wifi_status(int argc, char **argv);
 void handle_wifi_autoreconnect_cmd(int argc, char **argv);
 #if defined(CONFIG_IDF_TARGET_ESP32P4)
@@ -41,6 +42,7 @@ void handle_beaconclear(int argc, char **argv);
 void handle_beaconshow(int argc, char **argv);
 void handle_beaconspamlist(int argc, char **argv);
 void handle_stop_spam(int argc, char **argv);
+void handle_reconnect_cmd(int argc, char **argv);
 void handle_stop_deauth(int argc, char **argv);
 void handle_sae_flood_cmd(int argc, char **argv);
 void handle_stop_sae_flood_cmd(int argc, char **argv);
@@ -54,6 +56,7 @@ void handle_timezone_cmd(int argc, char **argv);
 void handle_loadconfig_cmd(int argc, char **argv);
 void handle_web_auth_cmd(int argc, char **argv);
 void handle_webuiap_cmd(int argc, char **argv);
+void handle_privacy_cmd(int argc, char **argv);
 void handle_clockstyle_cmd(int argc, char **argv);
 void handle_statusbarclock_cmd(int argc, char **argv);
 
@@ -123,6 +126,7 @@ void stop_portal(int argc, char **argv);
 void handle_listportals(int argc, char **argv);
 void handle_evilportal(int argc, char **argv);
 void handle_sinkhole_cmd(int argc, char **argv);
+void handle_certscan_cmd(int argc, char **argv);
 
 // GPS commands
 void handle_gps_info(int argc, char **argv);
@@ -298,6 +302,12 @@ void handle_nrf24_cmd(int argc, char **argv);
 
 // LoRa (SX1262/SX1276/LLCC68, Meshtastic-lite target)
 void handle_lora_cmd(int argc, char **argv);
+
+// MeshCore (SX1262-family, MeshCore-compatible companion node)
+void handle_meshcore_cmd(int argc, char **argv);
+
+// Unified mesh layer: switch between Meshtastic/MeshCore and shared verbs
+void handle_mesh_cmd(int argc, char **argv);
 
 // Printer command
 void handle_printer_command(int argc, char **argv);

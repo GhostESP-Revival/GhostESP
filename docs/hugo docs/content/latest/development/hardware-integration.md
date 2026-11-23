@@ -1,6 +1,6 @@
 ---
 title: "Hardware Integration"
-description: "Understanding hardware quirks and bus conflicts in GhostESP."
+description: "Understanding hardware quirks and bus conflicts in GhostESP"
 weight: 30
 ---
 
@@ -13,16 +13,16 @@ Some boards use an I2C IO expander to provide additional GPIO pins for buttons, 
 ### Shared I2C Bus
 
 The IO expander typically shares its I2C bus with:
-- **Status display (OLED)** — Secondary display on boards like Heltec V3
-- **Compass (QMC6309)** — If configured on the expander
+- **Status display (OLED)** - Secondary display on boards like Heltec V3
+- **Compass (QMC6309)** - If configured on the expander
 
 ### Configuration
 
 In menuconfig under **Ghost ESP Options → Misc Options**:
 
-- `CONFIG_USE_IO_EXPANDER` — Enable TCA9535 IO expander
-- `CONFIG_IO_EXPANDER_SDA_PIN` / `CONFIG_IO_EXPANDER_SCL_PIN` — I2C pins
-- `CONFIG_IO_EXPANDER_I2C_ADDR` — I2C address (default 0x74)
+- `CONFIG_USE_IO_EXPANDER` - Enable TCA9535 IO expander
+- `CONFIG_IO_EXPANDER_SDA_PIN` / `CONFIG_IO_EXPANDER_SCL_PIN` - I2C pins
+- `CONFIG_IO_EXPANDER_I2C_ADDR` - I2C address (default 0x74)
 
 ### Code Considerations
 
@@ -52,7 +52,7 @@ The SD card manager coordinates with LVGL to avoid bus conflicts by suspending t
 
 In menuconfig under **Ghost ESP Options → SPI and MMC Configuration**:
 
-- `CONFIG_SHARED_TFT_SD_SPI` — Enable shared bus coordination
+- `CONFIG_SHARED_TFT_SD_SPI` - Enable shared bus coordination
 
 ## Multiple SPI Buses
 
@@ -156,6 +156,7 @@ CONFIG_ETH_W5500_MISO_PIN=5
 CONFIG_ETH_W5500_SCK_PIN=4
 CONFIG_ETH_W5500_CS_PIN=15
 CONFIG_ETH_W5500_INT_PIN=7  # Optional, -1 to disable
+CONFIG_ETH_W5500_SPI_HOST=3  # SPI host: 2=SPI2, 3=SPI3 (default)
 ```
 
 ### SPI Bus Sharing
@@ -167,7 +168,7 @@ If Ethernet shares SPI with display or SD:
 
 ## Infrared
 
-IR TX/RX uses RMT (Remote Control Transceiver) peripheral, which is separate from SPI.
+IR TX/RX uses the RMT (Remote Control Transceiver) peripheral, which is independent of SPI and I2C, so IR can operate alongside display, SD, and other peripherals without coordination.
 
 ### Pin Configuration (Infrared)
 
@@ -177,10 +178,6 @@ CONFIG_INFRARED_LED_PIN=0      # TX pin
 CONFIG_HAS_INFRARED_RX=y
 CONFIG_INFRARED_RX_PIN=0       # RX pin
 ```
-
-### No Bus Conflicts
-
-RMT is independent of SPI and I2C, so IR can operate alongside display, SD, and other peripherals without coordination.
 
 ## Troubleshooting Bus Conflicts
 

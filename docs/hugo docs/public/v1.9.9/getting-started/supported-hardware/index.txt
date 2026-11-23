@@ -1,0 +1,255 @@
+Title: Supported Hardware
+Description: Device compatibility matrix for GhostESP features
+URL: /v1.9.9/getting-started/supported-hardware/
+Version: v1.9.9
+Section: Getting Started
+Search index: /search-index.json
+
+# Supported Hardware
+
+> Device compatibility matrix for GhostESP features
+
+## On this page
+
+- [Overview](#overview)
+- [Compatibility Matrix](#compatibility-matrix)
+- [Camera Support](#camera-support)
+- [Vendor Boards](#vendor-boards)
+
+---
+
+## Overview
+GhostESP runs on a variety of ESP32 boards with varying feature support. This compatibility matrix helps you identify which features are available on your device.
+## Compatibility Matrix
+.compat-table {
+--compat-bg: #ffffff;
+--compat-header-bg: #f5f5f5;
+--compat-text: #000000;
+--compat-border: #e0e0e0;
+--compat-hover: #f9f9f9;
+border-radius: 0.5rem;
+max-height: 70vh;
+overflow: auto;
+box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+background: var(--compat-bg);
+position: relative;
+isolation: isolate;
+}
+.compat-table table {
+margin: 0;
+width: 100%;
+border-collapse: separate;
+border-spacing: 0;
+min-width: 720px;
+color: var(--compat-text);
+}
+.compat-table th,
+.compat-table td {
+padding: 0.75rem;
+text-align: center;
+vertical-align: middle;
+border-bottom: 1px solid var(--compat-border);
+}
+.compat-table th:first-child,
+.compat-table td:first-child {
+text-align: left;
+position: sticky;
+left: 0;
+background: var(--compat-bg);
+box-shadow: 1px 0 0 var(--compat-border);
+z-index: 2;
+}
+.compat-table tbody tr:hover { background: var(--compat-hover); }
+.compat-table thead th {
+position: sticky;
+top: 0;
+z-index: 1;
+background: var(--compat-header-bg);
+box-shadow: 0 1px 2px rgba(0,0,0,0.25);
+}
+.compat-table thead th:first-child {
+left: 0;
+z-index: 3;
+background: var(--compat-header-bg);
+}
+:where([data-theme=&#34;dark&#34;], html[data-bs-theme=&#34;dark&#34;], body[data-bs-theme=&#34;dark&#34;], [data-bs-theme=&#34;dark&#34;], html.dark, body.dark, .dark-mode, .theme-dark) .compat-table {
+--compat-bg: #1a1a1a;
+--compat-header-bg: #2d2d2d;
+--compat-text: #ffffff;
+--compat-border: #3d3d3d;
+--compat-hover: #252525;
+}
+:where([data-theme=&#34;light&#34;], html[data-bs-theme=&#34;light&#34;], body[data-bs-theme=&#34;light&#34;], [data-bs-theme=&#34;light&#34;], html.light, body.light, .light-mode, .theme-light) .compat-table {
+--compat-bg: #ffffff;
+--compat-header-bg: #f5f5f5;
+--compat-text: #000000;
+--compat-border: #e0e0e0;
+--compat-hover: #f9f9f9;
+}
+@media (prefers-color-scheme: dark) {
+:root:not([data-theme]) .compat-table {
+--compat-bg: #1a1a1a;
+--compat-header-bg: #2d2d2d;
+--compat-text: #ffffff;
+--compat-border: #3d3d3d;
+--compat-hover: #252525;
+}
+}
+.vendor-table {
+--vendor-bg: #ffffff;
+--vendor-header-bg: #f5f5f5;
+--vendor-text: #000000;
+--vendor-border: #e0e0e0;
+--vendor-hover: #f9f9f9;
+border-radius: 0.5rem;
+overflow: auto;
+box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+background: var(--vendor-bg);
+position: relative;
+isolation: isolate;
+}
+.vendor-table table {
+margin: 0;
+width: 100%;
+border-collapse: separate;
+border-spacing: 0;
+min-width: 600px;
+color: var(--vendor-text);
+}
+.vendor-table th,
+.vendor-table td {
+padding: 0.75rem;
+text-align: left;
+vertical-align: middle;
+border-bottom: 1px solid var(--vendor-border);
+}
+.vendor-table th:first-child,
+.vendor-table td:first-child {
+position: sticky;
+left: 0;
+background: var(--vendor-bg);
+box-shadow: 1px 0 0 var(--vendor-border);
+z-index: 2;
+}
+.vendor-table tbody tr:hover { background: var(--vendor-hover); }
+.vendor-table thead th {
+position: sticky;
+top: 0;
+z-index: 1;
+background: var(--vendor-header-bg);
+box-shadow: 0 1px 2px rgba(0,0,0,0.25);
+}
+.vendor-table thead th:first-child {
+left: 0;
+z-index: 3;
+background: var(--vendor-header-bg);
+}
+.vendor-table img {
+max-width: 150px;
+max-height: 100px;
+object-fit: contain;
+}
+:where([data-theme=&#34;dark&#34;], html[data-bs-theme=&#34;dark&#34;], body[data-bs-theme=&#34;dark&#34;], [data-bs-theme=&#34;dark&#34;], html.dark, body.dark, .dark-mode, .theme-dark) .vendor-table {
+--vendor-bg: #1a1a1a;
+--vendor-header-bg: #2d2d2d;
+--vendor-text: #ffffff;
+--vendor-border: #3d3d3d;
+--vendor-hover: #252525;
+}
+:where([data-theme=&#34;light&#34;], html[data-bs-theme=&#34;light&#34;], body[data-bs-theme=&#34;light&#34;], [data-bs-theme=&#34;light&#34;], html.light, body.light, .light-mode, .theme-light) .vendor-table {
+--vendor-bg: #ffffff;
+--vendor-header-bg: #f5f5f5;
+--vendor-text: #000000;
+--vendor-border: #e0e0e0;
+--vendor-hover: #f9f9f9;
+}
+@media (prefers-color-scheme: dark) {
+:root:not([data-theme]) .vendor-table {
+--vendor-bg: #1a1a1a;
+--vendor-header-bg: #2d2d2d;
+--vendor-text: #ffffff;
+--vendor-border: #3d3d3d;
+--vendor-hover: #252525;
+}
+}
+Board | 
+Bluetooth | 
+NFC (PN532) | 
+NFC (Chameleon) | 
+IR TX | 
+IR RX | 
+GPS | 
+Keyboard | 
+Display | 
+SD Card | 
+CYD2USB | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✓ |
+CYDMicroUSB | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✓ |
+CYDDualUSB | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✓ |
+CYD2432S028R | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✓ |
+CYD 2.4″ variants | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✓ |
+Waveshare 7″ | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✓ |
+Crowtech 7″ | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✗ |
+Sunton 7″ | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✗ |
+Cardputer | ✓ | ✗ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ |
+Cardputer ADV | ✓ | ✗ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✓ |
+MarauderV4 | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✗ |
+MarauderV6 | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✗ |
+AwokMini | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✓ | ✗ |
+Awok V5 | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✗ |
+T-Display S3 Touch | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✓ |
+S3TWatch | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ | ✗ | ✓ | has 4MB vfs partition |
+TEmbed C1101 | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✓ | ✓ |
+GhostBoard | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ |
+T-Deck | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ |
+JCMK DevBoardPro | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✓ |
+RabbitLabs Minion | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ |
+Lolin S3 Pro | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ |
+XIAO ESP32-S3 Sense | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✓ | ✗ | ✓ |
+XIAO ESP32-C5 | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
+Flipper JCMK GPS | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ |
+ESP32 (generic) | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ |
+ESP32-S2 (generic) | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ |
+ESP32-C3 (generic) | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ |
+ESP32-S3 (generic) | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ |
+ESP32-C5 (generic) | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ |
+ESP32-C6 (generic) | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ |
+Heltec V3 | ✓ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ | Status Display | ✓ |
+## Camera Support
+- XIAO ESP32-S3 Sense currently has the dedicated camera-enabled build and supports the [Motion Detector](/v1.9.9/camera/motion-detector/) feature.
+- The current motion detector implementation uses QQVGA grayscale capture for low RAM usage and fast comparisons.
+- XIAO ESP32-C5 is a supported board config, but it does not include the onboard camera motion detector path used by the S3 Sense build.
+## Vendor Boards
+The following table lists the vendor-specific boards supported by GhostESP with their corresponding build names:
+Board Name | 
+Build Name | 
+Image | 
+&lt;tr&gt;&lt;td&gt;CYDMicroUSB&lt;/td&gt;&lt;td&gt;&lt;code&gt;CYDMicroUSB.zip&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;CYDDualUSB&lt;/td&gt;&lt;td&gt;&lt;code&gt;CYDDualUSB.zip&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;CYD2432S028R&lt;/td&gt;&lt;td&gt;&lt;code&gt;CYD2432S028R.zip&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;img src=&#34;../images/CYD2432S028R.jpg&#34; alt=&#34;CYD2432S028R&#34;&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;Waveshare 7″&lt;/td&gt;&lt;td&gt;&lt;code&gt;Waveshare_LCD.zip&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;Crowtech 7″&lt;/td&gt;&lt;td&gt;&lt;code&gt;Crowtech_LCD.zip&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;Sunton 7″&lt;/td&gt;&lt;td&gt;&lt;code&gt;Sunton_LCD.zip&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;Cardputer&lt;/td&gt;&lt;td&gt;&lt;code&gt;ESP32-S3-Cardputer.zip&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;img src=&#34;../images/m5_cardputer.jpg&#34; alt=&#34;M5 Stack Cardputer&#34;&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;Cardputer ADV&lt;/td&gt;&lt;td&gt;&lt;code&gt;CardputerADV.zip&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;MarauderV4&lt;/td&gt;&lt;td&gt;&lt;code&gt;MarauderV4_FlipperHub.zip&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;MarauderV6 &amp; AwokDual&lt;/td&gt;&lt;td&gt;&lt;code&gt;MarauderV6_AwokDual.zip&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;AwokMini&lt;/td&gt;&lt;td&gt;&lt;code&gt;AwokMini.zip&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;Awok V5&lt;/td&gt;&lt;td&gt;&lt;code&gt;esp32v5_awok.zip&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;T-Display S3 Touch&lt;/td&gt;&lt;td&gt;&lt;code&gt;LilyGo-TDisplayS3-Touch.zip&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;S3TWatch&lt;/td&gt;&lt;td&gt;&lt;code&gt;LilyGo-S3TWatch-2020.zip&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;TEmbed CC1101&lt;/td&gt;&lt;td&gt;&lt;code&gt;LilyGo-TEmbedC1101.zip&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;img src=&#34;../images/lilygo_tembed_cc1101.jpg&#34; alt=&#34;Lily Go Tembed cc1101&#34;&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;GhostBoard&lt;/td&gt;&lt;td&gt;&lt;code&gt;ghostboard.zip&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;img src=&#34;../images/rabbit_labs_ghost_board_black.jpg&#34; alt=&#34;Black Rabbit Labs Ghost Board&#34;&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;T-Deck&lt;/td&gt;&lt;td&gt;&lt;code&gt;LilyGo-T-Deck.zip&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;img src=&#34;../images/lilygo_tdeck_plus.jpg&#34; alt=&#34;LilyGo T-Deck Plus&#34;&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;JCMK DevBoardPro&lt;/td&gt;&lt;td&gt;&lt;code&gt;JCMK_DevBoardPro.zip&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;RabbitLabs Minion&lt;/td&gt;&lt;td&gt;&lt;code&gt;RabbitLabs_Minion.zip&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;img src=&#34;../images/rabbit_labs_minion.jpg&#34; alt=&#34;Rabbit Labs Minion&#34;&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;RabbitLabs Phantom&lt;/td&gt;&lt;td&gt;&lt;code&gt;CYD2USB2.4Inch.zip&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;img src=&#34;../images/rabbit_labs_phantom.jpg&#34; alt=&#34;Rabbit Labs Phantom&#34;&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;Lolin S3 Pro&lt;/td&gt;&lt;td&gt;&lt;code&gt;Lolin_S3_Pro.zip&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;img src=&#34;../images/lolin_s3_pro.jpg&#34; alt=&#34;Lolin S3 Pro&#34;&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;Seeed Studio XIAO ESP32-S3 Sense&lt;/td&gt;&lt;td&gt;&lt;code&gt;xiao_esp32s3_sense.zip&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;Seeed Studio XIAO ESP32-C5&lt;/td&gt;&lt;td&gt;&lt;code&gt;xiao_esp32c5.zip&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;Flipper JCMK GPS&lt;/td&gt;&lt;td&gt;&lt;code&gt;Flipper_JCMK_GPS.zip&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;img src=&#34;../images/flipper_wifi_devboard.jpg&#34; alt=&#34;Flipper Wifi Dev Board &#43; JCMK GPS Mod&#34;&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;JC3248W535EN&lt;/td&gt;&lt;td&gt;&lt;code&gt;JC3248W535EN_LCD.zip&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;Wired Hatters ESPRocket&lt;/td&gt;&lt;td&gt;&lt;code&gt;esp32-generic.zip&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;img src=&#34;../images/wired_hatters_rocket.jpg&#34; alt=&#34;Wired Hatters ESPRocket&#34;&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;Wired Hatters Ultimate Marauder&lt;/td&gt;&lt;td&gt;Red Port: &lt;code&gt;esp32-generic.zip&lt;/code&gt; and Blue Port: &lt;code&gt;MarauderV4_FlipperHub.zip&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;img src=&#34;../images/wired_hatters_ultimate_marauder.jpg&#34; alt=&#34;Wired Hatters Ultimate Marauder&#34;&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;Heltec V3&lt;/td&gt;&lt;td&gt;&lt;code&gt;heltecv3.zip&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;/tbody&gt;
+Note: Images are being added as they become available.

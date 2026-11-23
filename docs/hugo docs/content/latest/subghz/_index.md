@@ -7,9 +7,9 @@ aliases:
   - "/subghz/"
 ---
 
-GhostESP includes SubGHz radio tools for scanning, capturing, and transmitting signals on common frequency bands. Use these features to work with garage door remotes, gate openers, wireless sensors, and other sub-1 GHz devices.
+GhostESP includes SubGHz radio tools for scanning, capturing, and transmitting signals on common frequency bands. Use these features to work with garage door remotes, gate openers, wireless sensors, and other sub-1 GHz devices. SubGHz requires a CC1101-based radio module; not all GhostESP boards include this hardware (see [Hardware Support]({{< relref "hardware.md" >}})).
 
-## Supported frequency bands
+## Supported Frequency Bands
 
 - 315 MHz
 - 390 MHz
@@ -28,24 +28,13 @@ GhostESP includes SubGHz radio tools for scanning, capturing, and transmitting s
 - **Saved signals** - Store and manage captured signals as `.sub` files
 - **Flipper compatibility** - Uses Flipper SubGhz Key File format
 
-## Technical implementation
+## Technical Implementation
 
-GhostESP uses **dedicated protocol decoders based on Flipper Zero Unleashed/xMasterX firmware**, providing professional-grade signal analysis capabilities:
-
-- **30+ protocol decoders** with precise timing constants for each protocol
-- **Real-time decoding engine** with edge queue processing
-- **Proven implementation** - same decoders used by industry-standard Flipper Zero
-- **Supports complex encodings** including Manchester and multi-bit protocols
+GhostESP uses **dedicated protocol decoders based on Flipper Zero Unleashed/xMasterX firmware**, with precise per-protocol timing constants and real-time edge-queue processing. This covers 30+ protocols including Manchester and other multi-bit encodings, and supports a wider range of static-code protocols than generic libraries such as RCSwitch (10-15 protocols).
 
 Recently added support includes Ansonic, Bett, Clemsa, Dickert MAHS, Dooya, Elplast, Marantec24, Hollarm, Hay21, Feron, Roger, Treadmill37, KeyFinder, and Nord ICE.
 
-Unlike other ESP32 firmwares that rely on generic libraries like RCSwitch (10-15 protocols), GhostESP's dedicated decoders offer superior accuracy and support for a wider range of static code protocols.
-
-## Hardware requirements
-
-SubGHz requires a CC1101-based radio module. Not all GhostESP boards include this hardware. See [Hardware Support]({{< relref "hardware.md" >}}) for details.
-
-## Getting started
+## Getting Started
 
 - [Scanning]({{< relref "scanning.md" >}}) - Monitor radio activity
 - [Capturing Signals]({{< relref "capturing.md" >}}) - Record and decode signals

@@ -15,6 +15,8 @@ void lora_manager_stop(void) {}
 bool lora_manager_is_running(void) { return false; }
 bool lora_manager_is_present(void) { return false; }
 const char *lora_manager_last_error(void) { return "lora disabled"; }
+bool lora_manager_auto_start_enabled(void) { return false; }
+bool lora_manager_set_auto_start(bool e) { (void)e; return false; }
 bool lora_manager_set_region(lora_region_t r) { (void)r; return false; }
 bool lora_manager_set_params(int s, int b, int t) { (void)s; (void)b; (void)t; return false; }
 bool lora_manager_set_modem(int sf, int bw, int cr) { (void)sf; (void)bw; (void)cr; return false; }
@@ -94,6 +96,7 @@ static const char *TAG = "LORA";
 static char s_last_error[96] = "none";
 static bool s_running = false;
 static bool s_present = false;
+static bool s_auto_start = false;
 static lora_region_t s_region = LORA_REGION_US915;
 static bool s_region_saved = false; // true only after an explicit `lora set region`
 static uint32_t s_freq_hz = 906875000U; // slot; recomputed in start()
@@ -226,6 +229,7 @@ static void nvs_load(void) {
         s_companion = (lora_companion_t)v;
     }
     if (nvs_get_i32(h, "role", &i) == ESP_OK && i >= 0 && i <= 12) s_role = (int)i;
+    if (nvs_get_u8(h, "autostart", &v) == ESP_OK) s_auto_start = v != 0;
     nvs_close(h);
     // Modem preset/custom is the source of truth for SF/BW/CR (same NVS ns).
     lora_modem_cfg_load(&s_modem);
@@ -255,6 +259,7 @@ static void nvs_save(void) {
     nvs_set_i32(h, "hop", (int32_t)s_hop_limit);
     nvs_set_u8(h, "comp", (uint8_t)s_companion);
     nvs_set_i32(h, "role", (int32_t)s_role);
+    nvs_set_u8(h, "autostart", s_auto_start ? 1 : 0);
     nvs_commit(h);
     nvs_close(h);
 }
@@ -446,11 +451,16 @@ void lora_manager_chat_result(uint32_t peer, uint32_t id, bool success) {
 
 void lora_manager_chat_read(uint32_t peer) {
     if (!s_lock) return;
+    bool changed = false;
     xSemaphoreTake(s_lock, portMAX_DELAY);
     for (uint16_t i = 0; i < LORA_MSG_RING; ++i)
-        if (peer ? (s_ring[i].direct && s_ring[i].node_num == peer) : !s_ring[i].direct)
+        if ((peer ? (s_ring[i].direct && s_ring[i].node_num == peer) : !s_ring[i].direct) &&
+            !s_ring[i].read) {
             s_ring[i].read = true;
+            changed = true;
+        }
     xSemaphoreGive(s_lock);
+    if (changed) nvs_save_chat();
 }
 
 bool lora_manager_get_hw(lora_hw_t *out) {
@@ -1494,6 +1504,13 @@ bool lora_manager_set_hop_limit(int hop_limit) {
 }
 bool lora_manager_is_present(void) { return s_present; }
 const char *lora_manager_last_error(void) { return s_last_error; }
+bool lora_manager_auto_start_enabled(void) { return s_auto_start; }
+
+bool lora_manager_set_auto_start(bool enabled) {
+    s_auto_start = enabled;
+    nvs_save();
+    return true;
+}
 
 bool lora_manager_set_region(lora_region_t region) {
     if (s_running) {

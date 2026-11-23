@@ -1,3 +1,4 @@
+#include "managers/views/file_browser.h"
  #include "gui/screen_layout.h"
 #include "managers/views/infrared_view.h"
 #include "esp_heap_caps.h"
@@ -277,7 +278,7 @@ static void rename_remote_keyboard_callback(const char *name) {
     strncpy(truncated_name, name, max_name_len);
     truncated_name[max_name_len] = '\0';
     
-    char safe_dir_path[128];
+    char safe_dir_path[256];
     char filename_part[64];
     
     strncpy(safe_dir_path, dir_path, sizeof(safe_dir_path) - 1);
@@ -286,13 +287,18 @@ static void rename_remote_keyboard_callback(const char *name) {
     strncpy(filename_part, truncated_name, sizeof(filename_part) - 1);
     filename_part[sizeof(filename_part) - 1] = '\0';
     
-    if (strlen(safe_dir_path) + strlen(filename_part) + 4 >= sizeof(new_path)) {
+    size_t base_len = strlen(safe_dir_path);
+    size_t filename_len = strlen(filename_part);
+    if (base_len + filename_len + 4 >= sizeof(new_path)) {
         ESP_LOGE(TAG, "Path would be too long");
         display_manager_switch_view(&infrared_view);
         return;
     }
 
-    snprintf(new_path, sizeof(new_path), "%s/%s.ir", safe_dir_path, filename_part);
+    memcpy(new_path, safe_dir_path, base_len);
+    new_path[base_len] = '/';
+    memcpy(new_path + base_len + 1, filename_part, filename_len);
+    memcpy(new_path + base_len + 1 + filename_len, ".ir", 4);
     strncpy(old_path, current_remote_path, sizeof(old_path) - 1);
     old_path[sizeof(old_path) - 1] = '\0';
     
@@ -570,115 +576,35 @@ static void clear_ir_file_paths(void) {
     ir_file_capacity = 0;
 }
 
+static bool ir_accept_file(const char *name) {
+    const char *ext = strrchr(name, '.');
+    return ext && strcasecmp(ext, ".ir") == 0;
+}
+
 static bool load_ir_file_list_from_dir(const char *dir) {
     clear_ir_file_paths();
-
     bool susp = false;
     bool did = ir_sd_begin(&susp);
-
-    DIR *d = opendir(dir);
-    if (!d) {
-        ESP_LOGW(TAG, "Failed to open IR directory: %s", dir);
-        if (did) {
-            ir_sd_end(susp);
-        }
-        
-        // Still add TURNHISTVOFF for universals directory even if SD is not available
-        if (strcmp(dir, "/mnt/ghostesp/infrared/universals") == 0) {
-            char *turnthistvoff_name = strdup("TURNHISTVOFF.ir");
-            if (turnthistvoff_name) {
-                if (ir_file_count >= ir_file_capacity) {
-                    size_t new_cap = ir_file_capacity ? ir_file_capacity * 2 : 8;
-                    char **new_paths = realloc(ir_file_paths, new_cap * sizeof(*ir_file_paths));
-                    if (new_paths) {
-                        ir_file_paths = new_paths;
-                        ir_file_capacity = new_cap;
-                    } else {
-                        free(turnthistvoff_name);
-                        turnthistvoff_name = NULL;
-                    }
-                }
-                if (turnthistvoff_name) {
-                    ir_file_paths[ir_file_count] = turnthistvoff_name;
-                    ir_file_count++;
-                }
-            }
-        }
-        
-        // Treat missing or inaccessible directories as empty so callers can show placeholders
-        return true;
-    }
-
-    struct dirent *entry;
-    while ((entry = readdir(d)) != NULL) {
-        const char *name = entry->d_name;
-        if (!name) {
-            continue;
-        }
-        if ((name[0] == '.') && (name[1] == '\0' || (name[1] == '.' && name[2] == '\0'))) {
-            continue;
-        }
-
-        const char *ext = strrchr(name, '.');
-        if (!ext) {
-            continue;
-        }
-        if (!((ext[0] == '.') &&
-              (ext[1] == 'i' || ext[1] == 'I') &&
-              (ext[2] == 'r' || ext[2] == 'R') &&
-              ext[3] == '\0')) {
-            continue;
-        }
-
-        char *name_copy = strdup(name);
-        if (!name_copy) {
-            ESP_LOGE(TAG, "Failed to allocate IR filename copy");
-            continue;
-        }
-
-        if (ir_file_count >= ir_file_capacity) {
-            size_t new_cap = ir_file_capacity ? ir_file_capacity * 2 : 8;
-            char **new_paths = realloc(ir_file_paths, new_cap * sizeof(*ir_file_paths));
-            if (!new_paths) {
-                ESP_LOGE(TAG, "Failed to grow IR file list");
-                free(name_copy);
-                continue;
-            }
-            ir_file_paths = new_paths;
-            ir_file_capacity = new_cap;
-        }
-
-        ir_file_paths[ir_file_count] = name_copy;
-        ir_file_count++;
-    }
-
-    closedir(d);
-    if (did) {
-        ir_sd_end(susp);
-    }
-    
-    // Add TURNTHISTVOFF to universals directory
+    if (did) file_browser_read(dir, ir_accept_file, 0, (size_t)-1,
+                              &ir_file_paths, &ir_file_count, NULL);
+    ir_file_capacity = ir_file_count;
+    if (did) ir_sd_end(susp);
     if (strcmp(dir, "/mnt/ghostesp/infrared/universals") == 0) {
-        char *turnthistvoff_name = strdup("TURNHISTVOFF.ir");
-        if (turnthistvoff_name) {
-            if (ir_file_count >= ir_file_capacity) {
-                size_t new_cap = ir_file_capacity ? ir_file_capacity * 2 : 8;
-                char **new_paths = realloc(ir_file_paths, new_cap * sizeof(*ir_file_paths));
-                if (new_paths) {
-                    ir_file_paths = new_paths;
-                    ir_file_capacity = new_cap;
-                } else {
-                    free(turnthistvoff_name);
-                    turnthistvoff_name = NULL;
-                }
-            }
-            if (turnthistvoff_name) {
-                ir_file_paths[ir_file_count] = turnthistvoff_name;
-                ir_file_count++;
-            }
+        const char *builtin = "/mnt/ghostesp/infrared/universals/TURNHISTVOFF.ir";
+        bool found = false;
+        for (size_t i = 0; i < ir_file_count; i++) {
+            if (strcmp(ir_file_paths[i], builtin) == 0) found = true;
+        }
+        if (!found) {
+            char *copy = strdup(builtin);
+            char **grown = copy ? realloc(ir_file_paths, (ir_file_count + 1) * sizeof(char *)) : NULL;
+            if (grown) {
+                ir_file_paths = grown;
+                ir_file_paths[ir_file_count++] = copy;
+                ir_file_capacity = ir_file_count;
+            } else free(copy);
         }
     }
-    
     return true;
 }
 
@@ -690,7 +616,7 @@ static void rebuild_ir_file_list_ui(void) {
     selected_ir_index = 0;
 
     for (size_t i = 0; i < ir_file_count; i++) {
-        options_view_add_item(g_ir_ov, ir_file_paths[i], file_event_cb, (void *)(intptr_t)i);
+        options_view_add_item(g_ir_ov, file_browser_name(ir_file_paths[i]), file_event_cb, (void *)(intptr_t)i);
     }
 
     if (ir_file_count == 0) {
@@ -1317,6 +1243,13 @@ static void back_event_cb(lv_event_t *e) {
         return;
     }
 
+    const char *browse_root = in_universals_mode ? "/mnt/ghostesp/infrared/universals"
+                                                 : "/mnt/ghostesp/infrared/remotes";
+    if ((!has_remotes_option || !has_universals_option) && file_browser_parent(current_dir, browse_root)) {
+        refresh_ir_file_list(current_dir);
+        return;
+    }
+
     // if we are in a file list (remotes or universals) but not at top-level, go back to top-level menu
     if (!has_remotes_option || !has_universals_option) {
         // cancel any ongoing universal transmission
@@ -1470,6 +1403,9 @@ void infrared_view_create(void) {
             }
             if (infrared_manager_read_list(current_remote_path, &signals, &signal_count)) {
                 options_view_clear(g_ir_ov);
+                showing_commands = true;
+                has_remotes_option = false;
+                has_universals_option = false;
                 selected_ir_index = 0;
 
                 for (size_t i = 0; i < signal_count; i++) {
@@ -1626,7 +1562,7 @@ static void ir_delete_remote_confirm_cb(void *user_data) {
     if (did) ir_sd_end(susp);
     if (rm == 0) {
         ESP_LOGI(TAG, "Successfully deleted remote: %s", current_remote_path);
-        display_manager_switch_view(&infrared_view);
+        back_event_cb(NULL);
     } else {
         ESP_LOGE(TAG, "Failed to delete remote: %s", current_remote_path);
     }
@@ -2439,27 +2375,15 @@ static void ir_open_remote_path(const char *full_path, const char *fname) {
 }
 
 static void file_event_open(int idx) {
-    if (in_universals_mode) {
-        char path[256];
-        size_t base_len = strlen(current_dir);
-        if (base_len >= sizeof(path) - 1) base_len = sizeof(path) - 1;
-        memcpy(path, current_dir, base_len);
-        path[base_len] = '\0';
-        snprintf(path + base_len, sizeof(path) - base_len, "/%s", ir_file_paths[idx]);
-        ir_open_universal_path(path);
+    if (idx < 0 || (size_t)idx >= ir_file_count) return;
+    if (file_browser_is_dir(ir_file_paths[idx])) {
+        if (file_browser_enter(current_dir, sizeof(current_dir), ir_file_paths[idx])) {
+            refresh_ir_file_list(current_dir);
+        }
         return;
     }
-    if (idx < 0 || idx >= ir_file_count) return;
-    char path[256];
-    size_t base_len = strlen(current_dir);
-    if (base_len >= sizeof(path) - 1) base_len = sizeof(path) - 1;
-    memcpy(path, current_dir, base_len);
-    path[base_len] = '\0';
-    if (base_len + 1 < sizeof(path)) {
-        strncat(path, "/", sizeof(path) - strlen(path) - 1);
-    }
-    strncat(path, ir_file_paths[idx], sizeof(path) - strlen(path) - 1);
-    ir_open_remote_path(path, ir_file_paths[idx]);
+    if (in_universals_mode) ir_open_universal_path(ir_file_paths[idx]);
+    else ir_open_remote_path(ir_file_paths[idx], file_browser_name(ir_file_paths[idx]));
 }
 
 // Deep-link support for favorites: open a specific remote file. Safe to call
@@ -2481,8 +2405,6 @@ static void infrared_view_apply_pending_open(void) {
     path[sizeof(path) - 1] = '\0';
     free(s_pending_remote_open);
     s_pending_remote_open = NULL;
-    const char *fname = strrchr(path, '/');
-    fname = fname ? fname + 1 : path;
     bool is_universals = strstr(path, "/universals/") != NULL;
     // Reuse the normal navigation path so flags (has_remotes_option etc.)
     // stay consistent for the back button. This avoids the state mismatch
@@ -2494,15 +2416,23 @@ static void infrared_view_apply_pending_open(void) {
     } else {
         remotes_event_cb(NULL);
     }
+    char parent[sizeof(current_dir)];
+    snprintf(parent, sizeof(parent), "%s", path);
+    char *slash = strrchr(parent, '/');
+    const char *browse_root = is_universals ? "/mnt/ghostesp/infrared/universals" : "/mnt/ghostesp/infrared/remotes";
+    if (slash && strncmp(parent, browse_root, strlen(browse_root)) == 0 && parent[strlen(browse_root)] == '/') {
+        *slash = '\0';
+        snprintf(current_dir, sizeof(current_dir), "%s", parent);
+        refresh_ir_file_list(current_dir);
+    }
     // Find the requested file in the freshly populated list and open it
     for (size_t i = 0; i < ir_file_count; i++) {
-        if (strcmp(ir_file_paths[i], fname) == 0) {
+        if (strcmp(ir_file_paths[i], path) == 0) {
             file_event_open((int)i);
             return;
         }
     }
-    // Fallback: path already compared via fname; if still not found, keep
-    // the file list visible so the user can pick manually.
+    // Keep the file list visible if the requested file is unavailable.
 }
 
 // execute selected IR command

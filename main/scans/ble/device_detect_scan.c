@@ -1,5 +1,6 @@
 #include "scans/ble/device_detect_scan.h"
 
+#include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 
@@ -51,6 +52,37 @@
 #define UUID_ASHA         0xFDF0
 #define UUID_GAEN         0xFD6F
 
+// Meta glasses (Ray-Ban Meta / Snap Spectacles): 0xFD5F is the Meta member
+// UUID; the Meta/Luxottica/Snap company IDs are SIG-assigned. Google Find My
+// Device (FMDN) trackers advertise service data under Google's 0xFEAA.
+#define UUID_META_GLASSES    0xFD5F
+#define UUID_GOOGLE_FEAA     0xFEAA
+
+// Nest Weave BLE service (0000FEAF-..., Nest Labs' own 16-bit UUID, distinct
+// from Google's Fast Pair 0xFE2C / FMDN 0xFEAA). Its service data is a packed
+// 17-byte device-identification block: len, type 0x01, ver maj/min, vendor u16,
+// product u16, device id u64, pairing status.
+#define UUID_NEST_WEAVE        0xFEAF
+#define NEST_WEAVE_VENDOR_ID   0x235A
+#define NEST_WEAVE_BLOCK_LEN   17
+
+// Current Google Nest cameras (2K generation) are Matter devices over WiFi+BLE.
+// In setup mode they advertise the Matter commissioning service 0xFFF6 with an
+// 8-byte block: opcode, discriminator+adv version (u16), vendor u16, product
+// u16, flags. Google's Matter vendor ID is shared by every Google device (Hubs,
+// WiFi, thermostat), so the product ID is what singles out the cameras (IDs
+// from the CSA certification database).
+#define UUID_MATTER            0xFFF6
+#define MATTER_VENDOR_GOOGLE   0x6006
+#define MATTER_BLOCK_LEN       8
+#define NEST_MATTER_PID_CAM_INDOOR   0x0011
+#define NEST_MATTER_PID_DOORBELL     0x0012
+#define NEST_MATTER_PID_CAM_OUTDOOR  0x0014
+#define META_COMPANY_ID      0x01AB
+#define META_TECH_COMPANY_ID 0x058E
+#define LUXOTTICA_COMPANY_ID 0x0D53
+#define SNAP_COMPANY_ID      0x03C2
+
 #define BLE_AD_TYPE_16BIT_UUID_COMPLETE  0x03
 #define BLE_AD_TYPE_16BIT_UUID_PARTIAL   0x02
 #define BLE_AD_TYPE_32BIT_UUID_COMPLETE  0x05
@@ -82,6 +114,7 @@ typedef struct {
     char subtype[20];
     uint8_t payload[BLE_HS_ADV_MAX_SZ];
     size_t payload_len;
+    uint32_t last_seen_ms;
 } BLEDetectDevice;
 
 typedef struct {
@@ -253,6 +286,79 @@ static bool adv_has_uuid16(const uint8_t *data, size_t len, uint16_t uuid) {
     return false;
 }
 
+// Detects a Nest Weave advertisement. When the 0xFEAF service data carries a
+// device-identification block it must name the Nest Labs vendor; a bare 0xFEAF
+// UUID with no parsable block is still accepted (info stays unset).
+static bool adv_nest_weave(const uint8_t *data, size_t len, bool *out_have_info,
+                           uint16_t *out_product, bool *out_paired) {
+    *out_have_info = false;
+    if (!adv_has_uuid16(data, len, UUID_NEST_WEAVE)) {
+        return false;
+    }
+    const uint8_t *p = data;
+    size_t remaining = len;
+    while (remaining > 1) {
+        uint8_t field_len = p[0];
+        if (field_len == 0 || (size_t)(field_len + 1) > remaining) {
+            break;
+        }
+        const uint8_t *payload = p + 2;
+        size_t payload_len = (size_t)(field_len - 1);
+        if (p[1] == BLE_AD_TYPE_SERVICE_DATA_16BIT && payload_len >= 2 &&
+            read_u16_le(payload) == UUID_NEST_WEAVE) {
+            const uint8_t *blk = payload + 2;
+            size_t blk_len = payload_len - 2;
+            if (blk_len >= NEST_WEAVE_BLOCK_LEN && blk[1] == 0x01) {
+                if (read_u16_le(blk + 4) != NEST_WEAVE_VENDOR_ID) {
+                    return false;
+                }
+                *out_have_info = true;
+                *out_product = read_u16_le(blk + 6);
+                *out_paired = (blk[16] == 1);
+            }
+            break;
+        }
+        remaining -= (size_t)(field_len + 1);
+        p += (size_t)(field_len + 1);
+    }
+    return true;
+}
+
+// Detects a Google Nest camera/doorbell in Matter commissioning mode. Returns
+// the variant label via *out_label when vendor and product both match.
+static bool adv_nest_matter(const uint8_t *data, size_t len, const char **out_label) {
+    if (data == NULL) {
+        return false;
+    }
+    const uint8_t *p = data;
+    size_t remaining = len;
+    while (remaining > 1) {
+        uint8_t field_len = p[0];
+        if (field_len == 0 || (size_t)(field_len + 1) > remaining) {
+            break;
+        }
+        const uint8_t *payload = p + 2;
+        size_t payload_len = (size_t)(field_len - 1);
+        if (p[1] == BLE_AD_TYPE_SERVICE_DATA_16BIT && payload_len >= 2 &&
+            read_u16_le(payload) == UUID_MATTER) {
+            const uint8_t *blk = payload + 2;
+            if (payload_len - 2 < MATTER_BLOCK_LEN || blk[0] != 0x00 ||
+                read_u16_le(blk + 3) != MATTER_VENDOR_GOOGLE) {
+                return false;
+            }
+            switch (read_u16_le(blk + 5)) {
+            case NEST_MATTER_PID_DOORBELL:    *out_label = "Doorbell"; return true;
+            case NEST_MATTER_PID_CAM_INDOOR:  *out_label = "Indoor Cam"; return true;
+            case NEST_MATTER_PID_CAM_OUTDOOR: *out_label = "Outdoor Cam"; return true;
+            default:                          return false;
+            }
+        }
+        remaining -= (size_t)(field_len + 1);
+        p += (size_t)(field_len + 1);
+    }
+    return false;
+}
+
 static bool adv_mfg_match(const uint8_t *data, size_t len, uint16_t company,
                           const uint8_t *prefix, size_t prefix_len) {
     if (data == NULL || prefix == NULL || prefix_len == 0) {
@@ -390,6 +496,12 @@ const char *ble_device_detect_type_to_string(BLEDetectDeviceType type) {
         return "Exposure Beacon";
     case BLE_DETECT_DEVICE_CHAMELEON:
         return "Chameleon";
+    case BLE_DETECT_DEVICE_META_GLASSES:
+        return "Meta Glasses";
+    case BLE_DETECT_DEVICE_GOOGLE_TAG:
+        return "Google Tag";
+    case BLE_DETECT_DEVICE_NEST:
+        return "Nest Device";
     default:
         return "BLE Device";
     }
@@ -429,6 +541,9 @@ static bool is_tracking_addr(const ble_addr_t *addr) {
            memcmp(s_tracking.addr.val, addr->val, sizeof(addr->val)) == 0;
 }
 
+static uint32_t s_rx_count;
+uint32_t ble_device_detect_get_rx_count(void) { return s_rx_count; }
+
 static void ble_device_detect_callback(struct ble_gap_event *event, size_t len) {
     (void)len;
 
@@ -451,6 +566,7 @@ static void ble_device_detect_callback(struct ble_gap_event *event, size_t len) 
             if (s_devices[i].addr.type == event->disc.addr.type &&
                 memcmp(s_devices[i].addr.val, event->disc.addr.val, sizeof(event->disc.addr.val)) == 0) {
                 s_devices[i].rssi = s_tracking.last_rssi;
+                s_devices[i].last_seen_ms = (uint32_t)(esp_timer_get_time() / 1000);
                 if (s_devices[i].type == BLE_DETECT_DEVICE_AIRTAG) {
                     char mac[18];
                     format_mac_address(s_devices[i].addr.val, mac, sizeof(mac), false);
@@ -467,8 +583,12 @@ static void ble_device_detect_callback(struct ble_gap_event *event, size_t len) 
     }
 
     BLEDetectDeviceType detected_type = BLE_DETECT_DEVICE_UNKNOWN;
+    s_rx_count++;
     const char *detected_subtype = NULL;
     char adv_name[32] = {0};
+    char nest_sub[20];
+    bool nest_info = false, nest_paired = false;
+    uint16_t nest_product = 0;
 
     parse_ble_device_name(event->disc.data, event->disc.length_data, adv_name, sizeof(adv_name));
     detected_subtype = detect_flipper_type_from_adv(event->disc.data, event->disc.length_data);
@@ -505,6 +625,18 @@ static void ble_device_detect_callback(struct ble_gap_event *event, size_t len) 
                              s_generic_findmy_prefix, sizeof(s_generic_findmy_prefix))) {
         detected_type = BLE_DETECT_DEVICE_FINDMY;
         detected_subtype = "Clone";
+    } else if (adv_nest_matter(event->disc.data, event->disc.length_data, &detected_subtype)) {
+        detected_type = BLE_DETECT_DEVICE_NEST;
+    } else if (adv_nest_weave(event->disc.data, event->disc.length_data, &nest_info,
+                              &nest_product, &nest_paired)) {
+        detected_type = BLE_DETECT_DEVICE_NEST;
+        if (nest_info) {
+            snprintf(nest_sub, sizeof(nest_sub), "%s P:%04X",
+                     nest_paired ? "Paired" : "Setup", (unsigned)nest_product);
+            detected_subtype = nest_sub;
+        } else {
+            detected_subtype = "Weave";
+        }
     } else if (adv_has_uuid16(event->disc.data, event->disc.length_data, UUID_FASTPAIR)) {
         detected_type = BLE_DETECT_DEVICE_FASTPAIR;
         detected_subtype = "Fast Pair";
@@ -514,6 +646,16 @@ static void ble_device_detect_callback(struct ble_gap_event *event, size_t len) 
     } else if (adv_has_uuid16(event->disc.data, event->disc.length_data, UUID_GAEN)) {
         detected_type = BLE_DETECT_DEVICE_GAEN;
         detected_subtype = "Exposure";
+    } else if (adv_has_uuid16(event->disc.data, event->disc.length_data, UUID_META_GLASSES) ||
+               adv_has_company(event->disc.data, event->disc.length_data, META_COMPANY_ID) ||
+               adv_has_company(event->disc.data, event->disc.length_data, META_TECH_COMPANY_ID) ||
+               adv_has_company(event->disc.data, event->disc.length_data, LUXOTTICA_COMPANY_ID) ||
+               adv_has_company(event->disc.data, event->disc.length_data, SNAP_COMPANY_ID)) {
+        detected_type = BLE_DETECT_DEVICE_META_GLASSES;
+        detected_subtype = "Glasses";
+    } else if (adv_has_uuid16(event->disc.data, event->disc.length_data, UUID_GOOGLE_FEAA)) {
+        detected_type = BLE_DETECT_DEVICE_GOOGLE_TAG;
+        detected_subtype = "Find My";
     } else if (adv_name[0] != '\0' && strstr(adv_name, "ChameleonUltra") != NULL) {
         detected_type = BLE_DETECT_DEVICE_CHAMELEON;
         detected_subtype = "Ultra";
@@ -529,6 +671,7 @@ static void ble_device_detect_callback(struct ble_gap_event *event, size_t len) 
     if (index >= 0) {
         BLEDetectDevice *existing = &s_devices[index];
         existing->rssi = event->disc.rssi;
+        existing->last_seen_ms = (uint32_t)(esp_timer_get_time() / 1000);
         if (adv_name[0] != '\0') {
             strncpy(existing->name, adv_name, sizeof(existing->name) - 1);
             existing->name[sizeof(existing->name) - 1] = '\0';
@@ -571,6 +714,7 @@ static void ble_device_detect_callback(struct ble_gap_event *event, size_t len) 
     memcpy(&device->addr, &event->disc.addr, sizeof(device->addr));
     device->type = detected_type;
     device->rssi = event->disc.rssi;
+    device->last_seen_ms = (uint32_t)(esp_timer_get_time() / 1000);
 
     if (adv_name[0] != '\0') {
         strncpy(device->name, adv_name, sizeof(device->name) - 1);
@@ -634,6 +778,7 @@ static void ble_device_detect_callback(struct ble_gap_event *event, size_t len) 
 }
 
 void ble_device_detect_start(void) {
+    s_rx_count = 0;
     free(s_devices);
     s_devices = calloc(MAX_BLE_DETECT_DEVICES, sizeof(*s_devices));
     s_device_count = 0;
@@ -659,7 +804,12 @@ void ble_device_detect_start(void) {
     }
 
     ble_unregister_handler(ble_device_detect_callback);
-    ble_register_handler(ble_device_detect_callback);
+    if (ble_register_handler(ble_device_detect_callback) != ESP_OK) {
+        ESP_LOGE(TAG, "Could not register device detection handler");
+        free(s_devices);
+        s_devices = NULL;
+        return;
+    }
     s_scan_active = true;
 
     if (!ble_start_scanning()) {
@@ -716,6 +866,7 @@ int ble_device_detect_get_device(int index, BLEDetectDeviceInfo *out_info) {
     memset(out_info, 0, sizeof(*out_info));
     out_info->type = s_devices[index].type;
     out_info->rssi = s_devices[index].rssi;
+    out_info->last_seen_ms = s_devices[index].last_seen_ms;
     out_info->tracking = s_tracking.active && s_devices[index].type == s_tracking.type &&
                          s_devices[index].addr.type == s_tracking.addr.type &&
                          memcmp(s_devices[index].addr.val, s_tracking.addr.val,

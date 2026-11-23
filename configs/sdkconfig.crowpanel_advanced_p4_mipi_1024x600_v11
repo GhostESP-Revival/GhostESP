@@ -85,6 +85,8 @@ CONFIG_HAS_AUDIO_PLAYER=y
 # available; GPIO53/54 are shared with the UART passthrough and nRF24 and must
 # not be enabled in the same build.
 CONFIG_HAS_LORA=y
+CONFIG_HAS_MESHCORE=y
+CONFIG_MESHCORE_REGION_US=y
 CONFIG_LORA_SPI_HOST=3
 CONFIG_LORA_SPI_MOSI_PIN=6
 CONFIG_LORA_SPI_MISO_PIN=7

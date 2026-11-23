@@ -89,6 +89,8 @@ static lv_obj_t *s_rows[CLOUD_STORE_MAX_ROWS];
 static row_meta_t s_row_meta[CLOUD_STORE_MAX_ROWS];
 static lv_timer_t *s_status_timer;
 static progress_bar_view_t *s_progress;
+#define NO_INTERNET_MSG "No internet. Connect GhostESP to WiFi first"
+
 static scan_status_t *s_loading; // full-screen loading overlay while fetching
 static popup_confirm_t *s_confirm_popup;
 static bool s_apps_available;
@@ -319,8 +321,14 @@ static void render_top_level(int *rendered, cloud_store_status_t status) {
 
     char refresh_buf[CLOUD_STORE_ERROR_MAX + 40];
     const char *refresh_label = LV_SYMBOL_REFRESH "  Refresh cloud list";
+    bool catalog_empty = cloud_store_get_count(CLOUD_STORE_TYPE_APP) == 0 &&
+                         cloud_store_get_count(CLOUD_STORE_TYPE_ASSET_PACK) == 0 &&
+                         cloud_store_get_count(CLOUD_STORE_TYPE_SCRIPT) == 0;
     if (status.state == CLOUD_STORE_STATE_FETCHING) {
         refresh_label = LV_SYMBOL_REFRESH "  Loading cloud manifest...";
+    } else if (catalog_empty && !cloud_store_has_internet()) {
+        // Nothing cached and nothing to fetch it with: say why, plainly.
+        refresh_label = "#ff5555 " LV_SYMBOL_WARNING "#  No internet. Connect GhostESP to WiFi  (tap to retry)";
     } else if (status.state == CLOUD_STORE_STATE_FAILED &&
                cloud_store_get_count(CLOUD_STORE_TYPE_APP) == 0 &&
                cloud_store_get_count(CLOUD_STORE_TYPE_ASSET_PACK) == 0 &&
@@ -439,6 +447,7 @@ static void render_items(int *rendered, cloud_store_item_type_t type, cloud_stor
     if (item_total == 0) {
         const char *msg = (status.state == CLOUD_STORE_STATE_FETCHING)
             ? "Loading..."
+            : !cloud_store_has_internet() ? "No internet connection"
             : (type == CLOUD_STORE_TYPE_APP) ? "No apps available"
             : (type == CLOUD_STORE_TYPE_SCRIPT) ? "No scripts available"
             : "No asset packs available";
@@ -489,6 +498,14 @@ static void start_refresh(bool user_initiated) {
         return;
     }
 
+    // No uplink: don't start a doomed TLS fetch (it also pauses the AP). Tell the
+    // user what to do instead.
+    if (!cloud_store_has_internet()) {
+        toast_show_duration(NO_INTERNET_MSG, TOAST_ERROR, 3000);
+        render_store();
+        return;
+    }
+
     uint32_t now = lv_tick_get();
     if (user_initiated && s_last_refresh_ms != 0 && (uint32_t)(now - s_last_refresh_ms) < 5000) {
         toast_show_duration("Refresh already tried", TOAST_INFO, 900);
@@ -514,6 +531,10 @@ static void progress_cancel_cb(void *user_data);
 
 static void confirm_install_cb(void *user_data) {
     (void)user_data;
+    if (!cloud_store_has_internet()) {
+        toast_show_duration(NO_INTERNET_MSG, TOAST_ERROR, 3000);
+        return;
+    }
     esp_err_t err = cloud_store_install_async(s_pending_type, s_pending_id);
     if (err == ESP_ERR_NOT_FOUND) {
         toast_show_duration("SD card required for Cloud Store", TOAST_WARN, 1800);

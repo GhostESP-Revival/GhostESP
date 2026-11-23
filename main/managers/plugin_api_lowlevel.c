@@ -14,6 +14,7 @@
 #include "core/uart_share.h"
 #include "i2c_bus_lock.h"
 #include "vendor/pcap.h"
+#include "scans/wifi/wifi_channels.h"
 
 #if CONFIG_HAS_CAMERA
 #include "managers/camera_stream_manager.h"
@@ -877,7 +878,10 @@ void plugin_api_system_reboot(void) {
 }
 
 bool plugin_api_wifi_set_channel(uint8_t channel) {
-    if (!has_permission(PLUGIN_PERMISSION_WIFI_CONTROL) || channel == 0 || channel > 14) return false;
+    if (!has_permission(PLUGIN_PERMISSION_WIFI_CONTROL) ||
+        !wifi_channels_is_monitor_channel(channel)) {
+        return false;
+    }
     return esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE) == ESP_OK;
 }
 

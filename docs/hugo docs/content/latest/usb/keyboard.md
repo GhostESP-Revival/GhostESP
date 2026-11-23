@@ -4,14 +4,7 @@ description: "Using a USB keyboard to control GhostESP"
 weight: 10
 ---
 
-ESP32-S3 devices can use USB Host mode to accept input from a USB keyboard.
-
-## Requirements
-
-- **ESP32-S3 based device** (Cardputer ADV, T-Deck, etc.)
-- **USB OTG adapter** (Type-C to USB-A)
-- **USB keyboard**
-- **USE_USB_KEYBOARD** enabled in build config (ESP32-S3 only)
+ESP32-S3 devices with `USE_USB_KEYBOARD` enabled can use USB Host mode to accept input from a USB keyboard. You need a USB OTG adapter (Type-C to USB-A) and a USB keyboard.
 
 ## Enabling USB Host Mode
 
@@ -19,7 +12,7 @@ USB Host mode can be enabled in two ways:
 
 ### Via Settings Menu
 
-1. Navigate to **Settings → General → Power**
+1. Navigate to **Settings → Hardware → Power & USB**
 2. Find **USB Host Mode**
 3. Toggle to **On**
 

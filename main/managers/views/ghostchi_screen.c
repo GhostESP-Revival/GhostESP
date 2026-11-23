@@ -1,5 +1,6 @@
 #include "managers/views/ghostchi_screen.h"
 #include "core/ghostchi_identity.h"
+#include "core/utils.h"
 #include "gui/design_tokens.h"
 
 #include "gui/lvgl_safe.h"
@@ -363,7 +364,7 @@ static const char *bubble_text(const ghostchi_snapshot_t *snap,
                     return phase == 0 ? "getting loud." : (phase == 1 ? "bit rude, yeah." : "wake up already.");
                 return act_slot >= 3
                            ? (phase == 0 ? "forcing it." : (phase == 1 ? "nudging them." : "stirring things up."))
-                           : (phase == 0 ? "fine. deauthing." : (phase == 1 ? "pushing them." : "making noise."));
+                           : (phase == 0 ? "trying a reconnect." : (phase == 1 ? "pushing them." : "making noise."));
             case GHOSTCHI_STATE_COOLDOWN:
                 if (snap->handshakes) {
                     if (act_slot == 4)
@@ -1084,7 +1085,9 @@ static void update_ui(lv_timer_t *timer) {
         set_stat(1, "CH", snap.current_channel ? buf : "--");
         snprintf(buf, sizeof(buf), "%u", (unsigned)snap.aps_visible);
         set_stat(2, "APS", buf);
-        set_stat(3, "TARGET", snap.target_ssid[0] ? snap.target_ssid : "None");
+        char target_disp[sizeof(snap.target_ssid)];
+        privacy_redact_ssid_copy(snap.target_ssid, target_disp, sizeof(target_disp));
+        set_stat(3, "TARGET", snap.target_ssid[0] ? target_disp : "None");
         snprintf(buf, sizeof(buf), "%u", (unsigned)snap.handshakes);
         set_stat(4, "PWND", buf);
         snprintf(buf, sizeof(buf), "%u%%", (unsigned)snap.confidence);

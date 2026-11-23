@@ -229,7 +229,11 @@ void handle_flock_scan_cmd(int argc, char **argv) {
 }
 
 void handle_flock_list_cmd(int argc, char **argv) {
-    int count = flock_detector_get_count();
+    int total = flock_detector_get_count();
+    int count = 0;
+    for (int i = 0; i < total; i++) {
+        if (flock_detector_is_flock(flock_detector_get_detection(i))) count++;
+    }
     if (count == 0) {
         glog("No surveillance devices detected yet.\n");
         if (!flock_detector_is_running()) {
@@ -240,9 +244,9 @@ void handle_flock_list_cmd(int argc, char **argv) {
     glog("Surveillance Devices Detected (%d):\n", count);
     glog("%-3s %-18s %-17s %-4s %-8s %3s %5s %s\n", "#", "MAC", "Method", "Conf", "Signal", "Ch", "Hits", "SSID");
     glog("--- ------------------ ----------------- ---- -------- --- ----- ------\n");
-    for (int i = 0; i < count; i++) {
+    for (int i = 0; i < total; i++) {
         const FlockDetection *d = flock_detector_get_detection(i);
-        if (!d) continue;
+        if (!flock_detector_is_flock(d)) continue;
         const char *sig = (d->rssi > -50) ? "Strong" : (d->rssi > -70) ? "Medium" : "Weak";
         char sigbuf[16];
         snprintf(sigbuf, sizeof(sigbuf), "%s (%dd)", sig, d->rssi);

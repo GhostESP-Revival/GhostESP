@@ -21,6 +21,22 @@ typedef void (*lora_rx_cb_t)(const uint8_t *payload, uint8_t len,
 // Bring up SPI + radio with params from hw/region. Returns ESP_OK on ready.
 int lora_radio_init(const lora_hw_t *hw, uint32_t freq_hz, int sf, int bw_khz, int tx_dbm);
 int lora_radio_init_ex(const lora_hw_t *hw, uint32_t freq_hz, int sf, int bw_khz, int tx_dbm, int cr_denom);
+
+// Protocol-agnostic radio profile. The Meshtastic path (lora_radio_init_ex)
+// keeps its stock sync word/preamble/LDRO; MeshCore passes its own.
+typedef struct {
+    uint32_t freq_hz;
+    int sf;             // 5..12
+    int bw_khz_x10;     // bandwidth in kHz x10 (e.g. 62.5 kHz -> 625)
+    int cr_denom;       // 5..8 (CR 4/5..4/8)
+    int tx_dbm;
+    uint8_t sync_reg0;  // raw bytes written to SX126x 0x0740
+    uint8_t sync_reg1;
+    int preamble_len;   // preamble symbols
+    int8_t ldro;        // -1 auto, 0 off, 1 on
+} lora_radio_profile_t;
+int lora_radio_init_profile(const lora_hw_t *hw, const lora_radio_profile_t *profile);
+
 void lora_radio_deinit(void);
 bool lora_radio_is_ready(void);
 // Last failed init stage ("none" when healthy). Valid after a failed init.

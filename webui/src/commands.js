@@ -9,6 +9,13 @@
  * - description: human-readable help
  */
 
+// The firmware tokenizer concatenates quoted segments and preserves backslashes.
+// JSON escaping is not shell quoting. Represent a double quote in a single-quoted segment.
+function quoteCommandArg(value) {
+  const text = String(value ?? '');
+  if (/[\r\n\0]/.test(text)) throw new Error('Command arguments must be a single line');
+  return '"' + text.replace(/"/g, "\"'\"'\"") + '"';
+}
 const CMD = {
   // Core
   help:            () => ({ cmd: 'help',            risky: false, stopFirst: false, cat: 'System', desc: 'Show help' }),
@@ -31,24 +38,24 @@ const CMD = {
   selectSta:       (indices) => ({ cmd: `select -s ${indices}`, risky: false, stopFirst: false, cat: 'WiFi Select', desc: 'Select station by index' }),
   connect:         (ssid, pass) => {
     if (!ssid) return { cmd: 'connect', risky: false, stopFirst: false, cat: 'WiFi Select', desc: 'Connect to saved WiFi' };
-    return { cmd: pass ? `connect "${ssid}" "${pass}"` : `connect "${ssid}"`, risky: true, stopFirst: false, cat: 'WiFi Select', desc: 'Connect to WiFi' };
+    return { cmd: pass ? `connect ${quoteCommandArg(ssid)} ${quoteCommandArg(pass)}` : `connect ${quoteCommandArg(ssid)}`, risky: true, stopFirst: false, cat: 'WiFi Select', desc: 'Connect to WiFi' };
   },
   disconnect:      () => ({ cmd: 'disconnect',      risky: false, stopFirst: false, cat: 'WiFi Select', desc: 'Disconnect WiFi' }),
   wifiStatus:      () => ({ cmd: 'wifistatus',      risky: false, stopFirst: false, cat: 'WiFi Select', desc: 'WiFi connection status' }),
 
   // WiFi Attacks
-  deauth:          () => ({ cmd: 'attack -d',       risky: true, stopFirst: true, cat: 'WiFi Attack', desc: 'Deauth attack on selected APs' }),
-  eapol:           () => ({ cmd: 'attack -e',       risky: true, stopFirst: true, cat: 'WiFi Attack', desc: 'EAPOL logoff attack' }),
-  stopDeauth:      () => ({ cmd: 'stopdeauth',      risky: false, stopFirst: false, cat: 'WiFi Attack', desc: 'Stop deauth attack' }),
+  deauth:          () => ({ cmd: 'attack -d',       risky: true, stopFirst: true, cat: 'Wi-Fi Tests', desc: 'Reconnect test on selected APs (sends deauthentication frames)' }),
+  eapol:           () => ({ cmd: 'attack -e',       risky: true, stopFirst: true, cat: 'Wi-Fi Tests', desc: 'EAPOL logoff test' }),
+  stopDeauth:      () => ({ cmd: 'stopdeauth',      risky: false, stopFirst: false, cat: 'Wi-Fi Tests', desc: 'Stop reconnect test' }),
   beaconSpam:      (mode = 'random') => {
     const map = { random: '-r', rickroll: '-rr', list: '-l' };
-    return { cmd: `beaconspam ${map[mode] || mode}`, risky: true, stopFirst: true, cat: 'WiFi Attack', desc: 'Beacon spam' };
+    return { cmd: `beaconspam ${map[mode] || mode}`, risky: true, stopFirst: true, cat: 'Wi-Fi Tests', desc: 'Beacon spam' };
   },
-  stopSpam:        () => ({ cmd: 'stopspam',        risky: false, stopFirst: false, cat: 'WiFi Attack', desc: 'Stop beacon spam' }),
-  karmaStart:      (ssids) => ({ cmd: ssids?.length ? `karma start ${ssids.map(s => /\s/.test(s) ? `"${s}"` : s).join(' ')}` : 'karma start', risky: true, stopFirst: true, cat: 'WiFi Attack', desc: 'Start karma attack' }),
-  karmaStop:       () => ({ cmd: 'karma stop',      risky: false, stopFirst: false, cat: 'WiFi Attack', desc: 'Stop karma attack' }),
-  saeFlood:        (pass) => ({ cmd: `saeflood ${pass}`, risky: true, stopFirst: true, cat: 'WiFi Attack', desc: 'SAE flood attack' }),
-  stopSaeFlood:    () => ({ cmd: 'stopsaeflood',    risky: false, stopFirst: false, cat: 'WiFi Attack', desc: 'Stop SAE flood' }),
+  stopSpam:        () => ({ cmd: 'stopspam',        risky: false, stopFirst: false, cat: 'Wi-Fi Tests', desc: 'Stop beacon spam' }),
+  karmaStart:      (ssids) => ({ cmd: ssids?.length ? `karma start ${ssids.map(quoteCommandArg).join(' ')}` : 'karma start', risky: true, stopFirst: true, cat: 'Wi-Fi Tests', desc: 'Start karma test' }),
+  karmaStop:       () => ({ cmd: 'karma stop',      risky: false, stopFirst: false, cat: 'Wi-Fi Tests', desc: 'Stop karma test' }),
+  saeFlood:        (pass) => ({ cmd: `saeflood ${quoteCommandArg(pass)}`, risky: true, stopFirst: true, cat: 'Wi-Fi Tests', desc: 'SAE flood test' }),
+  stopSaeFlood:    () => ({ cmd: 'stopsaeflood',    risky: false, stopFirst: false, cat: 'Wi-Fi Tests', desc: 'Stop SAE flood' }),
 
   // WiFi Tracking
   trackAp:         () => ({ cmd: 'trackap',         risky: true, stopFirst: true, cat: 'WiFi Track', desc: 'Track selected AP RSSI' }),
@@ -67,7 +74,7 @@ const CMD = {
   // Environment
   sweep:           (stop) => ({ cmd: stop ? 'stop' : 'sweep', risky: !stop, stopFirst: !stop, cat: 'Environment', desc: 'WiFi/BLE/GPS sweep' }),
   pineap:          () => ({ cmd: 'pineap',          risky: true, stopFirst: true, cat: 'Environment', desc: 'Detect WiFi Pineapples' }),
-  congestion:      () => ({ cmd: 'congestion',      risky: false, stopFirst: false, cat: 'Environment', desc: 'Channel congestion' }),
+  congestion:      () => ({ cmd: 'congestion',      risky: true, stopFirst: true, cat: 'Environment', desc: 'Channel congestion' }),
   listenProbes:    (stop) => ({ cmd: stop ? 'listenprobes -s' : 'listenprobes', risky: !stop, stopFirst: !stop, cat: 'Environment', desc: 'Listen for probe requests' }),
 
   // Network
@@ -84,21 +91,22 @@ const CMD = {
 
   // Evil Portal
   startPortal:     (path, ssid, password) => {
-    let c = `startportal ${path || 'default'} "${ssid || 'FreeWiFi'}"`;
-    if (password) c += ` "${password}"`;
+    let c = `startportal ${quoteCommandArg(path || 'default')} ${quoteCommandArg(ssid || 'FreeWiFi')}`;
+    if (password) c += ` ${quoteCommandArg(password)}`;
     return { cmd: c, risky: true, stopFirst: true, cat: 'Portal', desc: 'Start evil portal' };
   },
   stopPortal:      () => ({ cmd: 'stopportal',      risky: false, stopFirst: false, cat: 'Portal', desc: 'Stop evil portal' }),
   listPortals:     () => ({ cmd: 'listportals',     risky: false, stopFirst: false, cat: 'Portal', desc: 'List portal files' }),
 
   // BLE Scan
+  bleDetect:       () => ({ cmd: 'bledetect', risky: true, stopFirst: true, cat: 'BLE Scan', desc: 'Detect BLE trackers, skimmers and beacons' }),
   bleScan:         (mode, stop) => {
     const m = { flipper: '-f', spam: '-ds', airtag: '-a', raw: '-r', gatt: '-g' };
     return { cmd: stop ? 'blescan -s' : `blescan ${m[mode] || ''}`.trim(), risky: !stop, stopFirst: !stop, cat: 'BLE Scan', desc: `BLE scan ${mode}` };
   },
   bleSpam:         (mode, stop) => {
     const m = { apple: '-apple', microsoft: '-ms', samsung: '-samsung', google: '-google', random: '-random' };
-    return { cmd: stop ? 'blespam -s' : `blespam ${m[mode] || ''}`.trim(), risky: !stop, stopFirst: !stop, cat: 'BLE Attack', desc: `BLE spam ${mode}` };
+    return { cmd: stop ? 'blespam -s' : `blespam ${m[mode] || ''}`.trim(), risky: !stop, stopFirst: !stop, cat: 'BLE Tests', desc: `BLE spam ${mode}` };
   },
   listFlippers:    () => ({ cmd: 'listflippers',    risky: false, stopFirst: false, cat: 'BLE Scan', desc: 'List Flipper devices' }),
   listAirTags:     () => ({ cmd: 'listairtags',     risky: false, stopFirst: false, cat: 'BLE Scan', desc: 'List AirTags' }),
@@ -107,7 +115,7 @@ const CMD = {
   selectGatt:      (indices) => ({ cmd: `selectgatt ${indices}`, risky: false, stopFirst: false, cat: 'BLE Select', desc: 'Select GATT device' }),
   trackGatt:       () => ({ cmd: 'trackgatt',       risky: true, stopFirst: true, cat: 'BLE Track', desc: 'Track GATT device' }),
   trackFlipper:    (index) => ({ cmd: `selectflipper ${index}`, risky: true, stopFirst: true, cat: 'BLE Track', desc: 'Track Flipper' }),
-  spoofAirTag:     (start) => ({ cmd: start ? 'spoofairtag' : 'stopspoof', risky: start, stopFirst: start, cat: 'BLE Attack', desc: 'Spoof AirTag' }),
+  spoofAirTag:     (start) => ({ cmd: start ? 'spoofairtag' : 'stopspoof', risky: start, stopFirst: start, cat: 'BLE Tests', desc: 'Spoof AirTag' }),
   bleWardrive:     (stop) => ({ cmd: stop ? 'blewardriving -s' : 'blewardriving', risky: !stop, stopFirst: !stop, cat: 'BLE Scan', desc: 'BLE wardriving' }),
 
   // NFC
@@ -115,20 +123,19 @@ const CMD = {
   // No single 'scan' verb exists; a full NFC view would need its own UI.
 
   // IR
-  irList:          (path) => ({ cmd: path ? `ir list ${path}` : 'ir list', risky: false, stopFirst: false, cat: 'IR', desc: 'List IR remotes' }),
-  irSend:          (remote, btn) => ({ cmd: btn != null ? `ir send ${remote} ${btn}` : `ir send ${remote}`, risky: false, stopFirst: false, cat: 'IR', desc: 'Send IR signal' }),
-  irLearn:         (path) => ({ cmd: path ? `ir learn ${path}` : 'ir learn', risky: true, stopFirst: true, cat: 'IR', desc: 'Learn IR signal' }),
+  irList:          (path) => ({ cmd: path ? `ir list ${quoteCommandArg(path)}` : 'ir list', risky: false, stopFirst: false, cat: 'IR', desc: 'List IR remotes' }),
+  irSend:          (remote, btn) => ({ cmd: btn != null ? `ir send ${quoteCommandArg(remote)} ${btn}` : `ir send ${quoteCommandArg(remote)}`, risky: false, stopFirst: false, cat: 'IR', desc: 'Send IR signal' }),
+  irLearn:         (path) => ({ cmd: path ? `ir learn ${quoteCommandArg(path)}` : 'ir learn', risky: true, stopFirst: true, cat: 'IR', desc: 'Learn IR signal' }),
   irDazzler:       (stop) => ({ cmd: stop ? 'ir dazzler stop' : 'ir dazzler', risky: !stop, stopFirst: !stop, cat: 'IR', desc: 'IR dazzler' }),
-  irShow:          (remote) => ({ cmd: `ir show ${remote}`, risky: false, stopFirst: false, cat: 'IR', desc: 'Show IR remote buttons' }),
-
+  irShow:          (remote) => ({ cmd: `ir show ${quoteCommandArg(remote)}`, risky: false, stopFirst: false, cat: 'IR', desc: 'Show IR remote buttons' }),
   // BadUSB
   badusbList:      () => ({ cmd: 'badusb list',     risky: false, stopFirst: false, cat: 'BadUSB', desc: 'List BadUSB scripts' }),
-  badusbRun:       (file) => ({ cmd: `badusb run ${file}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Run BadUSB script' }),
+  badusbRun:       (file) => ({ cmd: `badusb run ${quoteCommandArg(file)}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Run BadUSB script' }),
   badusbStop:      () => ({ cmd: 'badusb stop',     risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Stop BadUSB' }),
   badusbRunBuiltin:() => ({ cmd: 'badusb run "Ghost Art (Built-in)"', risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Run built-in Ghost Art script' }),
   badusbKeyboardStart: () => ({ cmd: 'badusb keyboard_start', risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Enable USB keyboard mode' }),
   badusbKeyboardStop:  () => ({ cmd: 'badusb keyboard_stop',  risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Disable USB keyboard mode' }),
-  badusbType:      (text) => ({ cmd: `badusb type ${JSON.stringify(text || '')}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Type via USB keyboard' }),
+  badusbType:      (text) => ({ cmd: `badusb type ${quoteCommandArg(text || '')}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Type via USB keyboard' }),
   badusbTypeChar:  (ch) => ({ cmd: `badusb type_char ${(ch || '').charCodeAt(0)}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Send a single ASCII char' }),
   badusbKeysend:   (modifier, keycode) => ({ cmd: `badusb keysend ${modifier} ${keycode}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Send single HID key (modifier, keycode)' }),
   badusbJiggleStart: () => ({ cmd: 'badusb jiggle_start', risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Start mouse jiggler' }),
@@ -140,8 +147,8 @@ const CMD = {
   badusbTrackpadButton:(mask) => ({ cmd: `badusb trackpad_button ${mask}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Mouse button mask: 1=L 2=R 4=M 0=release' }),
   badusbSetVid:    (hex) => ({ cmd: `badusb set_vid ${hex}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Set BadUSB VID (next run)' }),
   badusbSetPid:    (hex) => ({ cmd: `badusb set_pid ${hex}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Set BadUSB PID (next run)' }),
-  badusbSetMfr:    (text) => ({ cmd: `badusb set_mfr ${JSON.stringify(text || '')}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Set manufacturer string' }),
-  badusbSetProd:   (text) => ({ cmd: `badusb set_prod ${JSON.stringify(text || '')}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Set product string' }),
+  badusbSetMfr:    (text) => ({ cmd: `badusb set_mfr ${quoteCommandArg(text || '')}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Set manufacturer string' }),
+  badusbSetProd:   (text) => ({ cmd: `badusb set_prod ${quoteCommandArg(text || '')}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Set product string' }),
   badusbSetRand:   (on) => ({ cmd: `badusb set_rand ${on ? '1' : '0'}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Toggle VID/PID randomize' }),
   badusbSetLayout: (n) => ({ cmd: `badusb set_layout ${n}`, risky: false, stopFirst: false, cat: 'BadUSB', desc: 'Keyboard layout (0=US 1=DE 2=FR 3=UK 4=ES)' }),
 
@@ -151,8 +158,8 @@ const CMD = {
   badbleStart:     () => ({ cmd: 'badble keyboard_start', risky: false, stopFirst: false, cat: 'BadBLE', desc: 'Advertise BLE HID keyboard for live typing' }),
   badbleStop:      () => ({ cmd: 'badble stop',      risky: false, stopFirst: false, cat: 'BadBLE', desc: 'Stop BadBLE and restore BLE stack' }),
   badbleName:      () => ({ cmd: 'badble name',      risky: false, stopFirst: false, cat: 'BadBLE', desc: 'Show advertised BadBLE name' }),
-  badbleSetName:   (text) => ({ cmd: `badble set_name ${JSON.stringify(text || '')}`, risky: false, stopFirst: false, cat: 'BadBLE', desc: 'Set advertised BadBLE name (max 31 chars)' }),
-  badbleRun:       (file) => ({ cmd: `badble run ${file}`, risky: false, stopFirst: false, cat: 'BadBLE', desc: 'Wait for a BLE host, then run a DuckyScript' }),
+  badbleSetName:   (text) => ({ cmd: `badble set_name ${quoteCommandArg(text || '')}`, risky: false, stopFirst: false, cat: 'BadBLE', desc: 'Set advertised BadBLE name (max 31 chars)' }),
+  badbleRun:       (file) => ({ cmd: `badble run ${quoteCommandArg(file)}`, risky: false, stopFirst: false, cat: 'BadBLE', desc: 'Wait for a BLE host, then run a DuckyScript' }),
   badbleRunBuiltin:() => ({ cmd: 'badble run "Ghost Art (Built-in)"', risky: false, stopFirst: false, cat: 'BadBLE', desc: 'Run the built-in Ghost Art script over BLE' }),
 
   // GPS
@@ -161,19 +168,18 @@ const CMD = {
 
   // SD Card
   sdStatus:        () => ({ cmd: 'sd status',       risky: false, stopFirst: false, cat: 'Files', desc: 'SD card status' }),
-  sdList:          (path) => ({ cmd: path ? `sd list ${path}` : 'sd list', risky: false, stopFirst: false, cat: 'Files', desc: 'List SD files' }),
-  sdRead:          (path, offset, length) => ({ cmd: `sd read ${path}${offset != null ? ' ' + offset : ''}${length != null ? ' ' + length : ''}`, risky: false, stopFirst: false, cat: 'Files', desc: 'Read SD file' }),
-  sdSize:          (path) => ({ cmd: `sd size ${path}`, risky: false, stopFirst: false, cat: 'Files', desc: 'Get file size' }),
-  sdWrite:         (path, b64) => ({ cmd: `sd write ${path} ${b64}`, risky: false, stopFirst: false, cat: 'Files', desc: 'Write file' }),
-  sdAppend:        (path, b64) => ({ cmd: `sd append ${path} ${b64}`, risky: false, stopFirst: false, cat: 'Files', desc: 'Append to file' }),
-  sdMkdir:         (path) => ({ cmd: `sd mkdir ${path}`, risky: false, stopFirst: false, cat: 'Files', desc: 'Create directory' }),
-  sdRm:            (path) => ({ cmd: `sd rm ${path}`, risky: false, stopFirst: false, cat: 'Files', desc: 'Delete file/dir' }),
-
+  sdList:          (path) => ({ cmd: path ? `sd list ${quoteCommandArg(path)}` : 'sd list', risky: false, stopFirst: false, cat: 'Files', desc: 'List SD files' }),
+  sdRead:          (path, offset, length) => ({ cmd: `sd read ${quoteCommandArg(path)}${offset != null ? ' ' + offset : ''}${length != null ? ' ' + length : ''}`, risky: false, stopFirst: false, cat: 'Files', desc: 'Read SD file' }),
+  sdSize:          (path) => ({ cmd: `sd size ${quoteCommandArg(path)}`, risky: false, stopFirst: false, cat: 'Files', desc: 'Get file size' }),
+  sdWrite:         (path, b64) => ({ cmd: `sd write ${quoteCommandArg(path)} ${b64}`, risky: false, stopFirst: false, cat: 'Files', desc: 'Write file' }),
+  sdAppend:        (path, b64) => ({ cmd: `sd append ${quoteCommandArg(path)} ${b64}`, risky: false, stopFirst: false, cat: 'Files', desc: 'Append to file' }),
+  sdMkdir:         (path) => ({ cmd: `sd mkdir ${quoteCommandArg(path)}`, risky: false, stopFirst: false, cat: 'Files', desc: 'Create directory' }),
+  sdRm:            (path) => ({ cmd: `sd rm ${quoteCommandArg(path)}`, risky: false, stopFirst: false, cat: 'Files', desc: 'Delete file/dir' }),
   // Aerial
   aerialScan:      (duration, stop) => ({ cmd: stop ? 'aerialstop' : `aerialscan ${duration || 30}`, risky: !stop, stopFirst: !stop, cat: 'Aerial', desc: 'Aerial scan' }),
   aerialList:      () => ({ cmd: 'aeriallist',      risky: false, stopFirst: false, cat: 'Aerial', desc: 'List aerial devices' }),
   aerialTrack:     (id) => ({ cmd: `aerialtrack ${id}`, risky: true, stopFirst: true, cat: 'Aerial', desc: 'Track aerial device' }),
-  aerialSpoof:     (id, lat, lon, alt) => ({ cmd: `aerialspoof "${id || 'GHOST-TEST'}" ${lat || 37.7749} ${lon || -122.4194} ${alt || 100}`, risky: true, stopFirst: true, cat: 'Aerial', desc: 'Spoof aerial device' }),
+  aerialSpoof:     (id, lat, lon, alt) => ({ cmd: `aerialspoof ${quoteCommandArg(id || 'GHOST-TEST')} ${lat ?? 37.7749} ${lon ?? -122.4194} ${alt ?? 100}`, risky: true, stopFirst: true, cat: 'Aerial', desc: 'Spoof aerial device' }),
   aerialSpoofStop: () => ({ cmd: 'aerialspoofstop', risky: false, stopFirst: false, cat: 'Aerial', desc: 'Stop aerial spoof' }),
 
   // Ethernet
@@ -206,7 +212,7 @@ const CMD = {
   timezone:        (tz) => ({ cmd: `timezone ${tz}`, risky: false, stopFirst: false, cat: 'Misc', desc: 'Set timezone' }),
   apcred:          (ssid, pass, reset) => {
     if (reset) return { cmd: 'apcred -r', risky: false, stopFirst: false, cat: 'Misc', desc: 'Reset AP creds' };
-    if (ssid && pass) return { cmd: `apcred "${ssid}" "${pass}"`, risky: false, stopFirst: false, cat: 'Misc', desc: 'Set AP credentials' };
+    if (ssid && pass) return { cmd: `apcred ${quoteCommandArg(ssid)} ${quoteCommandArg(pass)}`, risky: false, stopFirst: false, cat: 'Misc', desc: 'Set AP credentials' };
     return { cmd: 'apcred', risky: false, stopFirst: false, cat: 'Misc', desc: 'Show AP credentials' };
   },
   apenable:        (on) => ({ cmd: `apenable ${on ? 'on' : 'off'}`, risky: true, stopFirst: false, cat: 'Misc', desc: 'Enable/disable AP' }),
@@ -218,8 +224,27 @@ const CMD = {
   loraChat:        (text) => ({ cmd: text ? `lora chat ${text}` : 'lora chat', risky: false, stopFirst: false, cat: 'LoRa', desc: 'Send/list LoRa chat' }),
   loraNodes:       () => ({ cmd: 'lora nodes',       risky: false, stopFirst: false, cat: 'LoRa', desc: 'List LoRa nodes' }),
   loraDiag:        () => ({ cmd: 'lora diag',        risky: false, stopFirst: false, cat: 'LoRa', desc: 'LoRa diagnostics' }),
+  loraAutostart:   (on) => ({ cmd: on == null ? 'lora autostart' : `lora autostart ${on ? 'on' : 'off'}`, risky: false, stopFirst: false, cat: 'LoRa', desc: 'LoRa boot auto-start' }),
   loraBle:         (on) => ({ cmd: on == null ? 'lora ble' : on ? 'lora ble on' : 'lora ble off', risky: false, stopFirst: false, cat: 'LoRa', desc: 'LoRa BLE app link' }),
   loraApp:         () => ({ cmd: 'lora app',         risky: false, stopFirst: false, cat: 'LoRa', desc: 'Meshtastic app link status' }),
+
+  // MeshCore (alternative SX1262-family mesh; companion-only, exclusive with LoRa)
+  mcStatus:        () => ({ cmd: 'meshcore status',   risky: false, stopFirst: false, cat: 'MeshCore', desc: 'MeshCore status' }),
+  mcStart:         () => ({ cmd: 'meshcore start',    risky: true,  stopFirst: true,  cat: 'MeshCore', desc: 'Start MeshCore (stops Meshtastic)' }),
+  mcStop:          () => ({ cmd: 'meshcore stop',     risky: false, stopFirst: false, cat: 'MeshCore', desc: 'Stop MeshCore' }),
+  mcChat:          (text) => ({ cmd: text ? `meshcore send ${text}` : 'meshcore messages', risky: false, stopFirst: false, cat: 'MeshCore', desc: 'Send/list MeshCore messages' }),
+  mcContacts:      () => ({ cmd: 'meshcore contacts', risky: false, stopFirst: false, cat: 'MeshCore', desc: 'List MeshCore contacts' }),
+  mcChannels:      () => ({ cmd: 'meshcore channels', risky: false, stopFirst: false, cat: 'MeshCore', desc: 'List MeshCore channels' }),
+  mcAdvert:        () => ({ cmd: 'meshcore advert',   risky: false, stopFirst: false, cat: 'MeshCore', desc: 'Send MeshCore advert' }),
+  mcSelftest:      () => ({ cmd: 'meshcore selftest', risky: false, stopFirst: false, cat: 'MeshCore', desc: 'MeshCore crypto self test' }),
+
+  // Unified mesh layer: one place to see and switch the active backend.
+  meshStatus:      () => ({ cmd: 'mesh',                    risky: false, stopFirst: false, cat: 'Mesh', desc: 'Active mesh + how to switch' }),
+  meshSwitchMt:    () => ({ cmd: 'mesh switch meshtastic',  risky: true,  stopFirst: true,  cat: 'Mesh', desc: 'Switch to Meshtastic' }),
+  meshSwitchMc:    () => ({ cmd: 'mesh switch meshcore',    risky: true,  stopFirst: true,  cat: 'Mesh', desc: 'Switch to MeshCore' }),
+  meshOff:         () => ({ cmd: 'mesh off',                risky: false, stopFirst: false, cat: 'Mesh', desc: 'Stop the active mesh' }),
+  meshChat:        (text) => ({ cmd: text ? `mesh send ${text}` : 'mesh messages', risky: false, stopFirst: false, cat: 'Mesh', desc: 'Send/list on active mesh' }),
+  meshPeers:       () => ({ cmd: 'mesh peers',              risky: false, stopFirst: false, cat: 'Mesh', desc: 'Peers on active mesh' }),
 };
 
 /** Registry of UI action definitions for WiFi page groups */
@@ -232,13 +257,13 @@ const WIFI_GROUPS = {
     { label: 'List Access Points',    factory: () => CMD.listAp() },
     { label: 'List Stations',         factory: () => CMD.listSta() },
   ],
-  'Attacks': [
-    { label: 'Start Deauth Attack',   factory: () => CMD.deauth() },
+  'Tests': [
+    { label: 'Start Reconnect Test',   factory: () => CMD.deauth() },
     { label: 'Start EAPOL Logoff',    factory: () => CMD.eapol() },
     { label: 'Beacon Spam - Random',  factory: () => CMD.beaconSpam('random') },
     { label: 'Beacon Spam - Rickroll',factory: () => CMD.beaconSpam('rickroll') },
     { label: 'Beacon Spam - List',    factory: () => CMD.beaconSpam('list') },
-    { label: 'Stop Attacks',          factory: () => CMD.stopDeauth() },
+    { label: 'Stop Tests',          factory: () => CMD.stopDeauth() },
     { label: 'Stop Beacon Spam',      factory: () => CMD.stopSpam() },
   ],
   'Capture': [
@@ -277,14 +302,14 @@ const WIFI_GROUPS = {
 /** BLE action definitions (grouped, mirroring WiFi layout) */
 const BLE_GROUPS = {
   'Scan & Select': [
-    { label: 'Detect Devices',     factory: () => CMD.bleScan('spam'),    refresh: () => CMD.bleScan('spam'),    refreshLabel: 'Re-scan' },
+    { label: 'Detect Devices',     factory: () => CMD.bleDetect(),         refresh: () => ({ cmd: 'bledetect -l' }), refreshLabel: 'List Devices' },
     { label: 'Find Flippers',      factory: () => CMD.bleScan('flipper') },
     { label: 'AirTag Scanner',     factory: () => CMD.bleScan('airtag') },
     { label: 'Raw BLE Scanner',    factory: () => CMD.bleScan('raw') },
     { label: 'GATT Scanner',       factory: () => CMD.bleScan('gatt'),   refresh: () => CMD.listGatt(),         refreshLabel: 'List GATT' },
     { label: 'Stop BLE Scan',      factory: () => CMD.bleScan(null, true) },
   ],
-  'Attacks': [
+  'Tests': [
     { label: 'BLE Spam - Apple',     factory: () => CMD.bleSpam('apple') },
     { label: 'BLE Spam - Microsoft', factory: () => CMD.bleSpam('microsoft') },
     { label: 'BLE Spam - Samsung',   factory: () => CMD.bleSpam('samsung') },
@@ -457,6 +482,9 @@ const LORA_GROUPS = {
     { label: 'Start LoRa',   factory: () => CMD.loraStart() },
     { label: 'Stop LoRa',    factory: () => CMD.loraStop() },
     { label: 'Diagnostics',  factory: () => CMD.loraDiag() },
+    { label: 'Auto-start Status', factory: () => CMD.loraAutostart() },
+    { label: 'Enable Auto-start', factory: () => CMD.loraAutostart(true) },
+    { label: 'Disable Auto-start', factory: () => CMD.loraAutostart(false) },
   ],
   'Mesh': [
     { label: 'List Messages', factory: () => CMD.loraChat() },
@@ -468,6 +496,19 @@ const LORA_GROUPS = {
     { label: 'BLE Off',         factory: () => CMD.loraBle(false) },
   ],
 };
+/** Unified mesh switch actions (Meshtastic <-> MeshCore, one radio). */
+const MESH_GROUPS = {
+  'Active mesh': [
+    { label: 'Mesh Status',          factory: () => CMD.meshStatus() },
+    { label: 'Switch to Meshtastic', factory: () => CMD.meshSwitchMt() },
+    { label: 'Switch to MeshCore',   factory: () => CMD.meshSwitchMc() },
+    { label: 'Stop Mesh',            factory: () => CMD.meshOff() },
+  ],
+  'Chat': [
+    { label: 'List Messages', factory: () => CMD.meshChat() },
+    { label: 'List Peers',    factory: () => CMD.meshPeers() },
+  ],
+};
 /** Helper to build a command string with metadata */
 function buildCommand(factoryResult) {
   if (!factoryResult || typeof factoryResult !== 'object') return null;
@@ -475,33 +516,35 @@ function buildCommand(factoryResult) {
   return null;
 }
 
-/** Determine if a raw command string is risky */
-function isRiskyCommand(commandString) {
-  const riskyPatterns = [
-    /^scanap\b/i, /^scansta\b/i, /^scanall\b/i,
-    /^attack\b/i, /^beaconspam\b/i,
-    /^capture\b/i, /^listenprobes\b/i, /^pineap\b/i, /^karma\b/i,
-    /^blescan\b/i, /^blespam\b/i, /^blewardriving\b/i,
-    /^startwd\b/i, /^startportal\b/i, /^sweep\b/i, /^dhcpstarve\b/i,
-    /^trackap\b/i, /^tracksta\b/i, /^trackgatt\b/i, /^selectflipper\b/i,
-    /^spoofairtag\b/i, /^aerialscan\b/i, /^aerialspoof\b/i,
-    /^ir dazzler\b/i, /^ir learn\b/i, /^badusb run\b/i,
-    /^reboot\b/i, /^apenable\b/i, /^lora start\b/i,
-  ];
-  return riskyPatterns.some(p => p.test(commandString.trim()));
+/** Shared metadata for raw commands and registry actions. Stops never need another stop. */
+function commandMetadata(commandString) {
+  const command = commandString.trim();
+  if (/^bledetect\s+-(?:s|u|l|i)\b/i.test(command)) return { risky: false, stopFirst: false };
+  if (/^bledetect\s+-(?:t|sp)\b/i.test(command)) return { risky: true, stopFirst: false };
+  if (/^(?:stop\w*\b|(?:capture|blescan|blespam|blewardriving|gpsinfo|startwd|listenprobes)\s+(?:-stop|-s)\b|(?:karma|dhcpstarve|ir dazzler|lora|meshcore)\s+stop\b)/i.test(command)) {
+    return { risky: false, stopFirst: false };
+  }
+  for (const factory of Object.values(CMD)) {
+    const meta = factory();
+    if (meta.cmd === command) return meta;
+  }
+  const radio = /^(?:scanap|scansta|scanall|attack|wifitest|reconnect|beaconspam|capture|listenprobes|pineap|congestion|karma|saeflood|blescan|blespam|blewardriving|startwd|startportal|sweep|dhcpstarve|trackap|tracksta|trackgatt|selectflipper|spoofairtag|aerialscan|aerialtrack|aerialspoof)\b|^ir (?:dazzler|learn)\b|^(?:lora|meshcore) start\b|^mesh switch\b/i.test(command);
+  return { risky: radio || /^(?:reboot|apenable)\b|^badusb run\b|^connect\s/i.test(command), stopFirst: radio };
 }
 
+function isRiskyCommand(commandString) { return commandMetadata(commandString).risky; }
 /** Map a command string to its category for UI organisation */
 function commandCategory(commandString) {
   const c = commandString.trim().toLowerCase();
   if (c.startsWith('scan') || c.startsWith('list') || c.startsWith('select') || c.startsWith('connect') || c.startsWith('disconnect') || c.startsWith('wifistatus')) return 'WiFi';
-  if (c.startsWith('attack') || c.startsWith('beacon') || c.startsWith('stop') || c.startsWith('karma') || c.startsWith('saeflood')) return 'Attack';
+  if (c.startsWith('wifitest') || c.startsWith('reconnect') || c.startsWith('attack') || c.startsWith('beacon') || c.startsWith('stop') || c.startsWith('karma') || c.startsWith('saeflood')) return 'Test';
   if (c.startsWith('capture')) return 'Capture';
   if (c.startsWith('ble')) return 'BLE';
   if (c.startsWith('startportal') || c.startsWith('stopportal') || c.startsWith('listportals')) return 'Portal';
   if (c.startsWith('sd ')) return 'Files';
   if (c.startsWith('badusb')) return 'BadUSB';
   if (c.startsWith('badble')) return 'BadBLE';
+  if (c.startsWith('mesh') || c.startsWith('meshtastic') || c === 'mc' || c.startsWith('mc ')) return 'Mesh';
   if (c.startsWith('lora')) return 'LoRa';
   if (c.startsWith('comm')) return 'GhostLink';
   if (c.startsWith('settings')) return 'Settings';

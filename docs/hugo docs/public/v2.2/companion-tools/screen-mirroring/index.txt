@@ -1,0 +1,134 @@
+Title: Screen Mirroring
+Description: Mirror your GhostESP display to your desktop for easier viewing and remote control
+URL: /v2.2/companion-tools/screen-mirroring/
+Version: v2.2
+Section: Companion Tools
+Search index: /search-index.json
+
+# Screen Mirroring
+
+> Mirror your GhostESP display to your desktop for easier viewing and remote control
+
+## On this page
+
+- [Prerequisites](#prerequisites)
+- [Starting the Mirror](#starting-the-mirror)
+- [Desktop Script](#desktop-script)
+- [Device-Specific Considerations](#device-specific-considerations)
+- [CYD Devices](#cyd-devices)
+- [Using the Mirror](#using-the-mirror)
+- [CLI Options](#cli-options)
+- [Examples](#examples)
+- [Status Indicators](#status-indicators)
+- [Troubleshooting](#troubleshooting)
+- [No Display or Black Screen](#no-display-or-black-screen)
+- [Wrong Colors](#wrong-colors)
+- [Connection Lost](#connection-lost)
+- [Device Resets When Connecting](#device-resets-when-connecting)
+- [Slow or Laggy Display](#slow-or-laggy-display)
+
+---
+
+View and control your device’s screen from your computer.
+## Prerequisites
+- A GhostESP device with a display (CYD, T-Deck, Cardputer, etc.)
+- USB cable to connect the device
+- Python 3.8 or newer (for desktop script only)
+## Starting the Mirror
+The desktop script is in scripts/screen_mirror/ and installs its dependencies (pygame, pyserial, numpy) on first run. To skip Python entirely, use the web mirror at [ghostesp.net/serial](https://ghostesp.net/serial) and open the Mirror tab; that page also includes a console and file browser.
+### Desktop Script
+- Connect your GhostESP device via USB
+- Open a terminal in the scripts/screen_mirror folder
+- Run the script:
+python ghost_mirror.py
+Or specify a port directly:
+python ghost_mirror.py COM3
+For CYD devices, you must specify the higher baud rate:
+python ghost_mirror.py COM3 --baud 460800
+To list available serial ports:
+python ghost_mirror.py --list
+## Device-Specific Considerations
+### CYD Devices
+CYD devices need specific settings due to their 8-bit color mode:
+- Baud Rate: Use --baud 460800; the default 115200 is too slow for CYD refresh rates.
+- Color Mode: The mirror stream is truncated to 8 bits, so colors may shift compared to the physical display.
+- Performance: Expect reduced frame rates and occasional slowdowns because the 8-bit stream is bandwidth-constrained.
+To connect to a CYD device:
+python ghost_mirror.py COM3 --baud 460800
+Click Swap to fix inverted colors.
+## Using the Mirror
+Drag the title bar to move the window and click × to close the application. The mirror only shows content while the device’s display is actively updating, and the virtual controls send input as text over the same serial connection.
+- Port: Use the ◄ and ► buttons in the header to cycle through available COM ports; the current port is shown between them.
+- Connect: Opens the serial connection and enables mirroring.
+- Disconnect: Closes the connection cleanly.
+- Swap: If colors appear wrong (inverted or incorrect), toggles byte order and forces a full screen refresh.
+The virtual D-pad on the right side mirrors the physical controls on your device:
+Button |
+Action |
+▲ |
+Navigate up |
+▼ |
+Navigate down |
+◄ |
+Navigate left / Go back |
+► |
+Navigate right |
+● |
+Select / Confirm |
+Keyboard shortcuts:
+Key |
+Action |
+W / ↑ |
+Up |
+S / ↓ |
+Down |
+A / ← |
+Left |
+D / → |
+Right |
+Enter / Space |
+Select |
+Escape |
+Exit |
+## CLI Options
+Option |
+Description |
+--scale N |
+Scale the display by factor N (default: 2) |
+--baud N |
+Set baud rate (default: 115200) |
+--list |
+List available serial ports |
+### Examples
+# Run with 3x scaling
+python ghost_mirror.py COM3 --scale 3
+# CYD device (requires 460800 baud)
+python ghost_mirror.py COM3 --baud 460800
+# Use a different baud rate
+python ghost_mirror.py COM3 --baud 921600
+## Status Indicators
+- Green dot: Connected and receiving data
+- Red dot: Disconnected or connection lost
+- FPS counter: Shows current frame rate
+- Resolution: Displays current screen dimensions
+## Troubleshooting
+### No Display or Black Screen
+- Ensure the device is powered on and showing content on its physical display
+- Try clicking Connect to re-establish the connection
+- Check that the correct COM port is selected
+### Wrong Colors
+- Click the Swap button to toggle byte order
+- The display will refresh with corrected colors
+- For CYD devices: Poor color fidelity is normal due to 8-bit color mode.
+### Connection Lost
+- The status indicator will turn red
+- Click Connect to reconnect
+- If the device was reset, wait for it to boot before reconnecting
+### Device Resets When Connecting
+- This is normal for some boards on first connection
+- The script disables DTR/RTS to prevent resets after initial connection
+### Slow or Laggy Display
+- Screen mirroring uses USB serial which has bandwidth limitations
+- Reduce scale factor if needed
+- Close other applications using the serial port
+- For CYD devices: Slowdowns are expected due to 8-bit color mode and bandwidth constraints. Ensure you’re using --baud 460800 for optimal performance. If the display is still slow, try reducing the scale factor further.

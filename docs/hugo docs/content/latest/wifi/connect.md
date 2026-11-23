@@ -1,35 +1,16 @@
 ---
 title: "Connect to a Wi-Fi Network"
-description: "Connect GhostESP to a network you own or are authorized to use."
+description: "Connect GhostESP to a network you own or are authorized to use"
 weight: 11
-toc: true
 ---
 
-## What this does
+Connect GhostESP to a Wi-Fi network so it can use network-dependent features. You need the network name and password and permission to connect. Connecting changes the board's Wi-Fi mode and disconnects devices using the `GhostNet` access point - and drops the WebUI - so keep serial or on-device control available.
 
-Connect GhostESP to a Wi-Fi network so it can use network-dependent features. Connecting changes the board's Wi-Fi mode and disconnects devices using the `GhostNet` access point.
+## Connecting
 
-## Before you start
+On-device, open **Menu → Wi-Fi → Connection → Connect to Wi-Fi** (or **Connect to saved Wi-Fi** to rejoin a previously saved network), enter the network name and password, and wait for the connection status to confirm success.
 
-- The network name and password.
-- Permission to connect GhostESP to that network.
-- A serial or on-device control method. The WebUI connection drops when the board changes Wi-Fi mode.
-
-## On-device steps
-
-1. Open **Menu → WiFi → Connection → Connect to WiFi**.
-2. Enter the network name and password.
-3. Wait for the connection status to confirm success.
-4. To disconnect later, open **Menu → WiFi → Connection → Disconnect**.
-
-## CLI steps
-
-1. Run `connect "SSID" "password"`. Keep the quotes when either value contains spaces.
-2. Wait for the connection status.
-3. Run `connect` without arguments to reconnect to the saved network.
-4. Run `disconnect` to leave the network.
-
-## Expected result
+From the CLI, run `connect "SSID" "password"` and keep the quotes when either value contains spaces. Wait for the connection status. Run `connect` without arguments to reconnect to the saved network. Run `disconnect` to leave the network, or `autoreconnect <on|off>` to control whether the board automatically rejoins a dropped network.
 
 GhostESP reports that it is connected. The `GhostNet` access point is unavailable while the board uses its Wi-Fi radio as a client.
 

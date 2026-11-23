@@ -2,38 +2,24 @@
 title: "Companion Phone GPS Wardriving"
 description: "Use your phone's GPS to wardrive with the GhostESP Companion app"
 weight: 10
-toc: true
 ---
 
-The GhostESP Companion app supports **Phone GPS Wardriving**, a mode that uses your phone's built-in GPS to tag Wi-Fi access points observed by the connected GhostESP device. This is useful when your GhostESP board does not have a GPS module attached.
-
-## How It Works
-
-1. The Companion app streams wardrive AP observations from the GhostESP device over the active connection (USB or BLE)
-2. Each observed AP is tagged with the phone's current GPS coordinates
-3. When you stop the session, a WiGLE-compatible CSV file is saved to your phone's Downloads folder
-4. The CSV can be browsed, shared, or deleted from the built-in CSV explorer
-
-## Requirements
-
-- GhostESP device connected via USB or wireless bridge
-- Phone location permission granted
-- Phone GPS enabled with a valid fix (outdoor or near a window for best results)
+The GhostESP Companion app can use your phone's GPS to tag Wi-Fi access points observed by the connected GhostESP device (USB or BLE) - useful when your board has no GPS module. Grant the app location permission and get a valid GPS fix (outdoor or near a window works best).
 
 ## Starting Phone GPS Wardriving
 
 1. Open the **GPS / Wardrive** screen in the Companion app
 2. Ensure your GhostESP device is connected
 3. Toggle the **Phone GPS Wardrive** switch to ON
-4. Move through your route — APs will appear as circular markers on the map, colored by RSSI strength
-5. Toggle the switch to OFF when done — the CSV is saved automatically
+4. Move through your route - APs will appear as circular markers on the map, colored by RSSI strength
+5. Toggle the switch to OFF when done - the CSV is saved automatically
 
 ## Map Display
 
 The map shows individual access points as small circles:
 
 - **Color**: Ranges from red (weak RSSI, around -100 dBm) to blue (strong RSSI, around -40 dBm)
-- **Size**: Scales with zoom level (3–14 px radius)
+- **Size**: Scales with zoom level (3-14 px radius)
 - **Stroke**: Outline appears at zoom level 15 and above
 
 Your phone's current GPS position is shown as a blue marker, and the device's GPS position (if available) is shown as a red marker.
@@ -85,6 +71,6 @@ CSVs saved by Phone GPS Wardriving are fully WiGLE-compatible and can be uploade
 
 Future versions of the Companion app will support direct WiGLE upload from the CSV explorer.
 
-## Next Step
+## Related tasks
 
 For firmware-based wardriving with an attached GPS module, see [Wardriving]({{< relref "wardriving.md" >}}).

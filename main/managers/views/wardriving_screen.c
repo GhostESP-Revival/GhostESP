@@ -9,6 +9,7 @@
 #include "core/callbacks.h"
 #include "core/esp_comm_manager.h"
 #include "core/glog.h"
+#include "core/utils.h"
 #include "gui/design_tokens.h"
 #include "gui/touch_bar.h"
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
@@ -124,8 +125,7 @@ static bool should_force_gps_deinit_on_exit(void) {
 
 static bool should_prefer_peer_only_in_view(void) {
 #ifdef CONFIG_BUILD_CONFIG_TEMPLATE
-    return (strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0 ||
-            strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething2") == 0);
+    return strcmp(CONFIG_BUILD_CONFIG_TEMPLATE, "somethingsomething") == 0;
 #else
     return false;
 #endif
@@ -315,7 +315,17 @@ static void update_display_cb(lv_timer_t *timer) {
         if (lbl_fix_icon) lv_label_set_text(lbl_fix_icon, LV_SYMBOL_CLOSE);
         if (lbl_fix_icon) lv_obj_set_style_text_color(lbl_fix_icon, lv_color_hex(error_color), 0);
         if (lbl_sats) lv_label_set_text(lbl_sats, "--/--");
-        if (lbl_aps) lv_label_set_text(lbl_aps, "0");
+        if (lbl_aps) {
+            uint32_t count = 0;
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
+            if (wardriving_ble_mode) {
+                count = ble_wardriving_get_unique_device_count();
+            }
+#endif
+            char count_buf[16];
+            snprintf(count_buf, sizeof(count_buf), "%u", (unsigned)count);
+            lv_label_set_text(lbl_aps, count_buf);
+        }
         if (lbl_speed) lv_label_set_text(lbl_speed, "---");
         if (lbl_heading) lv_label_set_text(lbl_heading, "--");
         if (lbl_coords) lv_label_set_text(lbl_coords, "---'N  ---'E");
@@ -475,12 +485,20 @@ static void update_display_cb(lv_timer_t *timer) {
     }
 
     if (lbl_link_mode) {
+#ifdef CONFIG_BANSHEE_LITE_C5
+        /* This board has no local GPS. Scan-helper status is independent of
+         * the GPS stream and must never imply a standalone GPS fallback. */
+        lv_label_set_text(lbl_link_mode, !esp_comm_manager_is_connected() ? "GhostLink Lost"
+                                      : !gps_recent ? "GhostLink GPS Stale"
+                                      : "GhostLink");
+#else
         bool connected = esp_comm_manager_is_connected();
         bool peer_gps_mode = !wardriving_scan_mode && gps_manager_is_peer_gps_preferred();
         bool ghostlink_enabled = connected && !wardriving_is_helper_mode() &&
                                  ((wardriving_scan_mode && wardriving_has_peer_helper()) ||
                                   peer_gps_mode);
         lv_label_set_text(lbl_link_mode, ghostlink_enabled ? "GhostLink" : "Standalone");
+#endif
     }
     
     if (lbl_fix_icon) {
@@ -530,6 +548,7 @@ static void update_display_cb(lv_timer_t *timer) {
         }
         char speed_buf[16];
         snprintf(speed_buf, sizeof(speed_buf), "%.0f", (double)speed_kmh);
+        privacy_redact_text(speed_buf);
         lv_label_set_text(lbl_speed, speed_buf);
     }
     
@@ -538,6 +557,7 @@ static void update_display_cb(lv_timer_t *timer) {
             int heading = ((int)gps->cog + 360) % 360;
             char heading_buf[8];
             snprintf(heading_buf, sizeof(heading_buf), "%d", heading);
+            privacy_redact_text(heading_buf);
             lv_label_set_text(lbl_heading, heading_buf);
             
             if (compass_needle) {
@@ -554,6 +574,7 @@ static void update_display_cb(lv_timer_t *timer) {
         format_coordinate(gps->latitude, true, lat_str, sizeof(lat_str));
         format_coordinate(gps->longitude, false, lon_str, sizeof(lon_str));
         snprintf(coords_buf, sizeof(coords_buf), "%s  %s", lat_str, lon_str);
+        privacy_redact_text(coords_buf);
         lv_label_set_text(lbl_coords, coords_buf);
     } else if (lbl_coords) {
         lv_label_set_text(lbl_coords, "---'N  ---'E");
@@ -564,6 +585,7 @@ static void update_display_cb(lv_timer_t *timer) {
         const char *accuracy = get_accuracy_string(hdop);
         char acc_buf[32];
         snprintf(acc_buf, sizeof(acc_buf), "%.1f %s", (double)hdop, accuracy);
+        privacy_redact_text(acc_buf);
         lv_label_set_text(lbl_accuracy, acc_buf);
     }
     
@@ -724,6 +746,19 @@ static void create_touch_control_bar(lv_obj_t *root) {
 }
 #endif
 
+/* Why the capture session failed to start; shown instead of a blanket "No SD". */
+static const char *wd_setup_fail_msg = "No SD";
+
+static bool wd_open_csv(const char *base) {
+    esp_err_t err = csv_file_open(base);
+    if (err == ESP_OK) return true;
+    glog("Wardriving: csv_file_open(%s) failed: %s\n", base, esp_err_to_name(err));
+    wd_setup_fail_msg = (err == ESP_ERR_NO_MEM) ? "Low RAM"
+                      : (err == ESP_ERR_INVALID_STATE) ? "Log busy"
+                      : "Log error";
+    return false;
+}
+
 void wardriving_view_create(void) {
     if (wardriving_view.root != NULL) {
         return;
@@ -731,6 +766,7 @@ void wardriving_view_create(void) {
 
     touch_press_active = false;
     wardriving_owns_csv_session = false;
+    wd_setup_fail_msg = "No SD";
     
     uint8_t theme = settings_get_menu_theme(&G_Settings);
     accent_color = theme_palette_get_accent(theme);
@@ -774,11 +810,13 @@ void wardriving_view_create(void) {
     if (!observing_existing_session && wardriving_dual_mode) {
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE) && !defined(CONFIG_IDF_TARGET_ESP32P4)
         if (heap_caps_get_total_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) == 0) {
+            csv_ok = false;
+            wd_setup_fail_msg = "No PSRAM";
             glog("Dual wardriving requires a PSRAM device.\n");
         } else {
-            bool prefer_peer_only = peer_connected && should_prefer_peer_only_in_view();
-            gps_manager_set_peer_gps_preferred(prefer_peer_only);
-            if (prefer_peer_only) {
+            bool use_peer_gps = peer_connected && should_prefer_peer_only_in_view();
+            gps_manager_set_peer_gps_preferred(use_peer_gps);
+            if (use_peer_gps) {
                 gps_manager_clear_peer_fix();
                 if (g_gpsManager.isinitilized) {
                     gps_manager_deinit(&g_gpsManager);
@@ -786,13 +824,14 @@ void wardriving_view_create(void) {
                 }
             }
             ble_wardriving_reset_unique_device_count();
-            csv_ok = (csv_file_open("wardriving") == ESP_OK);
-            if (csv_ok && !prefer_peer_only) {
+            csv_ok = wd_open_csv("wardriving");
+            if (csv_ok) {
                 ble_set_suspend_allowed(false);
                 if (!ble_start_scanning()) {
                     ble_set_suspend_allowed(true);
                     csv_file_close();
                     csv_ok = false;
+                    wd_setup_fail_msg = "BLE failed";
                     glog("Failed to start BLE scan for dual wardriving.\n");
                 } else {
                     ble_register_handler(ble_wardriving_callback);
@@ -804,7 +843,12 @@ void wardriving_view_create(void) {
                         csv_file_close();
                         ble_set_suspend_allowed(true);
                         csv_ok = false;
+                        wd_setup_fail_msg = "Low RAM";
                         glog("Failed to start wardriving observation queue.\n");
+                    } else {
+                        // Session setup resets GPS source selection.  Scanning
+                        // remains local while the paired S3 supplies GPS.
+                        gps_manager_set_peer_gps_preferred(use_peer_gps);
                     }
                 }
             } else if (!csv_ok) {
@@ -816,20 +860,21 @@ void wardriving_view_create(void) {
     } else if (!observing_existing_session && wardriving_ble_mode) {
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(GHOSTESP_NO_NATIVE_BLE)
         ble_wardriving_reset_unique_device_count();
-        csv_ok = (csv_file_open("ble_wardriving") == ESP_OK);
+        csv_ok = wd_open_csv("ble_wardriving");
         if (csv_ok) {
             ble_start_scanning();
             ble_register_handler(ble_wardriving_callback);
         }
 #endif
     } else if (!observing_existing_session && wardriving_scan_mode) {
-        csv_ok = (csv_file_open("wardriving") == ESP_OK);
+        csv_ok = wd_open_csv("wardriving");
         if (csv_ok) {
             wifi_manager_start_monitor_mode(wardriving_scan_callback);
             if (!start_wardriving()) {
                 wifi_manager_stop_monitor_mode();
                 csv_file_close();
                 csv_ok = false;
+                wd_setup_fail_msg = "Low RAM";
                 glog("Failed to start wardriving observation queue.\n");
             }
         }
@@ -844,6 +889,11 @@ void wardriving_view_create(void) {
             glog("Wardrive helper unavailable: no GhostLink peer connected.\n");
         }
         if (!peer_helper_ok) wardriving_set_peer_assist(false);
+        if (peer_helper_ok && peer_connected && should_prefer_peer_only_in_view()) {
+            // start_wardriving() resets this; prefer the S3 GPS once its helper
+            // command has been accepted. Existing timeout handling falls back.
+            gps_manager_set_peer_gps_preferred(true);
+        }
     }
     wardriving_owns_csv_session = csv_ok && !observing_existing_session &&
                                     (wardriving_scan_mode || wardriving_ble_mode || wardriving_dual_mode);
@@ -1018,6 +1068,7 @@ void wardriving_view_create(void) {
 #endif
 
     if ((wardriving_scan_mode || wardriving_ble_mode || wardriving_dual_mode) && !csv_ok && lbl_sd_status) {
+        lv_label_set_text(lbl_sd_status, wd_setup_fail_msg);
         lv_obj_clear_flag(lbl_sd_status, LV_OBJ_FLAG_HIDDEN);
     }
 

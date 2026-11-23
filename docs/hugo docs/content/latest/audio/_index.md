@@ -7,8 +7,6 @@ aliases:
   - "/audio/"
 ---
 
-GhostESP audio playback streams MP3 files between the two chips in **The Banshee** over GhostLink, with output through the TLV320DAC3100 audio hardware.
+GhostESP audio playback streams MP3 files between the two chips in **The Banshee** over GhostLink, with output through the TLV320DAC3100 audio hardware. Single-chip audio builds play MP3 files directly through the on-board speaker.
 
-> **Hardware/build limitation:** Audio playback is currently only available on **The Banshee**. The Banshee uses the `Banshee_C5` and `Banshee_S3` builds for its two-chip audio setup. Other builds will not show the Audio app, and cannot receive audio output.
-
-Use this section for setup, file requirements, controls, and troubleshooting.
+> **Build support:** The Audio player is enabled on the Banshee C5, T-Deck, M5Stack CoreS3-SE, and CrowPanel Advanced P4 builds. The Banshee S3 enables the TLV320DAC3100 output and microphone but does not show the Audio player menu item. Builds without an audio output path do not show the Audio app.

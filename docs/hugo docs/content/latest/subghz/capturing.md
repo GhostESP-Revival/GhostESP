@@ -4,24 +4,29 @@ description: "Record and decode SubGHz signals from remotes and transmitters"
 weight: 20
 ---
 
-Capture signals from remote controls, garage door openers, and other SubGHz devices. GhostESP automatically decodes supported protocols and saves signals for later replay.
+Capture SubGHz activity from remote controls, garage door openers, and other SubGHz devices. There are two separate capture paths:
 
-## Before you start
+- **On-device UI** - captures and decodes real signals and writes Flipper `.sub` files for later replay.
+- **`subghz` CLI** - captures **RSSI spectrum snapshots** (the 64 levels the scanner shows), not decodable signals, and cannot transmit.
+
+Both paths write under `/mnt/ghostesp/subghz/` on the SD card, but produce different files; see [Files and Management]({{< relref "files.md" >}}) for the formats.
+
+## Before You Start
 
 - **Hardware**: Board with CC1101 SubGHz support (see [Hardware Support]({{< relref "hardware.md" >}})).
-- **SD card**: Inserted and mounted so GhostESP can save `.sub` files under `/mnt/ghostesp/subghz/`.
+- **SD card**: Inserted and mounted. CLI snapshots and on-device `.sub` files both live under `/mnt/ghostesp/subghz/`.
 - **Frequency**: Know or determine the target frequency using [Scanning]({{< relref "scanning.md" >}}) or [Frequency Analyzer]({{< relref "freq-analyzer.md" >}}).
 
-## Capture modes
+## Capture Modes
 
-GhostESP supports two capture modes:
+The on-device signal capture supports two modes:
 
 - **Normal capture** - Attempts to decode the signal using supported protocols. Best for known remotes and standard devices.
 - **Raw capture** - Records raw timing data without decoding. Use for unknown protocols or when normal capture fails.
 
-## Capturing a signal
+`subghz capture_on` / `subghz capture_off` select raw mode for that on-device/remote signal-capture path. They have no effect on the CLI spectrum snapshot.
 
-### On-device UI
+## Capturing a Signal (On-Device UI)
 
 1. Open **Menu → SubGHz → Capture** to start scanning on the current frequency.
 2. Press the button on your target remote while the scanner is running.
@@ -29,28 +34,26 @@ GhostESP supports two capture modes:
 4. Review the decoded information (protocol, bits, frequency) in the preview.
 5. Confirm to save the signal to the SD card.
 
-### Command line
+## Capturing a Spectrum Snapshot (CLI)
+
+The CLI works on the scanner's RSSI level buffer, not on decoded signals. A snapshot records the current `name`, `cursor` and 64 `levels` values - it is a picture of RF activity, not a signal you can replay or transmit.
 
 ```bash
 # Start the scanner
 subghz start
 
-# Enable raw capture mode (optional)
-subghz capture_on
-
-# Disable raw capture (return to normal mode)
-subghz capture_off
-
-# Capture the current signal
+# Capture the current RSSI spectrum into the snapshot buffer
 subghz capture [name_hint]
 
-# Save the captured signal
+# Save the captured spectrum snapshot to the SD card
 subghz save [name_hint]
 ```
 
-## Protocol decoding
+`subghz load` and `subghz replay` restore a saved snapshot back into the scanner display; neither transmits. Snapshot names are auto-generated as `snapshot_%08X` (based on the tick counter) unless you pass a name hint.
 
-GhostESP automatically attempts to decode captured signals using 30+ protocols including:
+## Protocol Decoding
+
+The on-device capture path automatically attempts to decode captured signals using 30+ protocols including:
 
 - Princeton
 - CAME
@@ -72,16 +75,7 @@ If the protocol is recognized, GhostESP displays:
 
 If decoding fails or the protocol is unknown, the signal is saved as raw timing data.
 
-## File storage
-
-Captured signals are saved as `.sub` files in `/mnt/ghostesp/subghz/` using the Flipper SubGhz Key File format. See [Files]({{< relref "files.md" >}}) for details on the file structure.
-
-File names are auto-generated based on:
-- Decoded protocol and code (if successful)
-- Timestamp (if raw capture)
-- Optional name hint provided during capture
-
-## Tips for successful captures
+## Tips for Successful Captures
 
 - **Frequency matching**: Ensure you're scanning on the correct frequency band for your target device.
 - **Distance**: Start with the remote within 1-2 meters of the device for best signal quality.
@@ -91,8 +85,7 @@ File names are auto-generated based on:
 
 ## Notes
 
-- Captured signals are stored in Flipper-compatible format, allowing interchange with Flipper Zero devices.
-- Rolling code protocols (like some KeeLoq implementations) may not replay successfully due to counter synchronization.
+- On-device captured signals are stored in Flipper-compatible format, allowing interchange with Flipper Zero devices.
 - Some devices require multiple button presses to transmit the full command sequence.
 
 ## Troubleshooting

@@ -30,6 +30,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 
 #define TAG "badble"
@@ -37,6 +38,8 @@
 #define BADBLE_NVS_NAME "name"
 #define BADBLE_DEFAULT_NAME "GhostESP BadBLE"
 #define BADBLE_SCRIPT_DIR "/mnt/ghostesp/badble"
+// BadUSB scripts are the same DuckyScript format, so they are runnable here too.
+#define BADBLE_ALT_SCRIPT_DIR "/mnt/ghostesp/badusb"
 #define BADBLE_MAX_SCRIPT_SIZE 65536
 /* BLE HID hosts (Android especially) drop keys when down/up events are sent
  * faster than the ATT round trip. 10 ms is fine for USB but flaky over BLE;
@@ -199,7 +202,24 @@ static bool badble_script_name_valid(const char *filename) {
         return false;
     }
     size_t len = strlen(filename);
-    return len > 4 && strcmp(filename + len - 4, ".txt") == 0;
+    return len > 4 && strcasecmp(filename + len - 4, ".txt") == 0;
+}
+
+// Scripts live in badble/ first, then badusb/. A name present in both resolves
+// to the badble/ copy.
+static bool badble_resolve_script(const char *filename, char *path, size_t path_len,
+                                  struct stat *st_out) {
+    static const char *const dirs[] = {BADBLE_SCRIPT_DIR, BADBLE_ALT_SCRIPT_DIR};
+    for (size_t i = 0; i < sizeof(dirs) / sizeof(dirs[0]); i++) {
+        int n = snprintf(path, path_len, "%s/%s", dirs[i], filename);
+        if (n < 0 || (size_t)n >= path_len) continue;
+        struct stat st;
+        if (stat(path, &st) == 0 && S_ISREG(st.st_mode)) {
+            if (st_out) *st_out = st;
+            return true;
+        }
+    }
+    return false;
 }
 
 static bool badble_transport_cancelled(void *ctx) {
@@ -601,8 +621,8 @@ static void badble_exec_task(void *arg) {
             lines = hid_script_execute((char *)badusb_builtin_script, &s_badble_transport);
         } else {
             char path[sizeof(BADBLE_SCRIPT_DIR) + sizeof(params->filename) + 2];
-            snprintf(path, sizeof(path), "%s/%s", BADBLE_SCRIPT_DIR, params->filename);
-            f = fopen(path, "r");
+            f = badble_resolve_script(params->filename, path, sizeof(path), NULL)
+                    ? fopen(path, "r") : NULL;
             if (!f) {
                 ESP_LOGE(TAG, "Unable to open BadBLE script '%s'", params->filename);
             } else {
@@ -760,9 +780,8 @@ esp_err_t badble_manager_run_script(const char *filename) {
     }
 
     char path[sizeof(BADBLE_SCRIPT_DIR) + 64 + 2];
-    snprintf(path, sizeof(path), "%s/%s", BADBLE_SCRIPT_DIR, filename);
     struct stat st;
-    if (stat(path, &st) != 0 || !S_ISREG(st.st_mode)) {
+    if (!badble_resolve_script(filename, path, sizeof(path), &st)) {
         return ESP_ERR_NOT_FOUND;
     }
     if (st.st_size < 0 || (uint64_t)st.st_size > BADBLE_MAX_SCRIPT_SIZE) {
@@ -915,21 +934,30 @@ int badble_manager_list_scripts(char scripts[][64], int max_scripts) {
     if (!scripts || max_scripts <= 0) {
         return 0;
     }
-    DIR *dir = opendir(BADBLE_SCRIPT_DIR);
-    if (!dir) {
-        return 0;
-    }
-
+    static const char *const dirs[] = {BADBLE_SCRIPT_DIR, BADBLE_ALT_SCRIPT_DIR};
     int count = 0;
-    struct dirent *entry;
-    while (count < max_scripts && (entry = readdir(dir)) != NULL) {
-        if (badble_script_name_valid(entry->d_name)) {
+    for (size_t d = 0; d < sizeof(dirs) / sizeof(dirs[0]); d++) {
+        DIR *dir = opendir(dirs[d]);
+        if (!dir) {
+            continue;
+        }
+        struct dirent *entry;
+        while (count < max_scripts && (entry = readdir(dir)) != NULL) {
+            if (!badble_script_name_valid(entry->d_name)) continue;
+            bool dup = false;
+            for (int i = 0; i < count; i++) {
+                if (strcasecmp(scripts[i], entry->d_name) == 0) {
+                    dup = true;
+                    break;
+                }
+            }
+            if (dup) continue;
             strncpy(scripts[count], entry->d_name, 63);
             scripts[count][63] = '\0';
             count++;
         }
+        closedir(dir);
     }
-    closedir(dir);
     return count;
 }
 

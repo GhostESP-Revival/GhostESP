@@ -1,26 +1,32 @@
 ---
 title: "Connection Management"
-description: "Connect and configure your Ethernet interface."
+description: "Connect and configure your Ethernet interface"
 weight: 5
 ---
 
 Manage your Ethernet connection with configuration and status commands.
 
-> **Tip**: The Ethernet interface can be used with the DNS sinkhole — once connected via Ethernet, `sinkhole start` will use the Ethernet IP automatically. See [DNS Sinkhole]({{< relref "../wifi/dns-sinkhole.md" >}}) for details.
+> **Note:** Ethernet is available **only on the Banshee S3 build** (`CONFIG_WITH_ETHERNET`).
 
-## Connection Status
+> **Tip:** The Ethernet interface can be used with the DNS sinkhole - once connected via Ethernet, `sinkhole start` will use the Ethernet IP automatically. See [DNS Sinkhole]({{< relref "../wifi/dns-sinkhole.md" >}}) for details.
 
-Check if Ethernet is connected and view link information:
+Check if Ethernet is connected and view its IP configuration with `ethup`:
 
 ```
 ethup
 ```
 
-Displays connection status, IP address, and link speed.
+Prints the IP address, subnet mask, gateway, DNS servers, and DHCP server. It does **not** show link speed.
 
-## Disconnecting
+Show link status, speed, duplex, MAC, and IP details with `ethinfo`:
 
-Bring down the Ethernet interface:
+```
+ethinfo
+```
+
+For example, `ethinfo` reports the negotiated link (such as `100Mbps Full Duplex`) and the interface MAC address.
+
+Bring the interface down with `ethdown`:
 
 ```
 ethdown
@@ -28,23 +34,17 @@ ethdown
 
 ## Configuration
 
-### View Current Configuration
+View the current IP settings (DHCP or static):
 
 ```
 ethconfig show
 ```
 
-Displays current IP settings (DHCP or static).
-
-### DHCP Configuration
-
-Enable DHCP to automatically obtain an IP address:
+Enable DHCP to obtain an IP address automatically:
 
 ```
 ethconfig dhcp
 ```
-
-### Static IP Configuration
 
 Set a static IP address:
 
@@ -59,31 +59,27 @@ ethconfig static 192.168.1.100 255.255.255.0 192.168.1.1
 
 ## MAC Address Management
 
-View or modify the MAC address:
+View the current MAC address:
 
 ```
 ethmac
 ```
 
-Shows current MAC address.
+Set a custom MAC address with `ethmac set`. Use with caution-changing MAC addresses may affect network access.
 
 ```
 ethmac set <xx:xx:xx:xx:xx:xx>
 ```
 
-Set a custom MAC address. Use with caution—changing MAC addresses may affect network access.
-
 ## System Time
 
-### Get Current Time
+Display the current system time including local time, UTC time, and Unix timestamp:
 
 ```
 time
 ```
 
-Displays the current system time including local time, UTC time, and Unix timestamp.
-
-### Set System Time
+Set the system time:
 
 ```
 settime <unix_timestamp>
@@ -94,9 +90,7 @@ settime <unix_timestamp>
 settime 1703001600
 ```
 
-### Sync Time via NTP
-
-Synchronize system time with an NTP server:
+Synchronize the system time with an NTP server:
 
 ```
 ethntp <time_server>
